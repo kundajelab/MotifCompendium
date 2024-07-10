@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Report</title>
+    <style>
+        .container {
+            column-count: 2;
+            column-gap: 20px;
+        }
+        .section-box {
+            border: 1px solid black;
+            padding: 10px;
+            margin-bottom: 20px;
+            background-color: #f0f0f0;
+            break-inside: avoid;
+            page-break-inside: avoid;
+        }
+        .section-title {
+            font-family: Arial, sans-serif;
+            font-size: 18px;
+            font-weight: bold;
+            text-align: center;
+        }
+        .plot-name {
+            font-family: Arial, sans-serif;
+            font-size: 10px;
+            font-weight: bold;
+        }
+        .plot-image {
+            width: 100%;
+            height: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        {% for section_idx, motifs in data.items() %}
+        <div class="section-box">
+            <div class="section-title"> Cluster {{ section_idx }} </div>
+            {% for m in motifs %}
+            <div class="plot-name">{{ loop.index }}) {{m[0]}} </div>
+            <img src="data:image/png;base64,{{ m[1] }}" class="plot-image">
+            {% endfor %}
+        </div>
+        {% endfor %}
+    </div>
+</body>
+</html>
