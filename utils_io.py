@@ -27,18 +27,6 @@ def sequence_importance_from_seqlets(seqlets):
 	# motif_importance /= np.sum(motif_importance)
 	return motif_importance
 
-def load_modiscos(modisco_dict):
-	sims, cwms, names = [], [], []
-	for m_name, modisco in modisco_dict.items():
-		m_sims, m_cwms, m_names = load_modisco(modisco)
-		m_names = [f"{m_name}-{x}" for x in m_names]
-		sims.append(m_sims)
-		cwms.append(m_cwms)
-		names += m_names
-	sims = np.concatenate(sims, axis=0)
-	cwms = np.concatenate(cwms, axis=0)
-	return sims, cwms, names
-
 def load_modisco(modisco_file):
 	sims, cwms, names = [], [], []
 	with h5py.File(modisco_file, 'r') as f:
@@ -60,5 +48,17 @@ def load_modisco(modisco_file):
 				names.append(f"neg.{pattern}")
 	sims = np.stack(sims, axis=0)
 	cwms = np.stack(cwms, axis=0)
+	return sims, cwms, names
+
+def load_modiscos(modisco_dict):
+	sims, cwms, names = [], [], []
+	for m_name, modisco in modisco_dict.items():
+		m_sims, m_cwms, m_names = load_modisco(modisco)
+		m_names = [f"{m_name}-{x}" for x in m_names]
+		sims.append(m_sims)
+		cwms.append(m_cwms)
+		names += m_names
+	sims = np.concatenate(sims, axis=0)
+	cwms = np.concatenate(cwms, axis=0)
 	return sims, cwms, names
 

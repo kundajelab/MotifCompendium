@@ -77,6 +77,6 @@ def compute_similarity_and_align(simsA, simsB):
 	sim = np.max(sim_12, axis=0)
 	sim_fb = np.argmax(sim_12, axis=0)
 	sim_alignments = np.where(sim_fb == 0, sim_1_alignments, sim_2_alignments)
-	sim_alignments[sim == 0] = 0 # alignment erroneously always -29
+	sim_alignments[sim == 0] = 0 # alignment erroneously always -29 when 0 similarity (argmax artifact)
 	return sim, sim_fb, sim_alignments
 

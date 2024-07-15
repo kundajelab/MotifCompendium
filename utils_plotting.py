@@ -8,14 +8,6 @@ import seaborn as sns
 def motif_to_df(motif):
 	return pd.DataFrame(motif, columns=["A", "C", "G", "T"])
 
-def create_html(cwms, clusters, sim_fb, sim_alignments, names, html_out_loc):
-	import make_report
-	clustering = []
-	for c in sorted(set(clusters)):
-		clustering.append([i for i, ic in enumerate(clusters) if ic == c])
-	motif_plot_dfs = prep_plotting_from_motifs(cwms, clustering, sim_fb, sim_alignments, names)
-	make_report.generate_report(motif_plot_dfs, html_out_loc)
-
 def prep_plotting_from_motifs(cwms, clusters, sim_fb, sim_alignments, names):
 	motif_plot_dfs = []
 	for c in clusters:
@@ -36,6 +28,14 @@ def prep_plotting_from_motifs(cwms, clusters, sim_fb, sim_alignments, names):
 		c_dfs = [(x[0], x[1].reindex(c_df_index, fill_value=0)) for x in c_dfs]
 		motif_plot_dfs.append(c_dfs)
 	return motif_plot_dfs
+
+def create_html(cwms, clusters, sim_fb, sim_alignments, names, html_out_loc):
+	import make_report
+	clustering = []
+	for c in sorted(set(clusters)):
+		clustering.append([i for i, ic in enumerate(clusters) if ic == c])
+	motif_plot_dfs = prep_plotting_from_motifs(cwms, clustering, sim_fb, sim_alignments, names)
+	make_report.generate_report(motif_plot_dfs, html_out_loc)
 
 def plot_motif_on_ax(motif, ax, motif_name=None):
 	motif_df = motif_to_df(motif)

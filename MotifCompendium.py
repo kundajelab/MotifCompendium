@@ -49,6 +49,7 @@ def build_from_modisco(modisco_dict, max_chunk=None, max_parallel=None, use_gpu=
 	return compendium
 
 def combine(compendiums, max_chunk=None, max_parallel=None, use_gpu=False):
+	print("not yet implemented"); assert(False)
 	n = len(compendiums)
 	# SIMILARITIES
 	sims_list = [mc.sims for mc in compendiums]
@@ -82,7 +83,6 @@ def combine(compendiums, max_chunk=None, max_parallel=None, use_gpu=False):
 	# METADATA
 	metadata = pd.concat([mc.metadata for mc in compendiums])
 	return MotifCompendium(sims, logos, similarity, alignment_fb, alignment_h, metadata)
-	print("not yet implemented")
 
 
 ##########################
@@ -96,7 +96,7 @@ class MotifCompendium():
 		self.alignment_fb = alignment_fb
 		self.alignment_h = alignment_h
 		self.metadata = metadata
-		# self.validate()
+		self.validate()
 
 	def cluster(self, algorithm="leiden", similarity_threshold=0.8, save_name="cluster"):
 		self.metadata[save_name] = utils_clustering.cluster(self.similarity, algorithm, similarity_threshold)
