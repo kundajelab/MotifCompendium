@@ -44,7 +44,10 @@ def build(sims, logos=None, metadata=None, max_chunk=None, max_parallel=None, us
 
 def build_from_modisco(modisco_dict, max_chunk=None, max_parallel=None, use_gpu=False):
 	sims, cwms, names = utils_io.load_modiscos(modisco_dict)
-	metadata = pd.DataFrame(); metadata["name"] = names
+	metadata = pd.DataFrame()
+	metadata["name"] = names
+	metadata["model"] = metadata["name"].str.split("-").str[0]
+	metadata["posneg"] = metadata["name"].str.split(".").str[0].str.split("-").str[1] # assume model names have no - or . in them
 	compendium = build(sims, logos=cwms, metadata=metadata, max_chunk=max_chunk, max_parallel=max_parallel, use_gpu=use_gpu)
 	return compendium
 
@@ -99,10 +102,26 @@ class MotifCompendium():
 		self.validate()
 
 	def cluster(self, algorithm="leiden", similarity_threshold=0.8, save_name="cluster"):
+		print("clustering"); start = time.time()
 		self.metadata[save_name] = utils_clustering.cluster(self.similarity, algorithm, similarity_threshold)
+		print(f"completed {time.time() - start}")
+
+	def clustering_quality(self, cluster_name="cluster"):
+		clusters = sorted(set(self.metadata[cluster_name]))
+		scores = np.zeros((len(clusters), len(clusters)))
+		for i, c1 in enumerate(clusters):
+			for j, c2 in enumerate(clusters):
+				if j < i:
+					continue
+				similarity_slice_ij = self.get_similarity_slice(self[cluster_name] == c1, self[cluster_name] == c2)
+				if i == j:
+					scores[i, j] = np.min(similarity_slice_ij)
+				else:
+					scores[i, j] = np.max(similarity_slice_ij)
+					scores[j, i] = scores[i, j]
+		return scores
 
 	def extend(self, sims, metadata=None, max_chunk=None, max_parallel=None):
-		
 		print("not yet implemented")
 
 	def assign(self, sims, n=5):
@@ -111,8 +130,10 @@ class MotifCompendium():
 	###
 	# VISUALIZATION
 	###
-	def create_html(self, html_out):
-		utils_plotting.create_html(self.logos, list(self.metadata["cluster"]), self.alignment_fb, self.alignment_h, list(self.metadata["name"]), html_out)
+	def create_html(self, html_out, group_by="cluster"):	
+		print("visualizing"); start = time.time()
+		utils_plotting.create_html(self.logos, list(self.metadata[group_by]), self.alignment_fb, self.alignment_h, list(self.metadata["name"]), html_out)
+		print(f"completed {time.time() - start}")
 
 	def heatmap(self, annot=False, label=False, show=False, save_loc=None):
 		if label:
