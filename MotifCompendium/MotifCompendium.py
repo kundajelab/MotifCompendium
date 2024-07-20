@@ -4,10 +4,10 @@ import pandas as pd
 
 import time
 
-import utils_clustering
-import utils_io
-import utils_plotting
-import utils_similarity
+import MotifCompendium.utils.clustering as utils_clustering
+import MotifCompendium.utils.loader as utils_loader
+import MotifCompendium.utils.plotting as utils_plotting
+import MotifCompendium.utils.similarity as utils_similarity
 
 
 ######################################
@@ -35,7 +35,6 @@ def build(sims, logos=None, metadata=None, max_chunk=None, max_parallel=None, us
 		metadata["name"] = [f"motif_{i}" for i in range(sims.shape[0])]
 	# SIMILARITY
 	print("aligning"); start = time.time()
-	# similarity, alignment_fb, alignment_h = utils_similarity.compute_similarity_and_align(sims, sims, False)
 	similarity, alignment_fb, alignment_h = utils_similarity.compute_similarities([sims], [(0, 0)], max_chunk, max_parallel, use_gpu)[0]
 	np.fill_diagonal(similarity, 1)
 	print(f"completed {time.time() - start}")
@@ -43,7 +42,7 @@ def build(sims, logos=None, metadata=None, max_chunk=None, max_parallel=None, us
 	return MotifCompendium(sims, logos, similarity, alignment_fb, alignment_h, metadata)
 
 def build_from_modisco(modisco_dict, max_chunk=None, max_parallel=None, use_gpu=False):
-	sims, cwms, names = utils_io.load_modiscos(modisco_dict)
+	sims, cwms, names = utils_loader.load_modiscos(modisco_dict)
 	metadata = pd.DataFrame()
 	metadata["name"] = names
 	metadata["model"] = metadata["name"].str.split("-").str[0]
@@ -99,11 +98,11 @@ class MotifCompendium():
 		self.alignment_fb = alignment_fb
 		self.alignment_h = alignment_h
 		self.metadata = metadata
-		self.validate()
+		# self.validate()
 
-	def cluster(self, algorithm="leiden", similarity_threshold=0.8, save_name="cluster"):
+	def cluster(self, algorithm="leiden", similarity_threshold=0.8, save_name="cluster", **kwargs):
 		print("clustering"); start = time.time()
-		self.metadata[save_name] = utils_clustering.cluster(self.similarity, algorithm, similarity_threshold)
+		self.metadata[save_name] = utils_clustering.cluster(self.similarity, algorithm, similarity_threshold, **kwargs)
 		print(f"completed {time.time() - start}")
 
 	def clustering_quality(self, cluster_name="cluster"):
@@ -120,6 +119,21 @@ class MotifCompendium():
 					scores[i, j] = np.max(similarity_slice_ij)
 					scores[j, i] = scores[i, j]
 		return scores
+
+	def cluster_averages(self, cluster_name="cluster", max_chunk=None, max_parallel=None, use_gpu=False):
+		sims, logos, names, counts = [], [], [], []
+		for c in sorted(set(self.metadata[cluster_name])):
+			mc_c = self[self[cluster_name] == c]
+			sims.append(np.mean(mc_c.sims, axis=0))
+			logos.append(np.mean(mc_c.logos, axis=0))
+			names.append(c)
+			counts.append(mc_c.sims.shape[0])
+		sims = np.stack(sims, axis=0)
+		logos = np.stack(logos, axis=0)
+		metadata = pd.DataFrame()
+		metadata["name"] = names
+		metadata["count"] = counts
+		return build(sims, logos, metadata, max_chunk, max_parallel, use_gpu)
 
 	def extend(self, sims, metadata=None, max_chunk=None, max_parallel=None):
 		print("not yet implemented")

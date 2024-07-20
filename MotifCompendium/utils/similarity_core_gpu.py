@@ -68,7 +68,7 @@ def compute_similarity(motif_set_1, motif_set_2):
 	assert(best_alignments.shape == (N_original, M_original))
 	return best_alignment_scores, best_alignments
 
-def compute_similarity_and_align(simsA, simsB):
+def gpu_compute_similarity_and_align(simsA, simsB):
 	simsA = cp.asarray(simsA)
 	simsB = cp.asarray(simsB)
 	samsA = cp.sqrt(simsA)
