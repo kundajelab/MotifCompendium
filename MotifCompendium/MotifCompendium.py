@@ -23,7 +23,7 @@ def load(file_loc):
 	metadata = pd.read_hdf(file_loc, key="metadata")
 	return MotifCompendium(sims, logos, similarity, alignment_fb, alignment_h, metadata)
 
-def build(sims, logos=None, metadata=None, max_chunk=None, max_parallel=None, use_gpu=False):
+def build(sims, logos=None, metadata=None, max_chunk=None, max_parallel=None, use_gpu=False, l2=False):
 	# SIMS
 	utils_similarity.validate_sims(sims)
 	# LOGOS
@@ -35,19 +35,19 @@ def build(sims, logos=None, metadata=None, max_chunk=None, max_parallel=None, us
 		metadata["name"] = [f"motif_{i}" for i in range(sims.shape[0])]
 	# SIMILARITY
 	print("aligning"); start = time.time()
-	similarity, alignment_fb, alignment_h = utils_similarity.compute_similarities([sims], [(0, 0)], max_chunk, max_parallel, use_gpu)[0]
+	similarity, alignment_fb, alignment_h = utils_similarity.compute_similarities([sims], [(0, 0)], max_chunk, max_parallel, use_gpu, l2=l2)[0]
 	np.fill_diagonal(similarity, 1)
 	print(f"completed {time.time() - start}")
 	# CONSTRUCT OBJECT
 	return MotifCompendium(sims, logos, similarity, alignment_fb, alignment_h, metadata)
 
-def build_from_modisco(modisco_dict, max_chunk=None, max_parallel=None, use_gpu=False):
-	sims, cwms, names = utils_loader.load_modiscos(modisco_dict)
+def build_from_modisco(modisco_dict, max_chunk=None, max_parallel=None, use_gpu=False, ic=False, l2=False):
+	sims, cwms, names = utils_loader.load_modiscos(modisco_dict, ic=ic)
 	metadata = pd.DataFrame()
 	metadata["name"] = names
 	metadata["model"] = metadata["name"].str.split("-").str[0]
 	metadata["posneg"] = metadata["name"].str.split(".").str[0].str.split("-").str[1] # assume model names have no - or . in them
-	compendium = build(sims, logos=cwms, metadata=metadata, max_chunk=max_chunk, max_parallel=max_parallel, use_gpu=use_gpu)
+	compendium = build(sims, logos=cwms, metadata=metadata, max_chunk=max_chunk, max_parallel=max_parallel, use_gpu=use_gpu, l2=l2)
 	return compendium
 
 def combine(compendiums, max_chunk=None, max_parallel=None, use_gpu=False):

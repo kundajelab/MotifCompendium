@@ -36,29 +36,29 @@ def ic_scale(x):
 	ic = 1 - entropy
 	return x * ic
 
-def sequence_importance_from_seqlets(seqlets):
+def sequence_importance_from_seqlets(seqlets, ic=False):
 	# INPUT = (N, 30, 4)
-	'''
-	seqlets_8 = _4_to_8(seqlets)
-	seqlets_importance = seqlets_8/np.sum(seqlets_8, axis=(1, 2), keepdims=True)
-	motif_importance = np.mean(seqlets_importance, axis=0)
-	'''
-	seqlets_avg = np.mean(seqlets, axis=0)
-	motif = ic_scale(seqlets_avg)
-	motif_8 = _4_to_8(motif)
-	motif_importance = motif_8/np.sum(motif_8)
+	if ic:
+		seqlets_avg = np.mean(seqlets, axis=0)
+		motif = ic_scale(seqlets_avg)
+		motif_8 = _4_to_8(motif)
+		motif_importance = motif_8/np.sum(motif_8)
+	else:
+		seqlets_8 = _4_to_8(seqlets)
+		seqlets_importance = seqlets_8/np.sum(seqlets_8, axis=(1, 2), keepdims=True)
+		motif_importance = np.mean(seqlets_importance, axis=0)
 	# TODO: CUTOFF UNDER SOME CERTAIN VALUE AND IGNORE ALL ELSE THEN RENORMALIZE
 	# motif_importance[motif_importance < 1/240] = 0
 	# motif_importance /= np.sum(motif_importance)
 	return motif_importance
 
-def load_modisco(modisco_file):
+def load_modisco(modisco_file, ic=False):
 	sims, cwms, names = [], [], []
 	with h5py.File(modisco_file, 'r') as f:
 		if "pos_patterns" in f:
 			for pattern in list(f["pos_patterns"]):
 				seqlets = f["pos_patterns"][pattern]["seqlets"]["contrib_scores"][()]
-				motif_sim = sequence_importance_from_seqlets(seqlets)
+				motif_sim = sequence_importance_from_seqlets(seqlets, ic=ic)
 				sims.append(motif_sim)
 				motif_cwm = f["pos_patterns"][pattern]["contrib_scores"][()]
 				cwms.append(motif_cwm)
@@ -66,7 +66,7 @@ def load_modisco(modisco_file):
 		if "neg_patterns" in f:	
 			for pattern in list(f["neg_patterns"]):
 				seqlets = f["neg_patterns"][pattern]["seqlets"]["contrib_scores"][()]
-				motif_sim = sequence_importance_from_seqlets(seqlets)
+				motif_sim = sequence_importance_from_seqlets(seqlets, ic=ic)
 				sims.append(motif_sim)
 				motif_cwm = f["neg_patterns"][pattern]["contrib_scores"][()]
 				cwms.append(motif_cwm)
@@ -76,11 +76,11 @@ def load_modisco(modisco_file):
 	cwms = _8_to_4(sims)
 	return sims, cwms, names
 
-def load_modiscos(modisco_dict):
+def load_modiscos(modisco_dict, ic=False):
 	print("uh loading")
 	sims, cwms, names = [], [], []
 	for m_name, modisco in modisco_dict.items():
-		m_sims, m_cwms, m_names = load_modisco(modisco)
+		m_sims, m_cwms, m_names = load_modisco(modisco, ic=ic)
 		m_names = [f"{m_name}-{x}" for x in m_names]
 		sims.append(m_sims)
 		cwms.append(m_cwms)

@@ -9,8 +9,8 @@ def motif_to_df(motif):
 	return pd.DataFrame(motif, columns=["A", "C", "G", "T"])
 
 def prep_plotting_from_motifs(cwms, clusters, sim_fb, sim_alignments, names):
-	motif_plot_dfs = []
-	for c in clusters:
+	motif_plot_dfs = {}
+	for c_name, c in clusters.items():
 		c_dfs = []
 		c_df_index = set()
 		first_idx = c[0]
@@ -26,16 +26,16 @@ def prep_plotting_from_motifs(cwms, clusters, sim_fb, sim_alignments, names):
 			c_df_index.update(idx_df.index)
 		c_df_index = sorted(c_df_index)
 		c_dfs = [(x[0], x[1].reindex(c_df_index, fill_value=0)) for x in c_dfs]
-		motif_plot_dfs.append(c_dfs)
+		motif_plot_dfs[c_name] = c_dfs
 	return motif_plot_dfs
 
-def create_html(cwms, clusters, sim_fb, sim_alignments, names, html_out_loc):
-	import make_report
-	clustering = []
+def create_html(cwms, clusters, sim_fb, sim_alignments, names, html_out_loc, average=True, parallel=True):
+	from .make_report import generate_report
+	clustering = {}
 	for c in sorted(set(clusters)):
-		clustering.append([i for i, ic in enumerate(clusters) if ic == c])
+		clustering[c] = [i for i, ic in enumerate(clusters) if ic == c]
 	motif_plot_dfs = prep_plotting_from_motifs(cwms, clustering, sim_fb, sim_alignments, names)
-	make_report.generate_report(motif_plot_dfs, html_out_loc)
+	generate_report(motif_plot_dfs, html_out_loc, average, parallel)
 
 def plot_motif_on_ax(motif, ax, motif_name=None):
 	motif_df = motif_to_df(motif)

@@ -70,15 +70,15 @@ def _chunk_sims_and_calcs(sims_list, calculations, max_chunk):
 				chunked_calculations.append((c0_chunk, c1_chunk))
 	return chunked_sims_list, chunked_calculations, chunk_map
 
-def _compute_similarity_and_align_parallel(sims_list, calculations, max_parallel, use_gpu):
+def _compute_similarity_and_align_parallel(sims_list, calculations, max_parallel, use_gpu, l2=False):
 	if max_parallel is None:
 		if use_gpu:
 			# SINGLE GPU CALCULATIONS
 			from .similarity_core_gpu import gpu_compute_similarity_and_align
-			return [gpu_compute_similarity_and_align(sims_list[c[0]], sims_list[c[1]]) for c in calculations]
+			return [gpu_compute_similarity_and_align(sims_list[c[0]], sims_list[c[1]], l2=l2) for c in calculations]
 		else:
 			# SINGLE CPU CALCULATIONS
-			return [compute_similarity_and_align(sims_list[c[0]], sims_list[c[1]]) for c in calculations]
+			return [compute_similarity_and_align(sims_list[c[0]], sims_list[c[1]], l2=l2) for c in calculations]
 	else:
 		if use_gpu:
 			print("not yet implemented"); assert(False)
@@ -101,7 +101,7 @@ def _compute_similarity_and_align_parallel(sims_list, calculations, max_parallel
 			return [results_dict[c] for c in calculations]
 		else:
 			# MULTI-CPU CALCULATIONS
-			inputs = [(sims_list[c[0]], sims_list[c[1]]) for c in calculations]
+			inputs = [(sims_list[c[0]], sims_list[c[1]], l2) for c in calculations]
 			max_cpus = min(max_parallel, multiprocessing.cpu_count()) # don't use more cpus than available
 			with multiprocessing.Pool(processes=max_cpus) as p:
 				return p.starmap(compute_similarity_and_align, inputs)
@@ -132,13 +132,13 @@ def _reassemble_results(calculations, chunked_calculations, chunked_results, chu
 	assert(len(results) == len(calculations))
 	return results
 
-def compute_similarities(sims_list, calculations, max_chunk, max_parallel, use_gpu):
+def compute_similarities(sims_list, calculations, max_chunk, max_parallel, use_gpu, l2=False):
 	for sims in sims_list:
 		validate_sims(sims)
 	if max_chunk is not None:
 		chunked_sims_list, chunked_calculations, chunk_map = _chunk_sims_and_calcs(sims_list, calculations, max_chunk)
-		chunked_results = _compute_similarity_and_align_parallel(chunked_sims_list, chunked_calculations, max_parallel, use_gpu)
+		chunked_results = _compute_similarity_and_align_parallel(chunked_sims_list, chunked_calculations, max_parallel, use_gpu, l2=l2)
 		return _reassemble_results(calculations, chunked_calculations, chunked_results, chunk_map)
 	else:
-		return _compute_similarity_and_align_parallel(sims_list, calculations, max_parallel, use_gpu)
+		return _compute_similarity_and_align_parallel(sims_list, calculations, max_parallel, use_gpu, l2=l2)
 

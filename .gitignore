@@ -3,4 +3,7 @@
 *.tsv
 *.png
 *.txt
+*.pyc
 __pycache__/*
+MotifCompendium.egg-info/*
+

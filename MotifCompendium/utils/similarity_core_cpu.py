@@ -64,9 +64,13 @@ def compute_similarity(motif_set_1, motif_set_2):
 	assert(best_alignments.shape == (N_original, M_original))
 	return best_alignment_scores, best_alignments
 
-def compute_similarity_and_align(simsA, simsB):
-	samsA = np.sqrt(simsA)
-	samsB = np.sqrt(simsB)
+def compute_similarity_and_align(simsA, simsB, l2=False):
+	if l2:
+		samsA = simsA/np.linalg.norm(simsA, axis=0)
+		samsB = simsB/np.linalg.norm(simsB, axis=0)
+	else:
+		samsA = np.sqrt(simsA)
+		samsB = np.sqrt(simsB)
 	samsB_revcomp = reverse_complement(samsB)
 	# forward similarity
 	sim_1, sim_1_alignments = compute_similarity(samsA, samsB) # skew-symmetric alignment
