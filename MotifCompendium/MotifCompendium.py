@@ -98,7 +98,7 @@ class MotifCompendium():
 		self.alignment_fb = alignment_fb
 		self.alignment_h = alignment_h
 		self.metadata = metadata
-		# self.validate()
+		self.validate()
 
 	def cluster(self, algorithm="leiden", similarity_threshold=0.8, save_name="cluster", **kwargs):
 		print("clustering"); start = time.time()

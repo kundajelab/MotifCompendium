@@ -72,8 +72,8 @@ def gpu_compute_similarity_and_align(simsA, simsB, l2=False):
 	simsA = cp.asarray(simsA)
 	simsB = cp.asarray(simsB)
 	if l2:
-		samsA = simsA/cp.linalg.norm(simsA, axis=0)
-		samsB = simsB/cp.linalg.norm(simsB, axis=0)
+		samsA = simsA/cp.linalg.norm(simsA, axis=(1, 2), keepdims=True)
+		samsB = simsB/cp.linalg.norm(simsB, axis=(1, 2), keepdims=True)
 	else:
 		samsA = cp.sqrt(simsA)
 		samsB = cp.sqrt(simsB)
