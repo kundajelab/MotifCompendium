@@ -187,7 +187,26 @@ def cc_clustering(similarity_matrix, similarity_threshold=0.8):
 	return final_clusters
 '''
 
-def cc_clustering(adjacency_matrix):
+def cc_clustering(adjacency_matrix):	
+	N = adjacency_matrix.shape[0]
+	clustering = [False] * N
+	current_cluster = 1
+	for current_node in range(N):
+		if not clustering[current_node]:
+			# create new cluster
+			clustering[current_node] = current_cluster
+			new_cluster_idxs = [current_node]
+			for consider_node in range(current_node+1, N):
+				if adjacency_matrix[consider_node, new_cluster_idxs].any():
+					clustering[consider_node] = current_cluster
+					new_cluster_idxs.append(consider_node)
+			current_cluster += 1
+	print(f"found {current_cluster} clusters in {N} nodes")
+	for i in range(N):
+		assert(clustering[i])
+	return [x-1 for x in clustering]
+
+def greedy_cc_clustering(adjacency_matrix):
 	# FINDING GREEDY DENSELY-CONNECTED COMPONENTS
 	N = adjacency_matrix.shape[0]
 	clustering = [False] * N
@@ -326,10 +345,12 @@ def cluster(similarity_matrix, algorithm, similarity_threshold, **kwargs):
 		return cpm_leiden_clustering_weights(adjacency_matrix, similarity_matrix, **kwargs_filtered)
 
 	# CC
-	elif algorithm == "cc":
+	elif algorithm == "cc":	
 		adjacency_matrix = similarity_matrix >= similarity_threshold
 		return cc_clustering(adjacency_matrix)
-
+	elif algorithm == "greedy_cc":
+		adjacency_matrix = similarity_matrix >= similarity_threshold
+		return greedy_cc_clustering(adjacency_matrix)
 	elif algorithm == "cc_stable":
 		print("not yet implemented"); assert(False)
 		adjacency_matrix = similarity_matrix >= similarity_threshold

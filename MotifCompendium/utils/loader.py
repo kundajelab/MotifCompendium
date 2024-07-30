@@ -1,5 +1,7 @@
 import h5py
 import numpy as np
+import pandas as pd
+
 
 MOTIF_4_TO_8_POS = np.zeros((4, 8))
 MOTIF_4_TO_8_POS[0, 0] = 1
@@ -88,4 +90,59 @@ def load_modiscos(modisco_dict, ic=False):
 	sims = np.concatenate(sims, axis=0)
 	cwms = np.concatenate(cwms, axis=0)
 	return sims, cwms, names
+
+def squash_motif(motif, squash_to=30):
+	if len(motif) < squash_to:
+		n_add = squash_to - len(motif)
+		zeros_df = pd.DataFrame(np.zeros((n_add, motif.shape[1])), columns=motif.columns)
+		motif = pd.concat([motif, zeros_df], ignore_index=True)
+		return motif
+	elif len(motif) > squash_to:
+		motif_np = motif.to_numpy()
+		i_sums = []
+		for i in range(len(motif) - 29):
+			i_sums.append((np.sum(motif_np[i:i+30, :]), i))
+		i_sums = sorted(i_sums, reverse=True)
+		top_i = i_sums[0][1]
+		motif = pd.DataFrame(motif_np[top_i:top_i+30, :], columns=motif.columns)
+		return motif
+	else:
+		return motif
+
+def load_pfm(pfm_file):
+	names = []
+	pwms = []
+	active_pwm = False
+	with open(pfm_file, 'r') as f:
+	        for line in f:
+	                x = line.strip()
+	                if active_pwm:
+	                        if x.startswith(">"):
+	                                # submit
+	                                pwms.append(squash_motif(pd.DataFrame(current_pwm)))
+	                                names.append(current_pwm_name)
+	                                # restart
+	                                current_pwm_name = x[1:]
+	                                current_pwm = {"A": [], "C": [], "G": [], "T": []}
+	                        else:
+	                                a, c, g, t = x.split()
+	                                a, c, g, t = float(a), float(c), float(g), float(t)
+	                                acgt = np.asarray([a, c, g, t])
+	                                xlogx = acgt*np.log2(acgt, where=(acgt != 0))
+	                                entropy = np.sum(-xlogx)/2
+	                                ic = 1 - entropy
+	                                acgt_ic = acgt * ic
+	                                current_pwm["A"].append(acgt_ic[0])
+	                                current_pwm["C"].append(acgt_ic[1])
+	                                current_pwm["G"].append(acgt_ic[2])
+	                                current_pwm["T"].append(acgt_ic[3])
+	                else:
+	                        assert(x.startswith(">"))
+	                        active_pwm = True
+	                        current_pwm_name = x[1:]
+	                        current_pwm = {"A": [], "C": [], "G": [], "T": []}
+
+	pwms_mtx = np.stack([x.to_numpy() for x in pwms], axis=0)
+	pwms_mtx /= np.sum(pwms_mtx, axis=(1, 2), keepdims=True)
+	return pwms_mtx, names
 

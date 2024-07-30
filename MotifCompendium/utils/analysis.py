@@ -150,20 +150,20 @@ def export_clusters_modisco(mc, cluster_name, save_loc, **kwargs):
 	with h5py.File(save_loc, 'w') as f:
 		f.attrs["window_size"] = 30
 		# Positive
-		if "pos" in mc_cluster_avg["pos_neg"]:
+		if "pos" in set(mc_cluster_avg["pos_neg"]):
 			pos_group = f.create_group("pos_patterns")
 			mc_cluster_avg_pos = mc_cluster_avg[mc_cluster_avg["pos_neg"] == "pos"]
 			for i in range(len(mc_cluster_avg_pos)):
-				name = mc_cluster_avg_pos.loc[i, "name"]
+				name = str(mc_cluster_avg_pos.metadata.loc[i, "name"])
 				cwm = mc_cluster_avg_pos.logos[i, :, :]
 				pos_cluster = pos_group.create_group(name)
 				pos_cluster.create_dataset("contrib_scores", data=cwm)
 		# Negative
-		if "neg" in mc_cluster_avg["pos_neg"]:
+		if "neg" in set(mc_cluster_avg["pos_neg"]):
 			neg_group = f.create_group("neg_patterns")
 			mc_cluster_avg_neg = mc_cluster_avg[mc_cluster_avg["pos_neg"] == "neg"]
 			for i in range(len(mc_cluster_avg_neg)):
-				name = mc_cluster_avg_neg.loc[i, "name"]
+				name = str(mc_cluster_avg_neg.metadata.loc[i, "name"])
 				cwm = mc_cluster_avg_neg.logos[i, :, :]
 				neg_cluster = neg_group.create_group(name)
 				neg_cluster.create_dataset("contrib_scores", data=cwm)

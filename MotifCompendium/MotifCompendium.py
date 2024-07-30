@@ -50,6 +50,14 @@ def build_from_modisco(modisco_dict, max_chunk=None, max_parallel=None, use_gpu=
 	compendium = build(sims, logos=cwms, metadata=metadata, max_chunk=max_chunk, max_parallel=max_parallel, use_gpu=use_gpu, l2=l2)
 	return compendium
 
+def build_from_pfms(pfm_file, max_chunk=None, max_parallel=None, use_gpu=False, l2=False):
+	sims, names = utils_loader.load_pfm(pfm_file)
+	logos = sims
+	metadata = pd.DataFrame()
+	metadata["name"] = names
+	compendium = build(sims, logos=logos, metadata=metadata, max_chunk=max_chunk, max_parallel=max_parallel, use_gpu=use_gpu, l2=l2)
+	return compendium
+
 def combine(compendiums, max_chunk=None, max_parallel=None, use_gpu=False):
 	print("not yet implemented"); assert(False)
 	n = len(compendiums)
