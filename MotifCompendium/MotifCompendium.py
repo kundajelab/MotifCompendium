@@ -6,6 +6,7 @@ import time
 
 import MotifCompendium.utils.clustering as utils_clustering
 import MotifCompendium.utils.loader as utils_loader
+import MotifCompendium.utils.matrix as utils_matrix
 import MotifCompendium.utils.plotting as utils_plotting
 import MotifCompendium.utils.similarity as utils_similarity
 
@@ -13,7 +14,7 @@ import MotifCompendium.utils.similarity as utils_similarity
 ######################################
 # MOTIF COMPENDIUM FACTORY FUNCTIONS #
 ######################################
-def load(file_loc):
+def load(file_loc, safe=True):
 	with h5py.File(file_loc, 'r') as f:
 		sims = f["sims"][:]
 		logos = f["logos"][:]
@@ -21,9 +22,9 @@ def load(file_loc):
 		alignment_fb = f["alignment_fb"][:]
 		alignment_h = f["alignment_h"][:]
 	metadata = pd.read_hdf(file_loc, key="metadata")
-	return MotifCompendium(sims, logos, similarity, alignment_fb, alignment_h, metadata)
+	return MotifCompendium(sims, logos, similarity, alignment_fb, alignment_h, metadata, safe)
 
-def build(sims, logos=None, metadata=None, max_chunk=None, max_parallel=None, use_gpu=False, l2=False):
+def build(sims, logos=None, metadata=None, max_chunk=None, max_parallel=None, use_gpu=False, l2=False, safe=False):
 	# SIMS
 	utils_similarity.validate_sims(sims)
 	# LOGOS
@@ -39,15 +40,15 @@ def build(sims, logos=None, metadata=None, max_chunk=None, max_parallel=None, us
 	np.fill_diagonal(similarity, 1)
 	print(f"completed {time.time() - start}")
 	# CONSTRUCT OBJECT
-	return MotifCompendium(sims, logos, similarity, alignment_fb, alignment_h, metadata)
+	return MotifCompendium(sims, logos, similarity, alignment_fb, alignment_h, metadata, safe)
 
-def build_from_modisco(modisco_dict, max_chunk=None, max_parallel=None, use_gpu=False, ic=False, l2=False):
+def build_from_modisco(modisco_dict, max_chunk=None, max_parallel=None, use_gpu=False, ic=False, l2=False, safe=False):
 	sims, cwms, names = utils_loader.load_modiscos(modisco_dict, ic=ic)
 	metadata = pd.DataFrame()
 	metadata["name"] = names
 	metadata["model"] = metadata["name"].str.split("-").str[0]
 	metadata["posneg"] = metadata["name"].str.split(".").str[0].str.split("-").str[1] # assume model names have no - or . in them
-	compendium = build(sims, logos=cwms, metadata=metadata, max_chunk=max_chunk, max_parallel=max_parallel, use_gpu=use_gpu, l2=l2)
+	compendium = build(sims, logos=cwms, metadata=metadata, max_chunk=max_chunk, max_parallel=max_parallel, use_gpu=use_gpu, l2=l2, safe=safe)
 	return compendium
 
 def build_from_pfms(pfm_file, max_chunk=None, max_parallel=None, use_gpu=False, l2=False):
@@ -99,14 +100,15 @@ def combine(compendiums, max_chunk=None, max_parallel=None, use_gpu=False):
 # MOTIF COMPENDIUM CLASS #
 ##########################
 class MotifCompendium():
-	def __init__(self, sims, logos, similarity, alignment_fb, alignment_h, metadata):
+	def __init__(self, sims, logos, similarity, alignment_fb, alignment_h, metadata, safe):
 		self.sims = sims
 		self.logos = logos
 		self.similarity = similarity
 		self.alignment_fb = alignment_fb
 		self.alignment_h = alignment_h
 		self.metadata = metadata
-		self.validate()
+		if safe:
+			self.validate()
 
 	def cluster(self, algorithm="leiden", similarity_threshold=0.8, save_name="cluster", **kwargs):
 		print("clustering"); start = time.time()
@@ -129,19 +131,21 @@ class MotifCompendium():
 		return scores
 
 	def cluster_averages(self, cluster_name="cluster", max_chunk=None, max_parallel=None, use_gpu=False):
-		sims, logos, names, counts = [], [], [], []
+		sims, logos, names, num_constituents = [], [], [], []
 		for c in sorted(set(self.metadata[cluster_name])):
 			mc_c = self[self[cluster_name] == c]
-			sims.append(np.mean(mc_c.sims, axis=0))
-			logos.append(np.mean(mc_c.logos, axis=0))
+			avg_motif_sims = utils_matrix.average_motifs(mc_c.sims, mc_c.alignment_fb, mc_c.alignment_h)
+			avg_motif_logo = utils_matrix._8_to_4(avg_motif_sims)
+			sims.append(avg_motif_sims)
+			logos.append(avg_motif_logo)
 			names.append(c)
-			counts.append(mc_c.sims.shape[0])
+			num_constituents.append(mc_c.sims.shape[0])
 		sims = np.stack(sims, axis=0)
 		logos = np.stack(logos, axis=0)
 		metadata = pd.DataFrame()
 		metadata["name"] = names
-		metadata["count"] = counts
-		return build(sims, logos, metadata, max_chunk, max_parallel, use_gpu)
+		metadata["num_constituents"] = num_constituents
+		return build(sims, logos, metadata, max_chunk, max_parallel, use_gpu, safe=True)
 
 	def extend(self, sims, metadata=None, max_chunk=None, max_parallel=None):
 		print("not yet implemented")
@@ -246,15 +250,15 @@ class MotifCompendium():
 		if isinstance(key, str):
 			return self.metadata[key]
 		elif isinstance(key, pd.Series) and key.dtype == bool:
-			metadata_slice = self.metadata.copy()[key]
+			metadata_slice = self.metadata[key]
 			keep_idxs = list(metadata_slice.index)
 			metadata_slice = metadata_slice.reset_index(drop=True)
-			sims_slice = self.sims.copy()[keep_idxs, :, :]
-			logos_slice = self.logos.copy()[keep_idxs, :, :]
-			similarity_slice = self.similarity.copy()[keep_idxs, :][:, keep_idxs]
-			alignment_fb_slice = self.alignment_fb.copy()[keep_idxs, :][:, keep_idxs]
-			alignment_h_slice = self.alignment_h.copy()[keep_idxs, :][:, keep_idxs]
-			return MotifCompendium(sims_slice, logos_slice, similarity_slice, alignment_fb_slice, alignment_h_slice, metadata_slice)
+			sims_slice = self.sims[keep_idxs, :, :]
+			logos_slice = self.logos[keep_idxs, :, :]
+			similarity_slice = self.similarity[keep_idxs, :][:, keep_idxs]
+			alignment_fb_slice = self.alignment_fb[keep_idxs, :][:, keep_idxs]
+			alignment_h_slice = self.alignment_h[keep_idxs, :][:, keep_idxs]
+			return MotifCompendium(sims_slice, logos_slice, similarity_slice, alignment_fb_slice, alignment_h_slice, metadata_slice, safe=False)
 		else:
 			raise TypeError("MotifCompendium cannot be indexed by this")
 
