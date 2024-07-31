@@ -77,11 +77,11 @@ def gpu_compute_similarity_and_align(simsA, simsB, l2=False):
 	else:
 		samsA = cp.sqrt(simsA)
 		samsB = cp.sqrt(simsB)
-	samsB_revcomp = reverse_complement(samsB)
+	samsA_revcomp = reverse_complement(samsA)
 	# forward similarity
 	sim_1, sim_1_alignments = compute_similarity(samsA, samsB) # skew-symmetric alignment
 	# backward similarity
-	sim_2, sim_2_alignments = compute_similarity(samsA, samsB_revcomp) # symmetric alignment
+	sim_2, sim_2_alignments = compute_similarity(samsA_revcomp, samsB) # symmetric alignment
 	# aligning
 	sim_12 = cp.stack([sim_1, sim_2])
 	sim = cp.max(sim_12, axis=0)

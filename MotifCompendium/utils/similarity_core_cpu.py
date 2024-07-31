@@ -71,11 +71,11 @@ def compute_similarity_and_align(simsA, simsB, l2=False):
 	else:
 		samsA = np.sqrt(simsA)
 		samsB = np.sqrt(simsB)
-	samsB_revcomp = reverse_complement(samsB)
+	samsA_revcomp = reverse_complement(samsA)
 	# forward similarity
 	sim_1, sim_1_alignments = compute_similarity(samsA, samsB) # skew-symmetric alignment
 	# backward similarity
-	sim_2, sim_2_alignments = compute_similarity(samsA, samsB_revcomp) # symmetric alignment
+	sim_2, sim_2_alignments = compute_similarity(samsA_revcomp, samsB) # symmetric alignment
 	# aligning
 	sim_12 = np.stack([sim_1, sim_2])
 	sim = np.max(sim_12, axis=0)

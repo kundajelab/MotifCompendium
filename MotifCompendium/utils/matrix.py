@@ -12,19 +12,13 @@ def average_motifs(motifs_8, alignment_fb, alignment_h):
 	N = motifs_4.shape[0]
 	if N == 1:
 		return motifs_8[0, :, :]
-	shifts = [alignment_h[i, 0] if alignment_fb[i, 0] == 0 else -alignment_h[i, 0] for i in range(N)]
-	max_shift = max(shifts)
-	min_shift = min(shifts)
+	max_shift = np.max(alignment_h[:, 0])
+	min_shift = np.min(alignment_h[:, 0])
 	width = 30 + max_shift - min_shift
 	motif_sum = np.zeros((width, 4))
 	for i in range(N):
-		if alignment_fb[i, 0] == 0:
-			s = alignment_h[i, 0]
-			motif_i = motifs_4[i, :, :]
-		else:
-			s = -alignment_h[i, 0]
-			motif_i = motifs_4[i, ::-1, ::-1]
-		motif_sum[np.abs(min_shift)+s:np.abs(min_shift)+s+30, :] += motif_i
+		s = alignment_h[i, 0]
+		motif_sum[np.abs(min_shift)+s:np.abs(min_shift)+s+30, :] += motifs_4[i, :, :] if alignment_fb[i, 0] == 0 else motifs_4[i, ::-1, ::-1]
 	motif_avg = motif_sum/N
 	squashed_motif = squash_motif(motif_avg)
 	squashed_motif_8 = _4_to_8(squashed_motif)

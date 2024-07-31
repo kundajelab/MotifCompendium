@@ -14,13 +14,11 @@ def prep_plotting_from_motifs(cwms, clusters, sim_fb, sim_alignments, names):
 		c_dfs = []
 		c_df_index = set()
 		first_idx = c[0]
-		c_left_alignment = -np.max([sim_alignments[first_idx, idx] for idx in c]) - 0.5
-		c_right_alignment = np.abs(np.min([sim_alignments[first_idx, idx] for idx in c])) + 29.5
 		for idx in c:
-			idx_cwm = cwms[idx, :, :] if sim_fb[first_idx, idx] == 0 else cwms[idx, ::-1, ::-1]
-			idx_shift = sim_alignments[first_idx, idx]
+			idx_cwm = cwms[idx, :, :] if sim_fb[idx, first_idx] == 0 else cwms[idx, ::-1, ::-1]
+			idx_shift = sim_alignments[idx, first_idx]
 			idx_df = pd.DataFrame(idx_cwm, columns=["A", "C", "G", "T"])
-			idx_df.index -= idx_shift
+			idx_df.index += idx_shift
 			idx_name = names[idx]
 			c_dfs.append((idx_name, idx_df))
 			c_df_index.update(idx_df.index)
