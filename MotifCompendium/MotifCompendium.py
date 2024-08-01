@@ -133,14 +133,16 @@ class MotifCompendium():
 	def cluster_averages(self, cluster_name="cluster", max_chunk=None, max_parallel=None, use_gpu=False):
 		sims, logos, names, num_constituents = [], [], [], []
 		for c in sorted(set(self.metadata[cluster_name])):
-			c_index = self.metadata.index[self[cluster_name] == c].to_index()
+			c_index = self.metadata.index[self[cluster_name] == c].to_list()
 			c_sims = self.sims[c_index, :, :]
-			avg_motif_sims = utils_matrix.average_motifs(c_sims, mc_c.alignment_fb, mc_c.alignment_h)
+			c_alignment_fb = self.alignment_fb[c_index, :][:, c_index]
+			c_alignment_h = self.alignment_h[c_index, :][:, c_index]
+			avg_motif_sims = utils_matrix.average_motifs(c_sims, c_alignment_fb, c_alignment_h)
 			avg_motif_logo = utils_matrix._8_to_4(avg_motif_sims)
 			sims.append(avg_motif_sims)
 			logos.append(avg_motif_logo)
 			names.append(c)
-			num_constituents.append(mc_c.sims.shape[0])
+			num_constituents.append(len(c_index))
 		sims = np.stack(sims, axis=0)
 		logos = np.stack(logos, axis=0)
 		metadata = pd.DataFrame()

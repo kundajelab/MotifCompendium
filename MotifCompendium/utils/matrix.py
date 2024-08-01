@@ -1,11 +1,6 @@
 import numpy as np
 import pandas as pd
 
-import matplotlib
-matplotlib.use("TkAgg")
-import matplotlib.pyplot as plt
-import logomaker
-
 
 def average_motifs(motifs_8, alignment_fb, alignment_h):
 	motifs_4 = _8_to_4(motifs_8)
