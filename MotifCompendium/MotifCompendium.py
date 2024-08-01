@@ -51,15 +51,15 @@ def build_from_modisco(modisco_dict, max_chunk=None, max_parallel=None, use_gpu=
 	compendium = build(sims, logos=cwms, metadata=metadata, max_chunk=max_chunk, max_parallel=max_parallel, use_gpu=use_gpu, l2=l2, safe=safe)
 	return compendium
 
-def build_from_pfms(pfm_file, max_chunk=None, max_parallel=None, use_gpu=False, l2=False):
+def build_from_pfms(pfm_file, max_chunk=None, max_parallel=None, use_gpu=False, l2=False, safe=False):
 	sims, names = utils_loader.load_pfm(pfm_file)
 	logos = sims
 	metadata = pd.DataFrame()
 	metadata["name"] = names
-	compendium = build(sims, logos=logos, metadata=metadata, max_chunk=max_chunk, max_parallel=max_parallel, use_gpu=use_gpu, l2=l2)
+	compendium = build(sims, logos=logos, metadata=metadata, max_chunk=max_chunk, max_parallel=max_parallel, use_gpu=use_gpu, l2=l2, safe=safe)
 	return compendium
 
-def combine(compendiums, max_chunk=None, max_parallel=None, use_gpu=False):
+def combine(compendiums, max_chunk=None, max_parallel=None, use_gpu=False, safe=False):
 	print("not yet implemented"); assert(False)
 	n = len(compendiums)
 	# SIMILARITIES
@@ -93,7 +93,7 @@ def combine(compendiums, max_chunk=None, max_parallel=None, use_gpu=False):
 	logos = np.concatenate([mc.logos for mc in compendiums])
 	# METADATA
 	metadata = pd.concat([mc.metadata for mc in compendiums])
-	return MotifCompendium(sims, logos, similarity, alignment_fb, alignment_h, metadata)
+	return MotifCompendium(sims, logos, similarity, alignment_fb, alignment_h, metadata, safe)
 
 
 ##########################
@@ -133,8 +133,9 @@ class MotifCompendium():
 	def cluster_averages(self, cluster_name="cluster", max_chunk=None, max_parallel=None, use_gpu=False):
 		sims, logos, names, num_constituents = [], [], [], []
 		for c in sorted(set(self.metadata[cluster_name])):
-			mc_c = self[self[cluster_name] == c]
-			avg_motif_sims = utils_matrix.average_motifs(mc_c.sims, mc_c.alignment_fb, mc_c.alignment_h)
+			c_index = self.metadata.index[self[cluster_name] == c].to_index()
+			c_sims = self.sims[c_index, :, :]
+			avg_motif_sims = utils_matrix.average_motifs(c_sims, mc_c.alignment_fb, mc_c.alignment_h)
 			avg_motif_logo = utils_matrix._8_to_4(avg_motif_sims)
 			sims.append(avg_motif_sims)
 			logos.append(avg_motif_logo)
@@ -156,9 +157,9 @@ class MotifCompendium():
 	###
 	# VISUALIZATION
 	###
-	def create_html(self, html_out, group_by="cluster"):	
+	def create_html(self, html_out, group_by="cluster", max_parallel=16):
 		print("visualizing"); start = time.time()
-		utils_plotting.create_html(self.logos, list(self.metadata[group_by]), self.alignment_fb, self.alignment_h, list(self.metadata["name"]), html_out)
+		utils_plotting.create_html(self.logos, list(self.metadata[group_by]), self.alignment_fb, self.alignment_h, list(self.metadata["name"]), html_out, max_parallel=max_parallel)
 		print(f"completed {time.time() - start}")
 
 	def heatmap(self, annot=False, label=False, show=False, save_loc=None):
