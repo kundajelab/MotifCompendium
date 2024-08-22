@@ -95,21 +95,27 @@ def calculate_entropy(cwm4: np.array, length: int = 30) -> tuple:
 	pair_base_prob = np.sum(pair28_prob, axis=0) / np.sum(pair28_prob)	
 	dinuc_base_prob = np.sum(dinuc56_prob, axis=0) / np.sum(dinuc56_prob)
 
-	# Calulcate entropy
+	# Calulcate entropy metrics
+	# 1) CWM entropy: Entropy calculated on (30,8)
+	# Purpose: High = Archetype #1: Noise/chaos, Low = Archetype #2: Sharp nucleotide peak (e.g., G)
 	cwm_entropy = shannon_entropy(cwm8_prob)
 
+	# 2) Entropy ratio:
+	# Purpose: High = Archetype #3: Single nucleotide repeats (e.g., AAAAA, GGGGG)
 	pos_entropy = shannon_entropy(pos_prob)
 	base_entropy = shannon_entropy(base_prob)
 	entropy_ratio = pos_entropy / base_entropy # High entropy when: High positional = Broad profile, Low base: Single base
 
+	# 3) Pair ratio:
+	# Purpose: High = GC, AT bias
 	pair_pos_entropy = shannon_entropy(pair_pos_prob)
 	pair_base_entropy = shannon_entropy(pair_base_prob)
 	pair_entropy_ratio = pair_pos_entropy / pair_base_entropy
 
+	# 4) Dinucleotide ratio
+	# Purpose: High = Dinucleotide repeats (e.g., GCGCGC)
 	dinuc_pos_entropy = shannon_entropy(dinuc_pos_prob)
 	dinuc_base_entropy = shannon_entropy(dinuc_base_prob)
 	dinuc_entropy_ratio = dinuc_pos_entropy / dinuc_base_entropy
 
-	return (cwm_entropy, pos_entropy, base_entropy, entropy_ratio, 
-		 pair_pos_entropy, pair_base_entropy, pair_entropy_ratio, 
-		 dinuc_pos_entropy, dinuc_base_entropy, dinuc_entropy_ratio)
+	return (cwm_entropy, entropy_ratio, pair_entropy_ratio, dinuc_entropy_ratio)
