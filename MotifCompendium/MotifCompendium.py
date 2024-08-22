@@ -43,9 +43,10 @@ def build(sims, logos=None, metadata=None, max_chunk=None, max_parallel=None, us
 	return MotifCompendium(sims, logos, similarity, alignment_fb, alignment_h, metadata, safe)
 
 def build_from_modisco(modisco_dict, max_chunk=None, max_parallel=None, use_gpu=False, ic=False, l2=False, safe=False):
-	sims, cwms, names = utils_loader.load_modiscos(modisco_dict, ic=ic)
+	sims, cwms, names, num_seqlets = utils_loader.load_modiscos(modisco_dict, ic=ic)
 	metadata = pd.DataFrame()
 	metadata["name"] = names
+	metadata["num_seqlets"] = num_seqlets
 	metadata["model"] = metadata["name"].str.split("-").str[0]
 	metadata["posneg"] = metadata["name"].str.split(".").str[0].str.split("-").str[1] # assume model names have no - or . in them
 	compendium = build(sims, logos=cwms, metadata=metadata, max_chunk=max_chunk, max_parallel=max_parallel, use_gpu=use_gpu, l2=l2, safe=safe)
@@ -130,25 +131,27 @@ class MotifCompendium():
 					scores[j, i] = scores[i, j]
 		return scores
 
-	def cluster_averages(self, cluster_name="cluster", max_chunk=None, max_parallel=None, use_gpu=False):
+	def cluster_averages(self, cluster_name="cluster", max_chunk=None, max_parallel=None, use_gpu=False, safe=True, aggregate_on=[]):
 		sims, logos, names, num_constituents = [], [], [], []
-		for c in sorted(set(self.metadata[cluster_name])):
-			c_index = self.metadata.index[self[cluster_name] == c].to_list()
-			c_sims = self.sims[c_index, :, :]
-			c_alignment_fb = self.alignment_fb[c_index, :][:, c_index]
-			c_alignment_h = self.alignment_h[c_index, :][:, c_index]
-			avg_motif_sims = utils_matrix.average_motifs(c_sims, c_alignment_fb, c_alignment_h)
+		aggregations = {x: [] for x in aggregate_on}
+		for c in sorted(set(self[cluster_name])):
+			mc_c = self[self[cluster_name] == c]
+			avg_motif_sims = utils_matrix.average_motifs(mc_c.sims, mc_c.alignment_fb, mc_c.alignment_h)
 			avg_motif_logo = utils_matrix._8_to_4(avg_motif_sims)
 			sims.append(avg_motif_sims)
 			logos.append(avg_motif_logo)
-			names.append(c)
-			num_constituents.append(len(c_index))
+			names.append(f"{cluster_name}#{c}")
+			num_constituents.append(len(mc_c))
+			for x in aggregate_on:
+				aggregations[x].append(np.sum(mc_c[x]))
 		sims = np.stack(sims, axis=0)
 		logos = np.stack(logos, axis=0)
 		metadata = pd.DataFrame()
 		metadata["name"] = names
 		metadata["num_constituents"] = num_constituents
-		return build(sims, logos, metadata, max_chunk, max_parallel, use_gpu, safe=True)
+		for x in aggregate_on:
+			metadata[x] = aggregations[x]
+		return build(sims, logos, metadata, max_chunk, max_parallel, use_gpu, safe=safe)
 
 	def extend(self, sims, metadata=None, max_chunk=None, max_parallel=None):
 		print("not yet implemented")
@@ -264,6 +267,12 @@ class MotifCompendium():
 			return MotifCompendium(sims_slice, logos_slice, similarity_slice, alignment_fb_slice, alignment_h_slice, metadata_slice, safe=False)
 		else:
 			raise TypeError("MotifCompendium cannot be indexed by this")
+
+	def __setitem__(self, key, value):
+		if isinstance(key, str):
+			self.metadata[key] = value
+		else:
+			raise TypeError("MotifCompendium assignments cannot be done like this")
 
 	def __eq__(self, other):
 		if isinstance(other, MotifCompendium):

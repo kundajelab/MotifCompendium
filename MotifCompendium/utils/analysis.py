@@ -129,7 +129,7 @@ def plot_unique_per_cluster(mc, clustering, save_loc):
 	html_sim_fb = mc.alignment_fb[idxs, :][:, idxs]
 	html_sim_alignments = mc.alignment_h[idxs, :][:, idxs]
 	from .plotting import create_html
-	create_html(html_cwms, cluster_names, html_sim_fb, html_sim_alignments, motif_names, save_loc, average=False, parallel=False)
+	create_html(html_cwms, cluster_names, html_sim_fb, html_sim_alignments, motif_names, save_loc, average=False)
 
 
 def cluster_grouping_upset_plot(mc, clustering, grouping, save_loc, **kwargs):

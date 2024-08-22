@@ -55,7 +55,7 @@ def sequence_importance_from_seqlets(seqlets, ic=False):
 	return motif_importance
 
 def load_modisco(modisco_file, ic=False):
-	sims, cwms, names = [], [], []
+	sims, cwms, names, counts = [], [], [], []
 	with h5py.File(modisco_file, 'r') as f:
 		if "pos_patterns" in f:
 			for pattern in list(f["pos_patterns"]):
@@ -65,6 +65,7 @@ def load_modisco(modisco_file, ic=False):
 				motif_cwm = f["pos_patterns"][pattern]["contrib_scores"][()]
 				cwms.append(motif_cwm)
 				names.append(f"pos.{pattern}")
+				counts.append(seqlets.shape[0])
 		if "neg_patterns" in f:	
 			for pattern in list(f["neg_patterns"]):
 				seqlets = f["neg_patterns"][pattern]["seqlets"]["contrib_scores"][()]
@@ -73,23 +74,25 @@ def load_modisco(modisco_file, ic=False):
 				motif_cwm = f["neg_patterns"][pattern]["contrib_scores"][()]
 				cwms.append(motif_cwm)
 				names.append(f"neg.{pattern}")
+				counts.append(seqlets.shape[0])
 	sims = np.stack(sims, axis=0)
 	# cwms = np.stack(cwms, axis=0)
 	cwms = _8_to_4(sims)
-	return sims, cwms, names
+	return sims, cwms, names, counts
 
 def load_modiscos(modisco_dict, ic=False):
 	print("uh loading")
-	sims, cwms, names = [], [], []
+	sims, cwms, names, counts = [], [], [], []
 	for m_name, modisco in modisco_dict.items():
-		m_sims, m_cwms, m_names = load_modisco(modisco, ic=ic)
+		m_sims, m_cwms, m_names, m_counts = load_modisco(modisco, ic=ic)
 		m_names = [f"{m_name}-{x}" for x in m_names]
 		sims.append(m_sims)
 		cwms.append(m_cwms)
 		names += m_names
+		counts += m_counts
 	sims = np.concatenate(sims, axis=0)
 	cwms = np.concatenate(cwms, axis=0)
-	return sims, cwms, names
+	return sims, cwms, names, counts
 
 def squash_motif(motif, squash_to=30):
 	if len(motif) < squash_to:
