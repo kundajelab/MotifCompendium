@@ -1,5 +1,4 @@
 from __future__ import annotations
-from typing import Any
 
 import h5py
 import matplotlib
@@ -221,7 +220,9 @@ def judge_clustering(mc: MotifCompendium, clustering: str, base_saveloc: str) ->
 #######################
 # DOWNSTREAM ANALYSES #
 #######################
-def plot_unique_per_cluster(mc: MotifCompendium, clustering: str, save_loc: str) -> None:
+def plot_unique_per_cluster(
+    mc: MotifCompendium, clustering: str, save_loc: str
+) -> None:
     """Identifies and plots the most unique in each cluster.
 
     For each cluster, identifies the most unique motif (motif with the minimum maximal
@@ -269,7 +270,7 @@ def plot_unique_per_cluster(mc: MotifCompendium, clustering: str, save_loc: str)
 
 
 def cluster_grouping_upset_plot(
-    mc: MotifCompendium, clustering: str, grouping: str, save_loc: str, **kwargs: Any
+    mc: MotifCompendium, clustering: str, grouping: str, save_loc: str, **kwargs
 ) -> None:
     """Creates an upset plot of how many motif clusters span across different groups.
 
@@ -301,8 +302,8 @@ def cluster_grouping_upset_plot(
 
 
 def export_clusters_modisco(
-    mc: MotifCompendium, cluster_name: str, save_loc: str, **kwargs: Any
-):
+    mc: MotifCompendium, cluster_name: str, save_loc: str, **kwargs
+) -> None:
     """Exports cluster averages in the Modisco file format.
 
     Given a clustering, compute cluster averages and export them in an h5py structure

@@ -1,5 +1,4 @@
 from __future__ import annotations
-from typing import Any, Union
 
 import h5py
 import numpy as np
@@ -46,10 +45,10 @@ def load(file_loc: str, safe: bool = True) -> MotifCompendium:
 
 def build(
     sims: np.ndarray,
-    logos: np.ndarray = None,
-    metadata: pd.DataFrame = None,
-    max_chunk: int = None,
-    max_parallel: int = None,
+    logos: np.ndarray | None = None,
+    metadata: pd.DataFrame | None = None,
+    max_chunk: int | None = None,
+    max_parallel: int | None = None,
     use_gpu: bool = False,
     l2: bool = False,
     safe: bool = False,
@@ -114,8 +113,8 @@ def build(
 
 def build_from_modisco(
     modisco_dict: dict[str, str],
-    max_chunk: int = None,
-    max_parallel: int = None,
+    max_chunk: int | None = None,
+    max_parallel: int | None = None,
     use_gpu: bool = False,
     ic: bool = False,
     l2: bool = False,
@@ -176,8 +175,8 @@ def build_from_modisco(
 
 def build_from_pfms(
     pfm_file: str,
-    max_chunk: int = None,
-    max_parallel: int = None,
+    max_chunk: int | None = None,
+    max_parallel: int | None = None,
     use_gpu: bool = False,
     l2: bool = False,
     safe: bool = False,
@@ -231,8 +230,8 @@ def build_from_pfms(
 
 def combine(
     compendiums: list[MotifCompendium],
-    max_chunk: int = None,
-    max_parallel: int = None,
+    max_chunk: int | None = None,
+    max_parallel: int | None = None,
     use_gpu: bool = False,
     l2: bool = False,
     safe: bool = False,
@@ -387,7 +386,7 @@ class MotifCompendium:
         algorithm: str = "leiden",
         similarity_threshold: float = 0.8,
         save_name: str = "cluster",
-        **kwargs: Any,
+        **kwargs,
     ) -> None:
         """Cluster motifs.
 
@@ -448,8 +447,8 @@ class MotifCompendium:
     def cluster_averages(
         self,
         cluster_name: str = "cluster",
-        max_chunk: int = None,
-        max_parallel: int = None,
+        max_chunk: int | None = None,
+        max_parallel: int | None = None,
         use_gpu: bool = False,
         safe: bool = True,
         aggregate_on: list[str] = [],
@@ -560,7 +559,7 @@ class MotifCompendium:
         annot: bool = False,
         label: bool = False,
         show: bool = False,
-        save_loc: str = None,
+        save_loc: str | None = None,
     ) -> None:
         """Creates a heatmap of the similarity matrix.
 
@@ -659,7 +658,10 @@ class MotifCompendium:
         assert self.sims.shape[0] == len(self.metadata)
 
     def get_similarity_slice(
-        self, slice1: pd.Series, slice2: pd.Series = None, with_names: bool = False
+        self,
+        slice1: pd.Series,
+        slice2: pd.Series | None = None,
+        with_names: bool = False,
     ) -> pd.DataFrame:
         """Extracts a subset of the similarity matrix.
 
@@ -712,16 +714,15 @@ class MotifCompendium:
                 return similarity_slice
 
     def __str__(self) -> str:
-        """String representation of the MotifCompendium."""
+        """String representation of the MotifCompendium.
+        """
         return f"Motif Compendium with {len(self)} motifs.\n{self.metadata}"
 
     def __len__(self) -> int:
         """Length of the MotifCompendium."""
         return len(self.metadata)
 
-    def __getitem__(
-        self, key: Union[str, pd.Series]
-    ) -> Union[pd.Series, MotifCompendium]:
+    def __getitem__(self, key: str | pd.Series) -> pd.Series | MotifCompendium:
         """Get columns or subsets of the MotifCompendium.
 
         Allows indexing into the MotifCompendium with the same syntax as a Pandas
@@ -780,7 +781,8 @@ class MotifCompendium:
             raise TypeError("MotifCompendium assignments cannot be done like this")
 
     def __eq__(self, other: MotifCompendium) -> bool:
-        """Length of the MotifCompendium."""
+        """Length of the MotifCompendium.
+        """
         if isinstance(other, MotifCompendium):
             return (
                 np.allclose(self.sims, other.sims)
@@ -791,4 +793,3 @@ class MotifCompendium:
                 and self.metadata.equals(other.metadata)
             )
         return False
-

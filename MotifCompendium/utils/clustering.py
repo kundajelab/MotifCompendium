@@ -5,6 +5,7 @@ import sklearn.metrics
 
 import seaborn as sns
 import matplotlib
+
 matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
 
@@ -15,37 +16,49 @@ import random
 # LEIDEN CLUSTERING #
 #####################
 def leiden_clustering(adjacency_matrix):
-	import igraph as ig
-	import leidenalg as la
-	g = ig.Graph.Adjacency(adjacency_matrix)
-	partition = la.find_partition(g, la.ModularityVertexPartition)
-	return partition.membership
+    import igraph as ig
+    import leidenalg as la
+
+    g = ig.Graph.Adjacency(adjacency_matrix)
+    partition = la.find_partition(g, la.ModularityVertexPartition)
+    return partition.membership
+
 
 def cpm_leiden_clustering(adjacency_matrix, resolution=0.8):
-	import igraph as ig
-	import leidenalg as la
-	g = ig.Graph.Adjacency(adjacency_matrix)
-	partition = la.find_partition(g, la.CPMVertexPartition, resolution_parameter=resolution)
-	return partition.membership
+    import igraph as ig
+    import leidenalg as la
+
+    g = ig.Graph.Adjacency(adjacency_matrix)
+    partition = la.find_partition(
+        g, la.CPMVertexPartition, resolution_parameter=resolution
+    )
+    return partition.membership
+
 
 def leiden_clustering_weights(adjacency_matrix, weights):
-	import igraph as ig
-	import leidenalg as la
-	g = ig.Graph.Adjacency(adjacency_matrix)
-	partition = la.find_partition(g, la.ModularityVertexPartition, weights=weights)
-	return partition.membership
+    import igraph as ig
+    import leidenalg as la
+
+    g = ig.Graph.Adjacency(adjacency_matrix)
+    partition = la.find_partition(g, la.ModularityVertexPartition, weights=weights)
+    return partition.membership
+
 
 def cpm_leiden_clustering_weights(adjacency_matrix, weights, resolution=0.8):
-	import igraph as ig
-	import leidenalg as la
-	g = ig.Graph.Adjacency(adjacency_matrix)
-	partition = la.find_partition(g, la.CPMVertexPartition, resolution_parameter=resolution, weights=weights)
-	return partition.membership
+    import igraph as ig
+    import leidenalg as la
+
+    g = ig.Graph.Adjacency(adjacency_matrix)
+    partition = la.find_partition(
+        g, la.CPMVertexPartition, resolution_parameter=resolution, weights=weights
+    )
+    return partition.membership
+
 
 #######################
 # SPECTRAL CLUSTERING #
 #######################
-'''
+"""
 def similarity_asw(similarity_matrix, clustering):
 	worst_asw = 1
 	for cluster in sorted(set(clustering)):
@@ -132,20 +145,33 @@ def spectral_clustering(similarity_matrix, similarity_threshold=0.8):
 	# CHECK RESULTS
 	assert(sum([len(x) for x in final_clusters]) == N)
 	return final_clusters
-'''
+"""
 
-def spectral_clustering_k(similarity_matrix, similarity_threshold=0.8, k=40, cluster_qr=False):
-	if cluster_qr:
-		clustering = sklearn.cluster.SpectralClustering(k, affinity="precomputed", assign_labels="cluster_qr").fit(similarity_matrix).labels_
-	else:
-		clustering = sklearn.cluster.SpectralClustering(k, affinity="precomputed").fit(similarity_matrix).labels_
-	return clustering
+
+def spectral_clustering_k(
+    similarity_matrix, similarity_threshold=0.8, k=40, cluster_qr=False
+):
+    if cluster_qr:
+        clustering = (
+            sklearn.cluster.SpectralClustering(
+                k, affinity="precomputed", assign_labels="cluster_qr"
+            )
+            .fit(similarity_matrix)
+            .labels_
+        )
+    else:
+        clustering = (
+            sklearn.cluster.SpectralClustering(k, affinity="precomputed")
+            .fit(similarity_matrix)
+            .labels_
+        )
+    return clustering
 
 
 #################
 # CC CLUSTERING #
 #################
-'''
+"""
 def connected_components(adjacency_matrix):
 	check_error(adjacency_matrix.shape[0] == adjacency_matrix.shape[1], "error: adjacency matrix not square")
 	N = adjacency_matrix.shape[0]
@@ -185,96 +211,101 @@ def cc_clustering(similarity_matrix, similarity_threshold=0.8):
 	# CHECK RESULTS
 	assert(sum([len(x) for x in final_clusters]) == N)
 	return final_clusters
-'''
+"""
 
-def cc_clustering(adjacency_matrix):	
-	N = adjacency_matrix.shape[0]
-	clustering = [False] * N
-	current_cluster = 1
-	for current_node in range(N):
-		if not clustering[current_node]:
-			# create new cluster
-			clustering[current_node] = current_cluster
-			new_cluster_idxs = [current_node]
-			for consider_node in range(current_node+1, N):
-				if adjacency_matrix[consider_node, new_cluster_idxs].any():
-					clustering[consider_node] = current_cluster
-					new_cluster_idxs.append(consider_node)
-			current_cluster += 1
-	print(f"found {current_cluster} clusters in {N} nodes")
-	for i in range(N):
-		assert(clustering[i])
-	return [x-1 for x in clustering]
+
+def cc_clustering(adjacency_matrix):
+    N = adjacency_matrix.shape[0]
+    clustering = [False] * N
+    current_cluster = 1
+    for current_node in range(N):
+        if not clustering[current_node]:
+            # create new cluster
+            clustering[current_node] = current_cluster
+            new_cluster_idxs = [current_node]
+            for consider_node in range(current_node + 1, N):
+                if adjacency_matrix[consider_node, new_cluster_idxs].any():
+                    clustering[consider_node] = current_cluster
+                    new_cluster_idxs.append(consider_node)
+            current_cluster += 1
+    print(f"found {current_cluster} clusters in {N} nodes")
+    for i in range(N):
+        assert clustering[i]
+    return [x - 1 for x in clustering]
+
 
 def greedy_cc_clustering(adjacency_matrix):
-	# FINDING GREEDY DENSELY-CONNECTED COMPONENTS
-	N = adjacency_matrix.shape[0]
-	clustering = [False] * N
-	current_cluster = 1
-	for current_node in range(N):
-		if not clustering[current_node]:
-			# create new cluster
-			clustering[current_node] = current_cluster
-			new_cluster_idxs = [current_node]
-			for consider_node in range(current_node+1, N):
-				if adjacency_matrix[consider_node, new_cluster_idxs].all():
-					clustering[consider_node] = current_cluster
-					new_cluster_idxs.append(consider_node)
-			current_cluster += 1
-	print(f"found {current_cluster} clusters in {N} nodes")
-	for i in range(N):
-		assert(clustering[i])
-	return [x-1 for x in clustering]
+    # FINDING GREEDY DENSELY-CONNECTED COMPONENTS
+    N = adjacency_matrix.shape[0]
+    clustering = [False] * N
+    current_cluster = 1
+    for current_node in range(N):
+        if not clustering[current_node]:
+            # create new cluster
+            clustering[current_node] = current_cluster
+            new_cluster_idxs = [current_node]
+            for consider_node in range(current_node + 1, N):
+                if adjacency_matrix[consider_node, new_cluster_idxs].all():
+                    clustering[consider_node] = current_cluster
+                    new_cluster_idxs.append(consider_node)
+            current_cluster += 1
+    print(f"found {current_cluster} clusters in {N} nodes")
+    for i in range(N):
+        assert clustering[i]
+    return [x - 1 for x in clustering]
+
 
 def _cc_clustering_random(adjacency_matrix, seed):
-	# FINDING GREEDY DENSELY-CONNECTED COMPONENTS
-	N = adjacency_matrix.shape[0]
-	clustering = [False] * N
-	current_cluster = 1
-	# RANDOM NODE ORDER
-	random.seed(seed)
-	node_order = random.sample(list(range(N)), k=N)
-	# print(f"seed {seed}: {node_order[:5]}")
-	# CONTINUE
-	for current_node_idx in range(N):
-		current_node = node_order[current_node_idx]
-		if not clustering[current_node]:
-			# create new cluster
-			clustering[current_node] = current_cluster
-			new_cluster_idxs = [current_node]
-			for consider_node_idx in range(current_node_idx+1, N):
-				consider_node = node_order[consider_node_idx]
-				if adjacency_matrix[consider_node, new_cluster_idxs].all():
-					clustering[consider_node] = current_cluster
-					new_cluster_idxs.append(consider_node)
-			current_cluster += 1
-	print(f"found {current_cluster} clusters in {N} nodes")
-	for i in range(N):
-		assert(clustering[i])
-	return [x-1 for x in clustering]
+    # FINDING GREEDY DENSELY-CONNECTED COMPONENTS
+    N = adjacency_matrix.shape[0]
+    clustering = [False] * N
+    current_cluster = 1
+    # RANDOM NODE ORDER
+    random.seed(seed)
+    node_order = random.sample(list(range(N)), k=N)
+    # print(f"seed {seed}: {node_order[:5]}")
+    # CONTINUE
+    for current_node_idx in range(N):
+        current_node = node_order[current_node_idx]
+        if not clustering[current_node]:
+            # create new cluster
+            clustering[current_node] = current_cluster
+            new_cluster_idxs = [current_node]
+            for consider_node_idx in range(current_node_idx + 1, N):
+                consider_node = node_order[consider_node_idx]
+                if adjacency_matrix[consider_node, new_cluster_idxs].all():
+                    clustering[consider_node] = current_cluster
+                    new_cluster_idxs.append(consider_node)
+            current_cluster += 1
+    print(f"found {current_cluster} clusters in {N} nodes")
+    for i in range(N):
+        assert clustering[i]
+    return [x - 1 for x in clustering]
+
 
 def _clustering_to_adjacency(clustering):
-	# create clustering dict
-	clustering_dict = dict()
-	for i, c in enumerate(clustering):
-		if c in clustering_dict:
-			clustering_dict[c].append(i)
-		else:
-			clustering_dict[c] = [i]
-	# create adjacency
-	N = len(clustering)
-	adjacency = np.zeros((N, N))
-	# fill adjacency
-	for c, idxs in clustering_dict.items():
-		for i in idxs:
-			for j in idxs:
-				adjacency[i, j] = 1	
-	assert((adjacency == adjacency.T).all() and np.max(adjacency) == 1)
-	return adjacency
+    # create clustering dict
+    clustering_dict = dict()
+    for i, c in enumerate(clustering):
+        if c in clustering_dict:
+            clustering_dict[c].append(i)
+        else:
+            clustering_dict[c] = [i]
+    # create adjacency
+    N = len(clustering)
+    adjacency = np.zeros((N, N))
+    # fill adjacency
+    for c, idxs in clustering_dict.items():
+        for i in idxs:
+            for j in idxs:
+                adjacency[i, j] = 1
+    assert (adjacency == adjacency.T).all() and np.max(adjacency) == 1
+    return adjacency
+
 
 def cc_leiden(adjacency_matrix, n_iter=100):
-	clustering_adjacency = np.load("clustering_adjacency.npy")
-	'''
+    clustering_adjacency = np.load("clustering_adjacency.npy")
+    """
 	clustering_adjacency = np.zeros(adjacency_matrix.shape)
 	for i in range(n_iter):
 		if i == 0:
@@ -282,14 +313,15 @@ def cc_leiden(adjacency_matrix, n_iter=100):
 		else:
 			clustering_i = _cc_clustering_random(adjacency_matrix, i)
 		clustering_adjacency += _clustering_to_adjacency(clustering_i)
-	'''
-	clustering = leiden_clustering(clustering_adjacency)
-	print(max(clustering))
-	return clustering
+	"""
+    clustering = leiden_clustering(clustering_adjacency)
+    print(max(clustering))
+    return clustering
+
 
 def cc_stable(adjacency_matrix, n_iter=100):
-	clustering_adjacency = np.load("clustering_adjacency.npy")
-	'''
+    clustering_adjacency = np.load("clustering_adjacency.npy")
+    """
 	clustering_adjacency = np.zeros(adjacency_matrix.shape)
 	for i in range(n_iter):
 		if i == 0:
@@ -299,79 +331,120 @@ def cc_stable(adjacency_matrix, n_iter=100):
 		clustering_adjacency += _clustering_to_adjacency(clustering_i)
 	# np.save("clustering_adjacency.npy", clustering_adjacency)
 	assert(False)
-	'''
-	print(np.count_nonzero(clustering_adjacency))
-	sns.histplot(clustering_adjacency[clustering_adjacency > 0])
-	plt.show()
-	assert(False)
-	stable_adjacency = clustering_adjacency >= 5
-	return cc_clustering(stable_adjacency)
+	"""
+    print(np.count_nonzero(clustering_adjacency))
+    sns.histplot(clustering_adjacency[clustering_adjacency > 0])
+    plt.show()
+    assert False
+    stable_adjacency = clustering_adjacency >= 5
+    return cc_clustering(stable_adjacency)
 
 
 ######################
 # CLUSTERING HANDLER #
 ######################
-def cluster(similarity_matrix, algorithm, similarity_threshold, **kwargs):
-	# Leiden
-	if algorithm == "leiden":
-		adjacency_matrix = 1*(similarity_matrix >= similarity_threshold)
-		return leiden_clustering(adjacency_matrix)
+def cluster(
+    similarity_matrix: SimilarityMatrix,
+    algorithm: str,
+    similarity_threshold: float,
+    **kwargs,
+) -> list(int):
+    """Cluster a similarity matrix.
 
-	elif algorithm == "cpm_leiden":
-		adjacency_matrix = 1*(similarity_matrix >= similarity_threshold)
-		kwargs_filtered = {k: v for k, v in enumerate(kwargs) if k in ["resolution"]}
-		return cpm_leiden_clustering(adjacency_matrix, **kwargs_filtered)
+    Given a similarity matrix, a similarity threshold, and an algorithm choice, return
+      a clustering of the similarity matrix. The clustering is a list that assigns each
+      index in the similarity matrix to a number number.
 
-	elif algorithm == "leiden_step":
-		adjacency_matrices = [1*(similarity_matrix >= x) for x in [1, 0.95, 0.9, 0.85, 0.80, 0.75, 0.7]]
-		adjacency_matrix = np.sum(adjacency_matrices, axis=0)
-		return leiden_clustering(adjacency_matrix)
+    Args:
+        similarity_matrix: A square similarity matrix.
+        algorithm: A string representing which clustering algorithm to use.
+        similarity_threshold: The threshold above which two motifs are considered to be
+          similar.
+        **kwargs: Any additional arguments to be passed to the clustering algorithm of
+          choice.
 
-	elif algorithm == "cpm_leiden_step":
-		adjacency_matrices = [1*(similarity_matrix >= x) for x in [1, 0.95, 0.9, 0.85, 0.80, 0.75, 0.7]]
-		adjacency_matrix = np.sum(adjacency_matrices, axis=0)
-		kwargs_filtered = {k: v for k, v in enumerate(kwargs) if k in ["resolution"]}
-		return cpm_leiden_clustering(adjacency_matrix, **kwargs_filtered)
+    Returns:
+        A list of integers where each element represents the cluster that index
+          corresponds to. All elements with the same value have been assigned to the
+          same cluster.
 
-	elif algorithm == "leiden_weights":
-		adjacency_matrix = np.ones(similarity_matrix.shape)
-		adjacency_matrix = 1*(similarity_matrix >= similarity_threshold)
-		return leiden_clustering_weights(adjacency_matrix, similarity_matrix*adjacency_matrix)
+    Notes:
+        Please look through the possible clustering algorithm options in this function.
+    """
+    # Leiden
+    if algorithm == "leiden":
+        adjacency_matrix = 1 * (similarity_matrix >= similarity_threshold)
+        return leiden_clustering(adjacency_matrix)
 
-	elif algorithm == "cpm_leiden_weights":
-		adjacency_matrices = [1*(similarity_matrix >= x) for x in [1, 0.95, 0.9, 0.85, 0.80, 0.75, 0.7]]
-		adjacency_matrix = np.sum(adjacency_matrices, axis=0)
-		kwargs_filtered = {k: v for k, v in enumerate(kwargs) if k in ["resolution"]}
-		return cpm_leiden_clustering_weights(adjacency_matrix, similarity_matrix, **kwargs_filtered)
+    elif algorithm == "cpm_leiden":
+        adjacency_matrix = 1 * (similarity_matrix >= similarity_threshold)
+        kwargs_filtered = {k: v for k, v in enumerate(kwargs) if k in ["resolution"]}
+        return cpm_leiden_clustering(adjacency_matrix, **kwargs_filtered)
 
-	# CC
-	elif algorithm == "cc":	
-		adjacency_matrix = similarity_matrix >= similarity_threshold
-		return cc_clustering(adjacency_matrix)
-	elif algorithm == "greedy_cc":
-		adjacency_matrix = similarity_matrix >= similarity_threshold
-		return greedy_cc_clustering(adjacency_matrix)
-	elif algorithm == "cc_stable":
-		print("not yet implemented"); assert(False)
-		adjacency_matrix = similarity_matrix >= similarity_threshold
-		kwargs_filtered = {k: v for k, v in enumerate(kwargs) if k in ["n_iters"]}
-		return cc_stable_clustering(adjacency_matrix)
+    elif algorithm == "leiden_step":
+        adjacency_matrices = [
+            1 * (similarity_matrix >= x) for x in [1, 0.95, 0.9, 0.85, 0.80, 0.75, 0.7]
+        ]
+        adjacency_matrix = np.sum(adjacency_matrices, axis=0)
+        return leiden_clustering(adjacency_matrix)
 
-	elif algorithm == "cc_leiden":
-		print("not yet implemented"); assert(False)
-		adjacency_matrix = similarity_matrix >= similarity_threshold
-		kwargs_filtered = {k: v for k, v in enumerate(kwargs) if k in ["n_iters"]}
-		return cc_leiden_clustering(adjacency_matrix)
+    elif algorithm == "cpm_leiden_step":
+        adjacency_matrices = [
+            1 * (similarity_matrix >= x) for x in [1, 0.95, 0.9, 0.85, 0.80, 0.75, 0.7]
+        ]
+        adjacency_matrix = np.sum(adjacency_matrices, axis=0)
+        kwargs_filtered = {k: v for k, v in enumerate(kwargs) if k in ["resolution"]}
+        return cpm_leiden_clustering(adjacency_matrix, **kwargs_filtered)
 
-	# Spectral
-	elif algorithm == "spectral":
-		print("not yet implemented"); assert(False)
+    elif algorithm == "leiden_weights":
+        adjacency_matrix = np.ones(similarity_matrix.shape)
+        adjacency_matrix = 1 * (similarity_matrix >= similarity_threshold)
+        return leiden_clustering_weights(
+            adjacency_matrix, similarity_matrix * adjacency_matrix
+        )
 
-	elif algorithm == "spectral_k":
-		kwargs_filtered = {k: v for k, v in enumerate(kwargs) if k in ["k", "cluster_qr"]}
-		return spectral_clustering_k(similarity_matrix, similarity_threshold, **kwargs)	
-	
-	else:
-		print("that clustering algorithm has not been implemented yet...")
-		assert(False)
+    elif algorithm == "cpm_leiden_weights":
+        adjacency_matrices = [
+            1 * (similarity_matrix >= x) for x in [1, 0.95, 0.9, 0.85, 0.80, 0.75, 0.7]
+        ]
+        adjacency_matrix = np.sum(adjacency_matrices, axis=0)
+        kwargs_filtered = {k: v for k, v in enumerate(kwargs) if k in ["resolution"]}
+        return cpm_leiden_clustering_weights(
+            adjacency_matrix, similarity_matrix, **kwargs_filtered
+        )
 
+    # CC
+    elif algorithm == "cc":
+        adjacency_matrix = similarity_matrix >= similarity_threshold
+        return cc_clustering(adjacency_matrix)
+    elif algorithm == "greedy_cc":
+        adjacency_matrix = similarity_matrix >= similarity_threshold
+        return greedy_cc_clustering(adjacency_matrix)
+    elif algorithm == "cc_stable":
+        print("not yet implemented")
+        assert False
+        adjacency_matrix = similarity_matrix >= similarity_threshold
+        kwargs_filtered = {k: v for k, v in enumerate(kwargs) if k in ["n_iters"]}
+        return cc_stable_clustering(adjacency_matrix)
+
+    elif algorithm == "cc_leiden":
+        print("not yet implemented")
+        assert False
+        adjacency_matrix = similarity_matrix >= similarity_threshold
+        kwargs_filtered = {k: v for k, v in enumerate(kwargs) if k in ["n_iters"]}
+        return cc_leiden_clustering(adjacency_matrix)
+
+    # Spectral
+    elif algorithm == "spectral":
+        print("not yet implemented")
+        assert False
+
+    elif algorithm == "spectral_k":
+        kwargs_filtered = {
+            k: v for k, v in enumerate(kwargs) if k in ["k", "cluster_qr"]
+        }
+        return spectral_clustering_k(similarity_matrix, similarity_threshold, **kwargs)
+
+    else:
+        print("that clustering algorithm has not been implemented yet...")
+        assert False
