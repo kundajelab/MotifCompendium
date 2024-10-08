@@ -9,11 +9,11 @@ import sklearn.cluster
 # CLUSTERING HANDLER #
 ######################
 def cluster(
-    similarity_matrix: SimilarityMatrix,
+    similarity_matrix: np.ndarray,
     algorithm: str,
     similarity_threshold: float,
     **kwargs,
-) -> list(int):
+) -> list[int]:
     """Cluster a similarity matrix.
 
     Given a similarity matrix, a similarity threshold, and an algorithm choice, return

@@ -2,6 +2,7 @@ import multiprocessing
 
 import numpy as np
 
+from .motif import validate_motif_stack
 from .similarity_core_cpu import compute_similarity_and_align
 
 
@@ -30,7 +31,7 @@ def compute_similarities(
         asdf.
     """
     for sims in sims_list:
-        validate_sims(sims)
+        validate_motif_stack(sims)
     if max_chunk is not None:
         chunked_sims_list, chunked_calculations, chunk_map = _chunk_sims_and_calcs(
             sims_list, calculations, max_chunk

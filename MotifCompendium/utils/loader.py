@@ -61,8 +61,8 @@ def load_modiscos(
             m_sims, m_motif_names, m_seqlet_counts = r
             m_motif_names = [f"{m_names[i]}-{x}" for x in m_motif_names]
             sims.append(m_sims)
-            motif_names.append(m_motif_names)
-            seqlet_counts.append(m_seqlet_counts)
+            motif_names += m_motif_names
+            seqlet_counts += m_seqlet_counts
         sims = np.concatenate(sims, axis=0)
     return sims, motif_names, seqlet_counts
 
@@ -189,5 +189,5 @@ def _sequence_importance_from_seqlets(seqlets: np.ndarray, ic: bool) -> np.ndarr
         seqlets_avg = ic_scale(seqlets_avg)
     # Create sim
     sim = motif_4_to_8(seqlets_avg)
-    sim /= np.abs(sim)
+    sim /= np.sum(sim)
     return sim

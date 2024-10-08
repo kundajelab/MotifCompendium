@@ -376,26 +376,26 @@ class MotifCompendium:
         # motifs
         utils_motif.validate_motif_stack(self.motifs)
         # similarity
-        if not isinstance(self.similarity) == np.ndarray:
+        if not isinstance(self.similarity, np.ndarray):
             raise TypeError("self.similarity must be a np.ndarray.")
         if not (
-            (len(self.shape) == 2) and (np.allclose(self.similarity, self.similarity.T))
+            (len(self.similarity.shape) == 2) and (np.allclose(self.similarity, self.similarity.T))
         ):
             raise ValueError("self.similarity must be a square transpose matrix.")
         if not ((np.max(self.similarity) == 1) and ((self.similarity >= 0).all())):
             raise ValueError("self.similarity must have similarities between (0, 1].")
         # alignment_fr
-        if not isinstance(self.alignment_fr) == np.ndarray:
+        if not isinstance(self.alignment_fr, np.ndarray):
             raise TypeError("self.alignment_fr must be a np.ndarray.")
         if not (
-            (len(self.shape) == 2)
+            (len(self.alignment_fr.shape) == 2)
             and (np.allclose(self.alignment_fr, self.alignment_fr.T))
         ):
             raise ValueError("self.alignment_fr must be a square transpose matrix.")
         if not ((self.alignment_fr == 0) | (self.alignment_fr == 1)).all():
             raise ValueError("self.alignment_fr must have values being either 0 or 1.")
         # alignment_h
-        if not isinstance(self.alignment_h) == np.ndarray:
+        if not isinstance(self.alignment_h, np.ndarray):
             raise TypeError("self.alignment_h must be a np.ndarray.")
         if not (len(self.alignment_h.shape) == 2):
             raise ValueError("self.alignment_h must be a square matrix.")
@@ -411,7 +411,7 @@ class MotifCompendium:
                 "self.alignment_h is symmetric for reverse complement motifs and skew-symmetric for motifs that are already aligned."
             )
         # metadata
-        if not isinstance(self.metadata) == pd.DataFrame:
+        if not isinstance(self.metadata, pd.DataFrame):
             raise TypeError("self.metadata must be a pd.DataFrame.")
         # shape matches
         if not (
@@ -522,12 +522,12 @@ class MotifCompendium:
             Plotting can take a long time. Increase max_cpus to improve plotting
               time.
             If you just want to plot cluster averages, consider doing
-              mc.cluster_averages(group_by).create_html("name") with the appropriate
+              mc.cluster_averages(group_by).motif_collection_html("name") with the appropriate
               CPU/GPU/chunking options.
         """
         # Prepare motifs/names/groups
         motifs = (
-            matrix._8_to_4(self.motifs) if self.motifs.shape[2] == 8 else self.motifs
+            utils_motif.motif_8_to_4(self.motifs) if self.motifs.shape[2] == 8 else self.motifs
         )
         names = list(self.metadata["name"])
         groups = list(self.metadata[group_by])
@@ -540,9 +540,9 @@ class MotifCompendium:
                 cluster_x_seed = group_seeds[x]
                 # Forwards/reverse alignment
                 if self.alignment_fr[i, cluster_x_seed] == 0:
-                    motif_i_df = matrix.motif_to_df(motifs[i, :, :])
+                    motif_i_df = utils_motif.motif_to_df(motifs[i, :, :])
                 elif self.alignment_fr[i, cluster_x_seed] == 1:
-                    motif_i_df = matrix.motif_to_df(motifs[i, ::-1, ::-1])
+                    motif_i_df = utils_motif.motif_to_df(motifs[i, ::-1, ::-1])
                 # Horizontal alignment
                 motif_i_df.index += self.alignment_h[i, cluster_x_seed]
                 group_indices[x].update(motif_i_df.index)
@@ -551,7 +551,7 @@ class MotifCompendium:
                 motif_groups[x].append(motif_i_dict)
 
             else:
-                motif_i_df = matrix.motif_to_df(motifs[i, :, :])
+                motif_i_df = utils_motif.motif_to_df(motifs[i, :, :])
                 group_indices[x].update(motif_i_df.index)
                 # Create group
                 motif_i_dict = {"motif": motif_i_df, "name": names[i]}
@@ -565,7 +565,7 @@ class MotifCompendium:
                 motif_dict["motif"] = motif_dict["motif"].reindex(
                     g_indices, fill_value=0
                 )
-                group_motifs.append(motifs_dict["motif"])
+                group_motifs.append(motif_dict["motif"])
             # Average
             motifs_concat = pd.concat(group_motifs)
             average_motif = motifs_concat.groupby(motifs_concat.index).mean()

@@ -45,23 +45,23 @@ def motif_4_to_8(x: np.ndarray) -> np.ndarray:
 
 def motif_8_to_4(x: np.ndarray) -> np.ndarray:
     """Converts in 8 channel motif into a 4 channel motif."""
-    x_pos_4 = x @ MOTIF_4_TO_8_POS.T
-    x_neg_4 = x @ MOTIF_4_TO_8_NEG.T
+    x_pos_4 = x @ _MOTIF_4_TO_8_POS.T
+    x_neg_4 = x @ _MOTIF_4_TO_8_NEG.T
     x_4 = x_pos_4 - x_neg_4
     return x_4
 
 
 def motif_8_to_4_abs(x: np.ndarray) -> np.ndarray:
     """Converts in 8 channel motif into a 4 channel motif."""
-    x_pos_4 = x @ MOTIF_4_TO_8_POS.T
-    x_neg_4 = x @ MOTIF_4_TO_8_NEG.T
+    x_pos_4 = x @ _MOTIF_4_TO_8_POS.T
+    x_neg_4 = x @ _MOTIF_4_TO_8_NEG.T
     x_4 = x_pos_4 + x_neg_4
     return x_4
 
 
 def validate_motif_stack(motifs: np.ndarray) -> None:
     """Validate motifs."""
-    if not isinstance(motifs) == np.ndarray:
+    if not isinstance(motifs, np.ndarray):
         raise TypeError("Motifs must be a np.ndarray.")
     if not (
         (len(motifs.shape) == 3)
