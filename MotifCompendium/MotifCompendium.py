@@ -379,7 +379,8 @@ class MotifCompendium:
         if not isinstance(self.similarity, np.ndarray):
             raise TypeError("self.similarity must be a np.ndarray.")
         if not (
-            (len(self.similarity.shape) == 2) and (np.allclose(self.similarity, self.similarity.T))
+            (len(self.similarity.shape) == 2)
+            and (np.allclose(self.similarity, self.similarity.T))
         ):
             raise ValueError("self.similarity must be a square transpose matrix.")
         if not ((np.max(self.similarity) == 1) and ((self.similarity >= 0).all())):
@@ -527,7 +528,9 @@ class MotifCompendium:
         """
         # Prepare motifs/names/groups
         motifs = (
-            utils_motif.motif_8_to_4(self.motifs) if self.motifs.shape[2] == 8 else self.motifs
+            utils_motif.motif_8_to_4(self.motifs)
+            if self.motifs.shape[2] == 8
+            else self.motifs
         )
         names = list(self.metadata["name"])
         groups = list(self.metadata[group_by])

@@ -39,7 +39,7 @@ def motif_collection_html(
     """
     # Use Agg backend
     current_backend = matplotlib.get_backend()
-    matplotlib.use('Agg') # Use Agg backend
+    matplotlib.use("Agg")  # Use Agg backend
     # Create motif plots
     if max_cpus is None:
         for group in motif_groups.values():
@@ -60,7 +60,9 @@ def motif_collection_html(
             max_cpus, multiprocessing.cpu_count()
         )  # don't use more CPUs than available
         with multiprocessing.Pool(processes=num_processes) as p:
-            all_motif_dicts = p.map(_utf8_motif_plot, all_motif_dicts) # Not pass by ref
+            all_motif_dicts = p.map(
+                _utf8_motif_plot, all_motif_dicts
+            )  # Not pass by ref
         # Redefine motif_groups using updated motif dicts
         for group_name in group_to_motif_dict_idx:
             start, end = group_to_motif_dict_idx[group_name]
@@ -77,6 +79,7 @@ def motif_collection_html(
         f.write(rendered_html)
     # Switch to original backend
     matplotlib.use(current_backend)
+
 
 def summary_table_html():
     print("not yet implemented")
