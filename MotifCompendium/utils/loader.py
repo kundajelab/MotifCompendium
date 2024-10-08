@@ -10,7 +10,9 @@ from .motif import ic_scale, motif_4_to_8
 ####################
 # PUBLIC FUNCTIONS #
 ####################
-def load_modiscos(modisco_dict: dict[str, str], max_cpus: int | None = None, ic: bool = True) -> tuple[np.ndarray, list[str], list[int]]:
+def load_modiscos(
+    modisco_dict: dict[str, str], max_cpus: int | None = None, ic: bool = True
+) -> tuple[np.ndarray, list[str], list[int]]:
     """Load motifs, names, and seqlet counts from multiple Modisco file.
 
     Motifs from each Modisco file are extracted by calling load_modisco(). The results
@@ -44,7 +46,9 @@ def load_modiscos(modisco_dict: dict[str, str], max_cpus: int | None = None, ic:
         sims = np.concatenate(sims, axis=0)
     else:
         # Load in parallel
-        num_processes = min(max_cpus, multiprocessing.cpu_count())  # don't use more CPUs than available
+        num_processes = min(
+            max_cpus, multiprocessing.cpu_count()
+        )  # don't use more CPUs than available
         m_names, m_locs = [], []
         for m_name, m_loc in modisco_dict.items():
             m_names.append(m_name)
@@ -63,7 +67,9 @@ def load_modiscos(modisco_dict: dict[str, str], max_cpus: int | None = None, ic:
     return sims, motif_names, seqlet_counts
 
 
-def load_modisco(modisco_file: str, ic: bool = True) -> tuple[np.ndarray, list[str], list[int]]:
+def load_modisco(
+    modisco_file: str, ic: bool = True
+) -> tuple[np.ndarray, list[str], list[int]]:
     """Load motifs, names, and seqlet counts from a Modisco file.
 
     Each motif from a Modisco results file is extracted, normalized, and optionally has

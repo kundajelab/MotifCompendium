@@ -53,7 +53,9 @@ def cluster(
         return greedy_cc_clustering(adjacency_matrix)
     # Spectral
     elif algorithm == "spectral":
-        kwargs_filtered = {k: v for k, v in enumerate(kwargs) if k in ["k", "cluster_qr"]}
+        kwargs_filtered = {
+            k: v for k, v in enumerate(kwargs) if k in ["k", "cluster_qr"]
+        }
         return spectral_clustering_k(similarity_matrix, **kwargs_filtered)
 
 
@@ -77,9 +79,7 @@ def cpm_leiden_clustering(adjacency_matrix, resolution=0.8):
 #######################
 # SPECTRAL CLUSTERING #
 #######################
-def spectral_clustering_k(
-    similarity_matrix, k=40, cluster_qr=False
-):
+def spectral_clustering_k(similarity_matrix, k=40, cluster_qr=False):
     if cluster_qr:
         clustering = (
             sklearn.cluster.SpectralClustering(

@@ -1,1 +1,8 @@
-from .MotifCompendium import load, inspect, build, build_from_modisco, combine, MotifCompendium
+from .MotifCompendium import (
+    load,
+    inspect,
+    build,
+    build_from_modisco,
+    combine,
+    MotifCompendium,
+)

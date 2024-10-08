@@ -15,7 +15,7 @@ import seaborn as sns
 def motif_collection_html(
     motif_groups: dict[str, list[dict[str, Any]]],
     html_out: str,
-    max_cpus: int | None = None
+    max_cpus: int | None = None,
 ) -> None:
     """Creates an html output displaying groups of motifs.
 
@@ -37,7 +37,9 @@ def motif_collection_html(
         for group in motif_groups.values():
             _utf8_motif_plot_many(group)
     else:
-        num_processes = min(max_cpus, multiprocessing.cpu_count())  # don't use more CPUs than available
+        num_processes = min(
+            max_cpus, multiprocessing.cpu_count()
+        )  # don't use more CPUs than available
         with multiprocessing.Pool(processes=num_processes) as p:
             p.map(_utf8_motif_plot_many, motif_groups.values())
     # Create Jinja2 environment
@@ -62,7 +64,7 @@ def plot_heatmap(
     annot: bool = False,
     labels: list | None = None,
     show: bool = False,
-    save_loc: str | None = None
+    save_loc: str | None = None,
 ):
     """Plot a heatmap.
 
@@ -108,6 +110,7 @@ def _utf8_motif_plot_many(motif_dicts: list[dict[str, Any]]) -> None:
     """
     for motif_dict in motif_dicts:
         _utf8_motif_plot(motif_dict)
+
 
 def _utf8_motif_plot(motif_dict: dict[str, Any]) -> None:
     """Generates UTF-8 encoded plot of a motif and saves it into the input dictionary.

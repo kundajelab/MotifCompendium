@@ -2,8 +2,7 @@ import numpy as np
 
 
 def reverse_complement(motifs):
-    """Computes the reverse complement of a (N, L, C) motif stack.
-    """
+    """Computes the reverse complement of a (N, L, C) motif stack."""
     return motifs[:, ::-1, ::-1]
 
 
@@ -16,8 +15,7 @@ RIGHTTENSOR[:, 29:59] = np.eye(30)
 
 
 def compute_similarity_left_side(motifs):
-    """Prepares the left side of the similarity calculation.
-    """
+    """Prepares the left side of the similarity calculation."""
     # motifs = (N, 30, K)
     K = motifs.shape[2]
     motif_slices = [motifs[:, :, i] for i in range(K)]  # (N, 30)
@@ -33,8 +31,7 @@ def compute_similarity_left_side(motifs):
 
 
 def compute_similarity_right_side(motifs):
-    """Prepares the right side of the similarity calculation.
-    """
+    """Prepares the right side of the similarity calculation."""
     # motifs = (M, 30, K)
     K = motifs.shape[2]
     motifs_pivot = np.transpose(motifs, axes=(0, 2, 1))  # (M, K, 30)
@@ -48,8 +45,7 @@ def compute_similarity_right_side(motifs):
 
 
 def compute_similarity(motif_set_1, motif_set_2):
-    """Computes similarity and alignment for two sets of motifs.
-    """
+    """Computes similarity and alignment for two sets of motifs."""
     # TRANSPOSE FOR EFFICIENCY
     N_original = motif_set_1.shape[0]
     M_original = motif_set_2.shape[0]
@@ -85,8 +81,7 @@ def compute_similarity(motif_set_1, motif_set_2):
 
 
 def compute_similarity_and_align(simsA, simsB, l2=False):
-    """Computes similarity and alignment taking into account reverse complements.
-    """
+    """Computes similarity and alignment taking into account reverse complements."""
     if l2:
         samsA = simsA / np.linalg.norm(simsA, axis=(1, 2), keepdims=True)
         samsB = simsB / np.linalg.norm(simsB, axis=(1, 2), keepdims=True)
@@ -95,9 +90,7 @@ def compute_similarity_and_align(simsA, simsB, l2=False):
         samsB = np.sqrt(simsB)
     samsA_revcomp = reverse_complement(samsA)
     # forward similarity
-    sim_1, sim_1_alignments = compute_similarity(
-omi
-    )  # skew-symmetric alignment
+    sim_1, sim_1_alignments = compute_similarity(omi)  # skew-symmetric alignment
     # backward similarity
     sim_2, sim_2_alignments = compute_similarity(
         samsA_revcomp, samsB
@@ -111,4 +104,3 @@ omi
         0  # alignment erroneously always -29 when 0 similarity (argmax artifact)
     )
     return sim, sim_fb, sim_alignments
-

@@ -34,8 +34,7 @@ def ic_scale(x: np.ndarray) -> np.ndarray:
 
 
 def motif_4_to_8(x: np.ndarray) -> np.ndarray:
-    """Converts a 4 channel motif into an 8 channel motif.
-    """
+    """Converts a 4 channel motif into an 8 channel motif."""
     x_pos = np.maximum(x, 0)
     x_neg = np.maximum(-x, 0)
     x_pos_8 = x_pos @ _MOTIF_4_TO_8_POS
@@ -45,8 +44,7 @@ def motif_4_to_8(x: np.ndarray) -> np.ndarray:
 
 
 def motif_8_to_4(x: np.ndarray) -> np.ndarray:
-    """Converts in 8 channel motif into a 4 channel motif.
-    """
+    """Converts in 8 channel motif into a 4 channel motif."""
     x_pos_4 = x @ MOTIF_4_TO_8_POS.T
     x_neg_4 = x @ MOTIF_4_TO_8_NEG.T
     x_4 = x_pos_4 - x_neg_4
@@ -54,8 +52,7 @@ def motif_8_to_4(x: np.ndarray) -> np.ndarray:
 
 
 def motif_8_to_4_abs(x: np.ndarray) -> np.ndarray:
-    """Converts in 8 channel motif into a 4 channel motif.
-    """
+    """Converts in 8 channel motif into a 4 channel motif."""
     x_pos_4 = x @ MOTIF_4_TO_8_POS.T
     x_neg_4 = x @ MOTIF_4_TO_8_NEG.T
     x_4 = x_pos_4 + x_neg_4
@@ -63,19 +60,21 @@ def motif_8_to_4_abs(x: np.ndarray) -> np.ndarray:
 
 
 def validate_motif_stack(motifs: np.ndarray) -> None:
-    """Validate motifs.
-    """
+    """Validate motifs."""
     if not isinstance(motifs) == np.ndarray:
         raise TypeError("Motifs must be a np.ndarray.")
-    if not ((len(motifs.shape) == 3) and (motifs.shape[1] == 30) and (motifs.shape[2] in [4, 8])):
+    if not (
+        (len(motifs.shape) == 3)
+        and (motifs.shape[1] == 30)
+        and (motifs.shape[2] in [4, 8])
+    ):
         raise ValueError("Motif stack must be of shape (N, 30, 4/8).")
     if not (((motifs >= 0).all()) and (np.allclose(motifs.sum(axis=(1, 2)), 1))):
         raise ValueError("Motifs must be non-negative and sum to 1.")
 
 
 def motif_to_df(motif: np.ndarray) -> pd.DataFrame:
-    """Transforms a motif into a pd.DataFrame ready for plotting with logomaker.
-    """
+    """Transforms a motif into a pd.DataFrame ready for plotting with logomaker."""
     return pd.DataFrame(motif, columns=["A", "C", "G", "T"])
 
 
@@ -98,7 +97,9 @@ _MOTIF_4_TO_8_NEG[3, 6] = 1
 #####################
 # PRIVATE FUNCTIONS #
 #####################
-def average_motifs(motifs_8: np.ndarray, alignment_fb: np.ndarray, alignment_h: np.ndarray) -> np.ndarray:
+def average_motifs(
+    motifs_8: np.ndarray, alignment_fb: np.ndarray, alignment_h: np.ndarray
+) -> np.ndarray:
     """Compute the average of many motifs.
 
     Takes in a stack of motifs and aligns them based on alignment matrices. Then,
@@ -112,7 +113,7 @@ def average_motifs(motifs_8: np.ndarray, alignment_fb: np.ndarray, alignment_h: 
           any two motifs.
 
     Returns:
-        An 8 channel motif that is an average of the provided motif stack. 
+        An 8 channel motif that is an average of the provided motif stack.
 
     Notes:
         Assumes that the input is an 8 channel motif of shape (N, 30, 8).
@@ -137,19 +138,7 @@ def average_motifs(motifs_8: np.ndarray, alignment_fb: np.ndarray, alignment_h: 
     return squashed_motif_8
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-def squash_motif(motif: np.ndarray, squash_to=30: int) -> np.ndarray:
+def squash_motif(motif: np.ndarray, squash_to: int = 30) -> np.ndarray:
     """Squashes a larger motif into a smaller size.
 
     Takes a large motif and squashes/trims it down to a smaller motif. Selects the base
@@ -169,4 +158,3 @@ def squash_motif(motif: np.ndarray, squash_to=30: int) -> np.ndarray:
     i_sums = sorted(i_sums, reverse=True)
     top_i = i_sums[0][1]
     return motif[top_i : top_i + squash_to, :]
-

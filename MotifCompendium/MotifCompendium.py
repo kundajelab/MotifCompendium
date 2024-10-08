@@ -39,7 +39,9 @@ def load(file_loc: str, safe: bool = True) -> MotifCompendium:
         alignment_fr = f["alignment_fr"][:]
         alignment_h = f["alignment_h"][:]
     metadata = pd.read_hdf(file_loc, key="metadata")
-    return MotifCompendium(motifs, similarity, alignment_fr, alignment_h, metadata, safe)
+    return MotifCompendium(
+        motifs, similarity, alignment_fr, alignment_h, metadata, safe
+    )
 
 
 def inspect(file_loc: str) -> pd.DataFrame:
@@ -110,12 +112,16 @@ def build(
         metadata["name"] = [f"motif_{i}" for i in range(motifs.shape[0])]
     # Compute similarity
     if use_gpu and (max_cpus is not None):
-        warnings.warn("use_gpu is True but max_cpus is not None... setting max_cpus to None")
+        warnings.warn(
+            "use_gpu is True but max_cpus is not None... setting max_cpus to None"
+        )
         max_cpus = None
     similarity, alignment_fr, alignment_h = utils_similarity.compute_similarities(
         [motifs], [(0, 0)], max_chunk, max_cpus, use_gpu, l2=l2
     )[0]
-    np.fill_diagonal(similarity, 1) # Sometimes diagonal similarity is 0.999... but should be 1
+    np.fill_diagonal(
+        similarity, 1
+    )  # Sometimes diagonal similarity is 0.999... but should be 1
     # Construct object
     return MotifCompendium(
         motifs, similarity, alignment_fr, alignment_h, metadata, safe
@@ -172,7 +178,9 @@ def build_from_modisco(
     max_cpus_modisco = max_cpus
     max_cpus_similarity = None if use_gpu else max_cpus
     # Load from Modisco
-    motifs, motif_names, seqlet_counts = utils_loader.load_modiscos(modisco_dict, max_cpus=max_cpus_modisco, ic=ic)
+    motifs, motif_names, seqlet_counts = utils_loader.load_modiscos(
+        modisco_dict, max_cpus=max_cpus_modisco, ic=ic
+    )
     # Build metadata
     metadata = pd.DataFrame()
     metadata["name"] = motif_names
@@ -370,14 +378,19 @@ class MotifCompendium:
         # similarity
         if not isinstance(self.similarity) == np.ndarray:
             raise TypeError("self.similarity must be a np.ndarray.")
-        if not ((len(self.shape) == 2) and (np.allclose(self.similarity, self.similarity.T))):
+        if not (
+            (len(self.shape) == 2) and (np.allclose(self.similarity, self.similarity.T))
+        ):
             raise ValueError("self.similarity must be a square transpose matrix.")
         if not ((np.max(self.similarity) == 1) and ((self.similarity >= 0).all())):
             raise ValueError("self.similarity must have similarities between (0, 1].")
         # alignment_fr
         if not isinstance(self.alignment_fr) == np.ndarray:
             raise TypeError("self.alignment_fr must be a np.ndarray.")
-        if not ((len(self.shape) == 2) and (np.allclose(self.alignment_fr, self.alignment_fr.T))):
+        if not (
+            (len(self.shape) == 2)
+            and (np.allclose(self.alignment_fr, self.alignment_fr.T))
+        ):
             raise ValueError("self.alignment_fr must be a square transpose matrix.")
         if not ((self.alignment_fr == 0) | (self.alignment_fr == 1)).all():
             raise ValueError("self.alignment_fr must have values being either 0 or 1.")
@@ -386,23 +399,35 @@ class MotifCompendium:
             raise TypeError("self.alignment_h must be a np.ndarray.")
         if not (len(self.alignment_h.shape) == 2):
             raise ValueError("self.alignment_h must be a square matrix.")
-        if not (np.allclose(self.alignment_h, np.where(self.alignment_fr == 0, -self.alignment_h.T, self.alignment_h.T))):
-            raise ValueError("self.alignment_h is symmetric for reverse complement motifs and skew-symmetric for motifs that are already aligned.")
+        if not (
+            np.allclose(
+                self.alignment_h,
+                np.where(
+                    self.alignment_fr == 0, -self.alignment_h.T, self.alignment_h.T
+                ),
+            )
+        ):
+            raise ValueError(
+                "self.alignment_h is symmetric for reverse complement motifs and skew-symmetric for motifs that are already aligned."
+            )
         # metadata
         if not isinstance(self.metadata) == pd.DataFrame:
             raise TypeError("self.metadata must be a pd.DataFrame.")
         # shape matches
-        if not ((self.motifs.shape[0] == self.similarity.shape[0]) and (self.motifs.shape[0] == self.alignment_fr.shape[0]) and (self.motifs.shape[0] == self.alignment_h.shape[0]) and (self.motifs.shape[0] == len(self.metadata))):
+        if not (
+            (self.motifs.shape[0] == self.similarity.shape[0])
+            and (self.motifs.shape[0] == self.alignment_fr.shape[0])
+            and (self.motifs.shape[0] == self.alignment_h.shape[0])
+            and (self.motifs.shape[0] == len(self.metadata))
+        ):
             raise TypeError("Attribute shapes do not align.")
 
     def __str__(self) -> str:
-        """String representation of the MotifCompendium.
-        """
+        """String representation of the MotifCompendium."""
         return f"Motif Compendium with {len(self)} motifs.\n{self.metadata}"
 
     def __len__(self) -> int:
-        """Length of the MotifCompendium.
-        """
+        """Length of the MotifCompendium."""
         return len(self.metadata)
 
     def __getitem__(self, key: str | pd.Series) -> pd.Series | MotifCompendium:
@@ -464,8 +489,7 @@ class MotifCompendium:
             raise TypeError("MotifCompendium column names must be strings.")
 
     def __eq__(self, other: MotifCompendium) -> bool:
-        """Checks object equality between MotifCompendium.
-        """
+        """Checks object equality between MotifCompendium."""
         if isinstance(other, MotifCompendium):
             return (
                 np.allclose(self.motifs, other.motifs)
@@ -502,13 +526,15 @@ class MotifCompendium:
               CPU/GPU/chunking options.
         """
         # Prepare motifs/names/groups
-        motifs = matrix._8_to_4(self.motifs) if self.motifs.shape[2] == 8 else self.motifs
+        motifs = (
+            matrix._8_to_4(self.motifs) if self.motifs.shape[2] == 8 else self.motifs
+        )
         names = list(self.metadata["name"])
         groups = list(self.metadata[group_by])
         # Group motifs
-        motif_groups = dict() # group name --> {motif name --> motif dict}
-        group_seeds = dict() # group name --> index of seed motif in group
-        group_indices = defaultdict(set) # group name --> indices of shifted motifs
+        motif_groups = dict()  # group name --> {motif name --> motif dict}
+        group_seeds = dict()  # group name --> index of seed motif in group
+        group_indices = defaultdict(set)  # group name --> indices of shifted motifs
         for i, x in enumerate(groups):
             if x in motif_groups:
                 cluster_x_seed = group_seeds[x]
@@ -536,12 +562,18 @@ class MotifCompendium:
             g_indices = sorted(group_indices[group_name])
             group_motifs = []
             for motif_dict in group:
-                motif_dict["motif"] = motif_dict["motif"].reindex(g_indices, fill_value=0)
+                motif_dict["motif"] = motif_dict["motif"].reindex(
+                    g_indices, fill_value=0
+                )
                 group_motifs.append(motifs_dict["motif"])
             # Average
             motifs_concat = pd.concat(group_motifs)
             average_motif = motifs_concat.groupby(motifs_concat.index).mean()
-            average_dict = {"motif": average_motif, "name": "AVERAGE", "bgcolor": "palegreen"}
+            average_dict = {
+                "motif": average_motif,
+                "name": "AVERAGE",
+                "bgcolor": "palegreen",
+            }
             group.insert(0, average_dict)
         # Submit to plotting function
         utils_plotting.motif_collection_html(motif_groups, html_out, max_cpus)

@@ -51,8 +51,7 @@ def compute_similarities(
 # PRIVATE FUNCTIONS #
 #####################
 def _chunk_sims_and_calcs(sims_list, calculations, max_chunk):
-    """Chunks sims and calculations.
-    """
+    """Chunks sims and calculations."""
     # CHUNK MOTIFS
     chunked_sims_list = []
     chunk_map = dict()
@@ -80,8 +79,7 @@ def _chunk_sims_and_calcs(sims_list, calculations, max_chunk):
 
 
 def _chunk_axis_0(X, chunk_size):
-    """Chunks along axis 0.
-    """
+    """Chunks along axis 0."""
     N = X.shape[0]
     X_chunks = []
     for i in range(N // chunk_size):
@@ -95,8 +93,7 @@ def _chunk_axis_0(X, chunk_size):
 def _compute_similarity_and_align_parallel(
     sims_list, calculations, max_cpus, use_gpu, l2=False
 ):
-    """Compute similarities and alignments.
-    """
+    """Compute similarities and alignments."""
     if max_cpus is None:
         if use_gpu:
             # SINGLE GPU CALCULATIONS
@@ -122,14 +119,15 @@ def _compute_similarity_and_align_parallel(
         else:
             # MULTI-CPU CALCULATIONS
             inputs = [(sims_list[c[0]], sims_list[c[1]], l2) for c in calculations]
-            num_processes = min(max_cpus, multiprocessing.cpu_count())  # don't use more CPUs than available
+            num_processes = min(
+                max_cpus, multiprocessing.cpu_count()
+            )  # don't use more CPUs than available
             with multiprocessing.Pool(processes=num_processes) as p:
                 return p.starmap(compute_similarity_and_align, inputs)
 
 
 def _reassemble_results(calculations, chunked_calculations, chunked_results, chunk_map):
-    """Reassemble chunked results.
-    """
+    """Reassemble chunked results."""
     chunked_calculations_revmap = {c: i for i, c in enumerate(chunked_calculations)}
     results = []
     for c0, c1 in calculations:

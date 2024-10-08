@@ -2,14 +2,12 @@ import cupy as cp
 
 
 def reverse_complement(motifs):
-    """Computes the reverse complement of a (N, L, C) motif stack.
-    """
+    """Computes the reverse complement of a (N, L, C) motif stack."""
     return motifs[:, ::-1, ::-1]
 
 
 def LEFTTENSOR():
-    """Produces the LEFTTENSOR needed for the left side of the similarity calculation.
-    """
+    """Produces the LEFTTENSOR needed for the left side of the similarity calculation."""
     x = cp.zeros((59, 88, 30))
     for i in range(59):
         x[i, i : i + 30, :] = cp.eye(30)
@@ -17,16 +15,14 @@ def LEFTTENSOR():
 
 
 def RIGHTTENSOR():
-    """Produces the RIGHTTENSOR needed for the right side of the similarity calculation.
-    """
+    """Produces the RIGHTTENSOR needed for the right side of the similarity calculation."""
     x = cp.zeros((30, 88))
     x[:, 29:59] = cp.eye(30)
     return x
 
 
 def compute_similarity_left_side(motifs):
-    """Prepares the left side of the similarity calculation.
-    """
+    """Prepares the left side of the similarity calculation."""
     # motifs = (N, 30, K)
     K = motifs.shape[2]
     motif_slices = [motifs[:, :, i] for i in range(K)]  # (N, 30)
@@ -42,8 +38,7 @@ def compute_similarity_left_side(motifs):
 
 
 def compute_similarity_right_side(motifs):
-    """Prepares the right side of the similarity calculation.
-    """
+    """Prepares the right side of the similarity calculation."""
     # motifs = (M, 30, K)
     K = motifs.shape[2]
     motifs_pivot = cp.transpose(motifs, axes=(0, 2, 1))  # (M, K, 30)
@@ -57,8 +52,7 @@ def compute_similarity_right_side(motifs):
 
 
 def compute_similarity(motif_set_1, motif_set_2):
-    """Computes similarity and alignment for two sets of motifs.
-    """
+    """Computes similarity and alignment for two sets of motifs."""
     # TRANSPOSE FOR EFFICIENCY
     N_original = motif_set_1.shape[0]
     M_original = motif_set_2.shape[0]
@@ -96,8 +90,7 @@ def compute_similarity(motif_set_1, motif_set_2):
 
 
 def gpu_compute_similarity_and_align(simsA, simsB, l2=False):
-    """Computes similarity and alignment taking into account reverse complements.
-    """
+    """Computes similarity and alignment taking into account reverse complements."""
     simsA = cp.asarray(simsA)
     simsB = cp.asarray(simsB)
     if l2:
@@ -125,12 +118,10 @@ def gpu_compute_similarity_and_align(simsA, simsB, l2=False):
 
 
 def gpu_similarity_worker(gpu_idx, inputs):
-    """Worker function to perform many similarity calculations on one GPU.
-    """
+    """Worker function to perform many similarity calculations on one GPU."""
     outputs = []
     with cp.cuda.Device(gpu_idx):
         for calculation, simsA, simsB in inputs:
             result = compute_similarity_and_align(simsA, simsB)
             outputs.append((calculation, result))
     return outputs
-
