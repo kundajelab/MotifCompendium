@@ -1,0 +1,16 @@
+name: motifcompendium-gpu
+dependencies:
+- python=3.10
+- h5py
+- jinja2
+- numpy
+- pandas
+- pytables
+- seaborn
+- scikit-learn
+- pip
+- pip:
+    - cupy-cuda11x
+    - igraph
+    - leidenalg
+    - logomaker
