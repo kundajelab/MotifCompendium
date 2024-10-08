@@ -1,123 +1,81 @@
+from collections import defaultdict
+from typing import Any
+
+from jinja2 import Environment, FileSystemLoader
 import logomaker
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
 
-from collections import defaultdict
 
+####################
+# PUBLIC FUNCTIONS #
+####################
+def motif_collection_html(
+    motif_groups: dict[str, list[dict[str, Any]]],
+    html_out: str,
+    max_cpus: int | None = None
+) -> None:
+    """Creates an html output displaying groups of motifs.
 
-def motif_to_df(motif: np.ndarray) -> pd.DataFrame:
-    """Transforms a motif into a pd.DataFrame ready for plotting with logomaker.
+    Creates a two panel HTML file displaying motifs grouped into sections. Motifs will
+      be displayed in the order that they are listed. The HTML file is produced using
+      jinja2 and motif_collection_template.html.
+
+    Args:
+        motif_groups: A dictionary from group name to groups, where each group is
+          itself a list of motif dictionaries. Each motif dictionary maps strings to
+          attributes about the motif. Motif dictionaries must contain a key 'motif'
+          which is a pd.DataFrame that is plotted using logomaker and a key 'name' which
+          is the name of the motif.
+        html_out: The path to save he html file.
+        max_cpus: The maximum number of CPUs to use for parallelizing plotting.
     """
-    return pd.DataFrame(motif, columns=["A", "C", "G", "T"])
+    # Create motif plots
+    if max_cpus is None:
+        for group in motif_groups.values():
+            _utf8_motif_plot_many(group)
+    else:
+        num_processes = min(max_cpus, multiprocessing.cpu_count())  # don't use more CPUs than available
+        with multiprocessing.Pool(processes=num_processes) as p:
+            p.map(_utf8_motif_plot_many, motif_groups.values())
+    # Create Jinja2 environment
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    env = Environment(loader=FileSystemLoader(current_dir))
+    # Load HTML template
+    template = env.get_template("motif_collection_template.html")
+    # Render HTML with data
+    rendered_html = template.render(data=motif_groups, sorted=sorted)
+    # Write HTML to file
+    with open(html_out, "w") as f:
+        f.write(rendered_html)
 
 
-def _prep_plotting_from_motifs(cwms, clusters, sim_fb, sim_alignments, names, average):
-    """Function that prepares the creation of an HTML output.
-    """
-    cluster_indices = []
-    plotter_inputs = []
-    plot_names = []
-    for c_name, c in clusters.items():
-        cluster_start_idx = len(plotter_inputs)
-        plotter_inputs_c = []
-        plot_names_c = []
-
-        c_dfs = []
-        c_df_index = set()
-        first_idx = c[0]
-        for idx in c:
-            # Prepare df
-            idx_cwm = (
-                cwms[idx, :, :]
-                if sim_fb[idx, first_idx] == 0
-                else cwms[idx, ::-1, ::-1]
-            )
-            idx_shift = sim_alignments[idx, first_idx]
-            idx_df = pd.DataFrame(idx_cwm, columns=["A", "C", "G", "T"])
-            idx_df.index += idx_shift
-            idx_name = names[idx]
-            # Update lists
-            c_dfs.append(idx_df)
-            c_df_index.update(idx_df.index)
-            plot_names_c.append(idx_name)
-        # Update/align index
-        c_df_index = sorted(c_df_index)
-        c_dfs = [x.reindex(c_df_index, fill_value=0) for x in c_dfs]
-        # Prep plotting inputs
-        plotter_inputs_c = [(x, "white") for x in c_dfs]
-        assert len(plotter_inputs_c) == len(plot_names_c)
-        # Create average plot if needed
-        if average:
-            motifs_concat = pd.concat(c_dfs)
-            average_motif = motifs_concat.groupby(motifs_concat.index).mean()
-            plotter_inputs_c.insert(0, (average_motif, "palegreen"))
-            plot_names_c.insert(0, "AVERAGE")
-        # Add to total
-        plotter_inputs += plotter_inputs_c
-        plot_names += plot_names_c
-        cluster_end_idx = len(plotter_inputs)
-        cluster_indices.append((c_name, cluster_start_idx, cluster_end_idx))
-    assert len(cluster_indices) == len(clusters)
-    return cluster_indices, plotter_inputs, plot_names
+def summary_table_html():
+    print("not yet implemented")
+    assert False
 
 
-def create_html(
-    cwms,
-    clusters,
-    sim_fb,
-    sim_alignments,
-    names,
-    html_out_loc,
-    average=True,
-    max_parallel=16,
+def plot_heatmap(
+    data: np.ndarray,
+    annot: bool = False,
+    labels: list | None = None,
+    show: bool = False,
+    save_loc: str | None = None
 ):
-    """Creates an html output of motifs grouped into clusters.
-    """
-    from .make_report import generate_report
+    """Plot a heatmap.
 
-    clustering = defaultdict(list)
-    for i, c in enumerate(clusters):
-        clustering[c].append(i)
-    cluster_indices, plotter_inputs, plot_names = _prep_plotting_from_motifs(
-        cwms, clustering, sim_fb, sim_alignments, names, average
-    )
-    generate_report(
-        cluster_indices, plotter_inputs, plot_names, html_out_loc, max_parallel
-    )
+    Creates a heatmap. Includes additional options to annotate/label the heatmap and
+      optionally show and/or save the resulting plot.
 
-
-def plot_motif_on_ax(motif, ax, motif_name=None):
-    """Plots a motif on an axis.
-    """
-    motif_df = motif_to_df(motif)
-    logomaker.Logo(motif_df, ax=ax)
-    ax.spines[["top", "right", "bottom", "left"]].set_visible(False)
-    ax.set_xticks([])
-    ax.set_yticks([])
-    if motif_name is not None:
-        ax.set_title(motif_name)
-
-
-def plot_motifs(motifs, motif_names=None):
-    """Creates a plot of multiple motifs.
-    """
-    if type(motifs) == np.ndarray:
-        verify_motif_stack(motifs)
-        motifs = [motifs[i, :, :] for i in range(motifs.shape[0])]
-    # check_error(type(motifs) == list, "error: motifs must be provided as a list or an np.ndarray.")
-    if motif_names is None:
-        motif_names = [None for x in range(len(motifs))]
-    # check_error(len(motif_names) == len(motifs), "error: number of motifs and names not matching.")
-    fig, axs = plt.subplots(len(motifs), 1)
-    for i in range(len(motifs)):
-        plot_motif_on_ax(motifs[i], axs[i], motif_names[i])
-    plt.show()
-
-
-def plot_heatmap(data, annot=False, labels=None, show=False, save_loc=None):
-    """Plots heatmaps.
+    Args:
+        data: A np.ndarray to plot a heatmap of.
+        annot: Whether or not to annotate each cell of the heatmap with its value.
+        labels: Labels for the rows/columns of the heatmap. If None, rows and columns
+          are not annotated. If labels are provided, data is assumed to be square.
+        show: Whether or not to show the heatmap with plt.show().
+        save_loc: Where to save the heatmap to. If None, the heatmap is not saved.
     """
     if labels is None:
         df = pd.DataFrame(data)
@@ -130,3 +88,51 @@ def plot_heatmap(data, annot=False, labels=None, show=False, save_loc=None):
     if show:
         plt.show()
 
+
+#####################
+# PRIVATE FUNCTIONS #
+#####################
+def _utf8_motif_plot_many(motif_dicts: list[dict[str, Any]]) -> None:
+    """Generates UTF-8 encoded plots of many motifs.
+
+    Generates UTF-8 encoded plots by invoking _utf8_motif_plot(). Enters them into
+      each motif dict in the input under the key 'utf8_plot'.
+
+    Args:
+        motif_dicts: A list of motif inputs to be passed to _utf8_motif_plot().
+
+    Notes:
+        Each motif_dict must have key 'motif' which is a pd.DataFrame that can be read
+          by logomaker. It may additionally have arguments that change plot formatting.
+          Please refer to _utf8_motif_plot() implementation for further details.
+    """
+    for motif_dict in motif_dicts:
+        _utf8_motif_plot(motif_dict)
+
+def _utf8_motif_plot(motif_dict: dict[str, Any]) -> None:
+    """Generates UTF-8 encoded plot of a motif and saves it into the input dictionary.
+
+    Generates UTF-8 encoded plots using logomaker. Can make use of additional formatting
+      arguments in motif_dict if they are present. Saves the encoded plot into the input
+      dictionary under key 'utf8_plot'.
+
+    Args:
+        motif_dict: A dictionary containing key 'motif' which can be passed to
+          logomaker.
+    """
+    # Parse through arguments in motif_dict
+    motif = motif_dict["motif"]
+    face_color = motif_dict["bgcolor"] if "bgcolor" in motif_dict else "white"
+    # Plot
+    fig, ax = plt.subplots(figsize=(6, 2), facecolor=face_color)
+    logomaker.Logo(motif, ax=ax)
+    ax.spines[["top", "right", "bottom", "left"]].set_visible(False)
+    ax.set_axis_off()
+    # Encode image in UTF-8
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png")
+    plt.close(fig)
+    buf.seek(0)
+    utf8_plot = base64.b64encode(buf.read()).decode("utf-8")
+    # Update dictionary
+    motif_dict["utf8_plot"] = utf8_plot

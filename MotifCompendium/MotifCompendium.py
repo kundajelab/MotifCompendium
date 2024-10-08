@@ -1,4 +1,6 @@
 from __future__ import annotations
+from collections import defaultdict
+import warnings
 
 import h5py
 import numpy as np
@@ -6,7 +8,7 @@ import pandas as pd
 
 import MotifCompendium.utils.clustering as utils_clustering
 import MotifCompendium.utils.loader as utils_loader
-import MotifCompendium.utils.matrix as utils_matrix
+import MotifCompendium.utils.motif as utils_motif
 import MotifCompendium.utils.plotting as utils_plotting
 import MotifCompendium.utils.similarity as utils_similarity
 
@@ -18,40 +20,53 @@ def load(file_loc: str, safe: bool = True) -> MotifCompendium:
     """Loads a MotifCompendium object from file.
 
     Args:
-        file_loc: The path to the MotifCompendium file.
+        file_loc: The MotifCompendium file path.
         safe: Whether or not to construct the MotifCompendium safely.
 
     Returns:
         The corresponding MotifCompendium object.
 
     Notes:
-        Assumes the file is an h5py file with datasets 'sims', 'logos', 'similarity',
-          'alignment_fb', and 'alignment_h', as well as a DataFrame called 'metadata'.
+        Assumes the file is an h5py file with datasets 'motifs', 'similarity',
+          'alignment_fr', and 'alignment_h', as well as a DataFrame called 'metadata'.
         Old objects may be incompatable with the newest version of the load function.
         Safe loading validates object integrity but may take significantly longer for
           large objects.
     """
     with h5py.File(file_loc, "r") as f:
-        sims = f["sims"][:]
-        logos = f["logos"][:]
+        motifs = f["motifs"][:]
         similarity = f["similarity"][:]
-        alignment_fb = f["alignment_fb"][:]
+        alignment_fr = f["alignment_fr"][:]
         alignment_h = f["alignment_h"][:]
     metadata = pd.read_hdf(file_loc, key="metadata")
-    return MotifCompendium(
-        sims, logos, similarity, alignment_fb, alignment_h, metadata, safe
-    )
+    return MotifCompendium(motifs, similarity, alignment_fr, alignment_h, metadata, safe)
+
+
+def inspect(file_loc: str) -> pd.DataFrame:
+    """Inspects and returns the metadata of a MotifCompendium object from file.
+
+    Args:
+        file_loc: The MotifCompendium file path.
+
+    Returns:
+        The corresponding MotifCompendium object.
+
+    Notes:
+        Does not ever explicitly load the object, just the metadata from the object.
+    """
+    metadata = pd.read_hdf(file_loc, key="metadata")
+    print(f"Motif Compendium with {len(metadata)} motifs.\n{metadata}")
+    return metadata
 
 
 def build(
-    sims: np.ndarray,
-    logos: np.ndarray | None = None,
+    motifs: np.ndarray,
     metadata: pd.DataFrame | None = None,
     max_chunk: int | None = None,
-    max_parallel: int | None = None,
+    max_cpus: int | None = None,
     use_gpu: bool = False,
-    l2: bool = False,
-    safe: bool = False,
+    l2: bool = True,
+    safe: bool = True,
 ) -> MotifCompendium:
     """Builds a MotifCompendium object from a set of motifs.
 
@@ -59,15 +74,13 @@ def build(
       Then, passes everything to the MotifCompendium constructor.
 
     Args:
-        sims: The motifs.
-        logos: The visual representation of the motifs. If None, it will be set to be
-          the sims.
+        motifs: A stack of motifs of shape (N, 30, 8/4).
         metadata: The metadata for all motifs. If None, it will be set to a DataFrame
           with generic motif names.
         max_chunk: The maximum number of motifs to compute similarity on at a time. If
           None, it will compute the entire similarity matrix at once.
-        max_parallel: The maximum number of CPUs/GPUs to use for computing similarity.
-          If None, it will not parallelize the computation at all.
+        max_cpus: The maximum number of CPUs to use for computing similarity.
+          If None, it will only use a single CPU.
         use_gpu: Whether or not to use GPUs to accelerate computing similarity. Uses
           only CPUs by default.
         l2: Whether or not to use L2 normalization (instead of sqrt normalization when
@@ -75,50 +88,48 @@ def build(
         safe: Whether or not to construct the MotifCompendium safely.
 
     Returns:
-        A MotifCompendium object containing all motifs in sims.
+        A MotifCompendium object containing all motifs in motifs.
 
     Notes:
         Use GPU if possible to accelerate calculation (CuPy required.) Otherwise,
-          parallelize across CPUs by setting max_parallel to the number of available
-          CPUs. Currently, multi-GPU calculation is not supported (max_parallel and
-          use_gpu are incompatible).
+          parallelize across CPUs by setting max_cpus to the number of available
+          CPUs.
+        Currently, multi-GPU calculation is not supported. If use_gpu is True then
+          max_cpus will be set to None.
         If memory constraints are not an issue, leave chunk as None for faster
           performance. Otherwise, decrease max_chunk until calculations fit in memory.
           For a GPU with ~12GB of memory, use max_chunk=1000.
         Safe building validates object integrity but may take significantly longer for
           large objects.
     """
-    # Check sims
-    utils_similarity.validate_sims(sims)
-    # Logos
-    if logos is None:
-        logos = sims if sims.shape[2] == 4 else utils_similarity.sim8_to_sim4(sims)
+    # Check motifs
+    utils_motif.validate_motif_stack(motifs)
     # Metadata
     if metadata is None:
         metadata = pd.DataFrame()
-        metadata["name"] = [f"motif_{i}" for i in range(sims.shape[0])]
+        metadata["name"] = [f"motif_{i}" for i in range(motifs.shape[0])]
     # Compute similarity
-    print("aligning")
-    start = time.time()
-    similarity, alignment_fb, alignment_h = utils_similarity.compute_similarities(
-        [sims], [(0, 0)], max_chunk, max_parallel, use_gpu, l2=l2
+    if use_gpu and (max_cpus is not None):
+        warnings.warn("use_gpu is True but max_cpus is not None... setting max_cpus to None")
+        max_cpus = None
+    similarity, alignment_fr, alignment_h = utils_similarity.compute_similarities(
+        [motifs], [(0, 0)], max_chunk, max_cpus, use_gpu, l2=l2
     )[0]
-    np.fill_diagonal(similarity, 1)
-    print(f"completed {time.time() - start}")
+    np.fill_diagonal(similarity, 1) # Sometimes diagonal similarity is 0.999... but should be 1
     # Construct object
     return MotifCompendium(
-        sims, logos, similarity, alignment_fb, alignment_h, metadata, safe
+        motifs, similarity, alignment_fr, alignment_h, metadata, safe
     )
 
 
 def build_from_modisco(
     modisco_dict: dict[str, str],
     max_chunk: int | None = None,
-    max_parallel: int | None = None,
+    max_cpus: int | None = None,
     use_gpu: bool = False,
-    ic: bool = False,
-    l2: bool = False,
-    safe: bool = False,
+    ic: bool = True,
+    l2: bool = True,
+    safe: bool = True,
 ) -> MotifCompendium:
     """Builds a MotifCompendium object from a set of Modisco outputs.
 
@@ -128,8 +139,8 @@ def build_from_modisco(
         modisco_dict: A dictionary from model name to modisco file path.
         max_chunk: The maximum number of motifs to compute similarity on at a time. If
           None, it will compute the entire similarity matrix at once.
-        max_parallel: The maximum number of CPUs/GPUs to use for computing similarity.
-          If None, it will not parallelize the computation at all.
+        max_cpus: The maximum number of CPUs to use for loading Modisco motifs and for
+          computing similarity. If None, it will only use a single CPU.
         use_gpu: Whether or not to use GPUs to accelerate computing similarity. Uses
           only CPUs by default.
         ic: Whether or not to apply information content scaling to modisco motifs.
@@ -140,14 +151,16 @@ def build_from_modisco(
     Returns:
         A MotifCompendium object containing all motifs in all Modisco objects.
 
-    Assumptions:
-        The model names have no - or . in them.
-
     Notes:
+        Multiple Modisco outputs can be loaded and processed in parallel by setting
+          max_cpus to the number of available CPUs.
+        Assumes the model names have no '-'' or '.' in them.
         Use GPU if possible to accelerate calculation (CuPy required.) Otherwise,
-          parallelize across CPUs by setting max_parallel to the number of available
-          CPUs. Currently, multi-GPU calculation is not supported (max_parallel and
-          use_gpu are incompatible).
+          parallelize across CPUs by setting max_cpus to the number of available
+          CPUs.
+        Currently, multi-GPU calculation is not supported. If use_gpu is True then
+          max_cpus will be used to load Modisco objects but will be set to None for
+          similarity calculations.
         If memory constraints are not an issue, leave chunk as None for faster
           performance. Otherwise, decrease max_chunk until calculations fit in memory.
           For a GPU with ~12GB of memory, use max_chunk=1000.
@@ -155,86 +168,36 @@ def build_from_modisco(
         Safe building validates object integrity but may take significantly longer for
           large objects.
     """
-    sims, cwms, names, num_seqlets = utils_loader.load_modiscos(modisco_dict, ic=ic)
+    # Determine CPU usage for Modisco/similarity
+    max_cpus_modisco = max_cpus
+    max_cpus_similarity = None if use_gpu else max_cpus
+    # Load from Modisco
+    motifs, motif_names, seqlet_counts = utils_loader.load_modiscos(modisco_dict, max_cpus=max_cpus_modisco, ic=ic)
+    # Build metadata
     metadata = pd.DataFrame()
-    metadata["name"] = names
-    metadata["num_seqlets"] = num_seqlets
+    metadata["name"] = motif_names
+    metadata["num_seqlets"] = seqlet_counts
     metadata["model"] = metadata["name"].str.split("-").str[0]
     metadata["posneg"] = metadata["name"].str.split(".").str[0].str.split("-").str[1]
+    # Construct object
     return build(
-        sims,
-        logos=cwms,
+        motifs,
         metadata=metadata,
         max_chunk=max_chunk,
-        max_parallel=max_parallel,
+        max_cpus=max_cpus_similarity,
         use_gpu=use_gpu,
         l2=l2,
         safe=safe,
     )
-
-
-def build_from_pfms(
-    pfm_file: str,
-    max_chunk: int | None = None,
-    max_parallel: int | None = None,
-    use_gpu: bool = False,
-    l2: bool = False,
-    safe: bool = False,
-) -> MotifCompendium:
-    """Builds a MotifCompendium object from a PFM file.
-
-    Loads PFMs, converts them to PWMs, and then passes them to build().
-
-    Args:
-        pfm_file: The file path to a PFM text file.
-        max_chunk: The maximum number of motifs to compute similarity on at a time. If
-          None, it will compute the entire similarity matrix at once.
-        max_parallel: The maximum number of CPUs/GPUs to use for computing similarity.
-          If None, it will not parallelize the computation at all.
-        use_gpu: Whether or not to use GPUs to accelerate computing similarity. Uses
-          only CPUs by default.
-        l2: Whether or not to use L2 normalization (instead of sqrt normalization when
-          computing motif similarity).
-        safe: Whether or not to construct the MotifCompendium safely.
-
-    Returns:
-        A MotifCompendium object containing all motifs in the PFM file.
-
-    Notes:
-        Use GPU if possible to accelerate calculation (CuPy required.) Otherwise,
-          parallelize across CPUs by setting max_parallel to the number of available
-          CPUs. Currently, multi-GPU calculation is not supported (max_parallel and
-          use_gpu are incompatible).
-        If memory constraints are not an issue, leave chunk as None for faster
-          performance. Otherwise, decrease max_chunk until calculations fit in memory.
-          For a GPU with ~12GB of memory, use max_chunk=1000.
-        Safe building validates object integrity but may take significantly longer for
-          large objects.
-    """
-    sims, names = utils_loader.load_pfm(pfm_file)
-    logos = sims
-    metadata = pd.DataFrame()
-    metadata["name"] = names
-    compendium = build(
-        sims,
-        logos=logos,
-        metadata=metadata,
-        max_chunk=max_chunk,
-        max_parallel=max_parallel,
-        use_gpu=use_gpu,
-        l2=l2,
-        safe=safe,
-    )
-    return compendium
 
 
 def combine(
     compendiums: list[MotifCompendium],
     max_chunk: int | None = None,
-    max_parallel: int | None = None,
+    max_cpus: int | None = None,
     use_gpu: bool = False,
-    l2: bool = False,
-    safe: bool = False,
+    l2: bool = True,
+    safe: bool = True,
 ) -> MotifCompendium:
     """Combines multiple MotifCompendium into one MotifCompendium.
 
@@ -246,8 +209,8 @@ def combine(
         compendiums: A list of MotifCompendium objects.
         max_chunk: The maximum number of motifs to compute similarity on at a time. If
           None, it will compute the entire similarity matrix at once.
-        max_parallel: The maximum number of CPUs/GPUs to use for computing similarity.
-          If None, it will not parallelize the computation at all.
+        max_cpus: The maximum number of CPUs to use for computing similarity.
+          If None, it will only use a single CPU.
         use_gpu: Whether or not to use GPUs to accelerate computing similarity. Uses
           only CPUs by default.
         l2: Whether or not to use L2 normalization (instead of sqrt normalization when
@@ -260,9 +223,10 @@ def combine(
 
     Notes:
         Use GPU if possible to accelerate calculation (CuPy required.) Otherwise,
-          parallelize across CPUs by setting max_parallel to the number of available
-          CPUs. Currently, multi-GPU calculation is not supported (max_parallel and
-          use_gpu are incompatible).
+          parallelize across CPUs by setting max_cpus to the number of available
+          CPUs.
+        Currently, multi-GPU calculation is not supported. If use_gpu is True then
+          max_cpus will be set to None.
         If memory constraints are not an issue, leave chunk as None for faster
           performance. Otherwise, decrease max_chunk until calculations fit in memory.
           For a GPU with ~12GB of memory, use max_chunk=1000.
@@ -273,43 +237,42 @@ def combine(
     assert False
     n = len(compendiums)
     # SIMILARITIES
-    sims_list = [mc.sims for mc in compendiums]
+    motifs_list = [mc.motifs for mc in compendiums]
     calculations = []
     for i in range(n):
         for j in range(i + 1, n):
             calculations.append((i, j))
     similarity_results = utils_similarity.compute_similarities(
-        sims_list, calculations, max_chunk, max_parallel, use_gpu
+        motifs_list, calculations, max_chunk, max_cpus, use_gpu
     )
     similarity_block = [[None for i in range(n)] for i in range(n)]
-    alignment_fb_block = [[None for i in range(n)] for i in range(n)]
+    alignment_fr_block = [[None for i in range(n)] for i in range(n)]
     alignment_h_block = [[None for i in range(n)] for i in range(n)]
     for i in range(n):
         for j in range(n):
             if i == j:
                 similarity_block[i][j] = compendiums[i].similarity
-                alignment_fb_block[i][j] = compendiums[i].alignment_fb
+                alignment_fr_block[i][j] = compendiums[i].alignment_fr
                 alignment_h_block[i][j] = compendiums[i].alignment_h
             elif i > j:
                 (
                     similarity_block[i][j],
-                    alignment_fb_block[i][j],
+                    alignment_fr_block[i][j],
                     alignment_h_block[i][j],
                 ) = results_revcomp[(i, j)]
             else:
                 similarity_block[i][j] = similarity_block[j][i].T
-                alignment_fb_block[i][j] = alignemnt_fb_block[j][i].T
+                alignment_fr_block[i][j] = alignemnt_fb_block[j][i].T
                 alignment_h_block[i][j] = alignment_h_block[j][i].T
     similarity = np.block(similarity_block)
-    alignment_fb = np.block(alignment_fb_block)
+    alignment_fr = np.block(alignment_fr_block)
     alignment_h = np.block(alignment_h_block)
-    # SIMS + LOGOS
-    sims = np.concatenate(sims_list)
-    logos = np.concatenate([mc.logos for mc in compendiums])
+    # motifs
+    motifs = np.concatenate(motifs_list)
     # METADATA
     metadata = pd.concat([mc.metadata for mc in compendiums])
     return MotifCompendium(
-        sims, logos, similarity, alignment_fb, alignment_h, metadata, safe
+        motifs, similarity, alignment_fr, alignment_h, metadata, safe
     )
 
 
@@ -325,15 +288,13 @@ class MotifCompendium:
       EX: mc_neural = mc[mc["organ"] == "brain"].
 
     Attributes:
-        sims: A np.ndarray representing the motifs. Of shape (N, 30, 8/4). sims[i, :, :]
+        motifs: A np.ndarray representing the motifs. Of shape (N, 30, 8/4). motifs[i, :, :]
           represents motif i.
-        logos: A np.ndarray representing how each motif should be drawn by logomaker. Of
-          shape (N, 30, 4). logos[i, :, :] represents motif i.
         similarity: A np.ndarray containing the pairwise similarity scores between each
           motif. Of shape (N, N). similarity[i, j] is the similarity between motif i and
           motif j.
-        alignment_fb: A np.ndarray containing the forward/reverse complement
-          relationship between two motifs. Of shape (N, N). alignment_fb[i, j] is 0/1 if
+        alignment_fr: A np.ndarray containing the forward/reverse complement
+          relationship between two motifs. Of shape (N, N). alignment_fr[i, j] is 0/1 if
           motif i should/shouldn't be reverse complemented to best align with motif j.
         alignment_h: A np.ndarray containing the horizontal shift information between
           two motifs. Of shape (N, N). alignment_h[i, j] represents how many bases to
@@ -342,12 +303,14 @@ class MotifCompendium:
           metadata.iloc[i, :] contains metadata about motif i.
     """
 
+    ##################
+    # CORE FUNCTIONS #
+    ##################
     def __init__(
         self,
-        sims: np.ndarray,
-        logos: np.ndarray,
+        motifs: np.ndarray,
         similarity: np.ndarray,
-        alignment_fb: np.ndarray,
+        alignment_fr: np.ndarray,
         alignment_h: np.ndarray,
         metadata: np.ndarray,
         safe: bool,
@@ -355,36 +318,281 @@ class MotifCompendium:
         """MotifCompendium constructor.
 
         This constructor takes in already defined versions of each class attribute. If
-          safe, validate() is run; otherwise, it is not.
+          safe is True, validate() is run; otherwise, it is not run.
 
         Args:
-            sims: A np.ndarray that is assigned to self.sims.
-            logos: A np.ndarray that is assigned to self.logos.
+            motifs: A np.ndarray that is assigned to self.motifs.
             similarity: A np.ndarray that is assigned to self.similarity.
-            alignment_fb: A np.ndarray that is assigned to self.alignment_fb.
+            alignment_fr: A np.ndarray that is assigned to self.alignment_fr.
             alignment_h: A np.ndarray that is assigned to self.alignment_h.
             metadata: A pd.DataFrame that is assigned to self.metadata.
             safe: Whether or not to construct the MotifCompendium safely.
 
         Notes:
-            In general, users should use factory functions and no access this
+            In general, users should use factory functions and not access this
               constructor directly.
             Safe construction validates object integrity but may take significantly
               longer for large objects.
         """
-        self.sims = sims
-        self.logos = logos
+        self.motifs = motifs
         self.similarity = similarity
-        self.alignment_fb = alignment_fb
+        self.alignment_fr = alignment_fr
         self.alignment_h = alignment_h
         self.metadata = metadata
         if safe:
             self.validate()
 
+    def save(self, save_loc: str) -> None:
+        """Saves the MotifCompendium to file.
+
+        Saves the current MotifCompendium to a compressed h5py file.
+
+        Args:
+            save_loc: Where to save the MotifCompendium to.
+        """
+        with h5py.File(save_loc, "w") as f:
+            f.create_dataset("motifs", data=self.motifs)
+            f.create_dataset("similarity", data=self.similarity)
+            f.create_dataset("alignment_fr", data=self.alignment_fr)
+            f.create_dataset("alignment_h", data=self.alignment_h)
+        self.metadata.to_hdf(save_loc, key="metadata", mode="a")
+
+    def validate(self) -> None:
+        """Verifies the integrity of the MotifCompendium.
+
+        Checks the validity of each attribute (motifs, similarity, similarity_fb, similarity_h).
+
+        Notes:
+            This function can take a long time to run, especially for very large MotifCompendium.
+        """
+        # motifs
+        utils_motif.validate_motif_stack(self.motifs)
+        # similarity
+        if not isinstance(self.similarity) == np.ndarray:
+            raise TypeError("self.similarity must be a np.ndarray.")
+        if not ((len(self.shape) == 2) and (np.allclose(self.similarity, self.similarity.T))):
+            raise ValueError("self.similarity must be a square transpose matrix.")
+        if not ((np.max(self.similarity) == 1) and ((self.similarity >= 0).all())):
+            raise ValueError("self.similarity must have similarities between (0, 1].")
+        # alignment_fr
+        if not isinstance(self.alignment_fr) == np.ndarray:
+            raise TypeError("self.alignment_fr must be a np.ndarray.")
+        if not ((len(self.shape) == 2) and (np.allclose(self.alignment_fr, self.alignment_fr.T))):
+            raise ValueError("self.alignment_fr must be a square transpose matrix.")
+        if not ((self.alignment_fr == 0) | (self.alignment_fr == 1)).all():
+            raise ValueError("self.alignment_fr must have values being either 0 or 1.")
+        # alignment_h
+        if not isinstance(self.alignment_h) == np.ndarray:
+            raise TypeError("self.alignment_h must be a np.ndarray.")
+        if not (len(self.alignment_h.shape) == 2):
+            raise ValueError("self.alignment_h must be a square matrix.")
+        if not (np.allclose(self.alignment_h, np.where(self.alignment_fr == 0, -self.alignment_h.T, self.alignment_h.T))):
+            raise ValueError("self.alignment_h is symmetric for reverse complement motifs and skew-symmetric for motifs that are already aligned.")
+        # metadata
+        if not isinstance(self.metadata) == pd.DataFrame:
+            raise TypeError("self.metadata must be a pd.DataFrame.")
+        # shape matches
+        if not ((self.motifs.shape[0] == self.similarity.shape[0]) and (self.motifs.shape[0] == self.alignment_fr.shape[0]) and (self.motifs.shape[0] == self.alignment_h.shape[0]) and (self.motifs.shape[0] == len(self.metadata))):
+            raise TypeError("Attribute shapes do not align.")
+
+    def __str__(self) -> str:
+        """String representation of the MotifCompendium.
+        """
+        return f"Motif Compendium with {len(self)} motifs.\n{self.metadata}"
+
+    def __len__(self) -> int:
+        """Length of the MotifCompendium.
+        """
+        return len(self.metadata)
+
+    def __getitem__(self, key: str | pd.Series) -> pd.Series | MotifCompendium:
+        """Get columns or subsets of the MotifCompendium.
+
+        Allows indexing into the MotifCompendium with the same syntax as a Pandas
+          DataFrame.
+
+        Args:
+            key: What is being used to subset the object.
+
+        Returns:
+            If a string is input, the corresponding column from the metadata is
+              returned. If a pd.Series of booleans is given, a new MotifCompendium
+              representing just the subset of motifs that were True in the key
+              is returned.
+
+        Note:
+            When a subset of the MotifCompendium is returned, it is returned as a new
+              MotifCompendium object and is not built safely.
+        """
+        if isinstance(key, str):
+            return self.metadata[key]
+        elif isinstance(key, pd.Series) and key.dtype == bool:
+            metadata_slice = self.metadata[key]
+            keep_idxs = list(metadata_slice.index)
+            metadata_slice = metadata_slice.reset_index(drop=True)
+            motifs_slice = self.motifs[keep_idxs, :, :]
+            similarity_slice = self.similarity[keep_idxs, :][:, keep_idxs]
+            alignment_fr_slice = self.alignment_fr[keep_idxs, :][:, keep_idxs]
+            alignment_h_slice = self.alignment_h[keep_idxs, :][:, keep_idxs]
+            return MotifCompendium(
+                motifs_slice,
+                similarity_slice,
+                alignment_fr_slice,
+                alignment_h_slice,
+                metadata_slice,
+                safe=False,
+            )
+        else:
+            raise TypeError("MotifCompendium cannot be indexed by this.")
+
+    def __setitem__(self, key: str, value) -> None:
+        """Set the value of a column in the metadata.
+
+        Allows adding or setting columns of the MotifCompendium with the same syntax as
+          a Pandas DataFrame.
+
+        Args:
+            key: The name of the column to set.
+            value: The value to set that column assignment to.
+
+        Note:
+            Works exactly like setting a Pandas DataFrame column does.
+        """
+        if isinstance(key, str):
+            self.metadata[key] = value
+        else:
+            raise TypeError("MotifCompendium column names must be strings.")
+
+    def __eq__(self, other: MotifCompendium) -> bool:
+        """Checks object equality between MotifCompendium.
+        """
+        if isinstance(other, MotifCompendium):
+            return (
+                np.allclose(self.motifs, other.motifs)
+                and np.allclose(self.similarity, other.similarity)
+                and np.allclose(self.alignment_fr, other.alignment_fr)
+                and np.allclose(self.alignment_h, other.alignment_h)
+                and self.metadata.equals(other.metadata)
+            )
+        return False
+
+    ###########################
+    # VIZUALIZATION FUNCTIONS #
+    ###########################
+    def motif_collection_html(
+        self, html_out: str, group_by: str, max_cpus: int | None = None
+    ) -> None:
+        """Creates an html file displaying all motifs in the current MotifCompendium.
+
+        Produces an html file at the specified location with all motifs from the current
+          MotifCompendium. Motifs are grouped by the group_by field in the metadata.
+          Group averages are plotted with a green background at the top of each group.
+
+        Args:
+            html_out: The path to save the html file.
+            group_by: The column in the metadata to group motifs by for visualization.
+            max_cpus: The maximum number of CPUs to use for parallelizing plotting.
+
+        Notes:
+            Assumes self.metadata has a "name" column.
+            Plotting can take a long time. Increase max_cpus to improve plotting
+              time.
+            If you just want to plot cluster averages, consider doing
+              mc.cluster_averages(group_by).create_html("name") with the appropriate
+              CPU/GPU/chunking options.
+        """
+        # Prepare motifs/names/groups
+        motifs = matrix._8_to_4(self.motifs) if self.motifs.shape[2] == 8 else self.motifs
+        names = list(self.metadata["name"])
+        groups = list(self.metadata[group_by])
+        # Group motifs
+        motif_groups = dict() # group name --> {motif name --> motif dict}
+        group_seeds = dict() # group name --> index of seed motif in group
+        group_indices = defaultdict(set) # group name --> indices of shifted motifs
+        for i, x in enumerate(groups):
+            if x in motif_groups:
+                cluster_x_seed = group_seeds[x]
+                # Forwards/reverse alignment
+                if self.alignment_fr[i, cluster_x_seed] == 0:
+                    motif_i_df = matrix.motif_to_df(motifs[i, :, :])
+                elif self.alignment_fr[i, cluster_x_seed] == 1:
+                    motif_i_df = matrix.motif_to_df(motifs[i, ::-1, ::-1])
+                # Horizontal alignment
+                motif_i_df.index += self.alignment_h[i, cluster_x_seed]
+                group_indices[x].update(motif_i_df.index)
+                # Add into group
+                motif_i_dict = {"motif": motif_i_df, "name": names[i]}
+                motif_groups[x].append(motif_i_dict)
+
+            else:
+                motif_i_df = matrix.motif_to_df(motifs[i, :, :])
+                group_indices[x].update(motif_i_df.index)
+                # Create group
+                motif_i_dict = {"motif": motif_i_df, "name": names[i]}
+                motif_groups[x] = [motif_i_dict]
+                group_seeds[x] = i
+        # Reindex all motifs + average
+        for group_name, group in motif_groups.items():
+            g_indices = sorted(group_indices[group_name])
+            group_motifs = []
+            for motif_dict in group:
+                motif_dict["motif"] = motif_dict["motif"].reindex(g_indices, fill_value=0)
+                group_motifs.append(motifs_dict["motif"])
+            # Average
+            motifs_concat = pd.concat(group_motifs)
+            average_motif = motifs_concat.groupby(motifs_concat.index).mean()
+            average_dict = {"motif": average_motif, "name": "AVERAGE", "bgcolor": "palegreen"}
+            group.insert(0, average_dict)
+        # Submit to plotting function
+        utils_plotting.motif_collection_html(motif_groups, html_out, max_cpus)
+
+    def summary_table_html(self, html_out, columns, max_cpus):
+        print("net yet implemented")
+
+    def heatmap(
+        self,
+        annot: bool = False,
+        label: bool = False,
+        show: bool = False,
+        save_loc: str | None = None,
+    ) -> None:
+        """Creates a heatmap of the similarity matrix.
+
+        Produces a heatmap of the similarity matrix of this MotifCompendium with various
+          formatting, display, and save options.
+
+        Args:
+            annot: Whether or not to display the similarity score value in each cell in
+              the heatmap.
+            label: Whether or not to label rows and columns with motif names.
+            show: Whether or not to show the heatmap with plt.show().
+            save_loc: Where to save the heatmap to. If None, the heatmap is not saved.
+
+        Notes:
+            Assumes self.metadata has a "name" column.
+            Consider visualizing just one cluster at a time with
+              mc[mc["cluster"] == "cluster_1"].heatmap().
+        """
+        if label:
+            utils_plotting.plot_heatmap(
+                self.similarity,
+                annot=annot,
+                labels=list(self.metadata["name"]),
+                show=show,
+                save_loc=save_loc,
+            )
+        else:
+            utils_plotting.plot_heatmap(
+                self.similarity, annot=annot, show=show, save_loc=save_loc
+            )
+
+    ######################
+    # ANALYSIS FUNCTIONS #
+    ######################
     def cluster(
         self,
         algorithm: str = "leiden",
-        similarity_threshold: float = 0.8,
+        similarity_threshold: float = 0.9,
         save_name: str = "cluster",
         **kwargs,
     ) -> None:
@@ -405,12 +613,9 @@ class MotifCompendium:
         Notes:
             Review the clustering algorithms available in utils/clustering.cluster().
         """
-        print("clustering")
-        start = time.time()
         self.metadata[save_name] = utils_clustering.cluster(
             self.similarity, algorithm, similarity_threshold, **kwargs
         )
-        print(f"completed {time.time() - start}")
 
     def clustering_quality(self, cluster_name: str = "cluster") -> np.ndarray:
         """Produces a matrix that summarizes the quality of a particular clustering.
@@ -486,176 +691,26 @@ class MotifCompendium:
             Safe building validates object integrity but may take significantly longer
               for large objects.
         """
-        sims, logos, names, num_constituents = [], [], [], []
+        # TODO: AVERAGE CERTAIN COLUMN VALUES PROPERLY
+        motifs, names, num_constituents = [], [], []
         aggregations = {x: [] for x in aggregate_on}
         for c in sorted(set(self[cluster_name])):
             mc_c = self[self[cluster_name] == c]
-            avg_motif_sims = utils_matrix.average_motifs(
-                mc_c.sims, mc_c.alignment_fb, mc_c.alignment_h
+            avg_motif_motifs = utils_motif.average_motifs(
+                mc_c.motifs, mc_c.alignment_fr, mc_c.alignment_h
             )
-            avg_motif_logo = utils_matrix._8_to_4(avg_motif_sims)
-            sims.append(avg_motif_sims)
-            logos.append(avg_motif_logo)
+            motifs.append(avg_motif_motifs)
             names.append(f"{cluster_name}#{c}")
             num_constituents.append(len(mc_c))
             for x in aggregate_on:
                 aggregations[x].append(np.sum(mc_c[x]))
-        sims = np.stack(sims, axis=0)
-        logos = np.stack(logos, axis=0)
+        motifs = np.stack(motifs, axis=0)
         metadata = pd.DataFrame()
         metadata["name"] = names
         metadata["num_constituents"] = num_constituents
         for x in aggregate_on:
             metadata[x] = aggregations[x]
-        return build(sims, logos, metadata, max_chunk, max_parallel, use_gpu, safe=safe)
-
-    def extend(self):
-        """Add new motifs to the current MotifCompendium."""
-        print("not yet implemented")
-
-    def assign(self):
-        """Assign clusters to a new set of motifs."""
-        print("not yet implemented")
-
-    ###
-    # VISUALIZATION
-    ###
-    def create_html(
-        self, html_out: str, group_by: str = "cluster", max_parallel: int = 16
-    ) -> None:
-        """Creates an html file with all motifs in the current MotifCompendium.
-
-        Produces an html file at the specified location with all motifs from the current
-          MotifCompendium. Motifs are grouped by the group_by field in the metadata.
-          Group averages are plotted with a green background at the top of each group.
-
-        Args:
-            html_out: The path to save the html file.
-            group_by: The column in the metadata to group motifs by for visualization.
-            max_parallel: The maximum number of CPUs to use for parallelizing plotting.
-
-        Notes:
-            Plotting can take a long time. Increase max_parallel to improve plotting
-              time.
-            If you just want to plot cluster averages, consider doing
-              mc.cluster_averages(group_by).create_html("name") with the appropriate
-              CPU/GPU/chunking options.
-        """
-        print("visualizing")
-        start = time.time()
-        utils_plotting.create_html(
-            self.logos,
-            list(self.metadata[group_by]),
-            self.alignment_fb,
-            self.alignment_h,
-            list(self.metadata["name"]),
-            html_out,
-            max_parallel=max_parallel,
-        )
-        print(f"completed {time.time() - start}")
-
-    def heatmap(
-        self,
-        annot: bool = False,
-        label: bool = False,
-        show: bool = False,
-        save_loc: str | None = None,
-    ) -> None:
-        """Creates a heatmap of the similarity matrix.
-
-        Produces a heatmap of the similarity matrix of this MotifCompendium with various
-          formatting, display, and save options.
-
-        Args:
-            annot: Whether or not to display the similarity score value in each cell in
-              the heatmap.
-            label: Whether or not to label rows and columns with motif names.
-            show: Whether or not to show the heatmap with plt.show().
-            save_loc: Where to save the heatmap to. If None, the heatmap is not saved.
-
-        Notes:
-            Consider visualizing just one cluster at a time with
-              mc[mc["cluster"] == "cluster_1"].heatmap().
-        """
-        if label:
-            utils_plotting.plot_heatmap(
-                self.similarity,
-                annot=annot,
-                labels=list(self.metadata["name"]),
-                show=show,
-                save_loc=save_loc,
-            )
-        else:
-            utils_plotting.plot_heatmap(
-                self.similarity, annot=annot, show=show, save_loc=save_loc
-            )
-
-    ###
-    # GENERAL
-    ###
-    def save(self, save_loc: str) -> None:
-        """Saves the MotifCompendium to file.
-
-        Saves the current MotifCompendium to a compressed h5py file.
-
-        Args:
-            save_loc: Where to save the MotifCompendium to.
-        """
-        with h5py.File(save_loc, "w") as f:
-            f.create_dataset("sims", data=self.sims)
-            f.create_dataset("logos", data=self.logos)
-            f.create_dataset("similarity", data=self.similarity)
-            f.create_dataset("alignment_fb", data=self.alignment_fb)
-            f.create_dataset("alignment_h", data=self.alignment_h)
-        self.metadata.to_hdf(save_loc, key="metadata", mode="a")
-
-    def validate(self) -> None:
-        """Verifies the integrity of the MotifCompendium.
-
-        Checks the validity of each attribute (sims, logos, similarity, similarity_fb,
-          similarity_h).
-
-        Notes:
-            This function can take a long time to run.
-        """
-        # SIMS
-        assert type(self.sims) == np.ndarray
-        assert len(self.sims.shape) == 3
-        assert self.sims.shape[1] == 30
-        assert self.sims.shape[2] in [4, 8]
-        assert (self.sims >= 0).all()
-        assert np.allclose(self.sims.sum(axis=(1, 2)), 1)
-        # LOGOS
-        assert type(self.logos) == np.ndarray
-        assert len(self.logos.shape) == 3
-        assert self.logos.shape[1] == 30
-        assert self.logos.shape[2] == 4
-        # SIMILARITY
-        assert type(self.similarity) == np.ndarray
-        assert len(self.similarity.shape) == 2
-        assert np.allclose(self.similarity, self.similarity.T)
-        assert np.max(self.similarity) == 1
-        assert (self.similarity >= 0).all()
-        # ALIGNMENT_FB
-        assert type(self.alignment_fb) == np.ndarray
-        assert len(self.alignment_fb.shape) == 2
-        assert np.allclose(self.alignment_fb, self.alignment_fb.T)
-        assert ((self.alignment_fb == 0) | (self.alignment_fb == 1)).all()
-        # ALIGNMENT_H
-        assert type(self.alignment_h) == np.ndarray
-        assert len(self.alignment_h.shape) == 2
-        assert np.allclose(
-            self.alignment_h,
-            np.where(self.alignment_fb == 0, -self.alignment_h.T, self.alignment_h.T),
-        )
-        # METADATA
-        assert type(self.metadata) == pd.DataFrame
-        # SHAPE MATCHES
-        assert self.sims.shape[0] == self.logos.shape[0]
-        assert self.sims.shape[0] == self.similarity.shape[0]
-        assert self.sims.shape[0] == self.alignment_fb.shape[0]
-        assert self.sims.shape[0] == self.alignment_h.shape[0]
-        assert self.sims.shape[0] == len(self.metadata)
+        return build(motifs, metadata, max_chunk, max_parallel, use_gpu, safe=safe)
 
     def get_similarity_slice(
         self,
@@ -713,83 +768,10 @@ class MotifCompendium:
             else:
                 return similarity_slice
 
-    def __str__(self) -> str:
-        """String representation of the MotifCompendium.
-        """
-        return f"Motif Compendium with {len(self)} motifs.\n{self.metadata}"
+    def extend(self):
+        """Add new motifs to the current MotifCompendium."""
+        print("not yet implemented")
 
-    def __len__(self) -> int:
-        """Length of the MotifCompendium."""
-        return len(self.metadata)
-
-    def __getitem__(self, key: str | pd.Series) -> pd.Series | MotifCompendium:
-        """Get columns or subsets of the MotifCompendium.
-
-        Allows indexing into the MotifCompendium with the same syntax as a Pandas
-          DataFrame.
-
-        Args:
-            key: What is being used to subset the object.
-
-        Returns:
-            If a string is input, the corresponding column from the metadata is
-              returned. If a pd.Series of booleans is given, a new MotifCompendium
-
-        Note:
-            When a subset of the MotifCompendium is returned, it is returned as a new
-              MotifCompendium object and is not built safely.
-        """
-        if isinstance(key, str):
-            return self.metadata[key]
-        elif isinstance(key, pd.Series) and key.dtype == bool:
-            metadata_slice = self.metadata[key]
-            keep_idxs = list(metadata_slice.index)
-            metadata_slice = metadata_slice.reset_index(drop=True)
-            sims_slice = self.sims[keep_idxs, :, :]
-            logos_slice = self.logos[keep_idxs, :, :]
-            similarity_slice = self.similarity[keep_idxs, :][:, keep_idxs]
-            alignment_fb_slice = self.alignment_fb[keep_idxs, :][:, keep_idxs]
-            alignment_h_slice = self.alignment_h[keep_idxs, :][:, keep_idxs]
-            return MotifCompendium(
-                sims_slice,
-                logos_slice,
-                similarity_slice,
-                alignment_fb_slice,
-                alignment_h_slice,
-                metadata_slice,
-                safe=False,
-            )
-        else:
-            raise TypeError("MotifCompendium cannot be indexed by this")
-
-    def __setitem__(self, key: str, value) -> None:
-        """Set the value of a column in the metadata.
-
-        Allows adding or setting columns of the MotifCompendium with the same syntax as
-          a Pandas DataFrame.
-
-        Args:
-            key: The name of the column to set.
-            value: The value to set that column assignment to.
-
-        Note:
-            Works exactly like setting a pd.DataFrame column does.
-        """
-        if isinstance(key, str):
-            self.metadata[key] = value
-        else:
-            raise TypeError("MotifCompendium assignments cannot be done like this")
-
-    def __eq__(self, other: MotifCompendium) -> bool:
-        """Length of the MotifCompendium.
-        """
-        if isinstance(other, MotifCompendium):
-            return (
-                np.allclose(self.sims, other.sims)
-                and np.allclose(self.logos, other.logos)
-                and np.allclose(self.similarity, other.similarity)
-                and np.allclose(self.alignment_fb, other.alignment_fb)
-                and np.allclose(self.alignment_h, other.alignment_h)
-                and self.metadata.equals(other.metadata)
-            )
-        return False
+    def assign(self):
+        """Assign clusters to a new set of motifs."""
+        print("not yet implemented")

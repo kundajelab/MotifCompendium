@@ -34,12 +34,12 @@
 </head>
 <body>
     <div class="container">
-        {% for cluster_name in sorted(data.keys()) %}
+        {% for group_name in sorted(data.keys()) %}
         <div class="section-box">
-            <div class="section-title"> Cluster {{ cluster_name }} </div>
-            {% for m in data[cluster_name] %}
-            <div class="plot-name">{{ loop.index }}) {{m[0]}} </div>
-            <img src="data:image/png;base64,{{ m[1] }}" class="plot-image">
+            <div class="section-title"> Cluster {{ group_name }} </div>
+            {% for motif_dict in data[group_name] %}
+                <div class="plot-name">{{ loop.index }}) {{ motif_dict['name'] }} </div>
+                <img src="data:image/png;base64,{{ motif_dict['utf8_plot'] }}" class="plot-image">
             {% endfor %}
         </div>
         {% endfor %}

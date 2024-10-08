@@ -1,0 +1,12 @@
+name: motifcompendium
+dependencies:
+- python=3.9
+- h5py
+- igraph
+- jinja2
+- leidenalg
+- logomaker
+- numpy
+- pandas
+- seaborn
+- scikit-learn

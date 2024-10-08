@@ -1,15 +1,10 @@
-from __future__ import annotations
+import os
 
 import h5py
-import matplotlib
-
-matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-
-import os
 
 
 #######################
@@ -18,7 +13,7 @@ import os
 def plot_similarity_distribution(
     mc: MotifCompendium,
     save_loc: str,
-    vals: list(float) = [
+    vals: list[float] = [
         0.95,
         0.9,
         0.85,

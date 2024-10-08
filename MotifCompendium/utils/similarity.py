@@ -1,62 +1,55 @@
-import numpy as np
-
 import multiprocessing
+
+import numpy as np
 
 from .similarity_core_cpu import compute_similarity_and_align
 
 
-###############################
-# SIMILARITY HELPER FUNCTIONS #
-###############################
-MOTIF_8_TO_4 = np.zeros((8, 4))
-MOTIF_8_TO_4[0, 0] = 1
-MOTIF_8_TO_4[1, 0] = 1
-MOTIF_8_TO_4[2, 1] = 1
-MOTIF_8_TO_4[3, 1] = 1
-MOTIF_8_TO_4[4, 2] = 1
-MOTIF_8_TO_4[2, 2] = 1
-MOTIF_8_TO_4[6, 3] = 1
-MOTIF_8_TO_4[3, 3] = 1
+####################
+# PUBLIC FUNCTIONS #
+####################
+def compute_similarities(
+    sims_list, calculations, max_chunk, max_cpus, use_gpu, l2=False
+):
+    """Computes similarities.
 
-"""
-def reverse_complement(motifs):
-	return motifs[:, ::-1, ::-1]
-"""
+    Description
 
+    Args:
+        sims_list:
+        calculations:
+        max_chunk:
+        max_cpus:
+        use_gpu:
+        l2:
 
-def validate_sims(sims):
-    """Validate sims.
+    Returns:
+        asdf.
+
+    Notes:
+        asdf.
     """
-    assert type(sims) == np.ndarray
-    assert len(sims.shape) == 3
-    assert sims.shape[1] == 30
-    assert sims.shape[2] in [4, 8]
-    assert (sims >= 0).all()
-    assert np.allclose(sims.sum(axis=(1, 2)), 1)
+    for sims in sims_list:
+        validate_sims(sims)
+    if max_chunk is not None:
+        chunked_sims_list, chunked_calculations, chunk_map = _chunk_sims_and_calcs(
+            sims_list, calculations, max_chunk
+        )
+        chunked_results = _compute_similarity_and_align_parallel(
+            chunked_sims_list, chunked_calculations, max_cpus, use_gpu, l2=l2
+        )
+        return _reassemble_results(
+            calculations, chunked_calculations, chunked_results, chunk_map
+        )
+    else:
+        return _compute_similarity_and_align_parallel(
+            sims_list, calculations, max_cpus, use_gpu, l2=l2
+        )
 
 
-def sim8_to_sim4(sims):
-    """sims8 to sims4
-    """
-    return sims @ MOTIF_8_TO_4
-
-
-###############################################
-# SIMILARITY CALCULATION MANAGEMENT FUNCTIONS #
-###############################################
-def _chunk_axis_0(X, chunk_size):
-    """Chunks along axis 0.
-    """
-    N = X.shape[0]
-    X_chunks = []
-    for i in range(N // chunk_size):
-        X_chunks.append(X[i * chunk_size : (i + 1) * chunk_size])
-    if N % chunk_size > 0:
-        X_chunks.append(X[(i + 1) * chunk_size :])
-    assert len(X_chunks) == int(np.ceil(N / chunk_size))
-    return X_chunks
-
-
+#####################
+# PRIVATE FUNCTIONS #
+#####################
 def _chunk_sims_and_calcs(sims_list, calculations, max_chunk):
     """Chunks sims and calculations.
     """
@@ -86,12 +79,25 @@ def _chunk_sims_and_calcs(sims_list, calculations, max_chunk):
     return chunked_sims_list, chunked_calculations, chunk_map
 
 
+def _chunk_axis_0(X, chunk_size):
+    """Chunks along axis 0.
+    """
+    N = X.shape[0]
+    X_chunks = []
+    for i in range(N // chunk_size):
+        X_chunks.append(X[i * chunk_size : (i + 1) * chunk_size])
+    if N % chunk_size > 0:
+        X_chunks.append(X[(i + 1) * chunk_size :])
+    assert len(X_chunks) == int(np.ceil(N / chunk_size))
+    return X_chunks
+
+
 def _compute_similarity_and_align_parallel(
-    sims_list, calculations, max_parallel, use_gpu, l2=False
+    sims_list, calculations, max_cpus, use_gpu, l2=False
 ):
     """Compute similarities and alignments.
     """
-    if max_parallel is None:
+    if max_cpus is None:
         if use_gpu:
             # SINGLE GPU CALCULATIONS
             from .similarity_core_gpu import gpu_compute_similarity_and_align
@@ -110,33 +116,14 @@ def _compute_similarity_and_align_parallel(
             ]
     else:
         if use_gpu:
-            print("not yet implemented")
-            assert False
             # MULTI-GPU CALCULATIONS
-            # Define inputs to similarity_core_gpu.gpu_similarity_worker
-            gpu_inputs = [[] for _ in range(max_parallel)]
-            for idx, c in enumerate(calculations):
-                gpu_idx = idx % max_parallel
-                gpu_inputs[gpu_idx].append((c, sims_list[c[0]], sims_list[c[1]]))
-            worker_inputs = [(i, x) for i, x in enumerate(gpu_inputs)]
-            # Start pool with one set of inputs per process --> each process handles a single GPU
-            from .similarity_core_gpu import gpu_similarity_worker
-
-            with multiprocessing.Pool(processes=max_parallel) as p:
-                results = p.starmap(gpu_similarity_worker, worker_inputs)
-            # Correctly re-join results
-            results_dict = {}
-            for process_results in results:
-                for c, r in process_results:
-                    results_dict[c] = r
-            return [results_dict[c] for c in calculations]
+            print("max_cpu and use_gpu are incompatible options")
+            assert False
         else:
             # MULTI-CPU CALCULATIONS
             inputs = [(sims_list[c[0]], sims_list[c[1]], l2) for c in calculations]
-            max_cpus = min(
-                max_parallel, multiprocessing.cpu_count()
-            )  # don't use more cpus than available
-            with multiprocessing.Pool(processes=max_cpus) as p:
+            num_processes = min(max_cpus, multiprocessing.cpu_count())  # don't use more CPUs than available
+            with multiprocessing.Pool(processes=num_processes) as p:
                 return p.starmap(compute_similarity_and_align, inputs)
 
 
@@ -169,43 +156,3 @@ def _reassemble_results(calculations, chunked_calculations, chunked_results, chu
         results.append((sim, fb, ali))
     assert len(results) == len(calculations)
     return results
-
-
-def compute_similarities(
-    sims_list, calculations, max_chunk, max_parallel, use_gpu, l2=False
-):
-    """Computes similarities.
-
-    Description
-
-    Args:
-        sims_list:
-        calculations:
-        max_chunk:
-        max_parallel:
-        use_gpu:
-        l2:
-
-    Returns:
-        asdf.
-
-    Notes:
-        asdf.
-    """
-    for sims in sims_list:
-        validate_sims(sims)
-    if max_chunk is not None:
-        chunked_sims_list, chunked_calculations, chunk_map = _chunk_sims_and_calcs(
-            sims_list, calculations, max_chunk
-        )
-        chunked_results = _compute_similarity_and_align_parallel(
-            chunked_sims_list, chunked_calculations, max_parallel, use_gpu, l2=l2
-        )
-        return _reassemble_results(
-            calculations, chunked_calculations, chunked_results, chunk_map
-        )
-    else:
-        return _compute_similarity_and_align_parallel(
-            sims_list, calculations, max_parallel, use_gpu, l2=l2
-        )
-
