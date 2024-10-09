@@ -107,27 +107,30 @@ def cwm8_to_pair28(cwm8: np.array) -> np.array:
 
 	return pair28
 
-def cwm8_to_dinuc56(cwm8: np.array) -> np.array:
+def cwm8_to_dinuc64(cwm8: np.array) -> np.array:
 	"""Evaluate two positions at a time, as non-self A+,C+,G+,T+,A-,C-,G-,T- dinucleotide pair permutations"""
 	# Current dimensions: cwm8
 	rows, cols = cwm8.shape
 
 	# Dimensions: Dinuc64
 	new_rows = rows // 2 # Drop final position if odd length
-	new_cols = cols ** 2 - cols # Exclude repeat apirs
-	dinuc56 = np.zeros((new_rows, new_cols))
+	new_cols = cols ** 2 # Include self-repeats
+	dinuc64 = np.zeros((new_rows, new_cols))
 
 	# Calculate dinucleotide pairs, as product of distributions	
+	# Calculate dinucleotide pairs, as product of distributions	
+	mask = ~np.eye(cols, dtype=bool)
+
+	# Calculate dinucleotide pairs, as product of distributions
 	mask = ~np.eye(cols, dtype=bool)
 
 	for i in range(new_rows):
 		dinuc_pair = np.outer(cwm8[2*i,:], cwm8[2*i+1,:])
-		dinuc56[i,:] = dinuc_pair[mask]
+		dinuc64[i,:] = dinuc_pair.flatten()
 
-	return dinuc56
+	return dinuc64
 
 def shannon_entropy(prob_array: np.array, epsilon: float = 1e-10) -> float:
-	"""Calculate Shannon entropy"""
     # Normalize, flatten array
 	prob_array = prob_array / np.sum(prob_array)
 	prob_array = prob_array.flatten()
@@ -175,27 +178,28 @@ def calculate_entropy(cwm4: np.array, length: int = 30) -> tuple:
 		raise ValueError("cwm4 must be a 2D array")
 	
 	# Find normalized, standard length CWM
+	cwm4_prob = cwm4 / np.sum(cwm4)
 	rows, cols = cwm4.shape
 
-	# Create cwm8, pair28, dinuc56, as probability
+	# Create cwm8, pair28, dinuc64, as probability
 	cwm8 = cwm4_to_cwm8(cwm4)
 	cwm8_prob = cwm8 / np.sum(cwm8)
 
 	pair28 = cwm8_to_pair28(cwm8)
 	pair28_prob = pair28 / np.sum(pair28)
 
-	dinuc56 = cwm8_to_dinuc56(cwm8)
-	dinuc56_prob = dinuc56 / np.sum(dinuc56)
+	dinuc64 = cwm8_to_dinuc64(cwm8)
+	dinuc64_prob = dinuc64 / np.sum(dinuc64)
 
 	# Sum across bases (w,), normalize
 	pos_prob = np.sum(cwm8_prob, axis=1) / np.sum(cwm8_prob)
 	pair_pos_prob = np.sum(pair28_prob, axis=1) / np.sum(pair28_prob)	
-	dinuc_pos_prob = np.sum(dinuc56_prob, axis=1) / np.sum(dinuc56_prob)
+	dinuc_pos_prob = np.sum(dinuc64_prob, axis=1) / np.sum(dinuc64_prob)
 	
 	# Sum across positions (8 or 64,), normalize
 	base_prob = np.sum(cwm8_prob, axis=0) / np.sum(cwm8_prob)
 	pair_base_prob = np.sum(pair28_prob, axis=0) / np.sum(pair28_prob)	
-	dinuc_base_prob = np.sum(dinuc56_prob, axis=0) / np.sum(dinuc56_prob)
+	dinuc_base_prob = np.sum(dinuc64_prob, axis=0) / np.sum(dinuc64_prob)
 
 	# Calulcate entropy metrics
 	# (1) Base entropy
@@ -233,6 +237,12 @@ _MOTIF_4_TO_8_NEG[1, 3] = 1
 _MOTIF_4_TO_8_NEG[2, 4] = 1
 _MOTIF_4_TO_8_NEG[3, 6] = 1
 
+# Suggested entropy metric thresholds for chrombpnet-based TF-Modisco motifs
+ENTROPY_THRESHOLD_DICT = {'1_singlepeak': ('cwm_entropy', 'lt', 0.4),
+                     '2_noisemix': ('cwm_entropy', 'gt', 0.75),
+                     '3_broadsingle': ('entropy_ratio', 'gt', 3.0),
+                     '4_broadbias': ('pair_entropy_ratio', 'gt', 3.0),
+                     '5_broadCpG': ('dinuc_entropy_ratio', 'gt', 4.0)}
 
 #####################
 # PRIVATE FUNCTIONS #
