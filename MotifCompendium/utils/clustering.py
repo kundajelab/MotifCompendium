@@ -146,7 +146,7 @@ def leiden_clustering(graph: ig.Graph,
     seed: int
     ):
     """Standard Leiden clustering: Modularity, Resolution parameter = 1.0"""
-    partition_type == la.ModularityVertexPartition
+    partition_type = la.ModularityVertexPartition
     partition = la.find_partition(
             graph=g,
             partition_type=partition_type,
@@ -161,7 +161,7 @@ def weighted_leiden_clustering(g: ig.Graph,
     seed: int
     ):
     """Weighted Leiden clustering: Modularity, Resolution parameter enabled"""
-    partition_type == la.RBConfigurationVertexPartition
+    partition_type = la.RBConfigurationVertexPartition
     partition = la.find_partition(
         graph=g,
         partition_type=partition_type,
@@ -177,7 +177,7 @@ def cpm_leiden_clustering(g: ig.Graph,
     seed: int
     ):
     """Constant Potts Model (CPM) Leiden clustering: CPM Qualty, Resolution parameter enabled"""
-    partition_type == la.CPMVertexPartition
+    partition_type = la.CPMVertexPartition
     partition = la.find_partition(
         graph=g,
         partition_type=partition_type,
