@@ -668,15 +668,19 @@ class MotifCompendium:
               similarity and off-diagonal entries represent highest inter-cluster
               similarities.
         """
-        clusters = sorted(set(self.metadata[cluster_name]))
+        ci_idxs = defaultdict(list)
+        for i, c in enumerate(self.metadata[cluster_name]):
+            ci_idxs[c].append(i)
+        clusters = sorted(ci_idxs.keys())
         scores = np.zeros((len(clusters), len(clusters)))
         for i, c1 in enumerate(clusters):
+            c1_idxs = ci_idxs[c1]
+            c1_similarity_slice = self.similarity[c1_idxs, :]
             for j, c2 in enumerate(clusters):
                 if j < i:
                     continue
-                similarity_slice_ij = self.get_similarity_slice(
-                    self[cluster_name] == c1, self[cluster_name] == c2
-                )
+                c2_idxs = ci_idxs[c2]
+                similarity_slice_ij = c1_similarity_slice[:, c2_idxs]
                 if i == j:
                     scores[i, j] = np.min(similarity_slice_ij)
                 else:
