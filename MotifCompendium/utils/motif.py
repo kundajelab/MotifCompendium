@@ -77,23 +77,28 @@ def motif_to_df(motif: np.ndarray) -> pd.DataFrame:
     """Transforms a motif into a pd.DataFrame ready for plotting with logomaker."""
     return pd.DataFrame(motif, columns=["A", "C", "G", "T"])
 
+####################
+# ENTROPY #
+####################
 
-def cwm4_to_cwm8(cwm4: np.array) -> np.array:
-    """Expand base pair to A+,C+,G+,T+,A-,C-,G-,T-"""
-    rows, cols = cwm4.shape
-    cwm8 = np.zeros((rows, 2 * cols))
+def motif4_to_motif8(motif4: np.array) -> np.array:
+    """Expand base pair from 4-channel: A,C,T,G 
+    to 8-channel: A+,C+,G+,T+,A-,C-,G-,T-"""
+    rows, cols = motif4.shape
+    motif8 = np.zeros((rows, 2 * cols))
 
-    cwm8[:, :cols] = np.where(cwm4 > 0, cwm4, 0)
-    cwm8[:, cols:] = np.where(cwm4 < 0, -cwm4, 0)
+    motif8[:, :cols] = np.where(motif4 > 0, motif4, 0)
+    motif8[:, cols:] = np.where(motif4 < 0, -motif4, 0)
 
-    return cwm8
+    return motif8
 
 
-def cwm8_to_pair28(cwm8: np.array) -> np.array:
-    """Expand A+,C+,G+,T+,A-,C-,G-,T- to non-repeating, without order dinucleotide pair combinations"""
-    # Current dimensions: cwm8
-    rows, cols = cwm8.shape
-    nuc = 2  # Dinucleotide pair
+def motif8_to_copair28(motif8: np.array) -> np.array:
+    """Expand base channel from 8-channel: A+,C+,G+,T+,A-,C-,G-,T- 
+    to co-occurrrence of all, non-repeating dinucleotide pairs per position: 28 combinations."""
+    # Current dimensions: motif8
+    rows, cols = motif8.shape
+    nuc = 2  # Co-occurring pair
 
     # New dimensions
     new_cols = int(
@@ -101,7 +106,7 @@ def cwm8_to_pair28(cwm8: np.array) -> np.array:
         / (np.math.factorial(cols - nuc) * np.math.factorial(nuc))
     )  # C(n,r)
     new_cols_2 = int(new_cols / 2)
-    pair28 = np.zeros((rows, new_cols))
+    copair28 = np.zeros((rows, new_cols))
 
     ## Matrix multiplication + mask
     mask = np.tril(np.ones(cols), k=-1).astype(
@@ -109,18 +114,20 @@ def cwm8_to_pair28(cwm8: np.array) -> np.array:
     )  # Mask for bottom left off-diagonal half
 
     for i in range(rows):
-        pair_perm = np.outer(cwm8[i, :], cwm8[i, :])  # Permutations: With order
-        pair28[i, :] = pair_perm[
+        copair_perm = np.outer(motif8[i, :], motif8[i, :])  # Permutations: With order
+        copair28[i, :] = copair_perm[
             mask
         ]  # Combinations: Without order; Exclude self (e.g., AA,CC,GG,TT)
 
-    return pair28
+    return copair28
 
 
-def cwm8_to_dinuc64(cwm8: np.array) -> np.array:
-    """Evaluate two positions at a time, as non-self A+,C+,G+,T+,A-,C-,G-,T- dinucleotide pair permutations"""
-    # Current dimensions: cwm8
-    rows, cols = cwm8.shape
+def motif8_to_dinuc64(motif8: np.array) -> np.array:
+    """Transform (L-position channel, 8-base channel) motif
+    to (L/2-position channel, 64-base channel), evaluating two positions at a time, 
+    for all A+,C+,G+,T+,A-,C-,G-,T- dinucleotide pair permutations: 64 permutations."""
+    # Current dimensions: motif8
+    rows, cols = motif8.shape
 
     # Dimensions: Dinuc64
     new_rows = rows // 2  # Drop final position if odd length
@@ -135,7 +142,7 @@ def cwm8_to_dinuc64(cwm8: np.array) -> np.array:
     mask = ~np.eye(cols, dtype=bool)
 
     for i in range(new_rows):
-        dinuc_pair = np.outer(cwm8[2 * i, :], cwm8[2 * i + 1, :])
+        dinuc_pair = np.outer(motif8[2 * i, :], motif8[2 * i + 1, :])
         dinuc64[i, :] = dinuc_pair.flatten()
 
     return dinuc64
@@ -155,17 +162,172 @@ def shannon_entropy(prob_array: np.array, epsilon: float = 1e-10) -> float:
 
     return entropy
 
+def calculate_motif_entropy(motif: np.array) -> float:
+    """Calculate Shannon entropy of motif.
 
-def calculate_entropy(cwm4: np.array, length: int = 30) -> tuple:
+    Calculation: Shannon entropy on (L,8)
+    Purpose:    (High) Archetype: Noise/chaos
+                (Low) Archetype: Sharp nucleotide peak (e.g., G)
+    
+    Args: 
+        motif: (L, 4) or (L, 8) motif (np.ndarray)
+    
+    Returns:
+        motif_entropy: float
+    """
+    # Check if motif is valid
+    if not isinstance(motif, np.ndarray):
+        raise TypeError("Motif must be a NumPy array.")
+    if len(motif.shape) != 2:
+        raise ValueError("Motif must be a 2D array.")
+    if motif.shape[1] not in [4, 8]:
+        raise ValueError("Motif second dimension must be 4 or 8.")
+    if motif.shape[1] == 4:
+        motif = motif4_to_motif8(motif) # Convert motif to 8-channel
+    
+    # Standardize motif: Normalized, as probability
+    rows, cols = motif.shape
+    motif8_prob = motif / np.sum(motif)
+
+    # Calculate Shannon entropy
+    motif_entropy = shannon_entropy(motif8_prob)
+
+    return motif_entropy
+
+def calculate_posbase_entropy_ratio(motif: np.array) -> float:
+    """Calculate ratio of position-wise entropy / base_wise_entropy.
+
+    Calculation: Entropy across position (L,) / Entropy across base (8,)
+    Purpose: (High) Archetype: Single nucleotide repeats (e.g., AAAAA, GGGGG)
+    
+    Args: 
+        motif: (L, 4) or (L, 8) motif (np.ndarray)
+    
+    Returns:
+        posbase_entropy_ratio: float
+    """
+    # Check if motif is valid
+    if not isinstance(motif, np.ndarray):
+        raise TypeError("Motif must be a NumPy array.")
+    if len(motif.shape) != 2:
+        raise ValueError("Motif must be a 2D array.")
+    if motif.shape[1] not in [4, 8]:
+        raise ValueError("Motif second dimension must be 4 or 8.")
+    if motif.shape[1] == 4:
+        motif = motif4_to_motif8(motif) # Convert motif to 8-channel
+    
+    # Standardize motif: Normalized, as probability
+    rows, cols = motif.shape
+    motif8_prob = motif / np.sum(motif)
+
+    # Sum across position-wise, base-wise
+    pos_prob = np.sum(motif8_prob, axis=1) / np.sum(motif8_prob) # Sum across bases (L,), normalize
+    base_prob = np.sum(motif8_prob, axis=0) / np.sum(motif8_prob) # Sum across positions (,8), normalize
+
+    # Calculate position-wise, base-wise entropy
+    pos_entropy = shannon_entropy(pos_prob)
+    base_entropy = shannon_entropy(base_prob)
+
+    posbase_entropy_ratio = (pos_entropy / base_entropy)
+
+    return posbase_entropy_ratio
+
+def calculate_copair_entropy_ratio(motif: np.array) -> float:
+    """Calculate ratio of position-wise entropy / base co-occurrence pair entropy.
+    
+    Calculation: Entropy across position (L,) / 
+        Entropy across all pairs of co-occurring, non-repeating bases (28,)
+    Purpose: (High) Archetype: High GC, AT bias
+    
+    Args: 
+        motif: (L, 4) or (L, 8) motif (np.ndarray)
+    
+    Returns:
+        copair_entropy_ratio: float
+    """
+    # Check if motif is valid
+    if not isinstance(motif, np.ndarray):
+        raise TypeError("Motif must be a NumPy array.")
+    if len(motif.shape) != 2:
+        raise ValueError("Motif must be a 2D array.")
+    if motif.shape[1] not in [4, 8]:
+        raise ValueError("Motif second dimension must be 4 or 8.")
+    if motif.shape[1] == 4:
+        motif = motif4_to_motif8(motif) # Convert motif to 8-channel
+    
+    # Standardize motif: Normalized, as probability
+    rows, cols = motif.shape
+    motif8_prob = motif / np.sum(motif)
+
+    # Calculate joint distribution of all non-repeating, non-ordered pairs of bases, normalized
+    copair28 = motif8_to_copair28(motif)
+    copair28_prob = copair28 / np.sum(copair28)
+
+    # Sum across position-wise, base-wise
+    copair_pos_prob = np.sum(copair28_prob, axis=1) / np.sum(copair28_prob) # Sum across bases (L,), normalize
+    copair_base_prob = np.sum(copair28_prob, axis=0) / np.sum(copair28_prob) # Sum across positions (,8), normalize
+
+    # Calculate position-wise, base-wise entropy
+    copair_pos_entropy = shannon_entropy(copair_pos_prob)
+    copair_base_entropy = shannon_entropy(copair_base_prob)
+
+    copair_entropy_ratio = copair_pos_entropy / copair_base_entropy
+
+    return copair_entropy_ratio
+
+def calculate_dinuc_entropy_ratio(motif: np.array) -> float:
+    """Calculate ratio of two-position entropy / two-base entropy.
+    Calculation: Entropy across pairs of positions (L/2,) / 
+        Entropy across all dinucleotide pairs (64,)
+    Purpose: (High) Archetype: Dinucleotide repeats (e.g., GCGCGC, ATATAT)
+    
+    Args: 
+        motif: (L, 4) or (L, 8) motif (np.ndarray)
+    
+    Returns:
+        dinuc_entropy_ratio: Calculated Shannon entropy (float)
+    """
+    # Check if motif is valid
+    if not isinstance(motif, np.ndarray):
+        raise TypeError("Motif must be a NumPy array.")
+    if len(motif.shape) != 2:
+        raise ValueError("Motif must be a 2D array.")
+    if motif.shape[1] not in [4, 8]:
+        raise ValueError("Motif second dimension must be 4 or 8.")
+    if motif.shape[1] == 4:
+        motif = motif4_to_motif8(motif) # Convert motif to 8-channel
+    
+    # Standardize motif: Normalized, as probability
+    rows, cols = motif.shape
+    motif8_prob = motif / np.sum(motif)
+
+    # Calculate distribution of all dinucleotide pairs of bases, per 2 positions, normalized
+    dinuc64 = motif8_to_dinuc64(motif)
+    dinuc64_prob = dinuc64 / np.sum(dinuc64)
+
+    # Sum across position-wise, base-wise
+    dinuc_pos_prob = np.sum(dinuc64_prob, axis=1) / np.sum(dinuc64_prob) # Sum across bases (L/2,), normalize
+    dinuc_base_prob = np.sum(dinuc64_prob, axis=0) / np.sum(dinuc64_prob) # Sum across positions (,64), normalize
+
+    # Calculate position-wise, base-wise entropy
+    dinuc_pos_entropy = shannon_entropy(dinuc_pos_prob)
+    dinuc_base_entropy = shannon_entropy(dinuc_base_prob)
+
+    dinuc_entropy_ratio = dinuc_pos_entropy / dinuc_base_entropy
+
+    return dinuc_entropy_ratio
+
+
+def calculate_entropy(motif: np.array) -> tuple:
     """Calculate entropy metrics, to quantify motif information complexity.
 
     List of Entropy metrics:
-        (1) Base entropy:
-            Calculation: Shannon entropy on (30,8)
+        (1) Motif entropy:
+            Calculation: Shannon entropy on (L,8)
             Purpose:    (High) Archetype #1: Noise/chaos
                         (Low) Archetype #2: Sharp nucleotide peak (e.g., G)
         (2) Pos-base entropy ratio:
-            Calculation: Position-wise entropy on (30,) / Base-wise entropy on (4,)
+            Calculation: Position-wise entropy on (L,) / Base-wise entropy on (8,)
             Purpose:    (High) Archetype #3: Single nucleotide repeats (e.g., AAAAA, GGGGG)
         (3) Pair nucleotide ratio:
             Purpose:    (High) Archetype #4: High GC, AT bias
@@ -173,7 +335,10 @@ def calculate_entropy(cwm4: np.array, length: int = 30) -> tuple:
             Purpose:    (High) Dinucleotide repeats (e.g., GCGCGC, ATATAT)
 
     Args:
-        cwm4: (L, 4) motif.
+        motif: (L, 4) or (L, 8) motif (np.ndarray)
+        entropy_list: List of entropy metrics to calculate
+            Possible values: ['motif_entropy', 'posbase_entropy_ratio', 
+            'pair_entropy_ratio', 'dinuc_entropy_ratio']
 
     Returns:
         A tuple of (Base entropy, Pos-base ratio, Pair ratio, Dinuc ratio)
@@ -184,45 +349,45 @@ def calculate_entropy(cwm4: np.array, length: int = 30) -> tuple:
           And if all bases are present and represented equally, the weights will for all
           bases at that position will be set to 0.
     """
-    if not isinstance(cwm4, np.ndarray):
-        raise TypeError("cwm4 must be a NumPy array")
-    if len(cwm4.shape) != 2:
-        raise ValueError("cwm4 must be a 2D array")
+    if not isinstance(motif, np.ndarray):
+        raise TypeError("Motif must be a NumPy array.")
+    if len(motif.shape) != 2:
+        raise ValueError("Motif must be a 2D array.")
+    if motif.shape[1] not in [4, 8]:
+        raise ValueError("Motif second dimension must be 4 or 8.")
+    if motif.shape[1] == 4:
+        motif = motif4_to_motif8(motif)
 
-    # Find normalized, standard length CWM
-    cwm4_prob = cwm4 / np.sum(cwm4)
-    rows, cols = cwm4.shape
+    # Find normalized, standard length motif
+    rows, cols = motif.shape
 
-    # Create cwm8, pair28, dinuc64, as probability
-    cwm8 = cwm4_to_cwm8(cwm4)
-    cwm8_prob = cwm8 / np.sum(cwm8)
+    # Create motif8, pair28, dinuc64, as probability
+    motif8_prob = motif / np.sum(motif)
 
-    pair28 = cwm8_to_pair28(cwm8)
+    pair28 = motif8_to_pair28(motif)
     pair28_prob = pair28 / np.sum(pair28)
 
-    dinuc64 = cwm8_to_dinuc64(cwm8)
+    dinuc64 = motif8_to_dinuc64(motif)
     dinuc64_prob = dinuc64 / np.sum(dinuc64)
 
     # Sum across bases (w,), normalize
-    pos_prob = np.sum(cwm8_prob, axis=1) / np.sum(cwm8_prob)
+    pos_prob = np.sum(motif8_prob, axis=1) / np.sum(motif8_prob)
     pair_pos_prob = np.sum(pair28_prob, axis=1) / np.sum(pair28_prob)
     dinuc_pos_prob = np.sum(dinuc64_prob, axis=1) / np.sum(dinuc64_prob)
 
     # Sum across positions (8 or 64,), normalize
-    base_prob = np.sum(cwm8_prob, axis=0) / np.sum(cwm8_prob)
+    base_prob = np.sum(motif8_prob, axis=0) / np.sum(motif8_prob)
     pair_base_prob = np.sum(pair28_prob, axis=0) / np.sum(pair28_prob)
     dinuc_base_prob = np.sum(dinuc64_prob, axis=0) / np.sum(dinuc64_prob)
 
     # Calulcate entropy metrics
-    # (1) Base entropy
-    cwm_entropy = shannon_entropy(cwm8_prob)
+    # (1) Shannon entropy
+    motif_entropy = shannon_entropy(motif8_prob)
 
-    # (2) Pos-base Entropy ratio:
+    # (2) Pos-base entropy ratio:
     pos_entropy = shannon_entropy(pos_prob)
     base_entropy = shannon_entropy(base_prob)
-    entropy_ratio = (
-        pos_entropy / base_entropy
-    )  # High entropy when: High positional = Broad profile, Low base: Single base
+    entropy_ratio = (pos_entropy / base_entropy)
 
     # (3) Pair nucleotide ratio:
     pair_pos_entropy = shannon_entropy(pair_pos_prob)
@@ -234,7 +399,7 @@ def calculate_entropy(cwm4: np.array, length: int = 30) -> tuple:
     dinuc_base_entropy = shannon_entropy(dinuc_base_prob)
     dinuc_entropy_ratio = dinuc_pos_entropy / dinuc_base_entropy
 
-    return (cwm_entropy, entropy_ratio, pair_entropy_ratio, dinuc_entropy_ratio)
+    return (motif_entropy, entropy_ratio, pair_entropy_ratio, dinuc_entropy_ratio)
 
 
 #####################
@@ -251,16 +416,6 @@ _MOTIF_4_TO_8_NEG[0, 1] = 1
 _MOTIF_4_TO_8_NEG[1, 3] = 1
 _MOTIF_4_TO_8_NEG[2, 4] = 1
 _MOTIF_4_TO_8_NEG[3, 6] = 1
-
-# Suggested entropy metric thresholds for chrombpnet-based TF-Modisco motifs
-ENTROPY_THRESHOLD_DICT = {
-    "1_singlepeak": ("cwm_entropy", "lt", 0.4),
-    "2_noisemix": ("cwm_entropy", "gt", 0.75),
-    "3_broadsingle": ("entropy_ratio", "gt", 3.0),
-    "4_broadbias": ("pair_entropy_ratio", "gt", 3.0),
-    "5_broadCpG": ("dinuc_entropy_ratio", "gt", 4.0),
-}
-
 
 #####################
 # PRIVATE FUNCTIONS #

@@ -3,6 +3,7 @@ import leidenalg as la
 import numpy as np
 import pandas as pd
 import sklearn.cluster
+import scipy.sparse
 
 
 ######################
@@ -66,11 +67,52 @@ def cluster(
 
 def create_sparse_csr(similarity_matrix, similarity_threshold=0.5):
     """Create a sparse version of the similarity matrix, by filtering out scores below a similarity_threshold."""
-    sparse_similarity_matrix = sparse.csr_matrix(
+    sparse_similarity_matrix = scipy.sparse.csr_matrix(
         np.where(similarity_matrix >= similarity_threshold, similarity_matrix, 0)
     )
     return sparse_similarity_matrix
 
+def leiden_clustering(g: ig.Graph, n_iterations: int, seed: int):
+    """Standard Leiden clustering: Modularity, Resolution parameter = 1.0"""
+    partition_type = la.ModularityVertexPartition
+    partition = la.find_partition(
+        graph=g,
+        partition_type=partition_type,
+        weights="weight",  # Use edge attribute of graph
+        n_iterations=n_iterations,
+        seed=seed * 100,
+    )
+    return partition
+
+def weighted_leiden_clustering(
+    g: ig.Graph, resolution_parameter: float, n_iterations: int, seed: int
+):
+    """Weighted Leiden clustering: Modularity, Resolution parameter enabled"""
+    partition_type = la.RBConfigurationVertexPartition
+    partition = la.find_partition(
+        graph=g,
+        partition_type=partition_type,
+        weights="weight",  # Use edge attribute of graph
+        resolution_parameter=resolution_parameter,
+        n_iterations=n_iterations,
+        seed=seed * 100,
+    )
+    return partition.membership
+
+def cpm_leiden_clustering(
+    g: ig.Graph, resolution_parameter: float, n_iterations: int, seed: int
+):
+    """Constant Potts Model (CPM) Leiden clustering: CPM Qualty, Resolution parameter enabled"""
+    partition_type = la.CPMVertexPartition
+    partition = la.find_partition(
+        graph=g,
+        partition_type=partition_type,
+        weights="weight",  # Use edge attribute of graph
+        resolution_parameter=resolution_parameter,
+        n_iterations=n_iterations,
+        seed=seed * 100,
+    )
+    return partition.membership
 
 def run_leiden_clustering(
     similarity_matrix: np.ndarray,
@@ -136,14 +178,14 @@ def run_leiden_clustering(
             partition = leiden_clustering(g, n_iterations, seed)
         elif algorithm == "weighted_leiden":
             partition = weighted_leiden_clustering(
-                g, partition_type, resolution_parameter, n_iterations, seed
+                g, resolution_parameter, n_iterations, seed
             )
         elif algorithm == "cpm_leiden":
             partition = cpm_leiden_clustering(
-                g, partition_type, resolution_parameter, n_iterations, seed
+                g, resolution_parameter, n_iterations, seed
             )
         else:
-            raise ValueError(f"Unsupported Leiden clustering type: {partition_type}")
+            raise ValueError(f"Unsupported clustering type: {algorithm}")
 
     quality = partition.quality()
     membership = np.array(partition.membership)
@@ -152,51 +194,6 @@ def run_leiden_clustering(
         best_quality = quality
         best_membership = membership
     return best_membership
-
-
-def leiden_clustering(graph: ig.Graph, n_iterations: int, seed: int):
-    """Standard Leiden clustering: Modularity, Resolution parameter = 1.0"""
-    partition_type = la.ModularityVertexPartition
-    partition = la.find_partition(
-        graph=g,
-        partition_type=partition_type,
-        weights="weight",  # Use edge attribute of graph
-        n_iterations=n_iterations,
-        seed=seed * 100,
-    )
-    return partition
-
-
-def weighted_leiden_clustering(
-    g: ig.Graph, resolution_parameter: float, n_iterations: int, seed: int
-):
-    """Weighted Leiden clustering: Modularity, Resolution parameter enabled"""
-    partition_type = la.RBConfigurationVertexPartition
-    partition = la.find_partition(
-        graph=g,
-        partition_type=partition_type,
-        weights="weight",  # Use edge attribute of graph
-        resolution_parameter=resolution_parameter,
-        n_iterations=n_iterations,
-        seed=seed * 100,
-    )
-    return partition.membership
-
-
-def cpm_leiden_clustering(
-    g: ig.Graph, resolution_parameter: float, n_iterations: int, seed: int
-):
-    """Constant Potts Model (CPM) Leiden clustering: CPM Qualty, Resolution parameter enabled"""
-    partition_type = la.CPMVertexPartition
-    partition = la.find_partition(
-        graph=g,
-        partition_type=partition_type,
-        weights="weight",  # Use edge attribute of graph
-        resolution_parameter=resolution_parameter,
-        n_iterations=n_iterations,
-        seed=seed * 100,
-    )
-    return partition.membership
 
 
 #######################

@@ -320,7 +320,7 @@ class MotifCompendium:
         similarity: np.ndarray,
         alignment_fr: np.ndarray,
         alignment_h: np.ndarray,
-        metadata: np.ndarray,
+        metadata: pd.DataFrame,
         safe: bool,
     ) -> None:
         """MotifCompendium constructor.
@@ -806,6 +806,161 @@ class MotifCompendium:
                 return similarity_slice_df
             else:
                 return similarity_slice
+
+    def filter_metadata(
+        self,
+        filter_dict: dict
+    ) -> None:
+        """Filter motifs based on metadata column.
+
+        Creates a new column in the metadata per filter, 
+        with True/False values based on the filter.
+
+        Args:
+            filter_dict: A nested dict
+                key: Filter name (str), 
+                value: Nested dict
+                    key: "column"; value: column name (str) 
+                    key: "threshold"; value: float, int, or str
+                    key: "operation"; value: boolean operations (str)
+                    [I.e., "gt", "ge", "lt", "le", "eq", "ne"]
+        """
+        # Check entropy metric column, threshold, operation
+        for filter, parameter_dict in filter_dict.items():
+            if not isinstance(filter, str):
+                raise TypeError("Filter name must be a string.")
+            for key, value in parameter_dict.items():
+                if key == "column":
+                    if value not in self.metadata.columns:
+                        raise ValueError(f"Column {value} does not exist.")
+                elif key == "threshold":
+                    if not isinstance(float(value), float):
+                        raise TypeError("Threshold must be a float or int.")
+                elif key == "operation":
+                    if value not in ["gt", "ge", "lt", "le", "eq", "ne"]:
+                        raise ValueError("Operation must be one of: \
+                                        'gt', 'ge', 'lt', 'le', 'eq', 'ne'.")
+            
+            # Filter self.metadata
+            column = parameter_dict["column"]
+            threshold = float(parameter_dict["threshold"])
+            operation = parameter_dict["operation"]
+            
+            if operation == "gt":
+                self.metadata[filter] = self.metadata[column] > threshold
+            elif operation == "ge":
+                self.metadata[filter] = self.metadata[column] >= threshold
+            elif operation == "lt":
+                self.metadata[filter] = self.metadata[column] < threshold
+            elif operation == "le":
+                self.metadata[filter] = self.metadata[column] <= threshold
+            elif operation == "eq":
+                self.metadata[filter] = self.metadata[column] == threshold
+            elif operation == "ne":
+                self.metadata[filter] = self.metadata[column] != threshold
+            else:
+                raise ValueError("Operation must be one of: 'gt', 'ge', 'lt', 'le', 'eq', 'ne'.")
+
+    def calculate_entropy(
+        self,
+        entropy_list: list
+    ) -> None:
+        """Calculate entropy metrics, to quantify motif information complexity.
+
+        List of Entropy metrics:
+            (1) Motif entropy:
+                Calculation: Shannon entropy on (L,8)
+                Purpose:    (High) Archetype #1: Noise/chaos
+                            (Low) Archetype #2: Sharp nucleotide peak (e.g., G)
+            (2) Pos-base entropy ratio:
+                Calculation: Position-wise entropy on (L,) / Base-wise entropy on (8,)
+                Purpose:    (High) Archetype #3: Single nucleotide repeats (e.g., AAAAA, GGGGG)
+            (3) Co-pair entropy ratio:
+                Calculation: Entropy across position (L,) / 
+                    Entropy across all pairs of co-occurring, non-repeating bases (28,)
+                Purpose:    (High) Archetype #4: High GC, AT bias
+            (4) Dinucleotide entropy ratio:
+                Calculation: Entropy across pairs of positions (L/2,) / 
+                    Entropy across all dinucleotide pairs (64,)
+                Purpose:    (High) Dinucleotide repeats (e.g., GCGCGC, ATATAT)
+
+        Args:
+            entropy_list: List of entropy metrics to calculate
+                Possible values: ['motif_entropy', 'posbase_entropy_ratio', 
+                'copair_entropy_ratio', 'dinuc_entropy_ratio']
+        """
+        # Check if entropy metrics are valid
+        entropy_list = list(set(entropy_list)) # Convert entropy_list into a unique list
+        valid_entropy_metrics = ["motif_entropy", "posbase_entropy_ratio", "pair_entropy_ratio", "dinuc_entropy_ratio"]
+        for entropy_metric in entropy_list:
+            if entropy_metric not in valid_entropy_metrics:
+                raise ValueError(f"Entropy metric {entropy_metric} is not valid. Must be one of: {valid_entropy_metrics}")
+        
+        # Calculate entropy metrics
+        for entropy_metric in entropy_list:
+            if entropy_metric == "motif_entropy":
+                metrics_list = []
+                for i in range(self.motifs.shape[0]):
+                    metric = utils_motif.calculate_motif_entropy(self.motifs[i])
+                    metrics_list.append(metric)
+                metrics_df = pd.DataFrame(metrics_list, columns=["motif_entropy"])
+                self.metadata = pd.concat([self.metadata, metrics_df], axis=1) # Update self.metadata
+
+            elif entropy_metric == "posbase_entropy_ratio":
+                metrics_list = []
+                for i in range(self.motifs.shape[0]):
+                    metric = utils_motif.calculate_posbase_entropy_ratio(self.motifs[i])
+                    metrics_list.append(metric)
+                metrics_df = pd.DataFrame(metrics_list, columns=["posbase_entropy_ratio"])
+                self.metadata = pd.concat([self.metadata, metrics_df], axis=1) # Update self.metadata
+            
+            elif entropy_metric == "copair_entropy_ratio":
+                metrics_list = []
+                for i in range(self.motifs.shape[0]):
+                    metric = utils_motif.calculate_copair_entropy_ratio(self.motifs[i])
+                    metrics_list.append(metric)
+                metrics_df = pd.DataFrame(metrics_list, columns=["copair_entropy_ratio"])
+                self.metadata = pd.concat([self.metadata, metrics_df], axis=1) # Update self.metadata
+            
+            elif entropy_metric == "dinuc_entropy_ratio":
+                metrics_list = []
+                for i in range(self.motifs.shape[0]):
+                    metric = utils_motif.calculate_dinuc_entropy_ratio(self.motifs[i])
+                    metrics_list.append(metric)
+                metrics_df = pd.DataFrame(metrics_list, columns=["dinuc_entropy_ratio"])
+                self.metadata = pd.concat([self.metadata, metrics_df], axis=1) # Update self.metadata
+            
+            else:
+                raise ValueError(f"Entropy metric {entropy_metric} is not valid. Must be one of: {valid_entropy_metrics}")
+
+    def filter_entropy(
+        self,
+        entropy_dict: dict
+    ) -> None:
+        """Calculate and filter motifs based on entropy metrics.
+        
+        Args:
+            filter_dict: A nested dict
+                key: Filter name (str), 
+                value: Nested dict
+                    key: "column"; value: column name (str) 
+                    key: "threshold"; value: float, int, or str
+                    key: "operation"; value: boolean operations (str)
+                    [I.e., "gt", "ge", "lt", "le", "eq", "ne"]
+        """
+        # Collect entropy metrics to calculate
+        entropy_list = []
+        for filter, parameter_dict in entropy_dict.items():
+            for key, value in parameter_dict.items():
+                if key == "column":
+                    entropy_list.append(value)
+
+        # Calculate entropy metrics
+        entropy_list = list(set(entropy_list))
+        self.calculate_entropy(entropy_list)
+        
+        # Filter based on entropy metrics
+        self.filter_metadata(entropy_dict)
 
     def extend(self):
         """Add new motifs to the current MotifCompendium."""
