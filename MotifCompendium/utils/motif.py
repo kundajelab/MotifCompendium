@@ -80,7 +80,6 @@ def motif_to_df(motif: np.ndarray) -> pd.DataFrame:
 ####################
 # ENTROPY #
 ####################
-
 def motif4_to_motif8(motif4: np.array) -> np.array:
     """Expand base pair from 4-channel: A,C,T,G 
     to 8-channel: A+,C+,G+,T+,A-,C-,G-,T-"""
@@ -94,8 +93,9 @@ def motif4_to_motif8(motif4: np.array) -> np.array:
 
 
 def motif8_to_copair28(motif8: np.array) -> np.array:
-    """Expand base channel from 8-channel: A+,C+,G+,T+,A-,C-,G-,T- 
-    to co-occurrrence of all, non-repeating dinucleotide pairs per position: 28 combinations."""
+    """Expand base channel (e.g., 8-channel: A+,C+,G+,T+,A-,C-,G-,T-)
+    to co-occurrrence of all, non-repeating dinucleotide pairs per position
+    (e.g., 28-channel combinations)."""
     # Current dimensions: motif8
     rows, cols = motif8.shape
     nuc = 2  # Co-occurring pair
@@ -316,90 +316,6 @@ def calculate_dinuc_entropy_ratio(motif: np.array) -> float:
     dinuc_entropy_ratio = dinuc_pos_entropy / dinuc_base_entropy
 
     return dinuc_entropy_ratio
-
-
-def calculate_entropy(motif: np.array) -> tuple:
-    """Calculate entropy metrics, to quantify motif information complexity.
-
-    List of Entropy metrics:
-        (1) Motif entropy:
-            Calculation: Shannon entropy on (L,8)
-            Purpose:    (High) Archetype #1: Noise/chaos
-                        (Low) Archetype #2: Sharp nucleotide peak (e.g., G)
-        (2) Pos-base entropy ratio:
-            Calculation: Position-wise entropy on (L,) / Base-wise entropy on (8,)
-            Purpose:    (High) Archetype #3: Single nucleotide repeats (e.g., AAAAA, GGGGG)
-        (3) Pair nucleotide ratio:
-            Purpose:    (High) Archetype #4: High GC, AT bias
-        (4) Dinucleotide ratio:
-            Purpose:    (High) Dinucleotide repeats (e.g., GCGCGC, ATATAT)
-
-    Args:
-        motif: (L, 4) or (L, 8) motif (np.ndarray)
-        entropy_list: List of entropy metrics to calculate
-            Possible values: ['motif_entropy', 'posbase_entropy_ratio', 
-            'pair_entropy_ratio', 'dinuc_entropy_ratio']
-
-    Returns:
-        A tuple of (Base entropy, Pos-base ratio, Pair ratio, Dinuc ratio)
-
-    Notes:
-        If a position only has one base at a position, it will not change. If only two
-          bases are present but are represented equally, their weights will be halved.
-          And if all bases are present and represented equally, the weights will for all
-          bases at that position will be set to 0.
-    """
-    if not isinstance(motif, np.ndarray):
-        raise TypeError("Motif must be a NumPy array.")
-    if len(motif.shape) != 2:
-        raise ValueError("Motif must be a 2D array.")
-    if motif.shape[1] not in [4, 8]:
-        raise ValueError("Motif second dimension must be 4 or 8.")
-    if motif.shape[1] == 4:
-        motif = motif4_to_motif8(motif)
-
-    # Find normalized, standard length motif
-    rows, cols = motif.shape
-
-    # Create motif8, pair28, dinuc64, as probability
-    motif8_prob = motif / np.sum(motif)
-
-    pair28 = motif8_to_pair28(motif)
-    pair28_prob = pair28 / np.sum(pair28)
-
-    dinuc64 = motif8_to_dinuc64(motif)
-    dinuc64_prob = dinuc64 / np.sum(dinuc64)
-
-    # Sum across bases (w,), normalize
-    pos_prob = np.sum(motif8_prob, axis=1) / np.sum(motif8_prob)
-    pair_pos_prob = np.sum(pair28_prob, axis=1) / np.sum(pair28_prob)
-    dinuc_pos_prob = np.sum(dinuc64_prob, axis=1) / np.sum(dinuc64_prob)
-
-    # Sum across positions (8 or 64,), normalize
-    base_prob = np.sum(motif8_prob, axis=0) / np.sum(motif8_prob)
-    pair_base_prob = np.sum(pair28_prob, axis=0) / np.sum(pair28_prob)
-    dinuc_base_prob = np.sum(dinuc64_prob, axis=0) / np.sum(dinuc64_prob)
-
-    # Calulcate entropy metrics
-    # (1) Shannon entropy
-    motif_entropy = shannon_entropy(motif8_prob)
-
-    # (2) Pos-base entropy ratio:
-    pos_entropy = shannon_entropy(pos_prob)
-    base_entropy = shannon_entropy(base_prob)
-    entropy_ratio = (pos_entropy / base_entropy)
-
-    # (3) Pair nucleotide ratio:
-    pair_pos_entropy = shannon_entropy(pair_pos_prob)
-    pair_base_entropy = shannon_entropy(pair_base_prob)
-    pair_entropy_ratio = pair_pos_entropy / pair_base_entropy
-
-    # (4) Dinucleotide ratio
-    dinuc_pos_entropy = shannon_entropy(dinuc_pos_prob)
-    dinuc_base_entropy = shannon_entropy(dinuc_base_prob)
-    dinuc_entropy_ratio = dinuc_pos_entropy / dinuc_base_entropy
-
-    return (motif_entropy, entropy_ratio, pair_entropy_ratio, dinuc_entropy_ratio)
 
 
 #####################

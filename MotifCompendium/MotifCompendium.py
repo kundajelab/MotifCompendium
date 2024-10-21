@@ -39,6 +39,9 @@ def load(file_loc: str, safe: bool = True) -> MotifCompendium:
         alignment_fr = f["alignment_fr"][:]
         alignment_h = f["alignment_h"][:]
     metadata = pd.read_hdf(file_loc, key="metadata")
+    # Convert strings to numbers, boolean, etc.
+    metadata = metadata.apply(pd.to_numeric, errors='ignore')
+    metadata = metadata.replace({"True": True, "False": False})
     return MotifCompendium(
         motifs, similarity, alignment_fr, alignment_h, metadata, safe
     )
@@ -178,14 +181,14 @@ def build_from_modisco(
     max_cpus_modisco = max_cpus
     max_cpus_similarity = None if use_gpu else max_cpus
     # Load from Modisco
-    motifs, motif_names, seqlet_counts = utils_loader.load_modiscos(
+    motifs, motif_names, seqlet_counts, model_names = utils_loader.load_modiscos(
         modisco_dict, max_cpus=max_cpus_modisco, ic=ic
     )
     # Build metadata
     metadata = pd.DataFrame()
     metadata["name"] = motif_names
     metadata["num_seqlets"] = seqlet_counts
-    metadata["model"] = metadata["name"].str.split("-").str[0]
+    metadata["model"] = model_names
     metadata["posneg"] = metadata["name"].str.split(".").str[0].str.split("-").str[1]
     # Construct object
     return build(
@@ -363,7 +366,9 @@ class MotifCompendium:
             f.create_dataset("similarity", data=self.similarity)
             f.create_dataset("alignment_fr", data=self.alignment_fr)
             f.create_dataset("alignment_h", data=self.alignment_h)
+        self.metadata = self.metadata.applymap(str)
         self.metadata.to_hdf(save_loc, key="metadata", mode="a")
+        print(f"MotifCompendium saved to: {save_loc}")
 
     def validate(self) -> None:
         """Verifies the integrity of the MotifCompendium.
@@ -937,7 +942,7 @@ class MotifCompendium:
         self,
         entropy_dict: dict
     ) -> None:
-        """Calculate and filter motifs based on entropy metrics.
+        """Calculate and filter motifs based on entropy metrics.\
         
         Args:
             filter_dict: A nested dict

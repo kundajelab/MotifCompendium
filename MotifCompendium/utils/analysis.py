@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
+import MotifCompendium
 
 #######################
 # SIMILARITY ANALYSES #
@@ -188,10 +189,15 @@ def judge_clustering(mc: MotifCompendium, clustering: str, base_saveloc: str) ->
         base_saveloc: The file prefix to save the clustering quality and the clustering
           quality plot to.
     """
-    print("getting quality")
+    print("Getting quality...")
+    if not os.path.exists(os.path.dirname(base_saveloc)):
+        print(f"Making directory: {os.path.dirname(base_saveloc)}")
+        os.makedirs(os.path.dirname(base_saveloc), exist_ok=True)
+
     if os.path.exists(f"{base_saveloc}_quality.npy"):
         clustering_quality = np.load(f"{base_saveloc}_quality.npy")
     else:
+        print("Computing quality...")
         clustering_quality = mc.clustering_quality(clustering)
         np.save(f"{base_saveloc}_quality.npy", clustering_quality)
     print("plotting")

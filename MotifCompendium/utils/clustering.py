@@ -3,7 +3,6 @@ import leidenalg as la
 import numpy as np
 import pandas as pd
 import sklearn.cluster
-import scipy.sparse
 
 
 ######################
@@ -39,7 +38,10 @@ def cluster(
     """
     # Leiden
     if algorithm in ["leiden", "weighted_leiden", "cpm_leiden"]:
-        return run_leiden_clustering(similarity_matrix, algorithm, **kwargs_filtered)
+        kwargs_filtered = {
+            k: v for k, v in enumerate(kwargs) if k in ["n_seeds", "n_iterations", "resolution_parameter"]
+        }
+        return run_leiden_clustering(similarity_matrix, algorithm, similarity_threshold, **kwargs_filtered)
 
     # CC
     elif algorithm == "cc":
@@ -63,57 +65,6 @@ def cluster(
 #####################
 # LEIDEN CLUSTERING #
 #####################
-
-
-def create_sparse_csr(similarity_matrix, similarity_threshold=0.5):
-    """Create a sparse version of the similarity matrix, by filtering out scores below a similarity_threshold."""
-    sparse_similarity_matrix = scipy.sparse.csr_matrix(
-        np.where(similarity_matrix >= similarity_threshold, similarity_matrix, 0)
-    )
-    return sparse_similarity_matrix
-
-def leiden_clustering(g: ig.Graph, n_iterations: int, seed: int):
-    """Standard Leiden clustering: Modularity, Resolution parameter = 1.0"""
-    partition_type = la.ModularityVertexPartition
-    partition = la.find_partition(
-        graph=g,
-        partition_type=partition_type,
-        weights="weight",  # Use edge attribute of graph
-        n_iterations=n_iterations,
-        seed=seed * 100,
-    )
-    return partition
-
-def weighted_leiden_clustering(
-    g: ig.Graph, resolution_parameter: float, n_iterations: int, seed: int
-):
-    """Weighted Leiden clustering: Modularity, Resolution parameter enabled"""
-    partition_type = la.RBConfigurationVertexPartition
-    partition = la.find_partition(
-        graph=g,
-        partition_type=partition_type,
-        weights="weight",  # Use edge attribute of graph
-        resolution_parameter=resolution_parameter,
-        n_iterations=n_iterations,
-        seed=seed * 100,
-    )
-    return partition.membership
-
-def cpm_leiden_clustering(
-    g: ig.Graph, resolution_parameter: float, n_iterations: int, seed: int
-):
-    """Constant Potts Model (CPM) Leiden clustering: CPM Qualty, Resolution parameter enabled"""
-    partition_type = la.CPMVertexPartition
-    partition = la.find_partition(
-        graph=g,
-        partition_type=partition_type,
-        weights="weight",  # Use edge attribute of graph
-        resolution_parameter=resolution_parameter,
-        n_iterations=n_iterations,
-        seed=seed * 100,
-    )
-    return partition.membership
-
 def run_leiden_clustering(
     similarity_matrix: np.ndarray,
     algorithm: str,
@@ -121,7 +72,6 @@ def run_leiden_clustering(
     n_seeds: int = 2,
     n_iterations: int = -1,
     resolution_parameter: float = 1.0,
-    **kwargs,
 ) -> np.ndarray:
     """Run Leiden clustering.
 
@@ -138,33 +88,19 @@ def run_leiden_clustering(
         n_seeds (int, optional): Number of seeds
         n_iterations (int, optional): Number of clustering iterations
         resolution_parameter (float, optional)
-        **kwargs: Any additional arguments to be passed to the clustering algorithm of
-          choice.
 
     Returns:
         A np.ndarray of memberships
     """
-    # Open kwargs
-    for key, value in kwargs.items():
-        if key == "n_seeds":
-            n_seeds = value
-        if key == "n_iterations":
-            n_iterations = value
-        if key == "resolution":
-            resolution_parameter = value
-
-    # Convert similarity matrix into sparse csr matrix
-    sparse_similarity_matrix = create_sparse_csr(
-        similarity_matrix, similarity_threshold
-    )
+    # Apply similarity threshold
+    sparse_similarity_matrix = np.where(
+        similarity_matrix >= similarity_threshold, similarity_matrix, 0)
 
     # Convert sparse matrix to edge list
     n_vertices = sparse_similarity_matrix.shape[0]  # Assuming square similarity matrix
-    rows, cols = (
-        sparse_similarity_matrix.nonzero()
-    )  # Construct edges from non-zero entries
+    rows, cols = np.nonzero(sparse_similarity_matrix)  # Construct edges from non-zero entries
     edges = list(zip(rows, cols))
-    weights = sparse_similarity_matrix.data
+    weights = sparse_similarity_matrix[rows, cols]
 
     # Create igraph object
     g = ig.Graph(n_vertices, edges=edges)
@@ -175,17 +111,31 @@ def run_leiden_clustering(
 
     for seed in range(1, n_seeds + 1):
         if algorithm == "leiden":
-            partition = leiden_clustering(g, n_iterations, seed)
-        elif algorithm == "weighted_leiden":
-            partition = weighted_leiden_clustering(
-                g, resolution_parameter, n_iterations, seed
-            )
-        elif algorithm == "cpm_leiden":
-            partition = cpm_leiden_clustering(
-                g, resolution_parameter, n_iterations, seed
+            partition_type = la.ModularityVertexPartition
+            # Run clustering
+            partition = la.find_partition(
+                graph=g,
+                partition_type=partition_type,
+                weights="weight",  # Use edge attribute of graph
+                n_iterations=n_iterations,
+                seed=seed * 100,
             )
         else:
-            raise ValueError(f"Unsupported clustering type: {algorithm}")
+            if algorithm == "weighted_leiden":
+                partition_type = la.RBConfigurationVertexPartition
+            elif algorithm == "cpm_leiden":
+                partition_type = la.CPMVertexPartition
+            else:
+                raise ValueError(f"Unsupported clustering type: {algorithm}")
+            # Run clustering
+            partition = la.find_partition(
+                    graph=g,
+                    partition_type=partition_type,
+                    weights="weight",  # Use edge attribute of graph
+                    resolution_parameter=resolution_parameter,
+                    n_iterations=n_iterations,
+                    seed=seed * 100,
+                )
 
     quality = partition.quality()
     membership = np.array(partition.membership)

@@ -13,7 +13,7 @@ from .motif import ic_scale, motif_4_to_8
 def load_modiscos(
     modisco_dict: dict[str, str], max_cpus: int | None = None, ic: bool = True
 ) -> tuple[np.ndarray, list[str], list[int]]:
-    """Load motifs, names, and seqlet counts from multiple Modisco file.
+    """Load motifs, names, seqlet counts, and model names from multiple Modisco file.
 
     Motifs from each Modisco file are extracted by calling load_modisco(). The results
       are then concatenated. Loading can be parallelized across Modisco files.
@@ -25,7 +25,7 @@ def load_modiscos(
         ic: Whether or not to apply information content scaling to Modisco motifs.
 
     Returns:
-        A tuple of motifs, motif names, and number of seqlets per motifs.
+        A tuple of motifs, motif names, number of seqlets per motifs, and model names.
 
     Notes:
         For parallel loading, the number of processes used will be the minimum of
@@ -36,13 +36,14 @@ def load_modiscos(
     """
     if max_cpus is None:
         # Load serially
-        sims, motif_names, seqlet_counts = [], [], []
+        sims, motif_names, seqlet_counts, model_names = [], [], [], []
         for m_name, m_loc in modisco_dict.items():
             m_sims, m_motif_names, m_seqlet_counts = load_modisco(m_loc, ic=ic)
             m_motif_names = [f"{m_name}-{x}" for x in m_motif_names]
             sims.append(m_sims)
             motif_names += m_motif_names
             seqlet_counts += m_seqlet_counts
+            model_names += [m_name] * len(m_motif_names)
         sims = np.concatenate(sims, axis=0)
     else:
         # Load in parallel
@@ -56,15 +57,16 @@ def load_modiscos(
         payloads = [(m_loc, ic) for m_loc in m_locs]
         with multiprocessing.Pool(processes=num_processes) as p:
             results = p.starmap(load_modisco, payloads)
-        sims, motif_names, seqlet_counts = [], [], []
+        sims, motif_names, seqlet_counts, model_names = [], [], [], []
         for i, r in enumerate(results):
             m_sims, m_motif_names, m_seqlet_counts = r
             m_motif_names = [f"{m_names[i]}-{x}" for x in m_motif_names]
             sims.append(m_sims)
             motif_names += m_motif_names
             seqlet_counts += m_seqlet_counts
+            model_names += [m_names[i]] * len(m_motif_names)
         sims = np.concatenate(sims, axis=0)
-    return sims, motif_names, seqlet_counts
+    return sims, motif_names, seqlet_counts, model_names
 
 
 def load_modisco(
