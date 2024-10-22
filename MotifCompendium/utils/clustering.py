@@ -12,7 +12,7 @@ import sklearn.cluster
 def cluster(
     similarity_matrix: np.ndarray,
     similarity_threshold: float = 0.9,
-    algorithm: str,
+    algorithm: str = "leiden",
     **kwargs,
 ) -> list[int]:
     """Cluster a similarity matrix.
@@ -39,16 +39,12 @@ def cluster(
     """
     match algorithm:
         # Leiden
-        case "leiden":
-            thresholded_matrix = scipy.sparse.similarity_matrix(
-                similarity_matrix * (similarity_matrix >= similarity_threshold)
-            )
-            return leiden_clustering(thresholded_matrix, **kwargs)
-        case "cpm_leiden":
-            thresholded_matrix = scipy.sparse.similarity_matrix(
-                similarity_matrix * (similarity_matrix >= similarity_threshold)
-            )
-            return cpm_leiden_clustering(thresholded_matrix, **kwargs)
+        case "leiden" | "weighted_leiden" | "modularity_leiden":
+            adjacency_matrix= similarity_matrix * (similarity_matrix >= similarity_threshold)
+            return modularity_leiden_clustering(adjacency_matrix, **kwargs)
+        case "cpm_leiden" | "cpm_weighted_leiden":
+            adjacency_matrix = similarity_matrix * (similarity_matrix >= similarity_threshold)
+            return cpm_leiden_clustering(adjacency_matrix, **kwargs)
         # Connected-component
         case "cc":
             adjacency_matrix = similarity_matrix >= similarity_threshold
@@ -67,7 +63,7 @@ def cluster(
 #####################
 # LEIDEN CLUSTERING #
 #####################
-def leiden_clustering(
+def modularity_leiden_clustering(
     thresholded_matrix: np.ndarray,
     resolution: float = 1,
     leiden_iterations: int = 2,
@@ -82,7 +78,7 @@ def leiden_clustering(
         partition = la.find_partition(
             g,
             la.ModularityVertexPartition,
-            weights="weight",
+            weights=None,
             resolution_parameter=resolution,
             n_iterations=leiden_iterations,
         )
@@ -107,7 +103,7 @@ def cpm_leiden_clustering(
         partition = la.find_partition(
             g,
             la.CPMVertexPartition,
-            weights="weight",
+            weights=None,
             resolution_parameter=resolution,
             n_iterations=leiden_iterations,
         )
