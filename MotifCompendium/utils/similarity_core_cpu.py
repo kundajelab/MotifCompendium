@@ -8,7 +8,7 @@ def compute_similarity_and_align(
     simsA: np.ndarray,
     simsB: np.ndarray,
     l2: bool
-) -> tuple[np.ndaray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Computes similarity and alignment taking into account reverse complements.
     """
     if l2:

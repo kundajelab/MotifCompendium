@@ -39,9 +39,6 @@ def load(file_loc: str, safe: bool = True) -> MotifCompendium:
         alignment_fr = f["alignment_fr"][:]
         alignment_h = f["alignment_h"][:]
     metadata = pd.read_hdf(file_loc, key="metadata")
-    # Convert strings to numbers, boolean, etc.
-    metadata = metadata.apply(pd.to_numeric, errors="ignore")
-    metadata = metadata.replace({"True": True, "False": False})
     return MotifCompendium(
         motifs, similarity, alignment_fr, alignment_h, metadata, safe
     )
@@ -366,9 +363,7 @@ class MotifCompendium:
             f.create_dataset("similarity", data=self.similarity)
             f.create_dataset("alignment_fr", data=self.alignment_fr)
             f.create_dataset("alignment_h", data=self.alignment_h)
-        self.metadata = self.metadata.applymap(str)
         self.metadata.to_hdf(save_loc, key="metadata", mode="a")
-        print(f"MotifCompendium saved to: {save_loc}")
 
     def validate(self) -> None:
         """Verifies the integrity of the MotifCompendium.
@@ -809,7 +804,8 @@ class MotifCompendium:
                     case "average" | "avg":
                         agg_dict["values"].append(np.mean(agg_c_data))
                     case "concatenate" | "concat":
-                        agg_dict["values"].append(agg_c_data.str.cat(sep=","))
+                        agg_dict["values"].append(",".join(sorted(set(agg_c_data))))
+                        # agg_dict["values"].append(agg_c_data.str.cat(sep=","))
                     case _:
                         raise ValueError(
                             f"{agg_dict['method'].method} is not a supported aggregation method."
@@ -821,7 +817,7 @@ class MotifCompendium:
         for agg_dict in aggregations_dicts:
             metadata[agg_dict["save"]] = agg_dict["values"]
         return build(
-            cluster_motif_avgs, metadata, max_chunk, max_parallel, use_gpu, safe=safe
+            cluster_motif_avgs, metadata, max_chunk, max_cpus, use_gpu, safe=safe
         )
 
     def get_similarity_slice(

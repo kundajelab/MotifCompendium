@@ -363,7 +363,7 @@ def average_motifs(
     Notes:
         Assumes that the input is an 8 channel motif of shape (N, 30, 8).
     """
-    motifs_4 = _8_to_4(motifs_8)
+    motifs_4 = motif_8_to_4(motifs_8)
     N = motifs_4.shape[0]
     if N == 1:
         return motifs_8[0, :, :]
@@ -378,7 +378,7 @@ def average_motifs(
         )
     motif_avg = motif_sum / N
     squashed_motif = squash_motif(motif_avg)
-    squashed_motif_8 = _4_to_8(squashed_motif)
+    squashed_motif_8 = motif_4_to_8(squashed_motif)
     squashed_motif_8 /= np.sum(squashed_motif_8)
     return squashed_motif_8
 
