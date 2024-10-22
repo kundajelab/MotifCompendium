@@ -10,63 +10,90 @@ from .similarity_core_cpu import compute_similarity_and_align
 # PUBLIC FUNCTIONS #
 ####################
 def compute_similarities(
-    sims_list, calculations, max_chunk, max_cpus, use_gpu, l2=False
-):
-    """Computes similarities.
+    motif_stack_list: list[np.ndarray],
+    calculations: list[tuple[int, int]],
+    max_chunk: int | None,
+    max_cpus: int | None,
+    use_gpu: bool,
+    l2: bool = True,
+) -> list[tuple[np.ndarray, np.ndarray, np.ndarray]]:
+    """Performs similarity and calculations between sets of motif stacks.
 
-    Description
+    Given a list of motif stacks and an instruction of which motif stacks to perform
+      pairwise similarity calculations between, this function returns a list of results
+      of each one of the specified calculations.
 
     Args:
-        sims_list:
-        calculations:
-        max_chunk:
-        max_cpus:
-        use_gpu:
-        l2:
+        motif_stack_list: A list of np.ndarrays representing stacks of motifs.
+        calculations: A list where each element specifies a motif similarity calculation
+          to perform. Each element of the list is a tuple of two ints where each int is
+          the index of a motif stack in the motif_stack_list. For example, the
+          calculation (i, j) says to compute the pairwise similarity between all motifs
+          in motif stack i and motif stack j.
+        max_chunk: The maximum size of a motif stack to perform similarity calculations
+          on. All motif stacks larger than max_chunk will be chunked into smaller motif
+          stacks of size <= max_chunk by _chunk_motif_stacks_and_calcs(). Calculations
+          will occur on the smaller chunks and then the results will be reassembled with
+          _reassemble_results().
+        max_cpus: The maximum number of CPUs to use for computing similarity. If None,
+          it will only use a single CPU.
+        use_gpu: Whether or not to use GPUs to accelerate computing similarity. If True,
+          similarity calculations are carried out by the functions in utils file
+          .similarity_core_gpu.py. If False, they will be carried out by the function in
+          utils file .similarity_core_cpu.py.
+        l2: Whether or not to use L2 normalization (instead of sqrt normalization) when
+          computing motif similarity.
 
     Returns:
-        asdf.
-
-    Notes:
-        asdf.
+        A list of motif calculation result tuples. There is one motif calculation result
+          tuple for each calculation specification tuple in calculations. Each motif
+          calculation result tuple consists of a similarity matrix, an alignemnt_fr
+          matrix, and an alignment_h matrix.
     """
-    for sims in sims_list:
-        validate_motif_stack(sims)
+    for motif_stack in motif_stack_list:
+        validate_motif_stack(motif_stack)
     if max_chunk is not None:
-        chunked_sims_list, chunked_calculations, chunk_map = _chunk_sims_and_calcs(
-            sims_list, calculations, max_chunk
-        )
+        (
+            chunked_motif_stack_list,
+            chunked_calculations,
+            chunk_map,
+        ) = _chunk_motif_stacks_and_calcs(motif_stack_list, calculations, max_chunk)
         chunked_results = _compute_similarity_and_align_parallel(
-            chunked_sims_list, chunked_calculations, max_cpus, use_gpu, l2=l2
+            chunked_motif_stack_list, chunked_calculations, max_cpus, use_gpu, l2
         )
         return _reassemble_results(
             calculations, chunked_calculations, chunked_results, chunk_map
         )
     else:
         return _compute_similarity_and_align_parallel(
-            sims_list, calculations, max_cpus, use_gpu, l2=l2
+            motif_stack_list, calculations, max_cpus, use_gpu, l2
         )
 
 
 #####################
 # PRIVATE FUNCTIONS #
 #####################
-def _chunk_sims_and_calcs(sims_list, calculations, max_chunk):
-    """Chunks sims and calculations."""
+def _chunk_motif_stacks_and_calcs(
+    motif_stack_list: list[np.ndarray],
+    calculations: list[tuple[int, int]],
+    max_chunk: int,
+) -> tuple[list[np.ndarray], list[tuple[int, int]], dict[int, int]]:
+    """Chunks motifs and calculations.
+    """
     # CHUNK MOTIFS
-    chunked_sims_list = []
+    chunked_motif_stack_list = []
     chunk_map = dict()
     current_idx = 0
-    for i, sims in enumerate(sims_list):
-        if sims.shape[0] <= max_chunk:
-            chunked_sims_list.append(sims)
+    for i, motif_stack in enumerate(motif_stack_list):
+        if motif_stack.shape[0] <= max_chunk:
+            chunked_motif_stack_list.append(motif_stack)
             chunk_map[i] = [current_idx]
             current_idx += 1
         else:
-            sims_chunks = _chunk_axis_0(sims, max_chunk)
+            motif_stack_chunks = _chunk_axis_0(motif_stack, max_chunk)
             chunk_map_entry = []
-            for chunk in sims_chunks:
-                chunked_sims_list.append(chunk)
+            for chunk in motif_stack_chunks:
+                chunked_motif_stack_list.append(chunk)
                 chunk_map_entry.append(current_idx)
                 current_idx += 1
             chunk_map[i] = chunk_map_entry
@@ -76,11 +103,12 @@ def _chunk_sims_and_calcs(sims_list, calculations, max_chunk):
         for c0_chunk in chunk_map[c0]:
             for c1_chunk in chunk_map[c1]:
                 chunked_calculations.append((c0_chunk, c1_chunk))
-    return chunked_sims_list, chunked_calculations, chunk_map
+    return chunked_motif_stack_list, chunked_calculations, chunk_map
 
 
-def _chunk_axis_0(X, chunk_size):
-    """Chunks along axis 0."""
+def _chunk_axis_0(X: np.ndarray, chunk_size: int) -> list[np.ndarray]:
+    """Chunks along axis 0.
+    """
     N = X.shape[0]
     X_chunks = []
     for i in range(N // chunk_size):
@@ -92,9 +120,14 @@ def _chunk_axis_0(X, chunk_size):
 
 
 def _compute_similarity_and_align_parallel(
-    sims_list, calculations, max_cpus, use_gpu, l2=False
-):
-    """Compute similarities and alignments."""
+    motif_stack_list: list[np.ndarray],
+    calculations: list[tuple[int, int]],
+    max_cpus: int | None,
+    use_gpu: bool,
+    l2: bool,
+) -> list[tuple[np.ndarray, np.ndarray, np.ndarray]]:
+    """Compute similarities and alignments.
+    """
     if max_cpus is None:
         if use_gpu:
             # SINGLE GPU CALCULATIONS
@@ -102,14 +135,16 @@ def _compute_similarity_and_align_parallel(
 
             return [
                 gpu_compute_similarity_and_align(
-                    sims_list[c[0]], sims_list[c[1]], l2=l2
+                    motif_stack_list[c[0]], motif_stack_list[c[1]], l2
                 )
                 for c in calculations
             ]
         else:
             # SINGLE CPU CALCULATIONS
             return [
-                compute_similarity_and_align(sims_list[c[0]], sims_list[c[1]], l2=l2)
+                compute_similarity_and_align(
+                    motif_stack_list[c[0]], motif_stack_list[c[1]], l2
+                )
                 for c in calculations
             ]
     else:
@@ -119,7 +154,10 @@ def _compute_similarity_and_align_parallel(
             assert False
         else:
             # MULTI-CPU CALCULATIONS
-            inputs = [(sims_list[c[0]], sims_list[c[1]], l2) for c in calculations]
+            inputs = [
+                (motif_stack_list[c[0]], motif_stack_list[c[1]], l2)
+                for c in calculations
+            ]
             num_processes = min(
                 max_cpus, multiprocessing.cpu_count()
             )  # don't use more CPUs than available
@@ -127,8 +165,14 @@ def _compute_similarity_and_align_parallel(
                 return p.starmap(compute_similarity_and_align, inputs)
 
 
-def _reassemble_results(calculations, chunked_calculations, chunked_results, chunk_map):
-    """Reassemble chunked results."""
+def _reassemble_results(
+    calculations: list[tuple[int, int]],
+    chunked_calculations: list[tuple[int, int]],
+    chunked_results: list[tuple[np.ndarray, np.ndarray, np.ndarray]],
+    chunk_map: dict[int, int],
+) -> list[np.ndarray, np.ndarray, np.ndarray]:
+    """Reassemble chunked results.
+    """
     chunked_calculations_revmap = {c: i for i, c in enumerate(chunked_calculations)}
     results = []
     for c0, c1 in calculations:

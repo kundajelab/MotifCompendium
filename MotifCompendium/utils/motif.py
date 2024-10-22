@@ -34,7 +34,8 @@ def ic_scale(x: np.ndarray) -> np.ndarray:
 
 
 def motif_4_to_8(x: np.ndarray) -> np.ndarray:
-    """Converts a 4 channel motif into an 8 channel motif."""
+    """Converts a 4 channel motif into an 8 channel motif.
+    """
     x_pos = np.maximum(x, 0)
     x_neg = np.maximum(-x, 0)
     x_pos_8 = x_pos @ _MOTIF_4_TO_8_POS
@@ -44,7 +45,8 @@ def motif_4_to_8(x: np.ndarray) -> np.ndarray:
 
 
 def motif_8_to_4(x: np.ndarray) -> np.ndarray:
-    """Converts in 8 channel motif into a 4 channel motif."""
+    """Converts in 8 channel motif into a 4 channel motif.
+    """
     x_pos_4 = x @ _MOTIF_4_TO_8_POS.T
     x_neg_4 = x @ _MOTIF_4_TO_8_NEG.T
     x_4 = x_pos_4 - x_neg_4
@@ -52,7 +54,8 @@ def motif_8_to_4(x: np.ndarray) -> np.ndarray:
 
 
 def motif_8_to_4_abs(x: np.ndarray) -> np.ndarray:
-    """Converts in 8 channel motif into a 4 channel motif."""
+    """Converts in 8 channel motif into a 4 channel motif.
+    """
     x_pos_4 = x @ _MOTIF_4_TO_8_POS.T
     x_neg_4 = x @ _MOTIF_4_TO_8_NEG.T
     x_4 = x_pos_4 + x_neg_4
@@ -60,7 +63,8 @@ def motif_8_to_4_abs(x: np.ndarray) -> np.ndarray:
 
 
 def validate_motif_stack(motifs: np.ndarray) -> None:
-    """Validate motifs."""
+    """Validate motifs.
+    """
     if not isinstance(motifs, np.ndarray):
         raise TypeError("Motifs must be a np.ndarray.")
     if not (
@@ -74,7 +78,8 @@ def validate_motif_stack(motifs: np.ndarray) -> None:
 
 
 def motif_to_df(motif: np.ndarray) -> pd.DataFrame:
-    """Transforms a motif into a pd.DataFrame ready for plotting with logomaker."""
+    """Transforms a motif into a pd.DataFrame ready for plotting with logomaker.
+    """
     return pd.DataFrame(motif, columns=["A", "C", "G", "T"])
 
 
@@ -253,7 +258,7 @@ _MOTIF_4_TO_8_NEG[2, 4] = 1
 _MOTIF_4_TO_8_NEG[3, 6] = 1
 
 # Suggested entropy metric thresholds for chrombpnet-based TF-Modisco motifs
-ENTROPY_THRESHOLD_DICT = {
+_ENTROPY_THRESHOLD_DICT = {
     "1_singlepeak": ("cwm_entropy", "lt", 0.4),
     "2_noisemix": ("cwm_entropy", "gt", 0.75),
     "3_broadsingle": ("entropy_ratio", "gt", 3.0),
