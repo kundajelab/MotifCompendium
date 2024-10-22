@@ -37,7 +37,6 @@ def cluster(
     Notes:
         Please look through the possible clustering algorithm options in this function.
     """
-    # Leiden
     match algorithm:
         # Leiden
         case "leiden":
