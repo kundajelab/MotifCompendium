@@ -604,8 +604,13 @@ class MotifCompendium:
               mc.cluster_averages(cluster).summary_table_html(html_out, summary_cols)
               with the appropriate CPU/GPU/chunking options.
         """
+        motifs = (
+            utils_motif.motif_8_to_4(self.motifs)
+            if self.motifs.shape[2] == 8
+            else self.motifs
+        )
         utils_plotting.summary_table_html(
-            self.motifs, self.metadata[columns], html_out, max_cpus
+            motifs, self.metadata[columns], html_out, max_cpus
         )
 
     def heatmap(

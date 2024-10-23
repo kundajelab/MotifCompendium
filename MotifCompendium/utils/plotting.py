@@ -15,6 +15,9 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
+from MotifCompendium.utils.motif import motif_to_df
+
+
 
 ####################
 # PUBLIC FUNCTIONS #
@@ -112,8 +115,8 @@ def summary_table_html(
     current_backend = matplotlib.get_backend()
     matplotlib.use("Agg")  # Use Agg backend
     # Prepare for plotting
-    fwd_motif_dicts = [{"motif": motifs[i, :, :]} for i in range(motifs.shape[0])]
-    rev_motif_dicts = [{"motif": motifs[i, ::-1, ::-1]} for i in range(motifs.shape[0])]
+    fwd_motif_dicts = [{"motif": motif_to_df(motifs[i, :, :])} for i in range(motifs.shape[0])]
+    rev_motif_dicts = [{"motif": motif_to_df(motifs[i, ::-1, ::-1])} for i in range(motifs.shape[0])]
     # Create motif plots
     if max_cpus is None:
         fwd_motif_strings = []
