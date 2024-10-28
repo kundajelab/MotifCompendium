@@ -76,7 +76,7 @@ def motif_collection_html(
     current_dir = os.path.dirname(os.path.abspath(__file__))
     env = Environment(loader=FileSystemLoader(current_dir))
     # Load HTML template
-    template = env.get_template("motif_collection_template.html")
+    template = env.get_template("../resource/motif_collection_template.html")
     # Render HTML with data
     rendered_html = template.render(data=motif_groups, sorted=sorted)
     # Write HTML to file
@@ -141,7 +141,7 @@ def summary_table_html(
     current_dir = os.path.dirname(os.path.abspath(__file__))
     env = Environment(loader=FileSystemLoader(current_dir))
     # Load HTML template
-    template = env.get_template("table_template.html")
+    template = env.get_template("../resource/table_template.html")
     # Render HTML with data
     rendered_html = template.render(columns=columns, rows=rows)
     # Write HTML to file

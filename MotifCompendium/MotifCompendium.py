@@ -68,7 +68,7 @@ def build(
     max_cpus: int | None = None,
     use_gpu: bool = False,
     l2: bool = True,
-    safe: bool = True,
+    safe: bool = True
 ) -> MotifCompendium:
     """Builds a MotifCompendium object from a set of motifs.
 
@@ -745,9 +745,12 @@ class MotifCompendium:
           MotifCompendium is returned.
 
         Args:
-            cluster_name: The name of the column in metadata containing clustering
+            cluster_name: Name of column in metadata, containing clustering
               annotations to group motifs by.
-            aggregations:
+            aggregations: A list of tuples, each containing ("source", "method", "save").
+              "source": Name of column in metadata to aggregate.
+              "method": Aggregation method to use. Options: "count", "sum", "concatenate"
+              "save": Name of column in new metadata, to save the aggregated data.
             max_chunk: The maximum number of motifs to compute similarity on at a time. If
               None, it will compute the entire similarity matrix at once.
             max_cpus: The maximum number of CPUs to use for computing similarity. If None,
@@ -822,7 +825,7 @@ class MotifCompendium:
         for agg_dict in aggregations_dicts:
             metadata[agg_dict["save"]] = agg_dict["values"]
         return build(
-            cluster_motif_avgs, metadata, max_chunk, max_cpus, use_gpu, safe=safe
+            cluster_motif_avgs, metadata, max_chunk, max_cpus, use_gpu, l2=l2, safe=safe
         )
 
     def get_similarity_slice(
@@ -890,3 +893,82 @@ class MotifCompendium:
         """
         print("not yet implemented")
         assert False
+
+
+    def compare_mc(
+        mc: MotifCompendium,
+        mc_compare: MotifCompendium,
+        match_threshold: float = 0.8,
+        match_name_col: str = "matched_motif",
+        match_score_col: str = "matched_score",
+        max_chunk: int | None = None,
+        max_cpus: int | None = None,
+        use_gpu: bool = False,
+        l2: bool = True,
+        safe: bool = True
+    ) -> None:
+        """Compare two MotifCompendium objects and record best matching motif.
+        
+        Takes in two MotifCompendium objects (mc and mc_compare), and for each motif in mc, 
+        records the best matching motif in mc_compare. The best match is defined as the motif
+        with the highest similarity score, above match_threshold. The best match and its 
+        corresponding similarity score are recorded in the metadata of mc.
+
+        Args:
+            mc: The MotifCompendium object to compare.
+            mc_compare: The MotifCompendium object to compare against.
+            match_threshold: The minimum similarity score required for a match.
+            match_name_col: The name of the column in metadata to save the best match.
+            match_score_col: The name of the column in metadata to save the best match score.
+            max_chunk: The maximum number of motifs to compute similarity on at a time. If
+              None, it will compute the entire similarity matrix at once.
+            max_cpus: The maximum number of CPUs to use for computing similarity. If None,
+              it will only use a single CPU.
+            use_gpu: Whether or not to use GPUs to accelerate computing similarity. Uses
+              only CPUs by default.
+            l2: Whether or not to use L2 normalization (instead of sqrt normalization) when
+              computing motif similarity.
+            safe: Whether or not to construct the MotifCompendium safely.
+        """
+        mc_motifs = mc.motifs
+        mc_compare_motifs = mc_compare.motifs
+        
+        # Check sim4 vs. sim8
+        if mc_motifs.shape[2] == 8 and mc_compare_motifs.shape[2] == 8:
+            pass
+        elif mc_motifs.shape[2] == 8 and mc_compare_motifs.shape[2] == 4:
+            mc_compare_motifs = utils_motif.motif_4_to_8(mc_compare_motifs)
+        elif mc_motifs.shape[2] == 4 and mc_compare_motifs.shape[2] == 8:
+            mc_motifs = utils_motif.motif_4_to_8(mc_motifs)
+        elif mc_motifs.shape[2] == 4 and mc_compare_motifs.shape[2] == 4:
+            pass
+        else:
+            raise ValueError("Motif Compendiums must have motif dimension 4 or 8.")
+        
+        # Calculate similarity
+        if use_gpu and (max_cpus is not None):
+            warnings.warn(
+                "use_gpu is True but max_cpus is not None... setting max_cpus to None"
+            )
+            max_cpus = None
+        similarity, _, _ = utils_similarity.compute_similarities(
+            [mc_motifs, mc_compare_motifs], [(0, 1)], max_chunk, max_cpus, use_gpu, l2=l2
+        )[0]
+        np.fill_diagonal(
+            similarity, 1
+        )  # Sometimes diagonal similarity is 0.999... but should be 1
+
+        # Manage similarity matrix as DataFrame
+        similarity_df = pd.DataFrame(similarity, index=mc.metadata["name"], columns=mc_compare.metadata["name"])
+
+        # Create comparison dictionary
+        match_dict = similarity_df.apply(
+            lambda row: (
+            row.idxmax(), row.max()
+            ) if row.max() >= match_threshold else ("NOMATCH", 0),
+            axis=1
+        ).to_dict()
+
+        # Record matches in metadata
+        mc.metadata[match_name_col] = [match_dict[x][0] for x in list(mc.metadata["name"])]
+        mc.metadata[match_score_col] = [match_dict[x][1] for x in list(mc.metadata["name"])]

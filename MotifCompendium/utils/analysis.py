@@ -351,14 +351,23 @@ def export_clusters_modisco(
 ####################
 # ENTROPY ANALYSES #
 ####################
-def calculate_entropy(self, entropy_list: list) -> None:
+def calculate_entropy(
+    mc: MotifCompendium, 
+    entropy_list: list = [
+        "motif_entropy",
+        "posbase_entropy_ratio",
+        "copair_entropy_ratio",
+        "dinuc_entropy_ratio",
+    ]
+) -> None:
     """Calculate entropy metrics, to quantify motif information complexity.
+    Update metadata table with entropy metric values.
 
     List of Entropy metrics:
         (1) Motif entropy:
             Calculation: Shannon entropy on (L,8)
-            Purpose:    (High) Archetype #1: Noise/chaos
-                        (Low) Archetype #2: Sharp nucleotide peak (e.g., G)
+            Purpose:    (Low) Archetype #1: Sharp nucleotide peak (e.g., G)
+                        (High) Archetype #2: Noise/chaos
         (2) Pos-base entropy ratio:
             Calculation: Position-wise entropy on (L,) / Base-wise entropy on (8,)
             Purpose:    (High) Archetype #3: Single nucleotide repeats (e.g., AAAAA, GGGGG)
@@ -383,7 +392,7 @@ def calculate_entropy(self, entropy_list: list) -> None:
     valid_entropy_metrics = [
         "motif_entropy",
         "posbase_entropy_ratio",
-        "pair_entropy_ratio",
+        "copair_entropy_ratio",
         "dinuc_entropy_ratio",
     ]
     for entropy_metric in entropy_list:
@@ -397,50 +406,46 @@ def calculate_entropy(self, entropy_list: list) -> None:
         metrics_list = []
         match entropy_metric:
             case "motif_entropy":
-                for i in range(self.motifs.shape[0]):
-                    metric = utils_motif.calculate_motif_entropy(self.motifs[i])
+                for i in range(mc.motifs.shape[0]):
+                    metric = utils_motif.calculate_motif_entropy(mc.motifs[i])
                     metrics_list.append(metric)
                 metrics_df = pd.DataFrame(metrics_list, columns=["motif_entropy"])
-                self.metadata = pd.concat(
-                    [self.metadata, metrics_df], axis=1
+                mc.metadata = pd.concat(
+                    [mc.metadata, metrics_df], axis=1
                 )  # Update self.metadata
 
             case "posbase_entropy_ratio":
-                for i in range(self.motifs.shape[0]):
-                    metric = utils_motif.calculate_posbase_entropy_ratio(self.motifs[i])
+                for i in range(mc.motifs.shape[0]):
+                    metric = utils_motif.calculate_posbase_entropy_ratio(mc.motifs[i])
                     metrics_list.append(metric)
                 metrics_df = pd.DataFrame(
                     metrics_list, columns=["posbase_entropy_ratio"]
                 )
-                self.metadata = pd.concat(
-                    [self.metadata, metrics_df], axis=1
+                mc.metadata = pd.concat(
+                    [mc.metadata, metrics_df], axis=1
                 )  # Update self.metadata
 
             case "copair_entropy_ratio":
-                for i in range(self.motifs.shape[0]):
-                    metric = utils_motif.calculate_copair_entropy_ratio(self.motifs[i])
+                for i in range(mc.motifs.shape[0]):
+                    metric = utils_motif.calculate_copair_entropy_ratio(mc.motifs[i])
                     metrics_list.append(metric)
                 metrics_df = pd.DataFrame(
                     metrics_list, columns=["copair_entropy_ratio"]
                 )
-                self.metadata = pd.concat(
-                    [self.metadata, metrics_df], axis=1
+                mc.metadata = pd.concat(
+                    [mc.metadata, metrics_df], axis=1
                 )  # Update self.metadata
 
             case "dinuc_entropy_ratio":
-                for i in range(self.motifs.shape[0]):
-                    metric = utils_motif.calculate_dinuc_entropy_ratio(self.motifs[i])
+                for i in range(mc.motifs.shape[0]):
+                    metric = utils_motif.calculate_dinuc_entropy_ratio(mc.motifs[i])
                     metrics_list.append(metric)
                 metrics_df = pd.DataFrame(metrics_list, columns=["dinuc_entropy_ratio"])
-                self.metadata = pd.concat(
-                    [self.metadata, metrics_df], axis=1
+                mc.metadata = pd.concat(
+                    [mc.metadata, metrics_df], axis=1
                 )  # Update self.metadata
 
             case _:
                 raise ValueError(
                     f"Entropy metric {entropy_metric} is not valid. Must be one of: {valid_entropy_metrics}"
                 )
-        
-###########################
-# EXISTING MOTIF DATABASE #
-###########################
