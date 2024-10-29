@@ -685,7 +685,10 @@ class MotifCompendium:
             Review the clustering algorithms available in utils/clustering.cluster().
         """
         self.metadata[save_name] = utils_clustering.cluster(
-            self.similarity, algorithm, similarity_threshold, **kwargs
+            similarity_matrix=self.similarity, 
+            algorithm=algorithm, 
+            similarity_threshold=similarity_threshold, 
+            **kwargs
         )
 
     def clustering_quality(self, cluster_name: str = "cluster") -> np.ndarray:

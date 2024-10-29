@@ -140,7 +140,6 @@ def load_pfm(pfm_file: str) -> tuple[np.ndarray, list[str]]:
                     # restart
                     current_pwm_name = x[1:]
                     current_pwm = {"A": [], "C": [], "G": [], "T": []}
-                    break
                 else:
                     a, c, g, t = x.split()
                     a, c, g, t = float(a), float(c), float(g), float(t)
