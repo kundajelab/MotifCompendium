@@ -957,9 +957,6 @@ class MotifCompendium:
         similarity, _, _ = utils_similarity.compute_similarities(
             [mc_motifs, mc_compare_motifs], [(0, 1)], max_chunk, max_cpus, use_gpu, l2=l2
         )[0]
-        np.fill_diagonal(
-            similarity, 1
-        )  # Sometimes diagonal similarity is 0.999... but should be 1
 
         # Manage similarity matrix as DataFrame
         similarity_df = pd.DataFrame(similarity, index=mc.metadata["name"], columns=mc_compare.metadata["name"])

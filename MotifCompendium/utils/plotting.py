@@ -141,7 +141,7 @@ def summary_table_html(
     current_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "resource")
     env = Environment(loader=FileSystemLoader(current_dir))
     # Load HTML template
-    template = env.get_template("../resource/table_template.html")
+    template = env.get_template("table_template.html")
     # Render HTML with data
     rendered_html = template.render(columns=columns, rows=rows)
     # Write HTML to file
