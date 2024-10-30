@@ -1,0 +1,38 @@
+{
+    "1_singlepeak": {
+        "metric": "motif_entropy",
+        "operation": "<",
+        "threshold": 0.4,
+        "override": false
+    },
+    "2_noisemix": {
+        "metric": "motif_entropy",
+        "operation": ">",
+        "threshold": 0.75,
+        "override": false
+    },
+    "3_broadsingle": {
+        "metric": "posbase_entropy_ratio",
+        "operation": ">",
+        "threshold": 3.0,
+        "override": false
+    },
+    "4_gcbias": {
+        "metric": "copair_entropy_ratio",
+        "operation": ">",
+        "threshold": 3.0,
+        "override": false
+    },
+    "5_dinucrepeat": {
+        "metric": "dinuc_entropy_ratio",
+        "operation": ">",
+        "threshold": 4.0,
+        "override": false
+    },
+    "h12_match": {
+        "metric": "h12_score",
+        "operation": "<",
+        "threshold": 0.9,
+        "override": true
+    }
+}

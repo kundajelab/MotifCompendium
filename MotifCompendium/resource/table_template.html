@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>DataFrame Table</title>
+    <style>
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            border: 1px solid black;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            font-weight: bold;
+        }
+        button {
+            background: none;
+            background-color: #B9FEFF;
+            border: 2px solid black;
+            border-radius: 3px;
+            cursor: pointer;
+            font-weight: bold;
+            padding: 0 5px;
+            margin-left: 5px;
+        }
+    </style>
+    <script>
+        function sortTable(columnIndex, ascending) {
+            // Load rows
+            table = document.getElementById("dataTable");
+            trs = table.getElementsByTagName("tr");
+            rows = Array.from(trs).slice(2);
+            // Sort with custom row-sorting function
+            rows.sort((a, b) => {
+                aVal = a.cells[columnIndex].innerText.trim();
+                bVal = b.cells[columnIndex].innerText.trim();
+                if (!isNaN(aVal) && !isNaN(bVal)) {
+                    aVal = parseFloat(aVal);
+                    bVal = parseFloat(bVal);
+                } else {
+                    aVal = aVal.toLowerCase();
+                    bVal = bVal.toLowerCase();
+                }
+                if (aVal < bVal) {
+                    return ascending ? -1 : 1;
+                }
+                if (aVal > bVal) {
+                    return ascending ? 1 : -1;
+                }
+                return 0;
+            });
+            // Rebuild rows with new order
+            rows.forEach(row => table.appendChild(row));
+        }
+
+        function filterTable() {
+            // Load rows
+            table = document.getElementById("dataTable");
+            trs = table.getElementsByTagName("tr");
+            // Check if there are any active filters
+            inputs = document.getElementsByClassName("filterInput");
+            anyFilters = false;
+            for (z = 0; z < inputs.length; z++) {
+                if (inputs[z].value != "") {
+                    anyFilters = true;
+                    break;
+                }
+            }
+            // Turn rows on or off
+            if (anyFilters) {
+                // If filters, only display rows that match all current filters
+                for (i = 2; i < trs.length; i++) {
+                    showRow = true;
+                    tds = trs[i].getElementsByTagName("td");
+                    for (j = 2; j < tds.length; j++) {
+                        txtValue = tds[j].textContent;
+                        filter = inputs[j-2].value; // j-2 because image columns have no filter
+                        if (filter != "" && !txtValue.includes(filter)) {
+                            showRow = false;
+                            break;
+                        }
+                    }
+                    trs[i].style.display = showRow ? "" : "none";
+                }
+            } else {
+                // If no filters, display every row
+                for (i = 2; i < trs.length; i++) {
+                    trs[i].style.display = "";
+                }
+            }
+        }
+    </script>
+</head>
+<body>
+
+<h2>DataFrame Table</h2>
+
+<table id="dataTable">
+    <tr>
+        {% for col in columns %}
+            {% if loop.index0 == 0 or loop.index0 == 1 %}
+	    <th>{{ col }}</th>
+	    {% else %}
+                <th>
+                    {{ col }}
+		    <button class="sort-button" onclick="sortTable({{ loop.index0 }}, true)">&uarr;</button>
+		    <button class="sort-button" onclick="sortTable({{ loop.index0 }}, false)">&darr;</button>
+                </th>
+	    {% endif %}
+        {% endfor %}
+    </tr>
+    <tr>
+        {% for col in columns %}
+            {% if loop.index0 == 0 or loop.index0 == 1 %}
+	        <td></td>
+	    {% else %}
+	        <td><input type="text" class="filterInput" onkeyup="filterTable()"></td>
+	    {% endif %}
+        {% endfor %}
+    </tr>
+    {% for row in rows %}
+        <tr>
+            {% for col in columns %}
+                {% if loop.index0 == 0 or loop.index0 == 1 %}
+                    <td><img src="data:image/png;base64,{{ row[col] }}" class="plot-image"></td>
+                {% else %}
+                    <td>{{ row[col] }}</td>
+                {% endif %}
+            {% endfor %}
+        </tr>
+    {% endfor %}
+</table>
+
+</body>
+</html>
