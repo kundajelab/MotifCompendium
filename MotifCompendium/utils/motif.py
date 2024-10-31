@@ -82,9 +82,10 @@ def motif_to_df(motif: np.ndarray) -> pd.DataFrame:
     """
     return pd.DataFrame(motif, columns=["A", "C", "G", "T"])
 
-####################
+
+###########
 # ENTROPY #
-####################
+###########
 def motif4_to_motif8(motif4: np.array) -> np.array:
     """Expand base pair from 4-channel: A,C,T,G 
     to 8-channel: A+,C+,G+,T+,A-,C-,G-,T-"""

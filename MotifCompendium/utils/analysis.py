@@ -7,7 +7,10 @@ import pandas as pd
 import seaborn as sns
 
 import MotifCompendium
+import MotifCompendium.utils.loader as utils_loader
 import MotifCompendium.utils.motif as utils_motif
+import MotifCompendium.utils.similarity as utils_similarity
+
 
 #######################
 # SIMILARITY ANALYSES #
@@ -15,33 +18,13 @@ import MotifCompendium.utils.motif as utils_motif
 def plot_similarity_distribution(
     mc: MotifCompendium,
     save_loc: str,
-    vals: list[float] = [
-        0.95,
-        0.9,
-        0.85,
-        0.8,
-        0.75,
-        0.7,
-        0.65,
-        0.6,
-        0.55,
-        0.5,
-        0.45,
-        0.4,
-        0.35,
-        0.3,
-        0.25,
-        0.2,
-        0.15,
-        0.1,
-        0.05,
-    ],
-    n_per: int = 5,
+    vals: list[float] = [0.99, 0.98, 0.97, 0.96, 0.95, 0.9, 0.85, 0.8, 0.75, 0.7],
+    n_per: int = 5
 ) -> None:
     """Plots examples of various similarities in a MotifCompendium.
 
-    For a set of similarities, display multiple examples of pairs of motifs in the
-      MotifCompendium that have that similarity +-0.01 in html format.
+    For a set of similarities, create an html file displaying multiple examples of pairs
+      of motifs that have a similarity within +-0.01 of the specified similarity values.
 
     Args:
         mc: The MotifCompendium to analyze.
@@ -49,35 +32,25 @@ def plot_similarity_distribution(
         vals: The list of similarity scores to display examples of.
         n_per: The number of examples of each similarity score to display.
     """
-    N = len(mc)
+    clustering = [False for _ in range(len(mc))]
     similarity = mc.similarity
-    clustering = [False for _ in range(N)]
     for val in vals:
-        print(f"--- finding {val} ---")
-        indices = np.where((similarity <= val + 0.01) & (similarity >= val - 0.01))
+        # Find all locations where similarity is val-0.005 < similarity < val+0.005
+        indices = np.where(np.abs(similarity - val) < 0.005)
         indices = list(zip(indices[0], indices[1]))
         p = 1
         for i, j in indices:
             if not (clustering[i] or clustering[j]):
-                print(f"\t{p}) Found {i} {j} --> {similarity[i, j]}")
                 clustering[i] = f"Similarity {val} example {p}"
                 clustering[j] = f"Similarity {val} example {p}"
                 p += 1
             if p > n_per:
                 break
+    # Create MotifCompendium of only displayed motifs
     clustering_series = pd.Series(clustering)
     mc_distribution = mc[clustering_series != False]
-    from .plotting import create_html
-
-    create_html(
-        mc_distribution.logos,
-        list(clustering_series[clustering_series != False]),
-        mc_distribution.alignment_fb,
-        mc_distribution.alignment_h,
-        mc_distribution.metadata["name"],
-        save_loc,
-        average=False,
-    )
+    distribution_clusters = clustering_series[clustering_series != False].tolist()
+    mc_distribution.motif_collection_html(save_loc, distribution_clusters, average_motif=False)
 
 
 def plot_ground_truth_mismatch(
@@ -85,8 +58,7 @@ def plot_ground_truth_mismatch(
     ground_truth: str,
     save_loc: str,
     similarity_threshold: float = 0.8,
-    max_examples: int = 100,
-    quality: np.ndarray = None,
+    max_examples: int = 100
 ) -> None:
     """Plots examples of when similarity did not match a ground truth motif grouping.
 
@@ -104,80 +76,51 @@ def plot_ground_truth_mismatch(
         save_loc: The location where to save the output html file.
         similarity_threshold: The similarity value to threshold at.
         max_examples: The maximum number of mismatch examples to plot.
-        quality: The clustering quality derived from the ground truth to use. If None,
-          the quality will be computed.
-
-    Notes:
-        If the quality from mc.clustering_quality(ground_truth) is already computed,
-          pass it into this function to save a significant amount of time.
     """
-    if quality is None:
-        quality = mc.clustering_quality(ground_truth)
-        # else assume (for now) that quality was derived from ground truth
-    # Log similarity errors
-    names, clusters = [], []
-    mps = sorted(set(mc[ground_truth]))
+    quality = mc.clustering_quality(ground_truth, with_names=True)
+    clustering = [False for _ in range(len(mc))]
+    # Low internal similarity
     n_examples = 0
-    for i, mp in enumerate(mps):
+    for i, c in enumerate(quality.columns):
         if quality[i, i] >= similarity_threshold:
             continue
-        mp_select = mc[ground_truth] == mp
-        similarity_slice_ii_df = mc.get_similarity_slice(
-            mp_select, mp_select, with_names=True
-        )
+        c_select = mc[ground_truth] == c
+        similarity_slice_ii_df = mc.get_similarity_slice(c_select, c_select)
         similarity_slice_ii_df_stacked = similarity_slice_ii_df.stack()
         row_label, col_label = similarity_slice_ii_df_stacked.idxmin()
-        names.append(row_label)
-        names.append(col_label)
-        clusters += [f"Low internal similarity {mp} ({quality[i, i]:.3})"] * 2
+        clustering[row_label] = f"Low internal similarity {c} ({quality[i, i]:.3})"
+        clustering[col_label] = f"Low internal similarity {c} ({quality[i, i]:.3})"
         n_examples += 1
         if n_examples >= (max_examples) // 2:
             break
     # High external similarity
     n_examples = 0
-    for i, mp1 in enumerate(mps):
-        for j, mp2 in enumerate(mps):
+    for i, ci in enumerate(quality.columns):
+        for j, cj in enumerate(quality.columns):
             if j <= i:
                 continue
             if quality[i, j] < similarity_threshold:
                 continue
             similarity_slice_ij_df = mc.get_similarity_slice(
-                mc[ground_truth] == mp1, mc[ground_truth] == mp2, with_names=True
+                mc[ground_truth] == ci, mc[ground_truth] == cj
             )
             similarity_slice_ij_df_stacked = similarity_slice_ij_df.stack()
             row_label, col_label = similarity_slice_ij_df_stacked.idxmax()
-            names.append(row_label)
-            names.append(col_label)
-            clusters += [
-                f"High external similarity {mp1} & {mp2} ({quality[i, j]:.3})"
-            ] * 2
+            clustering[row_label] = f"High external similarity {ci} & {cj} ({quality[i, j]:.3})"
+            clustering[col_label] = f"High external similarity {ci} & {cj} ({quality[i, j]:.3})"
             n_examples += 1
             if n_examples >= (max_examples) // 2:
                 break
         if n_examples >= (max_examples) // 2:
             break
-    # Map back and html
-    names_revmap = {x: i for i, x in enumerate(list(mc["name"]))}
-    idxs = [names_revmap[x] for x in names]
-    # Prep for plotting
-    html_cwms = mc.logos[idxs, :, :]
-    html_sim_fb = mc.alignment_fb[idxs, :][:, idxs]
-    html_sim_alignments = mc.alignment_h[idxs, :][:, idxs]
-    from .plotting import create_html
-
-    create_html(
-        html_cwms,
-        clusters,
-        html_sim_fb,
-        html_sim_alignments,
-        names,
-        save_loc,
-        average=False,
-        parallel=False,
-    )
+    # Create MotifCompendium of only displayed motifs
+    clustering_series = pd.Series(clustering)
+    mc_mismatch = mc[clustering_series != False]
+    mismatch_clusters = clustering_series[clustering_series != False].tolist()
+    mc_mismatch.motif_collection_html(save_loc, mismatch_clusters, average_motif=False)
 
 
-def judge_clustering(mc: MotifCompendium, clustering: str, base_saveloc: str) -> None:
+def judge_clustering(mc: MotifCompendium, clustering: str, save_loc: str) -> None:
     """Plots histograms of inter-cluster and intra-cluster similarities.
 
     Judges a motif clustering by computing the quality of the clustering and then
@@ -187,21 +130,12 @@ def judge_clustering(mc: MotifCompendium, clustering: str, base_saveloc: str) ->
     Args:
         mc: The MotifCompendium to analyze.
         clustering: The motif clustering to judge.
-        base_saveloc: The file prefix to save the clustering quality and the clustering
+        save_loc: The file prefix to save the clustering quality and the clustering
           quality plot to.
     """
-    print("Getting quality...")
-    if not os.path.exists(os.path.dirname(base_saveloc)):
-        print(f"Making directory: {os.path.dirname(base_saveloc)}")
-        os.makedirs(os.path.dirname(base_saveloc), exist_ok=True)
-
-    if os.path.exists(f"{base_saveloc}_quality.npy"):
-        clustering_quality = np.load(f"{base_saveloc}_quality.npy")
-    else:
-        print("Computing quality...")
-        clustering_quality = mc.clustering_quality(clustering)
-        np.save(f"{base_saveloc}_quality.npy", clustering_quality)
-    print("plotting")
+    # Get clustering quality
+    clustering_quality = mc.clustering_quality(clustering)
+    # Plotting
     fig, axs = plt.subplots(2, 1, sharex=True)
     sns.histplot(np.diag(clustering_quality), ax=axs[0], stat="proportion", kde=True)
     axs[0].set_title("worst intra-cluster similarities")
@@ -215,7 +149,7 @@ def judge_clustering(mc: MotifCompendium, clustering: str, base_saveloc: str) ->
     axs[1].set_title("best inter-cluster similarities")
     axs[1].set_xlabel("similarity")
     plt.suptitle(f"{clustering} ({n_clusters} clusters)")
-    plt.savefig(f"{base_saveloc}.png")
+    plt.savefig(f"{save_loc}.png")
     plt.close()
 
 
@@ -239,36 +173,18 @@ def plot_unique_per_cluster(
         The most unique motif is defined as the motif within a cluster whose
           maximal similarity with all motifs not in that cluster is the lowest.
     """
-    clusters = sorted(set(mc[clustering]))
-    motif_names = []
-    cluster_names = []
-    for c in clusters:
-        similarity_contrast_c_df = mc.get_similarity_slice(
-            mc[clustering] == c, mc[clustering] != c, with_names=True
-        )
+    clustering = [False for _ in range(len(mc))]
+    for c in set(mc[clustering]):
+        similarity_contrast_c_df = mc.get_similarity_slice(mc[clustering] == c, mc[clustering] != c)
         c_best_similarities = similarity_contrast_c_df.max(axis=1)
         most_unique = c_best_similarities.idxmin()
         most_unique_similarity = c_best_similarities.min()
-        motif_names.append(most_unique)
-        cluster_names.append(f"{c} ({most_unique_similarity:.3})")
-    # Map back and html
-    names_revmap = {x: i for i, x in enumerate(list(mc["name"]))}
-    idxs = [names_revmap[x] for x in motif_names]
-    # Prep for plotting
-    html_cwms = mc.logos[idxs, :, :]
-    html_sim_fb = mc.alignment_fb[idxs, :][:, idxs]
-    html_sim_alignments = mc.alignment_h[idxs, :][:, idxs]
-    from .plotting import create_html
-
-    create_html(
-        html_cwms,
-        cluster_names,
-        html_sim_fb,
-        html_sim_alignments,
-        motif_names,
-        save_loc,
-        average=False,
-    )
+        clustering[most_unique] = f"{c} ({most_unique_similarity:.3})"
+    # Create MotifCompendium of only displayed motifs
+    clustering_series = pd.Series(clustering)
+    mc_unique = mc[clustering_series != False]
+    unique_clusters = clustering_series[clustering_series != False].tolist()
+    mc_unique.motif_collection_html(save_loc, unique_clusters, average_motif=False)
 
 
 def cluster_grouping_upset_plot(
@@ -289,11 +205,11 @@ def cluster_grouping_upset_plot(
 
     Notes:
         Requires package upsetplot to run.
+        Consider running with argument min_subset_size.
     """
-    metadata = mc.metadata
     membership_lists = [
-        list(set(metadata[metadata[clustering] == c][grouping]))
-        for c in set(metadata[clustering])
+        list(set(mc[mc[clustering] == c][grouping]))
+        for c in set(mc[clustering])
     ]
     import upsetplot
 
@@ -304,7 +220,13 @@ def cluster_grouping_upset_plot(
 
 
 def export_clusters_modisco(
-    mc: MotifCompendium, cluster_name: str, save_loc: str, **kwargs
+    mc: MotifCompendium,
+    cluster_name: str,
+    save_loc: str,
+    max_chunk: int | None = None,
+    max_cpus: int | None = None,
+    use_gpu: bool | None = None,
+    l2: bool | None = None
 ) -> None:
     """Exports cluster averages in the Modisco file format.
 
@@ -317,12 +239,19 @@ def export_clusters_modisco(
         save_loc: The location to save the Modisco h5py to.
         **kwargs: Additional named arguments that MotifCompendium.cluster_averages()
           takes.
+        max_chunk: The maximum number of motifs to compute similarity on at a time.
+        max_cpus: The maximum number of CPUs to use for computing similarity (only used
+          if use_gpu is False).
+        use_gpu: Whether or not to use GPUs to accelerate computing similarity.
+        l2: Whether or not to use L2 normalization (instead of sqrt normalization) when
+          computing motif similarity.
+        safe: Whether or not to construct the MotifCompendium safely.
 
     Notes:
         The resultant h5py file can be fed directly into FiNeMo (hitcaller).
     """
     mc_cluster_avg = mc.cluster_averages(
-        cluster_name, **kwargs
+        cluster_name, aggregations=[], max_chunk=max_chunk, max_cpus=max_cpus, use_gpu=use_gpu, l2=l2, safe=False
     )  # kwargs for new avg similarity calculations
     pos_neg = np.sum(mc_cluster_avg.logos, axis=(1, 2)) > 0
     pos_neg = ["pos" if x > 0 else "neg" for x in pos_neg]
@@ -348,10 +277,11 @@ def export_clusters_modisco(
                 neg_cluster = neg_group.create_group(name)
                 neg_cluster.create_dataset("contrib_scores", data=cwm)
 
+
 ####################
 # ENTROPY ANALYSES #
 ####################
-def calculate_entropy(self, entropy_list: list) -> None:
+def calculate_entropy(mc: MotifCompendium, entropy_list: list) -> None:
     """Calculate entropy metrics, to quantify motif information complexity.
 
     List of Entropy metrics:
@@ -372,9 +302,9 @@ def calculate_entropy(self, entropy_list: list) -> None:
             Purpose:    (High) Dinucleotide repeats (e.g., GCGCGC, ATATAT)
 
     Args:
-        entropy_list: List of entropy metrics to calculate
-            Possible values: ['motif_entropy', 'posbase_entropy_ratio',
-            'copair_entropy_ratio', 'dinuc_entropy_ratio']
+        entropy_list: List of entropy metrics to calculate.
+          Possible values: ['motif_entropy', 'posbase_entropy_ratio',
+          'copair_entropy_ratio', 'dinuc_entropy_ratio']
     """
     # Check if entropy metrics are valid
     entropy_list = list(
@@ -397,44 +327,44 @@ def calculate_entropy(self, entropy_list: list) -> None:
         metrics_list = []
         match entropy_metric:
             case "motif_entropy":
-                for i in range(self.motifs.shape[0]):
-                    metric = utils_motif.calculate_motif_entropy(self.motifs[i])
+                for i in range(mc.motifs.shape[0]):
+                    metric = utils_motif.calculate_motif_entropy(mc.motifs[i])
                     metrics_list.append(metric)
                 metrics_df = pd.DataFrame(metrics_list, columns=["motif_entropy"])
-                self.metadata = pd.concat(
-                    [self.metadata, metrics_df], axis=1
-                )  # Update self.metadata
+                mc.metadata = pd.concat(
+                    [mc.metadata, metrics_df], axis=1
+                )  # Update mc.metadata
 
             case "posbase_entropy_ratio":
-                for i in range(self.motifs.shape[0]):
-                    metric = utils_motif.calculate_posbase_entropy_ratio(self.motifs[i])
+                for i in range(mc.motifs.shape[0]):
+                    metric = utils_motif.calculate_posbase_entropy_ratio(mc.motifs[i])
                     metrics_list.append(metric)
                 metrics_df = pd.DataFrame(
                     metrics_list, columns=["posbase_entropy_ratio"]
                 )
-                self.metadata = pd.concat(
-                    [self.metadata, metrics_df], axis=1
-                )  # Update self.metadata
+                mc.metadata = pd.concat(
+                    [mc.metadata, metrics_df], axis=1
+                )  # Update mc.metadata
 
             case "copair_entropy_ratio":
-                for i in range(self.motifs.shape[0]):
-                    metric = utils_motif.calculate_copair_entropy_ratio(self.motifs[i])
+                for i in range(mc.motifs.shape[0]):
+                    metric = utils_motif.calculate_copair_entropy_ratio(mc.motifs[i])
                     metrics_list.append(metric)
                 metrics_df = pd.DataFrame(
                     metrics_list, columns=["copair_entropy_ratio"]
                 )
-                self.metadata = pd.concat(
-                    [self.metadata, metrics_df], axis=1
-                )  # Update self.metadata
+                mc.metadata = pd.concat(
+                    [mc.metadata, metrics_df], axis=1
+                )  # Update mc.metadata
 
             case "dinuc_entropy_ratio":
-                for i in range(self.motifs.shape[0]):
-                    metric = utils_motif.calculate_dinuc_entropy_ratio(self.motifs[i])
+                for i in range(mc.motifs.shape[0]):
+                    metric = utils_motif.calculate_dinuc_entropy_ratio(mc.motifs[i])
                     metrics_list.append(metric)
                 metrics_df = pd.DataFrame(metrics_list, columns=["dinuc_entropy_ratio"])
-                self.metadata = pd.concat(
-                    [self.metadata, metrics_df], axis=1
-                )  # Update self.metadata
+                mc.metadata = pd.concat(
+                    [mc.metadata, metrics_df], axis=1
+                )  # Update mc.metadata
 
             case _:
                 raise ValueError(
@@ -444,3 +374,41 @@ def calculate_entropy(self, entropy_list: list) -> None:
 ###########################
 # EXISTING MOTIF DATABASE #
 ###########################
+def label_from_pfms(
+    mc: MotifCompendium,
+    pfm_file: str,
+    save_col_sim: str = "pfm_match_similarity",
+    save_col_match: str = "pfm_match",
+    max_chunk: int | None = None,
+    max_cpus: int | None = None,
+    use_gpu: bool | None = None,
+    l2: bool | None = None
+) -> None:
+    """Automatic labeling of motifs from a pfm file.
+
+    For each motif in the MotifCompendium, computes the similarity between that motif
+      and all motifs in the PFM file. The highest similarity and closest motif match
+      will be saved as columns save_col_sim and save_col_match in the MotifCompendium
+      metadata.
+
+    Args:
+        mc: The MotifCompendium to analyze.
+        pfm_file: The PFM file path.
+        save_col_sim: The column under which the highest similarity will be stored.
+        save_col_match: The column under which the closest match will be stored.
+        max_chunk: The maximum number of motifs to compute similarity on at a time. If
+          None, it will compute the entire similarity matrix at once.
+        max_cpus: The maximum number of CPUs to use for computing similarity. If None,
+          it will only use a single CPU.
+        use_gpu: Whether or not to use GPUs to accelerate computing similarity. Uses
+          only CPUs by default.
+        l2: Whether or not to use L2 normalization (instead of sqrt normalization) when
+          computing motif similarity.
+    """
+    pfm_motifs, names = utils_loader.load_pfm(pfm_file)
+    mc_motifs = mc.motifs
+    if mc_motifs.shape[2] == 8:
+        mc_motifs = utils_motif.motif_8_to_4_abs(mc_motifs)
+    pfm_similarity, _, _  = similarity.compute_similarities([mc_motifs, pfm_motifs], [(0, 1)], max_chunk, max_cpus, use_gpu, l2=l2)[0]
+    mc[save_col_sim] = np.max(pfm_similarity, axis=1)
+    mc[save_col_match] = [names[x] for x in np.argmax(pfm_similarity, axis=1)]

@@ -18,7 +18,6 @@ import seaborn as sns
 from MotifCompendium.utils.motif import motif_to_df
 
 
-
 ####################
 # PUBLIC FUNCTIONS #
 ####################

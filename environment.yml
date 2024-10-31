@@ -13,3 +13,4 @@ dependencies:
     - igraph
     - leidenalg
     - logomaker
+    - upsetplot

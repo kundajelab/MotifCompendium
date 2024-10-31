@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="MotifCompendium",
-    version="0.2",
+    version="0.3",
     packages=find_packages(),
     package_data={
         "MotifCompendium": ["utils/*"],
@@ -19,5 +19,6 @@ setup(
         "pytables",
         "seaborn",
         "scikit-learn",
+        "upsetplot"
     ],
 )

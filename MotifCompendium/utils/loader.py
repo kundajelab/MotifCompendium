@@ -11,7 +11,7 @@ from .motif import ic_scale, motif_4_to_8
 # PUBLIC FUNCTIONS #
 ####################
 def load_modiscos(
-    modisco_dict: dict[str, str], max_cpus: int | None = None, ic: bool = True
+    modisco_dict: dict[str, str], ic: bool = True, max_cpus: int | None = None
 ) -> tuple[np.ndarray, list[str], list[int]]:
     """Load motifs, names, seqlet counts, and model names from multiple Modisco file.
 
@@ -20,10 +20,10 @@ def load_modiscos(
 
     Args:
         modisco_dict: A dictionary from model name to Modisco file path.
+        ic: Whether or not to apply information content scaling to Modisco motifs.
         max_cpus: The maximum number of processes to use for loading motifs from
           Modisco files. If None, Modisco files will be loaded serially.
-        ic: Whether or not to apply information content scaling to Modisco motifs.
-
+        
     Returns:
         A tuple of motifs, motif names, number of seqlets per motifs, and model names.
 

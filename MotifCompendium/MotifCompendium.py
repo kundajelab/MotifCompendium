@@ -66,8 +66,8 @@ def build(
     metadata: pd.DataFrame | None = None,
     max_chunk: int | None = None,
     max_cpus: int | None = None,
-    use_gpu: bool = False,
-    l2: bool = True,
+    use_gpu: bool | None = None,
+    l2: bool | None = None,
     safe: bool = True,
 ) -> MotifCompendium:
     """Builds a MotifCompendium object from a set of motifs.
@@ -79,12 +79,10 @@ def build(
         motifs: A stack of motifs of shape (N, 30, 8/4).
         metadata: The metadata for all motifs. If None, it will be set to a DataFrame
           with generic motif names.
-        max_chunk: The maximum number of motifs to compute similarity on at a time. If
-          None, it will compute the entire similarity matrix at once.
-        max_cpus: The maximum number of CPUs to use for computing similarity. If None,
-          it will only use a single CPU.
-        use_gpu: Whether or not to use GPUs to accelerate computing similarity. Uses
-          only CPUs by default.
+        max_chunk: The maximum number of motifs to compute similarity on at a time.
+        max_cpus: The maximum number of CPUs to use for computing similarity (only used
+          if use_gpu is False).
+        use_gpu: Whether or not to use GPUs to accelerate computing similarity.
         l2: Whether or not to use L2 normalization (instead of sqrt normalization) when
           computing motif similarity.
         safe: Whether or not to construct the MotifCompendium safely.
@@ -117,7 +115,7 @@ def build(
         )
         max_cpus = None
     similarity, alignment_fr, alignment_h = utils_similarity.compute_similarities(
-        [motifs], [(0, 0)], max_chunk, max_cpus, use_gpu, l2=l2
+        [motifs], [(0, 0)], max_chunk, max_cpus, use_gpu, l2
     )[0]
     np.fill_diagonal(
         similarity, 1
@@ -130,11 +128,11 @@ def build(
 
 def build_from_modisco(
     modisco_dict: dict[str, str],
+    ic: bool = True,
     max_chunk: int | None = None,
     max_cpus: int | None = None,
-    use_gpu: bool = False,
-    ic: bool = True,
-    l2: bool = True,
+    use_gpu: bool | None = None,
+    l2: bool | None = None,
     safe: bool = True,
 ) -> MotifCompendium:
     """Builds a MotifCompendium object from a set of Modisco outputs.
@@ -143,13 +141,12 @@ def build_from_modisco(
 
     Args:
         modisco_dict: A dictionary from model name to modisco file path.
-        max_chunk: The maximum number of motifs to compute similarity on at a time. If
-          None, it will compute the entire similarity matrix at once.
-        max_cpus: The maximum number of CPUs to use for loading Modisco motifs and for
-          computing similarity. If None, it will only use a single CPU.
-        use_gpu: Whether or not to use GPUs to accelerate computing similarity. Uses
-          only CPUs by default.
-        ic: Whether or not to apply information content scaling to modisco motifs.
+        ic: Whether or not to apply information content scaling to Modisco motifs.
+        max_chunk: The maximum number of motifs to compute similarity on at a time.
+        max_cpus: The maximum number of CPUs to use for loading Modisco motifs and
+          computing similarity (only used for similarity calculation if use_gpu is
+          False).
+        use_gpu: Whether or not to use GPUs to accelerate computing similarity.
         l2: Whether or not to use L2 normalization (instead of sqrt normalization) when
           computing motif similarity.
         safe: Whether or not to construct the MotifCompendium safely.
@@ -179,7 +176,7 @@ def build_from_modisco(
     max_cpus_similarity = None if use_gpu else max_cpus
     # Load from Modisco
     motifs, motif_names, seqlet_counts, model_names = utils_loader.load_modiscos(
-        modisco_dict, max_cpus=max_cpus_modisco, ic=ic
+        modisco_dict, ic, max_cpus_modisco
     )
     # Build metadata
     metadata = pd.DataFrame()
@@ -203,8 +200,8 @@ def combine(
     compendiums: list[MotifCompendium],
     max_chunk: int | None = None,
     max_cpus: int | None = None,
-    use_gpu: bool = False,
-    l2: bool = True,
+    use_gpu: bool | None = None,
+    l2: bool | None = None,
     safe: bool = True,
 ) -> MotifCompendium:
     """Combines multiple MotifCompendium into one MotifCompendium.
@@ -215,12 +212,10 @@ def combine(
 
     Args:
         compendiums: A list of MotifCompendium objects.
-        max_chunk: The maximum number of motifs to compute similarity on at a time. If
-          None, it will compute the entire similarity matrix at once.
-        max_cpus: The maximum number of CPUs to use for computing similarity. If None,
-          it will only use a single CPU.
-        use_gpu: Whether or not to use GPUs to accelerate computing similarity. Uses
-          only CPUs by default.
+        max_chunk: The maximum number of motifs to compute similarity on at a time.
+        max_cpus: The maximum number of CPUs to use for computing similarity (only used
+          if use_gpu is False).
+        use_gpu: Whether or not to use GPUs to accelerate computing similarity.
         l2: Whether or not to use L2 normalization (instead of sqrt normalization) when
           computing motif similarity.
         safe: Whether or not to construct the MotifCompendium safely.
@@ -358,6 +353,8 @@ class MotifCompendium:
         Args:
             save_loc: Where to save the MotifCompendium to.
         """
+        if not save_loc.endswith(".mc"):
+            save_loc += ".mc"
         with h5py.File(save_loc, "w") as f:
             f.create_dataset("motifs", data=self.motifs)
             f.create_dataset("similarity", data=self.similarity)
@@ -505,7 +502,11 @@ class MotifCompendium:
     # VIZUALIZATION FUNCTIONS #
     ###########################
     def motif_collection_html(
-        self, html_out: str, group_by: str, max_cpus: int | None = None
+        self,
+        html_out: str,
+        group_by: str | pd.Series = "cluster",
+        average_motif: bool = True,
+        max_cpus: int | None = None
     ) -> None:
         """Creates an html file displaying all motifs in the current MotifCompendium.
 
@@ -516,6 +517,8 @@ class MotifCompendium:
         Args:
             html_out: The path to save the html file.
             group_by: The column in the metadata to group motifs by for visualization.
+              Or, an externally provided pd.Series that fulfills the same role.
+            average_motif: Whether or not to show the average motif per cluster.
             max_cpus: The maximum number of CPUs to use for parallelizing plotting.
 
         Notes:
@@ -570,14 +573,15 @@ class MotifCompendium:
                 )
                 group_motifs.append(motif_dict["motif"])
             # Average
-            motifs_concat = pd.concat(group_motifs)
-            average_motif = motifs_concat.groupby(motifs_concat.index).mean()
-            average_dict = {
-                "motif": average_motif,
-                "name": "AVERAGE",
-                "bgcolor": "palegreen",
-            }
-            group.insert(0, average_dict)
+            if average_motif:  
+                motifs_concat = pd.concat(group_motifs)
+                average_motif = motifs_concat.groupby(motifs_concat.index).mean()
+                average_dict = {
+                    "motif": average_motif,
+                    "name": "AVERAGE",
+                    "bgcolor": "palegreen",
+                }
+                group.insert(0, average_dict)
         # Submit to plotting function
         utils_plotting.motif_collection_html(motif_groups, html_out, max_cpus)
 
@@ -688,7 +692,9 @@ class MotifCompendium:
             self.similarity, algorithm, similarity_threshold, **kwargs
         )
 
-    def clustering_quality(self, cluster_name: str = "cluster") -> np.ndarray:
+    def clustering_quality(
+        self, cluster_name: str = "cluster", with_names: bool = False
+    ) -> np.ndarray | pd.DataFrame:
         """Produces a matrix that summarizes the quality of a particular clustering.
 
         Produce a matrix where diagonal entries represent lowest intra-cluster
@@ -698,11 +704,14 @@ class MotifCompendium:
         Args:
             cluster_name: The name of the column in metadata containing clustering
               annotations to group motifs by.
+            with_names: Whether or not to return a raw quality matrix or a quality
+              matrix with row/column labels in the form or a pd.DataFrame.
 
         Returns:
-            A square np.ndarray where diagonal entries represent lowest intra-cluster
-              similarity and off-diagonal entries represent highest inter-cluster
-              similarities.
+            A square np.ndarray or pd.DataFrame where diagonal entries represent lowest
+              intra-cluster similarity and off-diagonal entries represent highest
+              inter-cluster similarities. Returns an np.ndarray if with_names is False
+              and a pd.DataFrame otherwise
         """
         # Cache cluster --> idxs dictionary
         ci_idxs = defaultdict(list)
@@ -710,7 +719,7 @@ class MotifCompendium:
             ci_idxs[c].append(i)
         # Iterate through pairs of clusters
         clusters = sorted(ci_idxs.keys())
-        scores = np.zeros((len(clusters), len(clusters)))
+        quality = np.zeros((len(clusters), len(clusters)))
         for i, c1 in enumerate(clusters):
             c1_idxs = ci_idxs[c1]
             c1_similarity_slice = self.similarity[c1_idxs, :]
@@ -720,11 +729,14 @@ class MotifCompendium:
                 c2_idxs = ci_idxs[c2]
                 similarity_slice_ij = c1_similarity_slice[:, c2_idxs]
                 if i == j:
-                    scores[i, j] = np.min(similarity_slice_ij)
+                    quality[i, j] = np.min(similarity_slice_ij)
                 else:
-                    scores[i, j] = np.max(similarity_slice_ij)
-                    scores[j, i] = scores[i, j]
-        return scores
+                    quality[i, j] = np.max(similarity_slice_ij)
+                    quality[j, i] = quality[i, j]
+        if with_names:
+            return pd.DataFrame(quality, index=clusters, columns=clusters)
+        else:
+            return quality
 
     def cluster_averages(
         self,
@@ -732,8 +744,8 @@ class MotifCompendium:
         aggregations: list[tuple[str]] = [("name", "count", "num_constituents")],
         max_chunk: int | None = None,
         max_cpus: int | None = None,
-        use_gpu: bool = False,
-        l2: bool = True,
+        use_gpu: bool | None = None,
+        l2: bool | None = None,
         safe: bool = True,
     ) -> MotifCompendium:
         """Creates a MotifCompendium where each motif represents a cluster of motifs.
@@ -748,14 +760,12 @@ class MotifCompendium:
             cluster_name: The name of the column in metadata containing clustering
               annotations to group motifs by.
             aggregations:
-            max_chunk: The maximum number of motifs to compute similarity on at a time. If
-              None, it will compute the entire similarity matrix at once.
-            max_cpus: The maximum number of CPUs to use for computing similarity. If None,
-              it will only use a single CPU.
-            use_gpu: Whether or not to use GPUs to accelerate computing similarity. Uses
-              only CPUs by default.
-            l2: Whether or not to use L2 normalization (instead of sqrt normalization) when
-              computing motif similarity.
+            max_chunk: The maximum number of motifs to compute similarity on at a time.
+            max_cpus: The maximum number of CPUs to use for computing similarity (only
+              used if use_gpu is False).
+            use_gpu: Whether or not to use GPUs to accelerate computing similarity.
+            l2: Whether or not to use L2 normalization (instead of sqrt normalization)
+              when computing motif similarity.
             safe: Whether or not to construct the MotifCompendium safely.
 
         Returns:
@@ -863,7 +873,12 @@ class MotifCompendium:
                 )
                 return similarity_slice_df
             else:
-                return similarity_slice
+                similarity_slice_df = pd.DataFrame(
+                    similarity_slice,
+                    index=list(keep_idxs_1),
+                    columns=list(self.metadata.index.tolist()),
+                )
+                return similarity_slice_df
         else:
             if not (isinstance(slice2, pd.Series) and (slice2.dtype == bool)):
                 raise TypeError("slice2 must be a pd.Series of dtype bool.")
@@ -877,7 +892,12 @@ class MotifCompendium:
                 )
                 return similarity_slice_df
             else:
-                return similarity_slice
+                similarity_slice_df = pd.DataFrame(
+                    similarity_slice,
+                    index=list(keep_idxs_1),
+                    columns=list(keep_idxs_2),
+                )
+                return similarity_slice_df
 
     def extend(self):
         """Add new motifs to the current MotifCompendium.
@@ -885,8 +905,37 @@ class MotifCompendium:
         print("not yet implemented")
         assert False
 
-    def assign(self):
-        """Assign clusters to a new set of motifs.
+    def assign_clusters_from_other(
+        self,
+        other: MotifCompendium,
+        other_cluster_col: str = "cluster",
+        save_col_sim: str = "mc_match_similarity",
+        save_col_match: str = "mc_match",
+        max_chunk: int | None = None,
+        max_cpus: int | None = None,
+        use_gpu: bool | None = None,
+        l2: bool | None = None
+    ) -> None:
+        """Assign clusters to motifs based on an existing clustered MotifCompendium.
+
+        Given another MotifCompendium that has already been clustered and assigned
+          labels, compute similarity between all the motifs in this MotifCompendium
+          and other. The highest similarity and closest motif match will be saved as
+          columns save_col_sim and save_col_match in metadata.
+
+        Args:
+            other: The other MotifCompendium to compare against.
+            other_cluster_col: The column in the other MotifCompendium with cluster
+              names of each motif.
+            save_col_sim: The column under which the highest similarity will be stored.
+            save_col_match: The column under which the closest match will be stored.
+            max_chunk: The maximum number of motifs to compute similarity on at a time.
+            max_cpus: The maximum number of CPUs to use for computing similarity (only
+              used if use_gpu is False).
+            use_gpu: Whether or not to use GPUs to accelerate computing similarity.
+            l2: Whether or not to use L2 normalization (instead of sqrt normalization)
+              when computing motif similarity.
         """
-        print("not yet implemented")
-        assert False
+        mc_similarity, _, _ = similarity.compute_similarities([self.motifs, other.motifs], [(0, 1)], max_chunk, max_cpus, use_gpu, l2=l2)[0]
+        self[save_col_sim] = np.max(mc_similarity, axis=1)
+        self[save_col_match] = [other[other_cluster_col].tolist()[x] for x in np.argmax(mc_similarity, axis=1)]

@@ -14,8 +14,8 @@ def compute_similarities(
     calculations: list[tuple[int, int]],
     max_chunk: int | None,
     max_cpus: int | None,
-    use_gpu: bool,
-    l2: bool = True,
+    use_gpu: bool | None,
+    l2: bool | None,
 ) -> list[tuple[np.ndarray, np.ndarray, np.ndarray]]:
     """Performs similarity and calculations between sets of motif stacks.
 
@@ -35,8 +35,7 @@ def compute_similarities(
           stacks of size <= max_chunk by _chunk_motif_stacks_and_calcs(). Calculations
           will occur on the smaller chunks and then the results will be reassembled with
           _reassemble_results().
-        max_cpus: The maximum number of CPUs to use for computing similarity. If None,
-          it will only use a single CPU.
+        max_cpus: The maximum number of CPUs to use for computing similarity.
         use_gpu: Whether or not to use GPUs to accelerate computing similarity. If True,
           similarity calculations are carried out by the functions in utils file
           .similarity_core_gpu.py. If False, they will be carried out by the function in
@@ -50,6 +49,14 @@ def compute_similarities(
           calculation result tuple consists of a similarity matrix, an alignemnt_fr
           matrix, and an alignment_h matrix.
     """
+    if max_chunk is None:
+        max_chunk = DEFAULT_MAX_CHUNK
+    if max_cpus is None:
+        max_cpus = DEFAULT_MAX_CPUS
+    if use_gpu is None:
+        use_gpu = DEFAULT_USE_GPU
+    if l2 is None:
+        l2 = DEFAULT_L2
     for motif_stack in motif_stack_list:
         validate_motif_stack(motif_stack)
     if max_chunk is not None:
@@ -199,3 +206,24 @@ def _reassemble_results(
         results.append((sim, fb, ali))
     assert len(results) == len(calculations)
     return results
+
+
+############
+# SETTINGS #
+############
+DEFAULT_MAX_CHUNK = 1000
+DEFAULT_MAX_CPUS = 4
+DEFAULT_USE_GPU = False
+DEFAULT_L2 = True
+
+def set_default_options(max_chunk: int | None = None, max_cpus: int | None = None, use_gpu: bool | None, l2: bool | None):
+    """Set default values for max_chunk, max_cpus, use_gpu, and l2.
+    """
+    if max_chunk is not None:
+        DEFAULT_MAX_CHUNK = max_chunk
+    if max_cpus is not None:
+        DEFAULT_MAX_CPUS = max_cpus
+    if use_gpu is not None:
+        DEFAULT_USE_GPU = use_gpu
+    if l2 is not None:
+        DEFAULT_L2 = l2
