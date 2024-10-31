@@ -11,8 +11,8 @@ import sklearn.cluster
 ######################
 def cluster(
     similarity_matrix: np.ndarray,
-    similarity_threshold: float = 0.9,
     algorithm: str = "leiden",
+    similarity_threshold: float = 0.9,
     **kwargs,
 ) -> list[int]:
     """Cluster a similarity matrix.
@@ -40,10 +40,12 @@ def cluster(
     match algorithm:
         # Leiden
         case "leiden" | "weighted_leiden" | "modularity_leiden":
-            adjacency_matrix= similarity_matrix * (similarity_matrix >= similarity_threshold)
+            # Required to create weighted matrix
+            adjacency_matrix= np.where(similarity_matrix >= similarity_threshold, similarity_matrix, 0) 
             return modularity_leiden_clustering(adjacency_matrix, **kwargs)
-        case "cpm_leiden" | "cpm_weighted_leiden":
-            adjacency_matrix = similarity_matrix * (similarity_matrix >= similarity_threshold)
+        case "cpm" | "cpm_leiden" | "cpm_weighted_leiden":
+            # Required to create weighted matrix
+            adjacency_matrix = np.where(similarity_matrix >= similarity_threshold, similarity_matrix, 0)
             return cpm_leiden_clustering(adjacency_matrix, **kwargs)
         # Connected-component
         case "cc":
@@ -64,51 +66,69 @@ def cluster(
 # LEIDEN CLUSTERING #
 #####################
 def modularity_leiden_clustering(
-    thresholded_matrix: np.ndarray,
-    resolution: float = 1,
-    leiden_iterations: int = 2,
-    n_init: int = 1,
+    adjacency_matrix: np.ndarray,
+    resolution_parameter: float = 1.0,
+    n_iterations: int = -1,
+    n_seeds: int = 2,
 ) -> list[int]:
-    """Perform Leiden clustering on a weighted similarity matrix.
+    """Perform Leiden clustering (modularity) on a weighted similarity matrix.
     """
-    g = ig.Graph.Weighted_Adjacency(thresholded_matrix, mode="undirected")
+    n_vertices = adjacency_matrix.shape[0]
+    rows, cols = np.nonzero(adjacency_matrix)
+    edges = list(zip(rows, cols))
+    weights = adjacency_matrix[rows, cols]
+    
+    # Create igraph object
+    g = ig.Graph(n_vertices, edges=edges)
+    g.es["weight"] = weights
+
     best_quality = None
     best_membership = None
-    for _ in range(n_init):
+    for seed in range(1, n_seeds+1):
         partition = la.find_partition(
-            g,
-            la.ModularityVertexPartition,
-            weights=None,
-            resolution_parameter=resolution,
-            n_iterations=leiden_iterations,
+            graph=g,
+            partition_type=la.ModularityVertexPartition,
+            weights="weight",
+            resolution_parameter=resolution_parameter,
+            n_iterations=n_iterations,
+            seed=seed*100,
         )
-        if (best_quality is None) or (partition.quality > best_quality):
-            best_quality = partition.quality
+        if best_quality is None or partition.quality() > best_quality:
+            best_quality = partition.quality()
             best_membership = partition.membership
     return best_membership
 
 
 def cpm_leiden_clustering(
-    thresholded_matrix: np.ndarray,
-    resolution: float = 1,
-    leiden_iterations: int = 2,
-    n_init: int = 1,
+    adjacency_matrix: np.ndarray,
+    resolution_parameter: float = 1.0,
+    n_iterations: int = -1,
+    n_seeds: int = 2,
 ) -> list[int]:
-    """Perform CPM Leiden clustering on a weighted similarity matrix.
+    """Perform Leiden clustering (CPM) on a weighted similarity matrix.
     """
-    g = ig.Graph.Weighted_Adjacency(thresholded_matrix, mode="undirected")
+    n_vertices = adjacency_matrix.shape[0]
+    rows, cols = np.nonzero(adjacency_matrix)
+    edges = list(zip(rows, cols))
+    weights = adjacency_matrix[rows, cols]
+    
+    # Create igraph object
+    g = ig.Graph(n_vertices, edges=edges)
+    g.es["weight"] = weights
+
     best_quality = None
     best_membership = None
-    for _ in range(n_init):
+    for seed in range(1, n_seeds+1):
         partition = la.find_partition(
-            g,
-            la.CPMVertexPartition,
-            weights=None,
-            resolution_parameter=resolution,
-            n_iterations=leiden_iterations,
+            graph=g,
+            partition_type=la.CPMVertexPartition,
+            weights="weight",
+            resolution_parameter=resolution_parameter,
+            n_iterations=n_iterations,
+            seed=seed*100,
         )
-        if (best_quality is None) or (partition.quality > best_quality):
-            best_quality = partition.quality
+        if best_quality is None or partition.quality() > best_quality:
+            best_quality = partition.quality()
             best_membership = partition.membership
     return best_membership
 

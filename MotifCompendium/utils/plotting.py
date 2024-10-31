@@ -72,7 +72,7 @@ def motif_collection_html(
             start, end = group_to_motif_dict_idx[group_name]
             motif_groups[group_name] = all_motif_dicts[start:end]
     # Create Jinja2 environment
-    current_dir = os.path.dirname(os.path.abspath(__file__))
+    current_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "resource")
     env = Environment(loader=FileSystemLoader(current_dir))
     # Load HTML template
     template = env.get_template("motif_collection_template.html")
@@ -137,7 +137,7 @@ def summary_table_html(
     columns = metadata.columns.tolist()
     rows = metadata.to_dict(orient="records")
     # Create Jinja2 environment
-    current_dir = os.path.dirname(os.path.abspath(__file__))
+    current_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "resource")
     env = Environment(loader=FileSystemLoader(current_dir))
     # Load HTML template
     template = env.get_template("table_template.html")

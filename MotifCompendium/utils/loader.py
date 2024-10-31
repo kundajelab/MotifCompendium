@@ -135,7 +135,7 @@ def load_pfm(pfm_file: str) -> tuple[np.ndarray, list[str]]:
             if active_pwm:
                 if x.startswith(">"):
                     # submit
-                    pwms.append(squash_motif(pd.DataFrame(current_pwm)))
+                    pwms.append(_resize_motif(pd.DataFrame(current_pwm)))
                     names.append(current_pwm_name)
                     # restart
                     current_pwm_name = x[1:]
@@ -143,15 +143,12 @@ def load_pfm(pfm_file: str) -> tuple[np.ndarray, list[str]]:
                 else:
                     a, c, g, t = x.split()
                     a, c, g, t = float(a), float(c), float(g), float(t)
-                    acgt = np.asarray([a, c, g, t])
-                    xlogx = acgt * np.log2(acgt, where=(acgt != 0))
-                    entropy = np.sum(-xlogx) / 2
-                    ic = 1 - entropy
-                    acgt_ic = acgt * ic
-                    current_pwm["A"].append(acgt_ic[0])
-                    current_pwm["C"].append(acgt_ic[1])
-                    current_pwm["G"].append(acgt_ic[2])
-                    current_pwm["T"].append(acgt_ic[3])
+                    acgt = np.asarray([[a, c, g, t]]) # (1, 4)
+                    acgt_ic = ic_scale(acgt)
+                    current_pwm["A"].append(acgt_ic[0,0])
+                    current_pwm["C"].append(acgt_ic[0,1])
+                    current_pwm["G"].append(acgt_ic[0,2])
+                    current_pwm["T"].append(acgt_ic[0,3])
             else:
                 assert x.startswith(">")
                 active_pwm = True
@@ -193,3 +190,26 @@ def _sequence_importance_from_seqlets(seqlets: np.ndarray, ic: bool) -> np.ndarr
     sim = motif_4_to_8(seqlets_avg)
     sim /= np.sum(sim)
     return sim
+
+def _resize_motif(motif: pd.DataFrame, squash_to: int = 30) -> pd.DataFrame:
+    """Resize a motif (by squashing or padding) to a specified length.
+
+    Args:
+        motif: A pandas DataFrame representing the motif.
+        squash_to: The length to squash or pad the motif to.
+
+    Returns:
+        A pandas DataFrame representing the squashed or padded motif.
+    """
+    if len(motif) < squash_to:
+        # Pad with zeros
+        n_add = squash_to - len(motif)
+        zeros_df = pd.DataFrame(np.zeros((n_add, motif.shape[1])), columns=motif.columns)
+        motif = pd.concat([motif, zeros_df], ignore_index=True)
+    elif len(motif) > squash_to:
+        # Squash to the desired length
+        motif_np = motif.to_numpy()
+        i_sums = [(np.sum(motif_np[i:i+squash_to, :]), i) for i in range(len(motif) - squash_to + 1)]
+        top_i = max(i_sums, key=lambda x: x[0])[1]
+        motif = pd.DataFrame(motif_np[top_i:top_i+squash_to, :], columns=motif.columns)
+    return motif

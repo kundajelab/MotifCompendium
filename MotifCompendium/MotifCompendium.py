@@ -689,7 +689,10 @@ class MotifCompendium:
             Review the clustering algorithms available in utils/clustering.cluster().
         """
         self.metadata[save_name] = utils_clustering.cluster(
-            self.similarity, algorithm, similarity_threshold, **kwargs
+            similarity_matrix=self.similarity, 
+            algorithm=algorithm, 
+            similarity_threshold=similarity_threshold, 
+            **kwargs
         )
 
     def clustering_quality(
@@ -757,9 +760,12 @@ class MotifCompendium:
           MotifCompendium is returned.
 
         Args:
-            cluster_name: The name of the column in metadata containing clustering
+            cluster_name: Name of column in metadata, containing clustering
               annotations to group motifs by.
-            aggregations:
+            aggregations: A list of tuples of string: ("source", "method", "save").
+              "source": Name of column in metadata to aggregate.
+              "method": Aggregation method to use. Ex: "count", "sum", "concatenate".
+              "save": Name of column in new metadata, to save the aggregated data.
             max_chunk: The maximum number of motifs to compute similarity on at a time.
             max_cpus: The maximum number of CPUs to use for computing similarity (only
               used if use_gpu is False).
@@ -832,7 +838,7 @@ class MotifCompendium:
         for agg_dict in aggregations_dicts:
             metadata[agg_dict["save"]] = agg_dict["values"]
         return build(
-            cluster_motif_avgs, metadata, max_chunk, max_cpus, use_gpu, safe=safe
+            cluster_motif_avgs, metadata, max_chunk, max_cpus, use_gpu, l2=l2, safe=safe
         )
 
     def get_similarity_slice(
@@ -935,7 +941,12 @@ class MotifCompendium:
             use_gpu: Whether or not to use GPUs to accelerate computing similarity.
             l2: Whether or not to use L2 normalization (instead of sqrt normalization)
               when computing motif similarity.
+
+        Notes:
+            Assumes that this MotifCompendium and other have the same dimensions for
+              their motifs. (Ex: 4 and 4 or 8 and 8.)
         """
+        assert self.motifs.shape[2] == other.motifs.shape[2]
         mc_similarity, _, _ = similarity.compute_similarities([self.motifs, other.motifs], [(0, 1)], max_chunk, max_cpus, use_gpu, l2=l2)[0]
         self[save_col_sim] = np.max(mc_similarity, axis=1)
         self[save_col_match] = [other[other_cluster_col].tolist()[x] for x in np.argmax(mc_similarity, axis=1)]

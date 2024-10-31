@@ -281,14 +281,23 @@ def export_clusters_modisco(
 ####################
 # ENTROPY ANALYSES #
 ####################
-def calculate_entropy(mc: MotifCompendium, entropy_list: list) -> None:
+def calculate_entropy(
+    mc: MotifCompendium, 
+    entropy_list: list = [
+        "motif_entropy",
+        "posbase_entropy_ratio",
+        "copair_entropy_ratio",
+        "dinuc_entropy_ratio",
+    ]
+) -> None:
     """Calculate entropy metrics, to quantify motif information complexity.
+    Update metadata table with entropy metric values.
 
     List of Entropy metrics:
         (1) Motif entropy:
             Calculation: Shannon entropy on (L,8)
-            Purpose:    (High) Archetype #1: Noise/chaos
-                        (Low) Archetype #2: Sharp nucleotide peak (e.g., G)
+            Purpose:    (Low) Archetype #1: Sharp nucleotide peak (e.g., G)
+                        (High) Archetype #2: Noise/chaos
         (2) Pos-base entropy ratio:
             Calculation: Position-wise entropy on (L,) / Base-wise entropy on (8,)
             Purpose:    (High) Archetype #3: Single nucleotide repeats (e.g., AAAAA, GGGGG)
@@ -313,7 +322,7 @@ def calculate_entropy(mc: MotifCompendium, entropy_list: list) -> None:
     valid_entropy_metrics = [
         "motif_entropy",
         "posbase_entropy_ratio",
-        "pair_entropy_ratio",
+        "copair_entropy_ratio",
         "dinuc_entropy_ratio",
     ]
     for entropy_metric in entropy_list:
