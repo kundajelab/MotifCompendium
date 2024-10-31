@@ -504,11 +504,10 @@ class MotifCompendium:
     # VIZUALIZATION FUNCTIONS #
     ###########################
     def motif_collection_html(
-        self,
-        html_out: str,
-        group_by: str | list = "cluster",
-        average_motif: bool = True,
-        max_cpus: int | None = None,
+        self, 
+        html_out: str, 
+        group_by: str, 
+        max_cpus: int | None = None
     ) -> None:
         """Creates an html file displaying all motifs in the current MotifCompendium.
 
@@ -595,7 +594,10 @@ class MotifCompendium:
         utils_plotting.motif_collection_html(motif_groups, html_out, max_cpus)
 
     def summary_table_html(
-        self, html_out: str, columns: list[str], max_cpus: int | None = None
+        self, 
+        html_out: str, 
+        columns: list[str] = ["name"], 
+        max_cpus: int | None = None
     ) -> None:
         """Creates an html file summarizing all motifs and metadata about them.
 
