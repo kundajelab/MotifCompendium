@@ -10,6 +10,7 @@ import logomaker
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.style as mplstyle
+
 mplstyle.use("fast")
 import numpy as np
 import pandas as pd
@@ -72,7 +73,7 @@ def motif_collection_html(
             start, end = group_to_motif_dict_idx[group_name]
             motif_groups[group_name] = all_motif_dicts[start:end]
     # Create Jinja2 environment
-    current_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "resource")
+    current_dir = os.path.dirname(os.path.abspath(__file))
     env = Environment(loader=FileSystemLoader(current_dir))
     # Load HTML template
     template = env.get_template("motif_collection_template.html")
@@ -89,7 +90,7 @@ def summary_table_html(
     motifs: np.ndarray,
     metadata: pd.DataFrame,
     html_out: str,
-    max_cpus: int | None = None
+    max_cpus: int | None = None,
 ) -> None:
     """Creates an html file displaying motifs with information about each motif.
 
@@ -114,8 +115,12 @@ def summary_table_html(
     current_backend = matplotlib.get_backend()
     matplotlib.use("Agg")  # Use Agg backend
     # Prepare for plotting
-    fwd_motif_dicts = [{"motif": motif_to_df(motifs[i, :, :])} for i in range(motifs.shape[0])]
-    rev_motif_dicts = [{"motif": motif_to_df(motifs[i, ::-1, ::-1])} for i in range(motifs.shape[0])]
+    fwd_motif_dicts = [
+        {"motif": motif_to_df(motifs[i, :, :])} for i in range(motifs.shape[0])
+    ]
+    rev_motif_dicts = [
+        {"motif": motif_to_df(motifs[i, ::-1, ::-1])} for i in range(motifs.shape[0])
+    ]
     # Create motif plots
     if max_cpus is None:
         fwd_motif_strings = []
@@ -137,7 +142,7 @@ def summary_table_html(
     columns = metadata.columns.tolist()
     rows = metadata.to_dict(orient="records")
     # Create Jinja2 environment
-    current_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "resource")
+    current_dir = os.path.dirname(os.path.abspath(__file))
     env = Environment(loader=FileSystemLoader(current_dir))
     # Load HTML template
     template = env.get_template("table_template.html")

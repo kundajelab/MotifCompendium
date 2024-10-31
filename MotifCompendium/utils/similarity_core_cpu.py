@@ -5,12 +5,9 @@ import numpy as np
 # PUBLIC FUNCTIONS #
 ####################
 def compute_similarity_and_align(
-    simsA: np.ndarray,
-    simsB: np.ndarray,
-    l2: bool
+    simsA: np.ndarray, simsB: np.ndarray, l2: bool
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Computes similarity and alignment taking into account reverse complements.
-    """
+    """Computes similarity and alignment taking into account reverse complements."""
     if l2:
         samsA = simsA / np.linalg.norm(simsA, axis=(1, 2), keepdims=True)
         samsB = simsB / np.linalg.norm(simsB, axis=(1, 2), keepdims=True)
@@ -31,9 +28,9 @@ def compute_similarity_and_align(
     sim = np.max(sim_12, axis=0)
     sim_fb = np.argmax(sim_12, axis=0)
     sim_alignments = np.where(sim_fb == 0, sim_1_alignments, sim_2_alignments)
-    sim_alignments[
-        sim == 0
-    ] = 0  # alignment erroneously always -29 when 0 similarity (argmax artifact)
+    sim_alignments[sim == 0] = (
+        0  # alignment erroneously always -29 when 0 similarity (argmax artifact)
+    )
     return sim, sim_fb, sim_alignments
 
 
@@ -52,16 +49,14 @@ _RIGHTTENSOR[:, 29:59] = np.eye(30)
 # PRIVATE FUNCTIONS #
 #####################
 def _reverse_complement(motifs: np.ndarray) -> np.ndarray:
-    """Computes the reverse complement of a (N, L, C) motif stack.
-    """
+    """Computes the reverse complement of a (N, L, C) motif stack."""
     return motifs[:, ::-1, ::-1]
 
 
 def _compute_similarity(
     motif_set_1: np.ndarray, motif_set_2: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Computes similarity and alignment for two sets of motifs.
-    """
+    """Computes similarity and alignment for two sets of motifs."""
     # TRANSPOSE FOR EFFICIENCY
     N_original = motif_set_1.shape[0]
     M_original = motif_set_2.shape[0]
@@ -97,8 +92,7 @@ def _compute_similarity(
 
 
 def _compute_similarity_left_side(motifs: np.ndarray) -> list[np.ndarray]:
-    """Prepares the left side of the similarity calculation.
-    """
+    """Prepares the left side of the similarity calculation."""
     # motifs = (N, 30, K)
     K = motifs.shape[2]
     motif_slices = [motifs[:, :, i] for i in range(K)]  # (N, 30)
@@ -114,8 +108,7 @@ def _compute_similarity_left_side(motifs: np.ndarray) -> list[np.ndarray]:
 
 
 def _compute_similarity_right_side(motifs: np.ndarray) -> list[np.ndarray]:
-    """Prepares the right side of the similarity calculation.
-    """
+    """Prepares the right side of the similarity calculation."""
     # motifs = (M, 30, K)
     K = motifs.shape[2]
     motifs_pivot = np.transpose(motifs, axes=(0, 2, 1))  # (M, K, 30)

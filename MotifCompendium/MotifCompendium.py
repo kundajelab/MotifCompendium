@@ -506,7 +506,7 @@ class MotifCompendium:
         html_out: str,
         group_by: str | pd.Series = "cluster",
         average_motif: bool = True,
-        max_cpus: int | None = None
+        max_cpus: int | None = None,
     ) -> None:
         """Creates an html file displaying all motifs in the current MotifCompendium.
 
@@ -573,7 +573,7 @@ class MotifCompendium:
                 )
                 group_motifs.append(motif_dict["motif"])
             # Average
-            if average_motif:  
+            if average_motif:
                 motifs_concat = pd.concat(group_motifs)
                 average_motif = motifs_concat.groupby(motifs_concat.index).mean()
                 average_dict = {
@@ -689,10 +689,10 @@ class MotifCompendium:
             Review the clustering algorithms available in utils/clustering.cluster().
         """
         self.metadata[save_name] = utils_clustering.cluster(
-            similarity_matrix=self.similarity, 
-            algorithm=algorithm, 
-            similarity_threshold=similarity_threshold, 
-            **kwargs
+            similarity_matrix=self.similarity,
+            algorithm=algorithm,
+            similarity_threshold=similarity_threshold,
+            **kwargs,
         )
 
     def clustering_quality(
@@ -826,10 +826,9 @@ class MotifCompendium:
                         agg_dict["values"].append(np.mean(agg_c_data))
                     case "concatenate" | "concat":
                         agg_dict["values"].append(",".join(sorted(set(agg_c_data))))
-                        # agg_dict["values"].append(agg_c_data.str.cat(sep=","))
                     case _:
                         raise ValueError(
-                            f"{agg_dict['method'].method} is not a supported aggregation method."
+                            f"{agg_dict['method']} is not a supported aggregation method."
                         )
         # Construct cluster average MotifCompendium
         cluster_motif_avgs = np.stack(cluster_motif_avgs, axis=0)
@@ -838,7 +837,7 @@ class MotifCompendium:
         for agg_dict in aggregations_dicts:
             metadata[agg_dict["save"]] = agg_dict["values"]
         return build(
-            cluster_motif_avgs, metadata, max_chunk, max_cpus, use_gpu, l2=l2, safe=safe
+            cluster_motif_avgs, metadata, max_chunk, max_cpus, use_gpu, l2, safe
         )
 
     def get_similarity_slice(
@@ -906,8 +905,7 @@ class MotifCompendium:
                 return similarity_slice_df
 
     def extend(self):
-        """Add new motifs to the current MotifCompendium.
-        """
+        """Add new motifs to the current MotifCompendium."""
         print("not yet implemented")
         assert False
 
@@ -920,7 +918,7 @@ class MotifCompendium:
         max_chunk: int | None = None,
         max_cpus: int | None = None,
         use_gpu: bool | None = None,
-        l2: bool | None = None
+        l2: bool | None = None,
     ) -> None:
         """Assign clusters to motifs based on an existing clustered MotifCompendium.
 
@@ -947,6 +945,11 @@ class MotifCompendium:
               their motifs. (Ex: 4 and 4 or 8 and 8.)
         """
         assert self.motifs.shape[2] == other.motifs.shape[2]
-        mc_similarity, _, _ = similarity.compute_similarities([self.motifs, other.motifs], [(0, 1)], max_chunk, max_cpus, use_gpu, l2=l2)[0]
+        mc_similarity, _, _ = similarity.compute_similarities(
+            [self.motifs, other.motifs], [(0, 1)], max_chunk, max_cpus, use_gpu, l2=l2
+        )[0]
         self[save_col_sim] = np.max(mc_similarity, axis=1)
-        self[save_col_match] = [other[other_cluster_col].tolist()[x] for x in np.argmax(mc_similarity, axis=1)]
+        self[save_col_match] = [
+            other[other_cluster_col].tolist()[x]
+            for x in np.argmax(mc_similarity, axis=1)
+        ]

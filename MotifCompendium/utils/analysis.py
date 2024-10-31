@@ -19,7 +19,7 @@ def plot_similarity_distribution(
     mc: MotifCompendium,
     save_loc: str,
     vals: list[float] = [0.99, 0.98, 0.97, 0.96, 0.95, 0.9, 0.85, 0.8, 0.75, 0.7],
-    n_per: int = 5
+    n_per: int = 5,
 ) -> None:
     """Plots examples of various similarities in a MotifCompendium.
 
@@ -50,7 +50,9 @@ def plot_similarity_distribution(
     clustering_series = pd.Series(clustering)
     mc_distribution = mc[clustering_series != False]
     distribution_clusters = clustering_series[clustering_series != False].tolist()
-    mc_distribution.motif_collection_html(save_loc, distribution_clusters, average_motif=False)
+    mc_distribution.motif_collection_html(
+        save_loc, distribution_clusters, average_motif=False
+    )
 
 
 def plot_ground_truth_mismatch(
@@ -58,7 +60,7 @@ def plot_ground_truth_mismatch(
     ground_truth: str,
     save_loc: str,
     similarity_threshold: float = 0.8,
-    max_examples: int = 100
+    max_examples: int = 100,
 ) -> None:
     """Plots examples of when similarity did not match a ground truth motif grouping.
 
@@ -106,8 +108,12 @@ def plot_ground_truth_mismatch(
             )
             similarity_slice_ij_df_stacked = similarity_slice_ij_df.stack()
             row_label, col_label = similarity_slice_ij_df_stacked.idxmax()
-            clustering[row_label] = f"High external similarity {ci} & {cj} ({quality[i, j]:.3})"
-            clustering[col_label] = f"High external similarity {ci} & {cj} ({quality[i, j]:.3})"
+            clustering[row_label] = (
+                f"High external similarity {ci} & {cj} ({quality[i, j]:.3})"
+            )
+            clustering[col_label] = (
+                f"High external similarity {ci} & {cj} ({quality[i, j]:.3})"
+            )
             n_examples += 1
             if n_examples >= (max_examples) // 2:
                 break
@@ -175,7 +181,9 @@ def plot_unique_per_cluster(
     """
     clustering = [False for _ in range(len(mc))]
     for c in set(mc[clustering]):
-        similarity_contrast_c_df = mc.get_similarity_slice(mc[clustering] == c, mc[clustering] != c)
+        similarity_contrast_c_df = mc.get_similarity_slice(
+            mc[clustering] == c, mc[clustering] != c
+        )
         c_best_similarities = similarity_contrast_c_df.max(axis=1)
         most_unique = c_best_similarities.idxmin()
         most_unique_similarity = c_best_similarities.min()
@@ -208,8 +216,7 @@ def cluster_grouping_upset_plot(
         Consider running with argument min_subset_size.
     """
     membership_lists = [
-        list(set(mc[mc[clustering] == c][grouping]))
-        for c in set(mc[clustering])
+        list(set(mc[mc[clustering] == c][grouping])) for c in set(mc[clustering])
     ]
     import upsetplot
 
@@ -226,7 +233,7 @@ def export_clusters_modisco(
     max_chunk: int | None = None,
     max_cpus: int | None = None,
     use_gpu: bool | None = None,
-    l2: bool | None = None
+    l2: bool | None = None,
 ) -> None:
     """Exports cluster averages in the Modisco file format.
 
@@ -251,7 +258,13 @@ def export_clusters_modisco(
         The resultant h5py file can be fed directly into FiNeMo (hitcaller).
     """
     mc_cluster_avg = mc.cluster_averages(
-        cluster_name, aggregations=[], max_chunk=max_chunk, max_cpus=max_cpus, use_gpu=use_gpu, l2=l2, safe=False
+        cluster_name,
+        aggregations=[],
+        max_chunk=max_chunk,
+        max_cpus=max_cpus,
+        use_gpu=use_gpu,
+        l2=l2,
+        safe=False,
     )  # kwargs for new avg similarity calculations
     pos_neg = np.sum(mc_cluster_avg.logos, axis=(1, 2)) > 0
     pos_neg = ["pos" if x > 0 else "neg" for x in pos_neg]
@@ -282,13 +295,13 @@ def export_clusters_modisco(
 # ENTROPY ANALYSES #
 ####################
 def calculate_entropy(
-    mc: MotifCompendium, 
+    mc: MotifCompendium,
     entropy_list: list = [
         "motif_entropy",
         "posbase_entropy_ratio",
         "copair_entropy_ratio",
         "dinuc_entropy_ratio",
-    ]
+    ],
 ) -> None:
     """Calculate entropy metrics, to quantify motif information complexity.
     Update metadata table with entropy metric values.
@@ -316,9 +329,7 @@ def calculate_entropy(
           'copair_entropy_ratio', 'dinuc_entropy_ratio']
     """
     # Check if entropy metrics are valid
-    entropy_list = list(
-        set(entropy_list)
-    )  # Convert entropy_list into a unique list
+    entropy_list = list(set(entropy_list))  # Convert entropy_list into a unique list
     valid_entropy_metrics = [
         "motif_entropy",
         "posbase_entropy_ratio",
@@ -379,7 +390,8 @@ def calculate_entropy(
                 raise ValueError(
                     f"Entropy metric {entropy_metric} is not valid. Must be one of: {valid_entropy_metrics}"
                 )
-        
+
+
 ###########################
 # EXISTING MOTIF DATABASE #
 ###########################
@@ -391,7 +403,7 @@ def label_from_pfms(
     max_chunk: int | None = None,
     max_cpus: int | None = None,
     use_gpu: bool | None = None,
-    l2: bool | None = None
+    l2: bool | None = None,
 ) -> None:
     """Automatic labeling of motifs from a pfm file.
 
@@ -418,6 +430,8 @@ def label_from_pfms(
     mc_motifs = mc.motifs
     if mc_motifs.shape[2] == 8:
         mc_motifs = utils_motif.motif_8_to_4_abs(mc_motifs)
-    pfm_similarity, _, _  = similarity.compute_similarities([mc_motifs, pfm_motifs], [(0, 1)], max_chunk, max_cpus, use_gpu, l2=l2)[0]
+    pfm_similarity, _, _ = similarity.compute_similarities(
+        [mc_motifs, pfm_motifs], [(0, 1)], max_chunk, max_cpus, use_gpu, l2=l2
+    )[0]
     mc[save_col_sim] = np.max(pfm_similarity, axis=1)
     mc[save_col_match] = [names[x] for x in np.argmax(pfm_similarity, axis=1)]

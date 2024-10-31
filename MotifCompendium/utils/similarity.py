@@ -85,8 +85,7 @@ def _chunk_motif_stacks_and_calcs(
     calculations: list[tuple[int, int]],
     max_chunk: int,
 ) -> tuple[list[np.ndarray], list[tuple[int, int]], dict[int, int]]:
-    """Chunks motifs and calculations.
-    """
+    """Chunks motifs and calculations."""
     # CHUNK MOTIFS
     chunked_motif_stack_list = []
     chunk_map = dict()
@@ -114,8 +113,7 @@ def _chunk_motif_stacks_and_calcs(
 
 
 def _chunk_axis_0(X: np.ndarray, chunk_size: int) -> list[np.ndarray]:
-    """Chunks along axis 0.
-    """
+    """Chunks along axis 0."""
     N = X.shape[0]
     X_chunks = []
     for i in range(N // chunk_size):
@@ -133,8 +131,7 @@ def _compute_similarity_and_align_parallel(
     use_gpu: bool,
     l2: bool,
 ) -> list[tuple[np.ndarray, np.ndarray, np.ndarray]]:
-    """Compute similarities and alignments.
-    """
+    """Compute similarities and alignments."""
     if max_cpus is None:
         if use_gpu:
             # SINGLE GPU CALCULATIONS
@@ -178,8 +175,7 @@ def _reassemble_results(
     chunked_results: list[tuple[np.ndarray, np.ndarray, np.ndarray]],
     chunk_map: dict[int, int],
 ) -> list[np.ndarray, np.ndarray, np.ndarray]:
-    """Reassemble chunked results.
-    """
+    """Reassemble chunked results."""
     chunked_calculations_revmap = {c: i for i, c in enumerate(chunked_calculations)}
     results = []
     for c0, c1 in calculations:
@@ -216,9 +212,14 @@ DEFAULT_MAX_CPUS = 4
 DEFAULT_USE_GPU = False
 DEFAULT_L2 = True
 
-def set_default_options(max_chunk: int | None = None, max_cpus: int | None = None, use_gpu: bool | None, l2: bool | None):
-    """Set default values for max_chunk, max_cpus, use_gpu, and l2.
-    """
+
+def set_default_options(
+    max_chunk: int | None = None,
+    max_cpus: int | None = None,
+    use_gpu: bool | None = None,
+    l2: bool | None = None,
+):
+    """Set default values for max_chunk, max_cpus, use_gpu, and l2."""
     if max_chunk is not None:
         DEFAULT_MAX_CHUNK = max_chunk
     if max_cpus is not None:

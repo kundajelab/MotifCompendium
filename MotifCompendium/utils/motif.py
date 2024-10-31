@@ -34,8 +34,7 @@ def ic_scale(x: np.ndarray) -> np.ndarray:
 
 
 def motif_4_to_8(x: np.ndarray) -> np.ndarray:
-    """Converts a 4 channel motif into an 8 channel motif.
-    """
+    """Converts a 4 channel motif into an 8 channel motif."""
     x_pos = np.maximum(x, 0)
     x_neg = np.maximum(-x, 0)
     x_pos_8 = x_pos @ _MOTIF_4_TO_8_POS
@@ -45,8 +44,7 @@ def motif_4_to_8(x: np.ndarray) -> np.ndarray:
 
 
 def motif_8_to_4(x: np.ndarray) -> np.ndarray:
-    """Converts in 8 channel motif into a 4 channel motif.
-    """
+    """Converts in 8 channel motif into a 4 channel motif."""
     x_pos_4 = x @ _MOTIF_4_TO_8_POS.T
     x_neg_4 = x @ _MOTIF_4_TO_8_NEG.T
     x_4 = x_pos_4 - x_neg_4
@@ -54,8 +52,7 @@ def motif_8_to_4(x: np.ndarray) -> np.ndarray:
 
 
 def motif_8_to_4_abs(x: np.ndarray) -> np.ndarray:
-    """Converts in 8 channel motif into a 4 channel motif.
-    """
+    """Converts in 8 channel motif into a 4 channel motif."""
     x_pos_4 = x @ _MOTIF_4_TO_8_POS.T
     x_neg_4 = x @ _MOTIF_4_TO_8_NEG.T
     x_4 = x_pos_4 + x_neg_4
@@ -63,8 +60,7 @@ def motif_8_to_4_abs(x: np.ndarray) -> np.ndarray:
 
 
 def validate_motif_stack(motifs: np.ndarray) -> None:
-    """Validate motifs.
-    """
+    """Validate motifs."""
     if not isinstance(motifs, np.ndarray):
         raise TypeError("Motifs must be a np.ndarray.")
     if not (
@@ -78,16 +74,67 @@ def validate_motif_stack(motifs: np.ndarray) -> None:
 
 
 def motif_to_df(motif: np.ndarray) -> pd.DataFrame:
-    """Transforms a motif into a pd.DataFrame ready for plotting with logomaker.
-    """
+    """Transforms a motif into a pd.DataFrame ready for plotting with logomaker."""
     return pd.DataFrame(motif, columns=["A", "C", "G", "T"])
+
+
+def squash_motif(motif: np.ndarray, squash_to: int = 30) -> np.ndarray:
+    """Squashes a larger motif into a smaller size.
+
+    Takes a large motif and squashes/trims it down to a smaller motif. Selects the base
+      pairs to keep that have the highest weights.
+
+    Args:
+        motif: A (L, C) motif.
+        squash_to: The size that the motif should be sqashed to.
+
+    Returns:
+        A (squash_to, C) motif.
+    """
+    N, c = motif.shape
+    i_sums = []
+    for i in range(N - squash_to + 1):
+        i_sums.append((np.sum(np.abs(motif[i : i + squash_to, :])), i))
+    i_sums = sorted(i_sums, reverse=True)
+    top_i = i_sums[0][1]
+    return motif[top_i : top_i + squash_to, :]
+
+
+def resize_motif(motif: np.ndarray, resize_to: int = 30) -> np.ndarray:
+    """Resize a motif (by squashing or padding) to a specified length.
+
+    If the given motif is shorter than resize_to, pad with 0s until it is large enough.
+      If the given motif is larger than resize_to, squash it down to a smaller motif.
+      Selects the base pairs to keep that have the highest weights.
+
+    Args:
+        motif: A (L, C) motif.
+        resize_to: The length to squash or pad the motif to.
+
+    Returns:
+        A (resize_to, C) motif.
+    """
+    L, C = motif.shape
+    if L < resize_to:
+        # Pad with zeros
+        motif_resized = np.zeros((resize_to, C))
+        motif_resized[0:L, :] = motif
+        return motif_resized
+    elif L > resize_to:
+        # Squash to the desired length
+        i_sums = [
+            (np.sum(np.abs(motif[i : i + resize_to, :])), i)
+            for i in range(L - resize_to + 1)
+        ]
+        top_i = max(i_sums, key=lambda x: x[0])[1]
+        return motif[top_i : top_i + resize_to, :]
 
 
 ###########
 # ENTROPY #
 ###########
 def motif4_to_motif8(motif4: np.array) -> np.array:
-    """Expand base pair from 4-channel: A,C,T,G 
+    """Expand base pair from 4-channel: A,C,T,G
     to 8-channel: A+,C+,G+,T+,A-,C-,G-,T-"""
     rows, cols = motif4.shape
     motif8 = np.zeros((rows, 2 * cols))
@@ -130,7 +177,7 @@ def motif8_to_copair28(motif8: np.array) -> np.array:
 
 def motif8_to_dinuc64(motif8: np.array) -> np.array:
     """Transform (L-position channel, 8-base channel) motif
-    to (L/2-position channel, 64-base channel), evaluating two positions at a time, 
+    to (L/2-position channel, 64-base channel), evaluating two positions at a time,
     for all A+,C+,G+,T+,A-,C-,G-,T- dinucleotide pair permutations: 64 permutations."""
     # Current dimensions: motif8
     rows, cols = motif8.shape
@@ -168,16 +215,17 @@ def shannon_entropy(prob_array: np.array, epsilon: float = 1e-10) -> float:
 
     return entropy
 
+
 def calculate_motif_entropy(motif: np.array) -> float:
     """Calculate Shannon entropy of motif.
 
     Calculation: Shannon entropy on (L,8)
     Purpose:    (High) Archetype: Noise/chaos
                 (Low) Archetype: Sharp nucleotide peak (e.g., G)
-    
-    Args: 
+
+    Args:
         motif: (L, 4) or (L, 8) motif (np.ndarray)
-    
+
     Returns:
         motif_entropy: float
     """
@@ -189,8 +237,8 @@ def calculate_motif_entropy(motif: np.array) -> float:
     if motif.shape[1] not in [4, 8]:
         raise ValueError("Motif second dimension must be 4 or 8.")
     if motif.shape[1] == 4:
-        motif = motif4_to_motif8(motif) # Convert motif to 8-channel
-    
+        motif = motif4_to_motif8(motif)  # Convert motif to 8-channel
+
     # Standardize motif: Normalized, as probability
     rows, cols = motif.shape
     motif8_prob = motif / np.sum(motif)
@@ -200,15 +248,16 @@ def calculate_motif_entropy(motif: np.array) -> float:
 
     return motif_entropy
 
+
 def calculate_posbase_entropy_ratio(motif: np.array) -> float:
     """Calculate ratio of position-wise entropy / base_wise_entropy.
 
     Calculation: Entropy across position (L,) / Entropy across base (8,)
     Purpose: (High) Archetype: Single nucleotide repeats (e.g., AAAAA, GGGGG)
-    
-    Args: 
+
+    Args:
         motif: (L, 4) or (L, 8) motif (np.ndarray)
-    
+
     Returns:
         posbase_entropy_ratio: float
     """
@@ -220,34 +269,39 @@ def calculate_posbase_entropy_ratio(motif: np.array) -> float:
     if motif.shape[1] not in [4, 8]:
         raise ValueError("Motif second dimension must be 4 or 8.")
     if motif.shape[1] == 4:
-        motif = motif4_to_motif8(motif) # Convert motif to 8-channel
-    
+        motif = motif4_to_motif8(motif)  # Convert motif to 8-channel
+
     # Standardize motif: Normalized, as probability
     rows, cols = motif.shape
     motif8_prob = motif / np.sum(motif)
 
     # Sum across position-wise, base-wise
-    pos_prob = np.sum(motif8_prob, axis=1) / np.sum(motif8_prob) # Sum across bases (L,), normalize
-    base_prob = np.sum(motif8_prob, axis=0) / np.sum(motif8_prob) # Sum across positions (,8), normalize
+    pos_prob = np.sum(motif8_prob, axis=1) / np.sum(
+        motif8_prob
+    )  # Sum across bases (L,), normalize
+    base_prob = np.sum(motif8_prob, axis=0) / np.sum(
+        motif8_prob
+    )  # Sum across positions (,8), normalize
 
     # Calculate position-wise, base-wise entropy
     pos_entropy = shannon_entropy(pos_prob)
     base_entropy = shannon_entropy(base_prob)
 
-    posbase_entropy_ratio = (pos_entropy / base_entropy)
+    posbase_entropy_ratio = pos_entropy / base_entropy
 
     return posbase_entropy_ratio
 
+
 def calculate_copair_entropy_ratio(motif: np.array) -> float:
     """Calculate ratio of position-wise entropy / base co-occurrence pair entropy.
-    
-    Calculation: Entropy across position (L,) / 
+
+    Calculation: Entropy across position (L,) /
         Entropy across all pairs of co-occurring, non-repeating bases (28,)
     Purpose: (High) Archetype: High GC, AT bias
-    
-    Args: 
+
+    Args:
         motif: (L, 4) or (L, 8) motif (np.ndarray)
-    
+
     Returns:
         copair_entropy_ratio: float
     """
@@ -259,8 +313,8 @@ def calculate_copair_entropy_ratio(motif: np.array) -> float:
     if motif.shape[1] not in [4, 8]:
         raise ValueError("Motif second dimension must be 4 or 8.")
     if motif.shape[1] == 4:
-        motif = motif4_to_motif8(motif) # Convert motif to 8-channel
-    
+        motif = motif4_to_motif8(motif)  # Convert motif to 8-channel
+
     # Standardize motif: Normalized, as probability
     rows, cols = motif.shape
     motif8_prob = motif / np.sum(motif)
@@ -270,8 +324,12 @@ def calculate_copair_entropy_ratio(motif: np.array) -> float:
     copair28_prob = copair28 / np.sum(copair28)
 
     # Sum across position-wise, base-wise
-    copair_pos_prob = np.sum(copair28_prob, axis=1) / np.sum(copair28_prob) # Sum across bases (L,), normalize
-    copair_base_prob = np.sum(copair28_prob, axis=0) / np.sum(copair28_prob) # Sum across positions (,8), normalize
+    copair_pos_prob = np.sum(copair28_prob, axis=1) / np.sum(
+        copair28_prob
+    )  # Sum across bases (L,), normalize
+    copair_base_prob = np.sum(copair28_prob, axis=0) / np.sum(
+        copair28_prob
+    )  # Sum across positions (,8), normalize
 
     # Calculate position-wise, base-wise entropy
     copair_pos_entropy = shannon_entropy(copair_pos_prob)
@@ -281,15 +339,16 @@ def calculate_copair_entropy_ratio(motif: np.array) -> float:
 
     return copair_entropy_ratio
 
+
 def calculate_dinuc_entropy_ratio(motif: np.array) -> float:
     """Calculate ratio of two-position entropy / two-base entropy.
-    Calculation: Entropy across pairs of positions (L/2,) / 
+    Calculation: Entropy across pairs of positions (L/2,) /
         Entropy across all dinucleotide pairs (64,)
     Purpose: (High) Archetype: Dinucleotide repeats (e.g., GCGCGC, ATATAT)
-    
-    Args: 
+
+    Args:
         motif: (L, 4) or (L, 8) motif (np.ndarray)
-    
+
     Returns:
         dinuc_entropy_ratio: Calculated Shannon entropy (float)
     """
@@ -301,8 +360,8 @@ def calculate_dinuc_entropy_ratio(motif: np.array) -> float:
     if motif.shape[1] not in [4, 8]:
         raise ValueError("Motif second dimension must be 4 or 8.")
     if motif.shape[1] == 4:
-        motif = motif4_to_motif8(motif) # Convert motif to 8-channel
-    
+        motif = motif4_to_motif8(motif)  # Convert motif to 8-channel
+
     # Standardize motif: Normalized, as probability
     rows, cols = motif.shape
     motif8_prob = motif / np.sum(motif)
@@ -312,8 +371,12 @@ def calculate_dinuc_entropy_ratio(motif: np.array) -> float:
     dinuc64_prob = dinuc64 / np.sum(dinuc64)
 
     # Sum across position-wise, base-wise
-    dinuc_pos_prob = np.sum(dinuc64_prob, axis=1) / np.sum(dinuc64_prob) # Sum across bases (L/2,), normalize
-    dinuc_base_prob = np.sum(dinuc64_prob, axis=0) / np.sum(dinuc64_prob) # Sum across positions (,64), normalize
+    dinuc_pos_prob = np.sum(dinuc64_prob, axis=1) / np.sum(
+        dinuc64_prob
+    )  # Sum across bases (L/2,), normalize
+    dinuc_base_prob = np.sum(dinuc64_prob, axis=0) / np.sum(
+        dinuc64_prob
+    )  # Sum across positions (,64), normalize
 
     # Calculate position-wise, base-wise entropy
     dinuc_pos_entropy = shannon_entropy(dinuc_pos_prob)
@@ -382,25 +445,3 @@ def average_motifs(
     squashed_motif_8 = motif_4_to_8(squashed_motif)
     squashed_motif_8 /= np.sum(squashed_motif_8)
     return squashed_motif_8
-
-
-def squash_motif(motif: np.ndarray, squash_to: int = 30) -> np.ndarray:
-    """Squashes a larger motif into a smaller size.
-
-    Takes a large motif and squashes/trims it down to a smaller motif. Selects the base
-      pairs to keep that have the highest weights.
-
-    Args:
-        motif: A (L, C) motif.
-        squash_to: The size that the motif should be sqashed to.
-
-    Returns:
-        A (squash_to, C) motif.
-    """
-    N, c = motif.shape
-    i_sums = []
-    for i in range(N - squash_to + 1):
-        i_sums.append((np.sum(np.abs(motif[i : i + squash_to, :])), i))
-    i_sums = sorted(i_sums, reverse=True)
-    top_i = i_sums[0][1]
-    return motif[top_i : top_i + squash_to, :]

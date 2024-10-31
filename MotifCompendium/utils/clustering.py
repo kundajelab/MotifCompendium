@@ -41,11 +41,15 @@ def cluster(
         # Leiden
         case "leiden" | "weighted_leiden" | "modularity_leiden":
             # Required to create weighted matrix
-            adjacency_matrix= np.where(similarity_matrix >= similarity_threshold, similarity_matrix, 0) 
+            adjacency_matrix = np.where(
+                similarity_matrix >= similarity_threshold, similarity_matrix, 0
+            )
             return modularity_leiden_clustering(adjacency_matrix, **kwargs)
         case "cpm" | "cpm_leiden" | "cpm_weighted_leiden":
             # Required to create weighted matrix
-            adjacency_matrix = np.where(similarity_matrix >= similarity_threshold, similarity_matrix, 0)
+            adjacency_matrix = np.where(
+                similarity_matrix >= similarity_threshold, similarity_matrix, 0
+            )
             return cpm_leiden_clustering(adjacency_matrix, **kwargs)
         # Connected-component
         case "cc":
@@ -71,27 +75,26 @@ def modularity_leiden_clustering(
     n_iterations: int = -1,
     n_seeds: int = 2,
 ) -> list[int]:
-    """Perform Leiden clustering (modularity) on a weighted similarity matrix.
-    """
+    """Perform Leiden clustering (modularity) on a weighted similarity matrix."""
     n_vertices = adjacency_matrix.shape[0]
     rows, cols = np.nonzero(adjacency_matrix)
     edges = list(zip(rows, cols))
     weights = adjacency_matrix[rows, cols]
-    
+
     # Create igraph object
     g = ig.Graph(n_vertices, edges=edges)
     g.es["weight"] = weights
 
     best_quality = None
     best_membership = None
-    for seed in range(1, n_seeds+1):
+    for seed in range(1, n_seeds + 1):
         partition = la.find_partition(
             graph=g,
             partition_type=la.ModularityVertexPartition,
             weights="weight",
             resolution_parameter=resolution_parameter,
             n_iterations=n_iterations,
-            seed=seed*100,
+            seed=seed * 100,
         )
         if best_quality is None or partition.quality() > best_quality:
             best_quality = partition.quality()
@@ -105,27 +108,26 @@ def cpm_leiden_clustering(
     n_iterations: int = -1,
     n_seeds: int = 2,
 ) -> list[int]:
-    """Perform Leiden clustering (CPM) on a weighted similarity matrix.
-    """
+    """Perform Leiden clustering (CPM) on a weighted similarity matrix."""
     n_vertices = adjacency_matrix.shape[0]
     rows, cols = np.nonzero(adjacency_matrix)
     edges = list(zip(rows, cols))
     weights = adjacency_matrix[rows, cols]
-    
+
     # Create igraph object
     g = ig.Graph(n_vertices, edges=edges)
     g.es["weight"] = weights
 
     best_quality = None
     best_membership = None
-    for seed in range(1, n_seeds+1):
+    for seed in range(1, n_seeds + 1):
         partition = la.find_partition(
             graph=g,
             partition_type=la.CPMVertexPartition,
             weights="weight",
             resolution_parameter=resolution_parameter,
             n_iterations=n_iterations,
-            seed=seed*100,
+            seed=seed * 100,
         )
         if best_quality is None or partition.quality() > best_quality:
             best_quality = partition.quality()
@@ -137,8 +139,7 @@ def cpm_leiden_clustering(
 # CC CLUSTERING #
 #################
 def cc_clustering(adjacency_matrix: np.ndarray) -> list[int]:
-    """Find connected components in an adjacency matrix.
-    """
+    """Find connected components in an adjacency matrix."""
     N = adjacency_matrix.shape[0]
     clustering = [False] * N
     current_cluster = 1
@@ -159,8 +160,7 @@ def cc_clustering(adjacency_matrix: np.ndarray) -> list[int]:
 
 
 def densely_cc_clustering(adjacency_matrix: np.ndarray) -> list[int]:
-    """Find densely connected components in a greedy fashion in an adjacency matrix.
-    """
+    """Find densely connected components in a greedy fashion in an adjacency matrix."""
     N = adjacency_matrix.shape[0]
     clustering = [False] * N
     current_cluster = 1
@@ -186,8 +186,7 @@ def densely_cc_clustering(adjacency_matrix: np.ndarray) -> list[int]:
 def spectral_clustering_k(
     similarity_matrix: np.ndarray, k: int = 40, cluster_qr: bool = False
 ) -> list[int]:
-    """Spectral clustering on a similarity matrix for a fixed number of clusters.
-    """
+    """Spectral clustering on a similarity matrix for a fixed number of clusters."""
     if cluster_qr:
         clustering = (
             sklearn.cluster.SpectralClustering(

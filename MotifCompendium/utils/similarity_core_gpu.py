@@ -6,12 +6,9 @@ import numpy as np
 # PUBLIC FUNCTIONS #
 ####################
 def gpu_compute_similarity_and_align(
-    simsA: np.ndarray,
-    simsB: np.ndarray,
-    l2: bool
+    simsA: np.ndarray, simsB: np.ndarray, l2: bool
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Computes similarity and alignment taking into account reverse complements.
-    """
+    """Computes similarity and alignment taking into account reverse complements."""
     simsA = cp.asarray(simsA)
     simsB = cp.asarray(simsB)
     if l2:
@@ -39,8 +36,7 @@ def gpu_compute_similarity_and_align(
 
 
 def gpu_similarity_worker(gpu_idx, inputs):
-    """Worker function to perform many similarity calculations on one GPU.
-    """
+    """Worker function to perform many similarity calculations on one GPU."""
     outputs = []
     with cp.cuda.Device(gpu_idx):
         for calculation, simsA, simsB in inputs:
@@ -53,16 +49,14 @@ def gpu_similarity_worker(gpu_idx, inputs):
 # PRIVATE FUNCTIONS #
 #####################
 def _reverse_complement(motifs: cp.ndarray) -> cp.ndarray:
-    """Computes the reverse complement of a (N, L, C) motif stack.
-    """
+    """Computes the reverse complement of a (N, L, C) motif stack."""
     return motifs[:, ::-1, ::-1]
 
 
 def _compute_similarity(
     motif_set_1: cp.ndarray, motif_set_2: cp.ndarray
 ) -> tuple[cp.ndarray, cp.ndarray]:
-    """Computes similarity and alignment for two sets of motifs.
-    """
+    """Computes similarity and alignment for two sets of motifs."""
     # TRANSPOSE FOR EFFICIENCY
     N_original = motif_set_1.shape[0]
     M_original = motif_set_2.shape[0]
@@ -100,8 +94,7 @@ def _compute_similarity(
 
 
 def _compute_similarity_left_side(motifs: cp.ndarray) -> list[cp.ndarray]:
-    """Prepares the left side of the similarity calculation.
-    """
+    """Prepares the left side of the similarity calculation."""
     # motifs = (N, 30, K)
     K = motifs.shape[2]
     motif_slices = [motifs[:, :, i] for i in range(K)]  # (N, 30)
@@ -117,8 +110,7 @@ def _compute_similarity_left_side(motifs: cp.ndarray) -> list[cp.ndarray]:
 
 
 def _compute_similarity_right_side(motifs: cp.ndarray) -> list[cp.ndarray]:
-    """Prepares the right side of the similarity calculation.
-    """
+    """Prepares the right side of the similarity calculation."""
     # motifs = (M, 30, K)
     K = motifs.shape[2]
     motifs_pivot = cp.transpose(motifs, axes=(0, 2, 1))  # (M, K, 30)
@@ -132,8 +124,7 @@ def _compute_similarity_right_side(motifs: cp.ndarray) -> list[cp.ndarray]:
 
 
 def _LEFTTENSOR() -> cp.ndarray:
-    """Produces the LEFTTENSOR needed for the left side of the similarity calculation.
-    """
+    """Produces the LEFTTENSOR needed for the left side of the similarity calculation."""
     x = cp.zeros((59, 88, 30))
     for i in range(59):
         x[i, i : i + 30, :] = cp.eye(30)
@@ -141,8 +132,7 @@ def _LEFTTENSOR() -> cp.ndarray:
 
 
 def _RIGHTTENSOR() -> cp.ndarray:
-    """Produces the RIGHTTENSOR needed for the right side of the similarity calculation.
-    """
+    """Produces the RIGHTTENSOR needed for the right side of the similarity calculation."""
     x = cp.zeros((30, 88))
     x[:, 29:59] = cp.eye(30)
     return x
