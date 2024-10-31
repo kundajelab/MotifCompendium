@@ -44,7 +44,7 @@ def cluster(
             adjacency_matrix = np.where(
                 similarity_matrix >= similarity_threshold, similarity_matrix, 0
             )
-            return modularity_leiden_clustering(adjacency_matrix, **kwargs)
+            return leiden_clustering(adjacency_matrix, **kwargs)
         case "cpm" | "cpm_leiden" | "cpm_weighted_leiden":
             # Required to create weighted matrix
             adjacency_matrix = np.where(
@@ -69,7 +69,7 @@ def cluster(
 #####################
 # LEIDEN CLUSTERING #
 #####################
-def modularity_leiden_clustering(
+def leiden_clustering(
     adjacency_matrix: np.ndarray,
     resolution_parameter: float = 1.0,
     n_iterations: int = -1,
@@ -90,7 +90,7 @@ def modularity_leiden_clustering(
     for seed in range(1, n_seeds + 1):
         partition = la.find_partition(
             graph=g,
-            partition_type=la.ModularityVertexPartition,
+            partition_type=la.RBConfigurationVertexPartition,
             weights="weight",
             resolution_parameter=resolution_parameter,
             n_iterations=n_iterations,

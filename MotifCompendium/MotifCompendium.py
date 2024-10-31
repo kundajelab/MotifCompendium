@@ -504,7 +504,7 @@ class MotifCompendium:
     def motif_collection_html(
         self,
         html_out: str,
-        group_by: str | pd.Series = "cluster",
+        group_by: str | list = "cluster",
         average_motif: bool = True,
         max_cpus: int | None = None,
     ) -> None:
@@ -536,7 +536,12 @@ class MotifCompendium:
             else self.motifs
         )
         names = list(self.metadata["name"])
-        groups = list(self.metadata[group_by])
+        if isinstance(group_by, str):
+            groups = list(self.metadata[group_by])
+        elif isinstance(group_by, list):
+            groups = group_by
+        else:
+            raise TypeError("group_by must either be a string (column name in metadata) or a list.")
         # Group motifs
         motif_groups = dict()  # group name --> {motif name --> motif dict}
         group_seeds = dict()  # group name --> index of seed motif in group
@@ -575,9 +580,9 @@ class MotifCompendium:
             # Average
             if average_motif:
                 motifs_concat = pd.concat(group_motifs)
-                average_motif = motifs_concat.groupby(motifs_concat.index).mean()
+                average_motif_df = motifs_concat.groupby(motifs_concat.index).mean()
                 average_dict = {
-                    "motif": average_motif,
+                    "motif": average_motif_df,
                     "name": "AVERAGE",
                     "bgcolor": "palegreen",
                 }

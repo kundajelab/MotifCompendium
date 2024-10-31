@@ -49,7 +49,7 @@ def motif_collection_html(
     if max_cpus is None:
         for group in motif_groups.values():
             for motif_dict in group:
-                _motifdict_to_utf8_plot(motif_dict)
+                _motifdict_utf8_plot_update(motif_dict)
     else:
         # Keep track of which plots come from which groups to reorder them later
         all_motif_dicts = []
@@ -66,14 +66,14 @@ def motif_collection_html(
         )  # don't use more CPUs than available
         with multiprocessing.Pool(processes=num_processes) as p:
             all_motif_dicts = p.map(
-                _motifdict_utf8_plot_update, all_motif_dicts
+                _motifdict_to_utf8_plot, all_motif_dicts
             )  # Not pass by ref
         # Redefine motif_groups using updated motif dicts
         for group_name in group_to_motif_dict_idx:
             start, end = group_to_motif_dict_idx[group_name]
             motif_groups[group_name] = all_motif_dicts[start:end]
     # Create Jinja2 environment
-    current_dir = os.path.dirname(os.path.abspath(__file))
+    current_dir = os.path.dirname(os.path.abspath(__file__))
     env = Environment(loader=FileSystemLoader(current_dir))
     # Load HTML template
     template = env.get_template("motif_collection_template.html")
@@ -142,7 +142,7 @@ def summary_table_html(
     columns = metadata.columns.tolist()
     rows = metadata.to_dict(orient="records")
     # Create Jinja2 environment
-    current_dir = os.path.dirname(os.path.abspath(__file))
+    current_dir = os.path.dirname(os.path.abspath(__file__))
     env = Environment(loader=FileSystemLoader(current_dir))
     # Load HTML template
     template = env.get_template("table_template.html")

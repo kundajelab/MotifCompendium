@@ -155,7 +155,7 @@ def judge_clustering(mc: MotifCompendium, clustering: str, save_loc: str) -> Non
     axs[1].set_title("best inter-cluster similarities")
     axs[1].set_xlabel("similarity")
     plt.suptitle(f"{clustering} ({n_clusters} clusters)")
-    plt.savefig(f"{save_loc}.png")
+    plt.savefig(save_loc)
     plt.close()
 
 
@@ -163,7 +163,7 @@ def judge_clustering(mc: MotifCompendium, clustering: str, save_loc: str) -> Non
 # DOWNSTREAM ANALYSES #
 #######################
 def plot_unique_per_cluster(
-    mc: MotifCompendium, clustering: str, save_loc: str
+    mc: MotifCompendium, group_by: str, save_loc: str
 ) -> None:
     """Identifies and plots the most unique in each cluster.
 
@@ -172,7 +172,7 @@ def plot_unique_per_cluster(
 
     Args:
         mc: The MotifCompendium to analyze.
-        clustering: The motif clustering to find unique clusters within.
+        group_by: The grouping to find unique clusters within.
         save_loc: The path to save the unique clusters html to.
 
     Notes:
@@ -180,9 +180,9 @@ def plot_unique_per_cluster(
           maximal similarity with all motifs not in that cluster is the lowest.
     """
     clustering = [False for _ in range(len(mc))]
-    for c in set(mc[clustering]):
+    for c in set(mc[group_by]):
         similarity_contrast_c_df = mc.get_similarity_slice(
-            mc[clustering] == c, mc[clustering] != c
+            mc[group_by] == c, mc[group_by] != c
         )
         c_best_similarities = similarity_contrast_c_df.max(axis=1)
         most_unique = c_best_similarities.idxmin()

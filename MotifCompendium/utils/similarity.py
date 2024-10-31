@@ -57,6 +57,9 @@ def compute_similarities(
         use_gpu = DEFAULT_USE_GPU
     if l2 is None:
         l2 = DEFAULT_L2
+    # TODO: FIX EDGE CASE THAT HAS ARISEN DUE TO DEFAULTS
+    if use_gpu:
+        max_cpus = None
     for motif_stack in motif_stack_list:
         validate_motif_stack(motif_stack)
     if max_chunk is not None:
@@ -207,8 +210,8 @@ def _reassemble_results(
 ############
 # SETTINGS #
 ############
-DEFAULT_MAX_CHUNK = 1000
-DEFAULT_MAX_CPUS = 4
+DEFAULT_MAX_CHUNK = None
+DEFAULT_MAX_CPUS = None
 DEFAULT_USE_GPU = False
 DEFAULT_L2 = True
 
