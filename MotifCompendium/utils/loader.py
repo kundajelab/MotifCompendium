@@ -113,8 +113,13 @@ def load_modisco(
 def load_pfm(pfm_file: str) -> tuple[np.ndarray, list[str]]:
     """Load motifs and names from a PFM file.
 
+<<<<<<< HEAD
     Each PFM from the PFM file is extracted. Then, the PFMs are transformed into a PWM
       using per position information content scaling.
+=======
+    Each PFM from a PFM file is extracted. Then, the PFM is transformed into a pfm using
+      per position information content scaling.
+>>>>>>> Minor updates for usability.
 
     Args:
         pfm_file: The PFM file path.
@@ -127,39 +132,37 @@ def load_pfm(pfm_file: str) -> tuple[np.ndarray, list[str]]:
         Motifs are returned as (N, 30, 4) 4 channel motif stack.
     """
     names = []
-    pwms = []
-    active_pwm = False
+    pfms = []
+    active_pfm = False
     with open(pfm_file, "r") as f:
         for line in f:
             x = line.strip()
-            if active_pwm:
+            if active_pfm:
                 if x.startswith(">"):
                     # submit
-                    current_pwm_df = pd.DataFrame(current_pwm)
-                    current_pwm_np = current_pwm_df.to_numpy()
-                    current_pwm_np = resize_motif(current_pwm_np)
-                    pwms.append(pd.DataFrame(current_pwm_np))
-                    names.append(current_pwm_name)
+                    current_pfm = np.stack([np.array(current_pfm[base]) for base in "ACGT"], axis=1)
+                    pfms.append(resize_motif(current_pfm))
+                    names.append(current_pfm_name)
                     # restart
-                    current_pwm_name = x[1:]
-                    current_pwm = {"A": [], "C": [], "G": [], "T": []}
+                    current_pfm_name = x[1:]
+                    current_pfm = {"A": [], "C": [], "G": [], "T": []}
                 else:
                     a, c, g, t = x.split()
                     a, c, g, t = float(a), float(c), float(g), float(t)
                     acgt = np.asarray([[a, c, g, t]])  # (1, 4)
                     acgt_ic = ic_scale(acgt)
-                    current_pwm["A"].append(acgt_ic[0, 0])
-                    current_pwm["C"].append(acgt_ic[0, 1])
-                    current_pwm["G"].append(acgt_ic[0, 2])
-                    current_pwm["T"].append(acgt_ic[0, 3])
+                    current_pfm["A"].append(acgt_ic[0,0])
+                    current_pfm["C"].append(acgt_ic[0,1])
+                    current_pfm["G"].append(acgt_ic[0,2])
+                    current_pfm["T"].append(acgt_ic[0,3])
             else:
                 assert x.startswith(">")
-                active_pwm = True
-                current_pwm_name = x[1:]
-                current_pwm = {"A": [], "C": [], "G": [], "T": []}
-    pwms_mtx = np.stack([x.to_numpy() for x in pwms], axis=0)
-    pwms_mtx /= np.sum(pwms_mtx, axis=(1, 2), keepdims=True)
-    return pwms_mtx, names
+                active_pfm = True
+                current_pfm_name = x[1:]
+                current_pfm = {"A": [], "C": [], "G": [], "T": []}
+    pfms_mtx = np.stack(pfms, axis=0)
+    pfms_mtx /= np.sum(pfms_mtx, axis=(1, 2), keepdims=True)
+    return pfms_mtx, names
 
 
 def load_meme(meme_file: str) -> tuple[np.ndarray, list[str]]:

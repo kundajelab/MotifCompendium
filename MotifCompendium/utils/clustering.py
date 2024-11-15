@@ -40,14 +40,10 @@ def cluster(
     match algorithm:
         # Leiden
         case "leiden" | "weighted_leiden" | "modularity_leiden":
-            adjacency_matrix = similarity_matrix * (
-                similarity_matrix >= similarity_threshold
-            )
-            return leiden_clustering(adjacency_matrix, **kwargs)
+            adjacency_matrix = similarity_matrix * (similarity_matrix >= similarity_threshold)
+            return modularity_leiden_clustering(adjacency_matrix, **kwargs)
         case "cpm" | "cpm_leiden" | "cpm_weighted_leiden":
-            adjacency_matrix = similarity_matrix * (
-                similarity_matrix >= similarity_threshold
-            )
+            adjacency_matrix = similarity_matrix * (similarity_matrix >= similarity_threshold)
             return cpm_leiden_clustering(adjacency_matrix, **kwargs)
         # Connected-component
         case "cc":
@@ -67,7 +63,7 @@ def cluster(
 #####################
 # LEIDEN CLUSTERING #
 #####################
-def leiden_clustering(
+def modularity_leiden_clustering(
     adjacency_matrix: np.ndarray,
     resolution_parameter: float = 1.0,
     n_iterations: int = -1,

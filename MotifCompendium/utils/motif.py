@@ -106,24 +106,13 @@ def resize_motif(motif: np.ndarray, resize_to: int = 30) -> np.ndarray:
         ]
         top_i = max(i_sums, key=lambda x: x[0])[1]
         return motif[top_i : top_i + resize_to, :]
-    return motif
+    else:
+        return motif
 
 
 ###########
 # ENTROPY #
 ###########
-def motif4_to_motif8(motif4: np.array) -> np.array:
-    """Expand base pair from 4-channel: A,C,T,G
-    to 8-channel: A+,C+,G+,T+,A-,C-,G-,T-"""
-    rows, cols = motif4.shape
-    motif8 = np.zeros((rows, 2 * cols))
-
-    motif8[:, :cols] = np.where(motif4 > 0, motif4, 0)
-    motif8[:, cols:] = np.where(motif4 < 0, -motif4, 0)
-
-    return motif8
-
-
 def motif8_to_copair28(motif8: np.array) -> np.array:
     """Expand base channel (e.g., 8-channel: A+,C+,G+,T+,A-,C-,G-,T-)
     to co-occurrrence of all, non-repeating dinucleotide pairs per position
@@ -216,7 +205,7 @@ def calculate_motif_entropy(motif: np.array) -> float:
     if motif.shape[1] not in [4, 8]:
         raise ValueError("Motif second dimension must be 4 or 8.")
     if motif.shape[1] == 4:
-        motif = motif4_to_motif8(motif)  # Convert motif to 8-channel
+        motif = motif_4_to_8(motif)  # Convert motif to 8-channel
 
     # Standardize motif: Normalized, as probability
     rows, cols = motif.shape
@@ -248,7 +237,7 @@ def calculate_posbase_entropy_ratio(motif: np.array) -> float:
     if motif.shape[1] not in [4, 8]:
         raise ValueError("Motif second dimension must be 4 or 8.")
     if motif.shape[1] == 4:
-        motif = motif4_to_motif8(motif)  # Convert motif to 8-channel
+        motif = motif_4_to_8(motif)  # Convert motif to 8-channel
 
     # Standardize motif: Normalized, as probability
     rows, cols = motif.shape
@@ -292,7 +281,7 @@ def calculate_copair_entropy_ratio(motif: np.array) -> float:
     if motif.shape[1] not in [4, 8]:
         raise ValueError("Motif second dimension must be 4 or 8.")
     if motif.shape[1] == 4:
-        motif = motif4_to_motif8(motif)  # Convert motif to 8-channel
+        motif = motif_4_to_8(motif)  # Convert motif to 8-channel
 
     # Standardize motif: Normalized, as probability
     rows, cols = motif.shape
@@ -339,7 +328,7 @@ def calculate_dinuc_entropy_ratio(motif: np.array) -> float:
     if motif.shape[1] not in [4, 8]:
         raise ValueError("Motif second dimension must be 4 or 8.")
     if motif.shape[1] == 4:
-        motif = motif4_to_motif8(motif)  # Convert motif to 8-channel
+        motif = motif_4_to_8(motif)  # Convert motif to 8-channel
 
     # Standardize motif: Normalized, as probability
     rows, cols = motif.shape
