@@ -262,7 +262,7 @@ def export_clusters_modisco(
         l2=l2,
         safe=False,
     )  # kwargs for new avg similarity calculations
-    pos_neg = np.sum(mc_cluster_avg.logos, axis=(1, 2)) > 0
+    pos_neg = np.sum(mc_cluster_avg.motifs, axis=(1, 2)) > 0
     pos_neg = ["pos" if x > 0 else "neg" for x in pos_neg]
     mc_cluster_avg.metadata["pos_neg"] = pos_neg
     with h5py.File(save_loc, "w") as f:
@@ -273,7 +273,7 @@ def export_clusters_modisco(
             mc_cluster_avg_pos = mc_cluster_avg[mc_cluster_avg["pos_neg"] == "pos"]
             for i in range(len(mc_cluster_avg_pos)):
                 name = str(mc_cluster_avg_pos.metadata.loc[i, "name"])
-                cwm = mc_cluster_avg_pos.logos[i, :, :]
+                cwm = mc_cluster_avg_pos.motifs[i, :, :]
                 pos_cluster = pos_group.create_group(name)
                 pos_cluster.create_dataset("contrib_scores", data=cwm)
         # Negative
@@ -282,7 +282,7 @@ def export_clusters_modisco(
             mc_cluster_avg_neg = mc_cluster_avg[mc_cluster_avg["pos_neg"] == "neg"]
             for i in range(len(mc_cluster_avg_neg)):
                 name = str(mc_cluster_avg_neg.metadata.loc[i, "name"])
-                cwm = mc_cluster_avg_neg.logos[i, :, :]
+                cwm = mc_cluster_avg_neg.motifs[i, :, :]
                 neg_cluster = neg_group.create_group(name)
                 neg_cluster.create_dataset("contrib_scores", data=cwm)
 
