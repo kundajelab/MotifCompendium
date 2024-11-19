@@ -3,7 +3,8 @@
 *.tsv
 *.png
 *.txt
+*.html
 *.pyc
-__pycache__/*
+*/__pycache__/*
+*/.ipynb_checkpoints
 MotifCompendium.egg-info/*
-

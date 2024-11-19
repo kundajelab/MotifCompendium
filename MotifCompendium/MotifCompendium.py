@@ -120,6 +120,8 @@ def build(
     np.fill_diagonal(
         similarity, 1
     )  # Sometimes diagonal similarity is 0.999... but should be 1
+    # similarity = np.round(similarity, 10) # Precision cutoff to ensure symmetric
+    similarity = (similarity + similarity.T) / 2
     # Construct object
     return MotifCompendium(
         motifs, similarity, alignment_fr, alignment_h, metadata, safe
@@ -541,7 +543,9 @@ class MotifCompendium:
         elif isinstance(group_by, list):
             groups = group_by
         else:
-            raise TypeError("group_by must either be a string (column name in metadata) or a list.")
+            raise TypeError(
+                "group_by must either be a string (column name in metadata) or a list."
+            )
         # Group motifs
         motif_groups = dict()  # group name --> {motif name --> motif dict}
         group_seeds = dict()  # group name --> index of seed motif in group
@@ -950,7 +954,7 @@ class MotifCompendium:
               their motifs. (Ex: 4 and 4 or 8 and 8.)
         """
         assert self.motifs.shape[2] == other.motifs.shape[2]
-        mc_similarity, _, _ = similarity.compute_similarities(
+        mc_similarity, _, _ = utils_similarity.compute_similarities(
             [self.motifs, other.motifs], [(0, 1)], max_chunk, max_cpus, use_gpu, l2=l2
         )[0]
         self[save_col_sim] = np.max(mc_similarity, axis=1)

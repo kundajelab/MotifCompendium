@@ -59,7 +59,7 @@ def plot_ground_truth_mismatch(
     mc: MotifCompendium,
     ground_truth: str,
     save_loc: str,
-    similarity_threshold: float = 0.8,
+    similarity_threshold: float = 0.95,
     max_examples: int = 100,
 ) -> None:
     """Plots examples of when similarity did not match a ground truth motif grouping.
@@ -162,9 +162,7 @@ def judge_clustering(mc: MotifCompendium, clustering: str, save_loc: str) -> Non
 #######################
 # DOWNSTREAM ANALYSES #
 #######################
-def plot_unique_per_cluster(
-    mc: MotifCompendium, group_by: str, save_loc: str
-) -> None:
+def plot_unique_per_cluster(mc: MotifCompendium, group_by: str, save_loc: str) -> None:
     """Identifies and plots the most unique in each cluster.
 
     For each cluster, identifies the most unique motif (motif with the minimum maximal
@@ -244,8 +242,6 @@ def export_clusters_modisco(
         mc: The MotifCompendium to analyze.
         cluster_name: The motif clustering to compute average motifs on.
         save_loc: The location to save the Modisco h5py to.
-        **kwargs: Additional named arguments that MotifCompendium.cluster_averages()
-          takes.
         max_chunk: The maximum number of motifs to compute similarity on at a time.
         max_cpus: The maximum number of CPUs to use for computing similarity (only used
           if use_gpu is False).
@@ -291,12 +287,66 @@ def export_clusters_modisco(
                 neg_cluster.create_dataset("contrib_scores", data=cwm)
 
 
+def export_modisco(
+    mc: MotifCompendium,
+    name_col: str,
+    save_loc: str,
+) -> None:
+    """Exports MotifCompendium in the Modisco file format.
+
+    Assumes that the MotifCompendium is already clustered and just exports it to an h5py
+      structure that matches Modisco outputs.
+
+    Args:
+        mc: The MotifCompendium to analyze.
+        name_col: The column in the MotifCompendium to name the motifs by.
+        save_loc: The location to save the Modisco h5py to.
+    Notes:
+        The motif names cannot have slashes (/) in them!
+        The resultant h5py file can be fed directly into FiNeMo (hitcaller).
+    """
+    size_4 = mc.motifs.shape[2] == 4
+    motifs = mc.motifs if size_4 else utils_motif.motif_8_to_4(mc.motifs)
+    pos_neg = np.sum(motifs, axis=(1, 2)) > 0
+    pos_neg = ["pos" if x > 0 else "neg" for x in pos_neg]
+    with h5py.File(save_loc, "w") as f:
+        f.attrs["window_size"] = 30
+        # Positive
+        if "pos" in pos_neg:
+            pos_group = f.create_group("pos_patterns")
+            mc_pos = mc[pd.Series(pos_neg) == "pos"]
+            for i in range(len(mc_pos)):
+                name = str(mc_pos.metadata.loc[i, name_col])
+                assert "/" not in name
+                cwm = (
+                    mc_pos.motifs[i, :, :]
+                    if size_4
+                    else utils_motif.motif_8_to_4(mc_pos.motifs[i, :, :])
+                )
+                pos_cluster = pos_group.create_group(name)
+                pos_cluster.create_dataset("contrib_scores", data=cwm)
+        # Negative
+        if "neg" in pos_neg:
+            neg_group = f.create_group("neg_patterns")
+            mc_neg = mc[pd.Series(pos_neg) == "neg"]
+            for i in range(len(mc_neg)):
+                name = str(mc_neg.metadata.loc[i, name_col])
+                assert "/" not in name
+                cwm = (
+                    mc_neg.motifs[i, :, :]
+                    if size_4
+                    else utils_motif.motif_8_to_4(mc_neg.motifs[i, :, :])
+                )
+                neg_cluster = neg_group.create_group(name)
+                neg_cluster.create_dataset("contrib_scores", data=cwm)
+
+
 ####################
 # ENTROPY ANALYSES #
 ####################
 def calculate_entropy(
     mc: MotifCompendium,
-    entropy_list: list = [
+    entropy_list: list[str] = [
         "motif_entropy",
         "posbase_entropy_ratio",
         "copair_entropy_ratio",
@@ -426,11 +476,16 @@ def label_from_pfms(
         l2: Whether or not to use L2 normalization (instead of sqrt normalization) when
           computing motif similarity.
     """
-    pfm_motifs, names = utils_loader.load_pfm(pfm_file)
+    if pfm_file.endswith("_pfms.txt"):
+        pfm_motifs, names = utils_loader.load_pfm(pfm_file)
+    elif pfm_file.endswith(".meme.txt") or pfm_file.endswith(".meme"):
+        pfm_motifs, names = utils_loader.load_meme(pfm_file)
+    else:
+        raise ValueError("pfm_file must be a _pfm.txt, .meme, or .meme.txt file.")
     mc_motifs = mc.motifs
     if mc_motifs.shape[2] == 8:
         mc_motifs = utils_motif.motif_8_to_4_abs(mc_motifs)
-    pfm_similarity, _, _ = similarity.compute_similarities(
+    pfm_similarity, _, _ = utils_similarity.compute_similarities(
         [mc_motifs, pfm_motifs], [(0, 1)], max_chunk, max_cpus, use_gpu, l2=l2
     )[0]
     mc[save_col_sim] = np.max(pfm_similarity, axis=1)

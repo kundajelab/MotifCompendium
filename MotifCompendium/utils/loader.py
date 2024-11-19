@@ -4,7 +4,7 @@ import h5py
 import numpy as np
 import pandas as pd
 
-from .motif import ic_scale, motif_4_to_8, squash_motif
+from .motif import ic_scale, motif_4_to_8, resize_motif
 
 
 ####################
@@ -113,8 +113,8 @@ def load_modisco(
 def load_pfm(pfm_file: str) -> tuple[np.ndarray, list[str]]:
     """Load motifs and names from a PFM file.
 
-    Each PFM from a PFM file is extracted. Then, the PFM is transformed into a PWM using
-      per position information content scaling.
+    Each PFM from the PFM file is extracted. Then, the PFMs are transformed into a PWM
+      using per position information content scaling.
 
     Args:
         pfm_file: The PFM file path.
@@ -135,7 +135,10 @@ def load_pfm(pfm_file: str) -> tuple[np.ndarray, list[str]]:
             if active_pwm:
                 if x.startswith(">"):
                     # submit
-                    pwms.append(pd.DataFrame(resize_motif(current_pwm)))
+                    current_pwm_df = pd.DataFrame(current_pwm)
+                    current_pwm_np = current_pwm_df.to_numpy()
+                    current_pwm_np = resize_motif(current_pwm_np)
+                    pwms.append(pd.DataFrame(current_pwm_np))
                     names.append(current_pwm_name)
                     # restart
                     current_pwm_name = x[1:]
@@ -145,10 +148,10 @@ def load_pfm(pfm_file: str) -> tuple[np.ndarray, list[str]]:
                     a, c, g, t = float(a), float(c), float(g), float(t)
                     acgt = np.asarray([[a, c, g, t]])  # (1, 4)
                     acgt_ic = ic_scale(acgt)
-                    current_pwm["A"].append(acgt_ic[0])
-                    current_pwm["C"].append(acgt_ic[1])
-                    current_pwm["G"].append(acgt_ic[2])
-                    current_pwm["T"].append(acgt_ic[3])
+                    current_pwm["A"].append(acgt_ic[0, 0])
+                    current_pwm["C"].append(acgt_ic[0, 1])
+                    current_pwm["G"].append(acgt_ic[0, 2])
+                    current_pwm["T"].append(acgt_ic[0, 3])
             else:
                 assert x.startswith(">")
                 active_pwm = True
@@ -156,6 +159,79 @@ def load_pfm(pfm_file: str) -> tuple[np.ndarray, list[str]]:
                 current_pwm = {"A": [], "C": [], "G": [], "T": []}
     pwms_mtx = np.stack([x.to_numpy() for x in pwms], axis=0)
     pwms_mtx /= np.sum(pwms_mtx, axis=(1, 2), keepdims=True)
+    return pwms_mtx, names
+
+
+def load_meme(meme_file: str) -> tuple[np.ndarray, list[str]]:
+    """Load motifs and names from a MEME file.
+
+    Each PFM from the MEME file is extracted. Then, the PFMs are transformed into a PWM
+      using per position information content scaling.
+
+    Args:
+        meme_file: The MEME file path.
+
+    Returns:
+        A tuple of motifs and motif names.
+
+    Notes:
+        Assumes a standard MEME file format.
+        Motifs are returned as (N, 30, 4) 4 channel motif stack.
+    """
+    names = []
+    pwms = []
+    active_pwm = False
+    with open(meme_file, "r") as f:
+        for line in f:
+            x = line.strip()
+            if not active_pwm:
+                if x.startswith("MOTIF"):
+                    active_pwm = True
+                    current_pwm_name = x.split(" ")[
+                        1
+                    ]  # MEME ALLOWS FOR ALTERNATE NAMES IN [2]
+                    looking_for_motif_info = True
+            else:
+                if looking_for_motif_info:
+                    assert x.startswith("letter-probability matrix")
+                    motif_info = x.split(": ")[1]
+                    motif_info_list = motif_info.split(" ")
+                    assert len(motif_info_list) % 2 == 0
+                    motif_info_dict = dict()
+                    for i in range(int(len(motif_info_list) / 2)):
+                        motif_info_dict[motif_info_list[2 * i]] = (
+                            int(motif_info_list[2 * i + 1])
+                            if float.is_integer(float(motif_info_list[2 * i + 1]))
+                            else float(motif_info_list[2 * i + 1])
+                        )
+                    assert motif_info_dict["alength="] == 4
+                    num_bases_remaining = motif_info_dict["w="]
+                    looking_for_motif_info = False
+                    current_pwm = {"A": [], "C": [], "G": [], "T": []}
+                else:
+                    # read line
+                    a, c, g, t = x.split()
+                    a, c, g, t = float(a), float(c), float(g), float(t)
+                    acgt = np.asarray([[a, c, g, t]])  # (1, 4)
+                    acgt_ic = ic_scale(acgt)
+                    current_pwm["A"].append(acgt_ic[0, 0])
+                    current_pwm["C"].append(acgt_ic[0, 1])
+                    current_pwm["G"].append(acgt_ic[0, 2])
+                    current_pwm["T"].append(acgt_ic[0, 3])
+                    num_bases_remaining -= 1
+                    # if motif over --> submit and restart
+                    if num_bases_remaining == 0:
+                        # submit
+                        current_pwm_df = pd.DataFrame(current_pwm)
+                        current_pwm_np = current_pwm_df.to_numpy()
+                        current_pwm_np = resize_motif(current_pwm_np)
+                        pwms.append(pd.DataFrame(current_pwm_np))
+                        names.append(current_pwm_name)
+                        # restart
+                        active_pwm = False
+    pwms_mtx = np.stack([x.to_numpy() for x in pwms], axis=0)
+    pwms_mtx /= np.sum(pwms_mtx, axis=(1, 2), keepdims=True)
+
     return pwms_mtx, names
 
 

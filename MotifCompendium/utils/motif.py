@@ -78,28 +78,6 @@ def motif_to_df(motif: np.ndarray) -> pd.DataFrame:
     return pd.DataFrame(motif, columns=["A", "C", "G", "T"])
 
 
-def squash_motif(motif: np.ndarray, squash_to: int = 30) -> np.ndarray:
-    """Squashes a larger motif into a smaller size.
-
-    Takes a large motif and squashes/trims it down to a smaller motif. Selects the base
-      pairs to keep that have the highest weights.
-
-    Args:
-        motif: A (L, C) motif.
-        squash_to: The size that the motif should be sqashed to.
-
-    Returns:
-        A (squash_to, C) motif.
-    """
-    N, c = motif.shape
-    i_sums = []
-    for i in range(N - squash_to + 1):
-        i_sums.append((np.sum(np.abs(motif[i : i + squash_to, :])), i))
-    i_sums = sorted(i_sums, reverse=True)
-    top_i = i_sums[0][1]
-    return motif[top_i : top_i + squash_to, :]
-
-
 def resize_motif(motif: np.ndarray, resize_to: int = 30) -> np.ndarray:
     """Resize a motif (by squashing or padding) to a specified length.
 
@@ -128,6 +106,7 @@ def resize_motif(motif: np.ndarray, resize_to: int = 30) -> np.ndarray:
         ]
         top_i = max(i_sums, key=lambda x: x[0])[1]
         return motif[top_i : top_i + resize_to, :]
+    return motif
 
 
 ###########
@@ -441,7 +420,7 @@ def average_motifs(
             motifs_4[i, :, :] if alignment_fb[i, 0] == 0 else motifs_4[i, ::-1, ::-1]
         )
     motif_avg = motif_sum / N
-    squashed_motif = squash_motif(motif_avg)
+    squashed_motif = resize_motif(motif_avg)
     squashed_motif_8 = motif_4_to_8(squashed_motif)
     squashed_motif_8 /= np.sum(squashed_motif_8)
     return squashed_motif_8

@@ -19,6 +19,6 @@ setup(
         "pytables",
         "seaborn",
         "scikit-learn",
-        "upsetplot"
+        "upsetplot",
     ],
 )

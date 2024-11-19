@@ -158,7 +158,7 @@ def summary_table_html(
 def plot_heatmap(
     data: np.ndarray,
     annot: bool = False,
-    labels: list | None = None,
+    labels: list[str] | None = None,
     show: bool = False,
     save_loc: str | None = None,
 ):

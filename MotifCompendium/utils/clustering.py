@@ -40,15 +40,13 @@ def cluster(
     match algorithm:
         # Leiden
         case "leiden" | "weighted_leiden" | "modularity_leiden":
-            # Required to create weighted matrix
-            adjacency_matrix = np.where(
-                similarity_matrix >= similarity_threshold, similarity_matrix, 0
+            adjacency_matrix = similarity_matrix * (
+                similarity_matrix >= similarity_threshold
             )
             return leiden_clustering(adjacency_matrix, **kwargs)
         case "cpm" | "cpm_leiden" | "cpm_weighted_leiden":
-            # Required to create weighted matrix
-            adjacency_matrix = np.where(
-                similarity_matrix >= similarity_threshold, similarity_matrix, 0
+            adjacency_matrix = similarity_matrix * (
+                similarity_matrix >= similarity_threshold
             )
             return cpm_leiden_clustering(adjacency_matrix, **kwargs)
         # Connected-component
@@ -76,14 +74,7 @@ def leiden_clustering(
     n_seeds: int = 2,
 ) -> list[int]:
     """Perform Leiden clustering (modularity) on a weighted similarity matrix."""
-    n_vertices = adjacency_matrix.shape[0]
-    rows, cols = np.nonzero(adjacency_matrix)
-    edges = list(zip(rows, cols))
-    weights = adjacency_matrix[rows, cols]
-
-    # Create igraph object
-    g = ig.Graph(n_vertices, edges=edges)
-    g.es["weight"] = weights
+    g = ig.Graph.Weighted_Adjacency(adjacency_matrix, mode="undirected")
 
     best_quality = None
     best_membership = None
