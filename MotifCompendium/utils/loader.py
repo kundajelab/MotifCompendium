@@ -193,14 +193,15 @@ def load_meme(meme_file: str) -> tuple[np.ndarray, list[str]]:
                     looking_for_motif_info = True
             else:
                 if looking_for_motif_info:
-                    assert x.startswith("letter-probability matrix")
+                    if not x.startswith("letter-probability matrix"):
+                        continue
                     motif_info = x.split(": ")[1]
                     motif_info_list = motif_info.split(" ")
                     assert len(motif_info_list) % 2 == 0
                     motif_info_dict = dict()
                     for i in range(int(len(motif_info_list) / 2)):
                         motif_info_dict[motif_info_list[2 * i]] = (
-                            int(motif_info_list[2 * i + 1])
+                            int(float(motif_info_list[2 * i + 1]))
                             if float.is_integer(float(motif_info_list[2 * i + 1]))
                             else float(motif_info_list[2 * i + 1])
                         )
