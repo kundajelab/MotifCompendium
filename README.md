@@ -11,4 +11,5 @@ For starter code, please go through the tutorials. **It is highly recommended to
 1. Create a conda environment by either running `conda env create -f environment.yml` or `conda env create -f environment_gpu.yml`.
 2. Activate the newly create conda environment.
 3. In this directory, run `pip install -e .`.
+
 **This package is being actively developed, so please git pull the package before each time you use it.** 
