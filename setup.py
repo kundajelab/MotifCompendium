@@ -16,7 +16,7 @@ setup(
         "logomaker",
         "numpy",
         "pandas",
-        "pytables",
+        "tables",
         "seaborn",
         "scikit-learn",
         "upsetplot",
