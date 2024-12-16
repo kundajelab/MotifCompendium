@@ -10,6 +10,7 @@ import seaborn as sns
 import MotifCompendium
 import MotifCompendium.utils.loader as utils_loader
 import MotifCompendium.utils.motif as utils_motif
+import MotifCompendium.utils.plotting as utils_plotting
 import MotifCompendium.utils.similarity as utils_similarity
 
 

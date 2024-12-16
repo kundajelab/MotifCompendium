@@ -75,10 +75,11 @@
                 for (i = 2; i < trs.length; i++) {
                     showRow = true;
                     tds = trs[i].getElementsByTagName("td");
-                    for (j = 2; j < tds.length; j++) {
-                        txtValue = tds[j].textContent;
-                        filter = inputs[j-2].value; // j-2 because image columns have no filter
-                        if (filter != "" && !txtValue.includes(filter)) {
+                    for (z = 0; z < inputs.length; z++) {
+                        zIndex = parseInt(inputs[z].getAttribute("data-columnindex"))
+                        textValue = tds[zIndex].textContent;
+                        filter = inputs[z].value;
+                        if (filter != "" && !textValue.includes(filter)) {
                             showRow = false;
                             break;
                         }
@@ -117,14 +118,14 @@
             {% if col.startswith("LOGOIMAGEDATA__") %}
                 <td></td>
             {% else %}
-                <td><input type="text" class="filterInput" onkeyup="filterTable()"></td>
+	    <td><input type="text" class="filterInput" onkeyup="filterTable()" data-columnindex="{{ loop.index0 }}"></td>
             {% endif %}
         {% endfor %}
     </tr>
     {% for row in rows %}
         <tr>
             {% for col in columns %}
-                {% if loop.index0 == 0 or loop.index0 == 1 %}
+	    	{% if col.startswith("LOGOIMAGEDATA__") %}
                     <td><img src="data:image/png;base64,{{ row[col] }}" class="plot-image"></td>
                 {% else %}
                     <td>{{ row[col] }}</td>

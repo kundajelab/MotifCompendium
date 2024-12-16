@@ -137,8 +137,8 @@ def summary_table_html(
             fwd_motif_strings = p.map(_motifdict_to_utf8_plot, fwd_motif_dicts)
             rev_motif_strings = p.map(_motifdict_to_utf8_plot, rev_motif_dicts)
     # Prepare data
-    metadata.insert(0, "logo (fwd)", fwd_motif_strings)
-    metadata.insert(1, "logo (rev)", rev_motif_strings)
+    metadata.insert(0, "LOGOIMAGEDATA__logo (fwd)", fwd_motif_strings)
+    metadata.insert(1, "LOGOIMAGEDATA__logo (rev)", rev_motif_strings)
     columns = metadata.columns.tolist()
     rows = metadata.to_dict(orient="records")
     # Create Jinja2 environment
