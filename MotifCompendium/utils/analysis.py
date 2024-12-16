@@ -1,6 +1,7 @@
+import multiprocessing
 import os
 
-import h5py
+import h5py  
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -450,6 +451,7 @@ def label_from_pfms(
     pfm_file: str,
     save_col_sim: str = "pfm_match_similarity",
     save_col_match: str = "pfm_match",
+    save_col_logo: str = "LOGOIMAGEDATA__pfm match logo",
     max_chunk: int | None = None,
     max_cpus: int | None = None,
     use_gpu: bool | None = None,
@@ -467,6 +469,7 @@ def label_from_pfms(
         pfm_file: The PFM file path.
         save_col_sim: The column under which the highest similarity will be stored.
         save_col_match: The column under which the closest match will be stored.
+        save_col_logo: The column under which the logo of the closest match will be stored.
         max_chunk: The maximum number of motifs to compute similarity on at a time. If
           None, it will compute the entire similarity matrix at once.
         max_cpus: The maximum number of CPUs to use for computing similarity. If None,
@@ -490,3 +493,20 @@ def label_from_pfms(
     )[0]
     mc[save_col_sim] = np.max(pfm_similarity, axis=1)
     mc[save_col_match] = [names[x] for x in np.argmax(pfm_similarity, axis=1)]
+    
+    match_motif_dicts = [
+        {"motif": utils_motif.motif_to_df(pfm_motifs[x])} for x in np.argmax(pfm_similarity, axis=1)
+    ]
+    # Create motif plots
+    if max_cpus is None:
+        match_motif_strings = []
+        for i in range(len(match_motif_dicts)):
+            match_motif_strings.append(utils_plotting._motifdict_to_utf8_plot(match_motif_dicts[i]))
+    else:
+        # Plot in parallel
+        num_processes = min(
+            max_cpus, multiprocessing.cpu_count()
+        )  # don't use more CPUs than available
+        with multiprocessing.Pool(processes=num_processes) as p:
+            match_motif_strings = p.map(utils_plotting._motifdict_to_utf8_plot, match_motif_dicts)
+    mc[save_col_logo] = match_motif_strings

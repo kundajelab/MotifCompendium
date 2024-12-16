@@ -101,24 +101,24 @@
 <table id="dataTable">
     <tr>
         {% for col in columns %}
-            {% if loop.index0 == 0 or loop.index0 == 1 %}
-	    <th>{{ col }}</th>
-	    {% else %}
+            {% if col.startswith("LOGOIMAGEDATA__") %}
+                <th>{{ col.split("LOGOIMAGEDATA__")[1] }}</th>
+            {% else %}
                 <th>
                     {{ col }}
-		    <button class="sort-button" onclick="sortTable({{ loop.index0 }}, true)">&uarr;</button>
-		    <button class="sort-button" onclick="sortTable({{ loop.index0 }}, false)">&darr;</button>
+                    <button class="sort-button" onclick="sortTable({{ loop.index0 }}, true)">&uarr;</button>
+                    <button class="sort-button" onclick="sortTable({{ loop.index0 }}, false)">&darr;</button>
                 </th>
-	    {% endif %}
+	       {% endif %}
         {% endfor %}
     </tr>
     <tr>
         {% for col in columns %}
-            {% if loop.index0 == 0 or loop.index0 == 1 %}
-	        <td></td>
-	    {% else %}
-	        <td><input type="text" class="filterInput" onkeyup="filterTable()"></td>
-	    {% endif %}
+            {% if col.startswith("LOGOIMAGEDATA__") %}
+                <td></td>
+            {% else %}
+                <td><input type="text" class="filterInput" onkeyup="filterTable()"></td>
+            {% endif %}
         {% endfor %}
     </tr>
     {% for row in rows %}
