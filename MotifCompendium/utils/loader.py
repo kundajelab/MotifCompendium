@@ -112,19 +112,8 @@ def load_modisco(
 
 def load_pfm(pfm_file: str) -> tuple[np.ndarray, list[str]]:
     """Load motifs and names from a PFM file.
-
-<<<<<<< HEAD
-<<<<<<< HEAD
     Each PFM from the PFM file is extracted. Then, the PFMs are transformed into a PWM
       using per position information content scaling.
-=======
-    Each PFM from a PFM file is extracted. Then, the PFM is transformed into a pfm using
-      per position information content scaling.
->>>>>>> Minor updates for usability.
-=======
-    Each PFM from the PFM file is extracted. Then, the PFMs are transformed into a PWM
-      using per position information content scaling.
->>>>>>> Updated tutorials_2 to include entropy filter.
 
     Args:
         pfm_file: The PFM file path.
