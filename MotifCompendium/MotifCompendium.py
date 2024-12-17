@@ -837,6 +837,8 @@ class MotifCompendium:
                         agg_dict["values"].append(np.mean(agg_c_data))
                     case "concatenate" | "concat":
                         agg_dict["values"].append(",".join(sorted(set(agg_c_data))))
+                    case "unique":
+                        agg_dict["values"].append(len(set(agg_c_data)))
                     case _:
                         raise ValueError(
                             f"{agg_dict['method']} is not a supported aggregation method."

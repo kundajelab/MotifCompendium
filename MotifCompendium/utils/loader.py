@@ -114,12 +114,17 @@ def load_pfm(pfm_file: str) -> tuple[np.ndarray, list[str]]:
     """Load motifs and names from a PFM file.
 
 <<<<<<< HEAD
+<<<<<<< HEAD
     Each PFM from the PFM file is extracted. Then, the PFMs are transformed into a PWM
       using per position information content scaling.
 =======
     Each PFM from a PFM file is extracted. Then, the PFM is transformed into a pfm using
       per position information content scaling.
 >>>>>>> Minor updates for usability.
+=======
+    Each PFM from the PFM file is extracted. Then, the PFMs are transformed into a PWM
+      using per position information content scaling.
+>>>>>>> Updated tutorials_2 to include entropy filter.
 
     Args:
         pfm_file: The PFM file path.
@@ -140,8 +145,9 @@ def load_pfm(pfm_file: str) -> tuple[np.ndarray, list[str]]:
             if active_pfm:
                 if x.startswith(">"):
                     # submit
-                    current_pfm = np.stack([np.array(current_pfm[base]) for base in "ACGT"], axis=1)
-                    pfms.append(resize_motif(current_pfm))
+                    current_pfm_np = pd.DataFrame(current_pfm).to_numpy()
+                    current_pfm_np = resize_motif(current_pfm_np)
+                    pfms.append(pd.DataFrame(current_pfm_np))
                     names.append(current_pfm_name)
                     # restart
                     current_pfm_name = x[1:]
@@ -151,10 +157,10 @@ def load_pfm(pfm_file: str) -> tuple[np.ndarray, list[str]]:
                     a, c, g, t = float(a), float(c), float(g), float(t)
                     acgt = np.asarray([[a, c, g, t]])  # (1, 4)
                     acgt_ic = ic_scale(acgt)
-                    current_pfm["A"].append(acgt_ic[0,0])
-                    current_pfm["C"].append(acgt_ic[0,1])
-                    current_pfm["G"].append(acgt_ic[0,2])
-                    current_pfm["T"].append(acgt_ic[0,3])
+                    current_pfm["A"].append(acgt_ic[0, 0])
+                    current_pfm["C"].append(acgt_ic[0, 1])
+                    current_pfm["G"].append(acgt_ic[0, 2])
+                    current_pfm["T"].append(acgt_ic[0, 3])
             else:
                 assert x.startswith(">")
                 active_pfm = True
@@ -190,9 +196,7 @@ def load_meme(meme_file: str) -> tuple[np.ndarray, list[str]]:
             if not active_pwm:
                 if x.startswith("MOTIF"):
                     active_pwm = True
-                    current_pwm_name = x.split(" ")[
-                        1
-                    ]  # MEME ALLOWS FOR ALTERNATE NAMES IN [2]
+                    current_pwm_name = x.split(" ")[-1]  # MEME ALLOWS FOR ALTERNATE NAMES IN [2]
                     looking_for_motif_info = True
             else:
                 if looking_for_motif_info:

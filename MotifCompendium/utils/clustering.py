@@ -11,7 +11,7 @@ import sklearn.cluster
 ######################
 def cluster(
     similarity_matrix: np.ndarray,
-    algorithm: str = "leiden",
+    algorithm: str = "cpm_leiden",
     similarity_threshold: float = 0.9,
     **kwargs,
 ) -> list[int]:
@@ -40,7 +40,9 @@ def cluster(
     match algorithm:
         # Leiden
         case "leiden" | "weighted_leiden" | "modularity_leiden":
-            adjacency_matrix = similarity_matrix * (similarity_matrix >= similarity_threshold)
+            adjacency_matrix = similarity_matrix * (
+                similarity_matrix >= similarity_threshold
+            )
             return modularity_leiden_clustering(adjacency_matrix, **kwargs)
         case "cpm" | "cpm_leiden" | "cpm_weighted_leiden":
             adjacency_matrix = similarity_matrix * (similarity_matrix >= similarity_threshold)
