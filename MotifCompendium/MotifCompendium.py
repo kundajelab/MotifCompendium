@@ -238,8 +238,6 @@ def combine(
         Safe building validates object integrity but may take significantly longer for
           large objects.
     """
-    print("not yet implemented")
-    assert False
     n = len(compendiums)
     # SIMILARITIES
     motifs_list = [mc.motifs for mc in compendiums]
@@ -248,7 +246,7 @@ def combine(
         for j in range(i + 1, n):
             calculations.append((i, j))
     similarity_results = utils_similarity.compute_similarities(
-        motifs_list, calculations, max_chunk, max_cpus, use_gpu
+        motifs_list, calculations, max_chunk, max_cpus, use_gpu, l2
     )
     similarity_block = [[None for i in range(n)] for i in range(n)]
     alignment_fr_block = [[None for i in range(n)] for i in range(n)]
@@ -259,23 +257,26 @@ def combine(
                 similarity_block[i][j] = compendiums[i].similarity
                 alignment_fr_block[i][j] = compendiums[i].alignment_fr
                 alignment_h_block[i][j] = compendiums[i].alignment_h
+            elif i < j:
+                (similarity_block[i][j],
+                alignment_fr_block[i][j],
+                alignment_h_block[i][j],
+                ) = similarity_results[calculations.index((i, j))]
             elif i > j:
-                (
-                    similarity_block[i][j],
-                    alignment_fr_block[i][j],
-                    alignment_h_block[i][j],
-                ) = results_revcomp[(i, j)]
-            else:
                 similarity_block[i][j] = similarity_block[j][i].T
-                alignment_fr_block[i][j] = alignemnt_fb_block[j][i].T
+                alignment_fr_block[i][j] = alignment_fr_block[j][i].T
                 alignment_h_block[i][j] = alignment_h_block[j][i].T
     similarity = np.block(similarity_block)
+    # Guarantee diagonal symmetry
+    np.fill_diagonal(similarity, 1) 
+    similarity = (similarity + similarity.T) / 2
+
     alignment_fr = np.block(alignment_fr_block)
     alignment_h = np.block(alignment_h_block)
     # motifs
-    motifs = np.concatenate(motifs_list)
+    motifs = np.concatenate(motifs_list, axis=0)
     # METADATA
-    metadata = pd.concat([mc.metadata for mc in compendiums])
+    metadata = pd.concat([mc.metadata for mc in compendiums], ignore_index=True)
     return MotifCompendium(
         motifs, similarity, alignment_fr, alignment_h, metadata, safe
     )
