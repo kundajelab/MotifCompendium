@@ -508,6 +508,7 @@ class MotifCompendium:
         self, 
         html_out: str, 
         group_by: str, 
+        average_motif: bool,
         max_cpus: int | None = None
     ) -> None:
         """Creates an html file displaying all motifs in the current MotifCompendium.
