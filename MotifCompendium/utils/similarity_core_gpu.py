@@ -6,26 +6,45 @@ import numpy as np
 # PUBLIC FUNCTIONS #
 ####################
 def gpu_compute_similarity_and_align(
-    simsA: np.ndarray, simsB: np.ndarray, l2: bool
+    simsA: np.ndarray, simsB: np.ndarray, sim_type: str,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Computes similarity and alignment taking into account reverse complements."""
+    # convert to cupy
     simsA = cp.asarray(simsA)
     simsB = cp.asarray(simsB)
-    if l2:
-        samsA = simsA / cp.linalg.norm(simsA, axis=(1, 2), keepdims=True)
-        samsB = simsB / cp.linalg.norm(simsB, axis=(1, 2), keepdims=True)
-    else:
-        samsA = cp.sqrt(simsA)
-        samsB = cp.sqrt(simsB)
-    samsA_revcomp = _reverse_complement(samsA)
-    # forward similarity
-    sim_1, sim_1_alignments = _compute_similarity(
-        samsA, samsB
-    )  # skew-symmetric alignment
-    # backward similarity
-    sim_2, sim_2_alignments = _compute_similarity(
-        samsA_revcomp, samsB
-    )  # symmetric alignment
+    
+    # L1 normalize
+    simsA = simsA / cp.sum(simsA, axis=(1, 2), keepdims=True)
+    simsB = simsB / cp.sum(simsB, axis=(1, 2), keepdims=True)
+
+    match sim_type:
+        case "l2" | "sqrt":
+            if sim_type == "l2":
+                # L2 normalization
+                simsA = simsA / cp.linalg.norm(simsA, axis=(1, 2), keepdims=True)
+                simsB = simsB / cp.linalg.norm(simsB, axis=(1, 2), keepdims=True)
+            elif sim_type == "sqrt":
+                # square root
+                simsA = cp.sqrt(simsA)
+                simsB = cp.sqrt(simsB)
+
+            # forward similarity
+            sim_1, sim_1_alignments = _compute_similarity(
+                simsA, simsB
+            )  # skew-symmetric alignment
+            # backward similarity
+            sim_2, sim_2_alignments = _compute_similarity(
+                _reverse_complement(simsA), simsB
+            )  # symmetric alignment
+        
+        case "jss":
+            sim_1, sim_1_alignments = _compute_similarity_jss(
+                simsA, simsB
+            )
+            sim_2, sim_2_alignments = _compute_similarity_jss(
+                _reverse_complement(simsA), simsB
+            )
+
     # aligning
     sim_12 = cp.stack([sim_1, sim_2])
     sim = cp.max(sim_12, axis=0)
@@ -82,6 +101,63 @@ def _compute_similarity(
     # COMPUTE ALIGNMENT
     best_alignment_scores = cp.max(total_sum, axis=1)
     best_alignments = cp.argmax(total_sum, axis=1) - 29
+    # REALIGN IF NEEDED
+    if transpose:
+        best_alignment_scores = best_alignment_scores.T
+        best_alignments = (
+            -best_alignments.T
+        )  # negative because transposing flips alignment
+    assert best_alignment_scores.shape == (N_original, M_original)
+    assert best_alignments.shape == (N_original, M_original)
+    return best_alignment_scores, best_alignments
+
+
+def _compute_similarity_jss(
+    motifsP: cp.ndarray, motifsQ: cp.ndarray
+) -> tuple[cp.ndarray, cp.ndarray]:
+    """Computes Jensen-Shannon Similarity (JSS) and alignment for two sets of motifs,
+    where JSS = 1 - sqrt(Jensen-Shannon Divergence)."""
+    # TRANSPOSE FOR EFFICIENCY
+    N_original = motifsP.shape[0]
+    M_original = motifsQ.shape[0]
+    if N_original > M_original:
+        temp = motifsP
+        motifsP = motifsQ
+        motifsQ = temp
+    transpose = N_original > M_original
+    N = motifsP.shape[0] # (N, 30, K)
+    M = motifsQ.shape[0] # (M, 30, K)
+    K = motifsP.shape[2]
+
+    ## COMPUTE JSD I: SELF-ENTROPY
+    motifsP_flat = motifsP.reshape(N, -1) # (N, 30*K)
+    motifsQ_flat = motifsQ.reshape(M, -1) # (M, 30*K)
+    
+    js_similarity = (cp.sum(motifsP_flat * cp.where(motifsP_flat == 0, 0, cp.log2(motifsP_flat)), axis=1)[:, cp.newaxis] \
+        + cp.sum(motifsQ_flat * cp.where(motifsQ_flat == 0, 0, cp.log2(motifsQ_flat)), axis=1)[cp.newaxis, :])[:, cp.newaxis, :] # (N, 1, M)
+    
+    del motifsP_flat, motifsQ_flat
+
+    ## COMPUTE JSD II: ENTROPY DIFFERENCE
+    for k in range(K):
+        left_side_tensorP = cp.tensordot(motifsP[:,:,k], _LEFTTENSOR(), axes=[[1],[2]])[:, :, :, cp.newaxis] # (N, 59, 88, 1)
+        right_side_tensorQ = cp.tensordot(_RIGHTTENSOR(), motifsQ[:,:,k], axes=[[0],[1]])[cp.newaxis, cp.newaxis, :, :] # (1, 1, 88, M)
+
+        mixed_tensorM_log = 0.5*(left_side_tensorP + right_side_tensorQ) # (N, 59, 88, M)
+        mixed_tensorM_log = cp.where(mixed_tensorM_log == 0, 0, cp.log2(mixed_tensorM_log)) # (N, 59, 88, M)
+        
+        # Update JSD
+        js_similarity = js_similarity - cp.sum((left_side_tensorP * mixed_tensorM_log + right_side_tensorQ * mixed_tensorM_log), axis=2) # (N, 59, M)
+
+    ## JS SIMILARITY
+    js_similarity = 0.5 * js_similarity
+    js_similarity = cp.clip(js_similarity, 0, 1)
+    js_similarity = 1 - cp.sqrt(js_similarity)
+
+    # COMPUTE ALIGNMENT
+    best_alignment_scores = cp.max(js_similarity, axis=1)
+    best_alignments = cp.argmax(js_similarity, axis=1) - 29
+    
     # REALIGN IF NEEDED
     if transpose:
         best_alignment_scores = best_alignment_scores.T

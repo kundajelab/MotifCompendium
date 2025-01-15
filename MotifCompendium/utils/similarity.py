@@ -15,7 +15,7 @@ def compute_similarities(
     max_chunk: int | None,
     max_cpus: int | None,
     use_gpu: bool | None,
-    l2: bool | None,
+    sim_type: str | None,
 ) -> list[tuple[np.ndarray, np.ndarray, np.ndarray]]:
     """Performs similarity and calculations between sets of motif stacks.
 
@@ -30,6 +30,7 @@ def compute_similarities(
           the index of a motif stack in the motif_stack_list. For example, the
           calculation (i, j) says to compute the pairwise similarity between all motifs
           in motif stack i and motif stack j.
+        similarity_type: The type of similarity to compute: 'cosine', 'jsd'
         max_chunk: The maximum size of a motif stack to perform similarity calculations
           on. All motif stacks larger than max_chunk will be chunked into smaller motif
           stacks of size <= max_chunk by _chunk_motif_stacks_and_calcs(). Calculations
@@ -40,8 +41,7 @@ def compute_similarities(
           similarity calculations are carried out by the functions in utils file
           .similarity_core_gpu.py. If False, they will be carried out by the function in
           utils file .similarity_core_cpu.py.
-        l2: Whether or not to use L2 normalization (instead of sqrt normalization) when
-          computing motif similarity.
+        sim_type: The type of similarity metric to compute: 'l2', 'sqrt', 'jss'
 
     Returns:
         A list of motif calculation result tuples. There is one motif calculation result
@@ -55,8 +55,8 @@ def compute_similarities(
         max_cpus = DEFAULT_MAX_CPUS
     if use_gpu is None:
         use_gpu = DEFAULT_USE_GPU
-    if l2 is None:
-        l2 = DEFAULT_L2
+    if sim_type is None:
+        sim_type = DEFAULT_SIM_TYPE
     # TODO: FIX EDGE CASE THAT HAS ARISEN DUE TO DEFAULTS
     if use_gpu:
         max_cpus = None
@@ -69,14 +69,16 @@ def compute_similarities(
             chunk_map,
         ) = _chunk_motif_stacks_and_calcs(motif_stack_list, calculations, max_chunk)
         chunked_results = _compute_similarity_and_align_parallel(
-            chunked_motif_stack_list, chunked_calculations, max_cpus, use_gpu, l2
+            chunked_motif_stack_list, chunked_calculations,
+            max_cpus, use_gpu, sim_type
         )
         return _reassemble_results(
             calculations, chunked_calculations, chunked_results, chunk_map
         )
     else:
         return _compute_similarity_and_align_parallel(
-            motif_stack_list, calculations, max_cpus, use_gpu, l2
+            motif_stack_list, calculations,
+            max_cpus, use_gpu, sim_type
         )
 
 
@@ -132,7 +134,7 @@ def _compute_similarity_and_align_parallel(
     calculations: list[tuple[int, int]],
     max_cpus: int | None,
     use_gpu: bool,
-    l2: bool,
+    sim_type: str,
 ) -> list[tuple[np.ndarray, np.ndarray, np.ndarray]]:
     """Compute similarities and alignments."""
     if max_cpus is None:
@@ -142,7 +144,7 @@ def _compute_similarity_and_align_parallel(
 
             return [
                 gpu_compute_similarity_and_align(
-                    motif_stack_list[c[0]], motif_stack_list[c[1]], l2
+                    motif_stack_list[c[0]], motif_stack_list[c[1]], sim_type
                 )
                 for c in calculations
             ]
@@ -150,7 +152,7 @@ def _compute_similarity_and_align_parallel(
             # SINGLE CPU CALCULATIONS
             return [
                 compute_similarity_and_align(
-                    motif_stack_list[c[0]], motif_stack_list[c[1]], l2
+                    motif_stack_list[c[0]], motif_stack_list[c[1]], sim_type,
                 )
                 for c in calculations
             ]
@@ -162,7 +164,7 @@ def _compute_similarity_and_align_parallel(
         else:
             # MULTI-CPU CALCULATIONS
             inputs = [
-                (motif_stack_list[c[0]], motif_stack_list[c[1]], l2)
+                (motif_stack_list[c[0]], motif_stack_list[c[1]], sim_type)
                 for c in calculations
             ]
             num_processes = min(
@@ -213,14 +215,14 @@ def _reassemble_results(
 DEFAULT_MAX_CHUNK = None
 DEFAULT_MAX_CPUS = None
 DEFAULT_USE_GPU = False
-DEFAULT_L2 = True
+DEFAULT_SIM_TYPE = "l2"
 
 
 def set_default_options(
     max_chunk: int | None = None,
     max_cpus: int | None = None,
     use_gpu: bool | None = None,
-    l2: bool | None = None,
+    sim_type: str | None = None,
 ):
     """Set default values for max_chunk, max_cpus, use_gpu, and l2."""
     if max_chunk is not None:
@@ -229,5 +231,5 @@ def set_default_options(
         DEFAULT_MAX_CPUS = max_cpus
     if use_gpu is not None:
         DEFAULT_USE_GPU = use_gpu
-    if l2 is not None:
-        DEFAULT_L2 = l2
+    if sim_type is not None:
+        DEFAULT_SIM_TYPE = sim_type

@@ -169,16 +169,16 @@ def motif8_to_dinuc64(motif8: np.array) -> np.array:
     return dinuc64
 
 
-def shannon_entropy(prob_array: np.array, epsilon: float = 1e-10) -> float:
+def shannon_entropy(prob_array: np.array) -> float:
     # Normalize, flatten array
     prob_array = prob_array / np.sum(prob_array)
     prob_array = prob_array.flatten()
-
-    # Replace zeroes with epsilon
-    prob_array[prob_array == 0] = epsilon
     length = prob_array.shape[0]
 
-    # Calculate Shannon entropy
+    # Filter out zero probabilities
+    prob_array = prob_array[prob_array > 0]
+    
+    # Calculate normalized Shannon entropy
     entropy = -np.sum(prob_array * np.log2(prob_array)) / np.log2(length)
 
     return entropy

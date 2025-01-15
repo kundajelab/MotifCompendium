@@ -67,7 +67,7 @@ def build(
     max_chunk: int | None = None,
     max_cpus: int | None = None,
     use_gpu: bool | None = None,
-    l2: bool | None = None,
+    sim_type: str | None = None,
     safe: bool = True,
 ) -> MotifCompendium:
     """Builds a MotifCompendium object from a set of motifs.
@@ -83,8 +83,7 @@ def build(
         max_cpus: The maximum number of CPUs to use for computing similarity (only used
           if use_gpu is False).
         use_gpu: Whether or not to use GPUs to accelerate computing similarity.
-        l2: Whether or not to use L2 normalization (instead of sqrt normalization) when
-          computing motif similarity.
+        sim_type: The type of similarity metric to compute: 'l2', 'sqrt', 'jss'.
         safe: Whether or not to construct the MotifCompendium safely.
 
     Returns:
@@ -115,7 +114,7 @@ def build(
         )
         max_cpus = None
     similarity, alignment_fr, alignment_h = utils_similarity.compute_similarities(
-        [motifs], [(0, 0)], max_chunk, max_cpus, use_gpu, l2
+        [motifs], [(0, 0)], max_chunk, max_cpus, use_gpu, sim_type
     )[0]
     np.fill_diagonal(
         similarity, 1
@@ -130,11 +129,11 @@ def build(
 
 def build_from_modisco(
     modisco_dict: dict[str, str],
-    ic: bool = True,
+    ic: bool = False,
     max_chunk: int | None = None,
     max_cpus: int | None = None,
     use_gpu: bool | None = None,
-    l2: bool | None = None,
+    sim_type: str | None = None,
     safe: bool = True,
 ) -> MotifCompendium:
     """Builds a MotifCompendium object from a set of Modisco outputs.
@@ -149,8 +148,7 @@ def build_from_modisco(
           computing similarity (only used for similarity calculation if use_gpu is
           False).
         use_gpu: Whether or not to use GPUs to accelerate computing similarity.
-        l2: Whether or not to use L2 normalization (instead of sqrt normalization) when
-          computing motif similarity.
+        sim_type: The type of similarity metric to compute: 'l2', 'sqrt', 'jss'.
         safe: Whether or not to construct the MotifCompendium safely.
 
     Returns:
@@ -193,7 +191,7 @@ def build_from_modisco(
         max_chunk=max_chunk,
         max_cpus=max_cpus_similarity,
         use_gpu=use_gpu,
-        l2=l2,
+        sim_type=sim_type,
         safe=safe,
     )
 
@@ -203,7 +201,7 @@ def combine(
     max_chunk: int | None = None,
     max_cpus: int | None = None,
     use_gpu: bool | None = None,
-    l2: bool | None = None,
+    sim_type: str | None = None,
     safe: bool = True,
 ) -> MotifCompendium:
     """Combines multiple MotifCompendium into one MotifCompendium.
@@ -218,8 +216,7 @@ def combine(
         max_cpus: The maximum number of CPUs to use for computing similarity (only used
           if use_gpu is False).
         use_gpu: Whether or not to use GPUs to accelerate computing similarity.
-        l2: Whether or not to use L2 normalization (instead of sqrt normalization) when
-          computing motif similarity.
+        sim_type: The type of similarity metric to compute: 'l2', 'sqrt', 'jss'.
         safe: Whether or not to construct the MotifCompendium safely.
 
     Returns:
@@ -246,7 +243,7 @@ def combine(
         for j in range(i + 1, n):
             calculations.append((i, j))
     similarity_results = utils_similarity.compute_similarities(
-        motifs_list, calculations, max_chunk, max_cpus, use_gpu, l2
+        motifs_list, calculations, max_chunk, max_cpus, use_gpu, sim_type
     )
     similarity_block = [[None for i in range(n)] for i in range(n)]
     alignment_fr_block = [[None for i in range(n)] for i in range(n)]
@@ -508,6 +505,7 @@ class MotifCompendium:
         self, 
         html_out: str, 
         group_by: str, 
+        average_motif: bool = False,
         max_cpus: int | None = None
     ) -> None:
         """Creates an html file displaying all motifs in the current MotifCompendium.
@@ -760,7 +758,7 @@ class MotifCompendium:
         max_chunk: int | None = None,
         max_cpus: int | None = None,
         use_gpu: bool | None = None,
-        l2: bool | None = None,
+        sim_type: str | None = None,
         safe: bool = True,
     ) -> MotifCompendium:
         """Creates a MotifCompendium where each motif represents a cluster of motifs.
@@ -782,8 +780,7 @@ class MotifCompendium:
             max_cpus: The maximum number of CPUs to use for computing similarity (only
               used if use_gpu is False).
             use_gpu: Whether or not to use GPUs to accelerate computing similarity.
-            l2: Whether or not to use L2 normalization (instead of sqrt normalization)
-              when computing motif similarity.
+            sim_type: The type of similarity metric to compute: 'l2', 'sqrt', 'jss'.
             safe: Whether or not to construct the MotifCompendium safely.
 
         Returns:
@@ -851,7 +848,7 @@ class MotifCompendium:
         for agg_dict in aggregations_dicts:
             metadata[agg_dict["save"]] = agg_dict["values"]
         return build(
-            cluster_motif_avgs, metadata, max_chunk, max_cpus, use_gpu, l2, safe
+            cluster_motif_avgs, metadata, max_chunk, max_cpus, use_gpu, sim_type, safe
         )
 
     def get_similarity_slice(
@@ -932,7 +929,7 @@ class MotifCompendium:
         max_chunk: int | None = None,
         max_cpus: int | None = None,
         use_gpu: bool | None = None,
-        l2: bool | None = None,
+        sim_type: str | None = None,
     ) -> None:
         """Assign clusters to motifs based on an existing clustered MotifCompendium.
 
@@ -951,8 +948,7 @@ class MotifCompendium:
             max_cpus: The maximum number of CPUs to use for computing similarity (only
               used if use_gpu is False).
             use_gpu: Whether or not to use GPUs to accelerate computing similarity.
-            l2: Whether or not to use L2 normalization (instead of sqrt normalization)
-              when computing motif similarity.
+            sim_type: The type of similarity metric to compute: 'l2', 'sqrt', 'jss'.
 
         Notes:
             Assumes that this MotifCompendium and other have the same dimensions for
@@ -960,7 +956,7 @@ class MotifCompendium:
         """
         assert self.motifs.shape[2] == other.motifs.shape[2]
         mc_similarity, _, _ = utils_similarity.compute_similarities(
-            [self.motifs, other.motifs], [(0, 1)], max_chunk, max_cpus, use_gpu, l2=l2
+            [self.motifs, other.motifs], [(0, 1)], max_chunk, max_cpus, use_gpu, sim_type=sim_type
         )[0]
         self[save_col_sim] = np.max(mc_similarity, axis=1)
         self[save_col_match] = [

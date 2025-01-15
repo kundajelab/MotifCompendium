@@ -231,7 +231,7 @@ def export_clusters_modisco(
     max_chunk: int | None = None,
     max_cpus: int | None = None,
     use_gpu: bool | None = None,
-    l2: bool | None = None,
+    sim_type: str | None = None,
 ) -> None:
     """Exports cluster averages in the Modisco file format.
 
@@ -246,8 +246,7 @@ def export_clusters_modisco(
         max_cpus: The maximum number of CPUs to use for computing similarity (only used
           if use_gpu is False).
         use_gpu: Whether or not to use GPUs to accelerate computing similarity.
-        l2: Whether or not to use L2 normalization (instead of sqrt normalization) when
-          computing motif similarity.
+        sim_type: The type of similarity metric to compute: 'l2', 'sqrt', 'jss'
         safe: Whether or not to construct the MotifCompendium safely.
 
     Notes:
@@ -259,7 +258,7 @@ def export_clusters_modisco(
         max_chunk=max_chunk,
         max_cpus=max_cpus,
         use_gpu=use_gpu,
-        l2=l2,
+        sim_type=sim_type,
         safe=False,
     )  # kwargs for new avg similarity calculations
     pos_neg = np.sum(mc_cluster_avg.motifs, axis=(1, 2)) > 0
@@ -453,7 +452,7 @@ def label_from_pfms(
     max_chunk: int | None = None,
     max_cpus: int | None = None,
     use_gpu: bool | None = None,
-    l2: bool | None = None,
+    sim_type: str | None = None,
 ) -> None:
     """Automatic labeling of motifs from a pfm file.
 
@@ -473,8 +472,7 @@ def label_from_pfms(
           it will only use a single CPU.
         use_gpu: Whether or not to use GPUs to accelerate computing similarity. Uses
           only CPUs by default.
-        l2: Whether or not to use L2 normalization (instead of sqrt normalization) when
-          computing motif similarity.
+        sim_type: The type of similarity metric to compute: 'l2', 'sqrt', 'jss'
     """
     if pfm_file.endswith("_pfms.txt"):
         pfm_motifs, names = utils_loader.load_pfm(pfm_file)
@@ -486,7 +484,7 @@ def label_from_pfms(
     if mc_motifs.shape[2] == 8:
         mc_motifs = utils_motif.motif_8_to_4_abs(mc_motifs)
     pfm_similarity, _, _ = utils_similarity.compute_similarities(
-        [mc_motifs, pfm_motifs], [(0, 1)], max_chunk, max_cpus, use_gpu, l2=l2
+        [mc_motifs, pfm_motifs], [(0, 1)], max_chunk, max_cpus, use_gpu, sim_type=sim_type
     )[0]
     mc[save_col_sim] = np.max(pfm_similarity, axis=1)
     mc[save_col_match] = [names[x] for x in np.argmax(pfm_similarity, axis=1)]
