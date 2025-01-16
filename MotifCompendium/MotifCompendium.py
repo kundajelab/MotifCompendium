@@ -964,8 +964,13 @@ class MotifCompendium:
             other[other_cluster_col].tolist()[x]
             for x in np.argmax(mc_similarity, axis=1)
         ]
+        motifs = (
+            utils_motif.motif_8_to_4(other.motifs)
+            if other.motifs.shape[2] == 8
+            else other.motifs
+        )
         match_motif_dicts = [
-            {"motif": utils_motif.motif_to_df(other.motifs[x])} for x in np.argmax(mc_similarity, axis=1)
+            {"motif": utils_motif.motif_to_df(motifs[x])} for x in np.argmax(mc_similarity, axis=1)
         ]
         # Create motif plots
         if max_cpus is None:
