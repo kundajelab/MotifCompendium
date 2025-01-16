@@ -984,4 +984,4 @@ class MotifCompendium:
             )  # don't use more CPUs than available
             with multiprocessing.Pool(processes=num_processes) as p:
                 match_motif_strings = p.map(utils_plotting._motifdict_to_utf8_plot, match_motif_dicts)
-        mc[save_col_logo] = match_motif_strings
+        self[save_col_logo] = match_motif_strings
