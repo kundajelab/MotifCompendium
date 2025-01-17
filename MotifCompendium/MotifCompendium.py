@@ -113,7 +113,7 @@ def build(
             "use_gpu is True but max_cpus is not None... setting max_cpus to None"
         )
         max_cpus = None
-    similarity, alignment_fr, alignment_h = utils_similarity.compute_similarities(
+    similarity, alignment_fr, alignment_h = utils_similarity.compute_similarities_alignments(
         [motifs], [(0, 0)], max_chunk, max_cpus, use_gpu, sim_type
     )[0]
     np.fill_diagonal(
@@ -242,7 +242,7 @@ def combine(
     for i in range(n):
         for j in range(i + 1, n):
             calculations.append((i, j))
-    similarity_results = utils_similarity.compute_similarities(
+    similarity_results = utils_similarity.compute_similarities_alignments(
         motifs_list, calculations, max_chunk, max_cpus, use_gpu, sim_type
     )
     similarity_block = [[None for i in range(n)] for i in range(n)]
@@ -755,6 +755,7 @@ class MotifCompendium:
         self,
         cluster_name: str = "cluster",
         aggregations: list[tuple[str]] = [("name", "count", "num_constituents")],
+        weight_col: str | bool = False,
         max_chunk: int | None = None,
         max_cpus: int | None = None,
         use_gpu: bool | None = None,
@@ -774,8 +775,10 @@ class MotifCompendium:
               annotations to group motifs by.
             aggregations: A list of tuples of string: ("source", "method", "save").
               "source": Name of column in metadata to aggregate.
-              "method": Aggregation method to use. Ex: "count", "sum", "concatenate".
+              "method": Aggregation method to use. 
+                (Ex: "count", "sum", "concatenate", "average", "unique")
               "save": Name of column in new metadata, to save the aggregated data.
+            weight_col: Name of column in metadata to use for weighted averaging.
             max_chunk: The maximum number of motifs to compute similarity on at a time.
             max_cpus: The maximum number of CPUs to use for computing similarity (only
               used if use_gpu is False).
@@ -819,9 +822,15 @@ class MotifCompendium:
             motifs_c = self.motifs[c_idxs, :, :]
             alignment_fr_c = self.alignment_fr[c_idxs, :][:, c_idxs]
             alignment_h_c = self.alignment_h[c_idxs, :][:, c_idxs]
-            motif_avg_c = utils_motif.average_motifs(
-                motifs_c, alignment_fr_c, alignment_h_c
-            )
+            # Average motifs
+            if weight_col:
+                motif_avg_c = utils_motif.weighted_average_motifs(
+                    motifs_c, alignment_fr_c, alignment_h_c, list(self.metadata.loc[c_idxs, weight_col])
+                )
+            else:
+                motif_avg_c = utils_motif.average_motifs(
+                    motifs_c, alignment_fr_c, alignment_h_c
+                )
             cluster_motif_avgs.append(motif_avg_c)
             # Aggregations
             for agg_dict in aggregations_dicts:
@@ -955,7 +964,7 @@ class MotifCompendium:
               their motifs. (Ex: 4 and 4 or 8 and 8.)
         """
         assert self.motifs.shape[2] == other.motifs.shape[2]
-        mc_similarity, _, _ = utils_similarity.compute_similarities(
+        mc_similarity, _, _ = utils_similarity.compute_similarities_alignments(
             [self.motifs, other.motifs], [(0, 1)], max_chunk, max_cpus, use_gpu, sim_type=sim_type
         )[0]
         self[save_col_sim] = np.max(mc_similarity, axis=1)

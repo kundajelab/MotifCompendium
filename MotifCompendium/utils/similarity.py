@@ -3,13 +3,13 @@ import multiprocessing
 import numpy as np
 
 from .motif import validate_motif_stack
-from .similarity_core_cpu import compute_similarity_and_align
+from .similarity_core_cpu import compute_similarity_and_align, compute_similarity
 
 
 ####################
 # PUBLIC FUNCTIONS #
 ####################
-def compute_similarities(
+def compute_similarities_alignments(
     motif_stack_list: list[np.ndarray],
     calculations: list[tuple[int, int]],
     max_chunk: int | None,
@@ -17,7 +17,7 @@ def compute_similarities(
     use_gpu: bool | None,
     sim_type: str | None,
 ) -> list[tuple[np.ndarray, np.ndarray, np.ndarray]]:
-    """Performs similarity and calculations between sets of motif stacks.
+    """Performs similarity and alignment calculations between sets of motif stacks.
 
     Given a list of motif stacks and an instruction of which motif stacks to perform
       pairwise similarity calculations between, this function returns a list of results
@@ -30,7 +30,6 @@ def compute_similarities(
           the index of a motif stack in the motif_stack_list. For example, the
           calculation (i, j) says to compute the pairwise similarity between all motifs
           in motif stack i and motif stack j.
-        similarity_type: The type of similarity to compute: 'cosine', 'jsd'
         max_chunk: The maximum size of a motif stack to perform similarity calculations
           on. All motif stacks larger than max_chunk will be chunked into smaller motif
           stacks of size <= max_chunk by _chunk_motif_stacks_and_calcs(). Calculations
@@ -78,6 +77,72 @@ def compute_similarities(
     else:
         return _compute_similarity_and_align_parallel(
             motif_stack_list, calculations,
+            max_cpus, use_gpu, sim_type
+        )
+
+
+def compute_similarities(
+    motifs: np.ndarray,
+    alignment_fr: np.ndarray,
+    alignment_h: np.ndarray,
+    max_chunk: int | None,
+    max_cpus: int | None,
+    use_gpu: bool | None,
+    sim_type: str | None,
+) -> np.ndarray:
+    """Performs similarity calculations, for known alignments.
+
+    Args:
+        motifs: A (N, L, C) np.ndarray representing a stack of motifs.
+        alignment_fr: A (N, L) np.ndarray representing the forward-reverse alignment.
+        alignment_h: A (N, L) np.ndarray representing the horizontal alignment.
+        max_chunk: The maximum size of a motif stack to perform similarity calculations
+          on. All motif stacks larger than max_chunk will be chunked into smaller motif
+          stacks of size <= max_chunk by _chunk_motif_stacks_and_calcs(). Calculations
+          will occur on the smaller chunks and then the results will be reassembled with
+          _reassemble_results().
+        max_cpus: The maximum number of CPUs to use for computing similarity.
+        use_gpu: Whether or not to use GPUs to accelerate computing similarity. If True,
+          similarity calculations are carried out by the functions in utils file
+          .similarity_core_gpu.py. If False, they will be carried out by the function in
+          utils file .similarity_core_cpu.py.
+        sim_type: The type of similarity metric to compute: 'l2', 'sqrt', 'jss'
+
+    Returns:
+        A (N, N) np.ndarray representing the similarity matrix.
+    """
+    if max_chunk is None:
+        max_chunk = DEFAULT_MAX_CHUNK
+    if max_cpus is None:
+        max_cpus = DEFAULT_MAX_CPUS
+    if use_gpu is None:
+        use_gpu = DEFAULT_USE_GPU
+    if sim_type is None:
+        sim_type = DEFAULT_SIM_TYPE
+    # TODO: FIX EDGE CASE THAT HAS ARISEN DUE TO DEFAULTS
+    if use_gpu:
+        max_cpus = None
+
+    if max_chunk is not None:
+        # TO BE IMPLEMENTED
+        assert False, "Not yet implemented"
+        # Chunk motifs
+        (
+            chunked_motif_stack_list,
+            chunked_calculations,
+            chunk_map,
+        ) = _chunk_motif_stacks_and_calcs(motif_stack_list, calculations, max_chunk)
+        
+        chunked_results = _compute_similarity(
+            chunked_motif_stack_list, chunked_alignfr_stack_list, chunked_alignh_stack_list,
+            max_cpus, use_gpu, sim_type
+        )
+        return _reassemble_results(
+            calculations, chunked_calculations, chunked_results, chunk_map
+        )
+    else:
+        return _compute_similarity(
+            [motifs], [alignment_fr], [alignment_h],
             max_cpus, use_gpu, sim_type
         )
 
@@ -172,6 +237,59 @@ def _compute_similarity_and_align_parallel(
             )  # don't use more CPUs than available
             with multiprocessing.Pool(processes=num_processes) as p:
                 return p.starmap(compute_similarity_and_align, inputs)
+
+
+def _compute_similarity(
+    motif_stack_list: list[np.ndarray],
+    alignfr_stack_list: list[np.ndarray],
+    alignh_stack_list: list[np.ndarray],
+    calculations: list[tuple[int, int]],
+    max_cpus: int | None,
+    use_gpu: bool,
+    sim_type: str,
+) -> list[tuple[np.ndarray, np.ndarray, np.ndarray]]:
+    """Compute similarities and alignments."""
+    if max_cpus is None:
+        if use_gpu:
+            # SINGLE GPU CALCULATIONS
+            from .similarity_core_gpu import gpu_compute_similarity
+
+            return [
+                gpu_compute_similarity(
+                    motif_stack_list[c[0]], motif_stack_list[c[1]], 
+                    alignfr_stack_list[i], alignh_stack_list[i],
+                    sim_type
+                )
+                for i, c in enumerate(calculations)
+            ]
+        else:
+            # SINGLE CPU CALCULATIONS
+            return [
+                compute_similarity(
+                    motif_stack_list[c[0]], motif_stack_list[c[1]], 
+                    alignfr_stack_list[i], alignh_stack_list[i],
+                    sim_type
+                )
+                for i, c in enumerate(calculations)
+            ]
+    else:
+        if use_gpu:
+            # MULTI-GPU CALCULATIONS
+            print("max_cpu and use_gpu are incompatible options")
+            assert False
+        else:
+            # MULTI-CPU CALCULATIONS
+            inputs = [
+                (motif_stack_list[c[0]], motif_stack_list[c[1]], 
+                    alignfr_stack_list[i], alignh_stack_list[i],
+                    sim_type)
+                for i, c in enumerate(calculations)
+            ]
+            num_processes = min(
+                max_cpus, multiprocessing.cpu_count()
+            )  # don't use more CPUs than available
+            with multiprocessing.Pool(processes=num_processes) as p:
+                return p.starmap(compute_similarity, inputs)
 
 
 def _reassemble_results(

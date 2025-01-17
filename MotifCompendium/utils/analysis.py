@@ -228,6 +228,7 @@ def export_clusters_modisco(
     mc: MotifCompendium,
     cluster_name: str,
     save_loc: str,
+    ic: bool = False,
     max_chunk: int | None = None,
     max_cpus: int | None = None,
     use_gpu: bool | None = None,
@@ -242,6 +243,7 @@ def export_clusters_modisco(
         mc: The MotifCompendium to analyze.
         cluster_name: The motif clustering to compute average motifs on.
         save_loc: The location to save the Modisco h5py to.
+        ic: Whether or not to revert IC-scaled motifs back to linear space.
         max_chunk: The maximum number of motifs to compute similarity on at a time.
         max_cpus: The maximum number of CPUs to use for computing similarity (only used
           if use_gpu is False).
@@ -273,6 +275,8 @@ def export_clusters_modisco(
             for i in range(len(mc_cluster_avg_pos)):
                 name = str(mc_cluster_avg_pos.metadata.loc[i, "name"])
                 cwm = mc_cluster_avg_pos.motifs[i, :, :]
+                if ic:
+                    cwm = utils_motif.ic_invert(cwm)
                 pos_cluster = pos_group.create_group(name)
                 pos_cluster.create_dataset("contrib_scores", data=cwm)
         # Negative
@@ -282,6 +286,8 @@ def export_clusters_modisco(
             for i in range(len(mc_cluster_avg_neg)):
                 name = str(mc_cluster_avg_neg.metadata.loc[i, "name"])
                 cwm = mc_cluster_avg_neg.motifs[i, :, :]
+                if ic:
+                    cwm = utils_motif.ic_invert(cwm)
                 neg_cluster = neg_group.create_group(name)
                 neg_cluster.create_dataset("contrib_scores", data=cwm)
 
@@ -290,6 +296,7 @@ def export_modisco(
     mc: MotifCompendium,
     name_col: str,
     save_loc: str,
+    ic: bool = False,
 ) -> None:
     """Exports MotifCompendium in the Modisco file format.
 
@@ -300,6 +307,7 @@ def export_modisco(
         mc: The MotifCompendium to analyze.
         name_col: The column in the MotifCompendium to name the motifs by.
         save_loc: The location to save the Modisco h5py to.
+        ic: Whether or not to revert IC-scaled motifs back to linear space.
     Notes:
         The motif names cannot have slashes (/) in them!
         The resultant h5py file can be fed directly into FiNeMo (hitcaller).
@@ -322,6 +330,9 @@ def export_modisco(
                     if size_4
                     else utils_motif.motif_8_to_4(mc_pos.motifs[i, :, :])
                 )
+                if ic:
+                    cwm = utils_motif.ic_invert(cwm)
+
                 pos_cluster = pos_group.create_group(name)
                 pos_cluster.create_dataset("contrib_scores", data=cwm)
         # Negative
@@ -336,6 +347,9 @@ def export_modisco(
                     if size_4
                     else utils_motif.motif_8_to_4(mc_neg.motifs[i, :, :])
                 )
+                if ic:
+                    cwm = utils_motif.ic_invert(cwm)
+
                 neg_cluster = neg_group.create_group(name)
                 neg_cluster.create_dataset("contrib_scores", data=cwm)
 
@@ -399,41 +413,25 @@ def calculate_entropy(
                 for i in range(mc.motifs.shape[0]):
                     metric = utils_motif.calculate_motif_entropy(mc.motifs[i])
                     metrics_list.append(metric)
-                metrics_df = pd.DataFrame(metrics_list, columns=["motif_entropy"])
-                mc.metadata = pd.concat(
-                    [mc.metadata, metrics_df], axis=1
-                )  # Update mc.metadata
+                mc["motif_entropy"] = metrics_list
 
             case "posbase_entropy_ratio":
                 for i in range(mc.motifs.shape[0]):
                     metric = utils_motif.calculate_posbase_entropy_ratio(mc.motifs[i])
                     metrics_list.append(metric)
-                metrics_df = pd.DataFrame(
-                    metrics_list, columns=["posbase_entropy_ratio"]
-                )
-                mc.metadata = pd.concat(
-                    [mc.metadata, metrics_df], axis=1
-                )  # Update mc.metadata
+                mc["posbase_entropy_ratio"] = metrics_list
 
             case "copair_entropy_ratio":
                 for i in range(mc.motifs.shape[0]):
                     metric = utils_motif.calculate_copair_entropy_ratio(mc.motifs[i])
                     metrics_list.append(metric)
-                metrics_df = pd.DataFrame(
-                    metrics_list, columns=["copair_entropy_ratio"]
-                )
-                mc.metadata = pd.concat(
-                    [mc.metadata, metrics_df], axis=1
-                )  # Update mc.metadata
+                mc["copair_entropy_ratio"] = metrics_list
 
             case "dinuc_entropy_ratio":
                 for i in range(mc.motifs.shape[0]):
                     metric = utils_motif.calculate_dinuc_entropy_ratio(mc.motifs[i])
                     metrics_list.append(metric)
-                metrics_df = pd.DataFrame(metrics_list, columns=["dinuc_entropy_ratio"])
-                mc.metadata = pd.concat(
-                    [mc.metadata, metrics_df], axis=1
-                )  # Update mc.metadata
+                mc["dinuc_entropy_ratio"] = metrics_list
 
             case _:
                 raise ValueError(
@@ -483,7 +481,7 @@ def label_from_pfms(
     mc_motifs = mc.motifs
     if mc_motifs.shape[2] == 8:
         mc_motifs = utils_motif.motif_8_to_4_abs(mc_motifs)
-    pfm_similarity, _, _ = utils_similarity.compute_similarities(
+    pfm_similarity, _, _ = utils_similarity.compute_similarities_alignments(
         [mc_motifs, pfm_motifs], [(0, 1)], max_chunk, max_cpus, use_gpu, sim_type=sim_type
     )[0]
     mc[save_col_sim] = np.max(pfm_similarity, axis=1)

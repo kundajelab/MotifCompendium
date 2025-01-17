@@ -29,19 +29,19 @@ def gpu_compute_similarity_and_align(
                 simsB = cp.sqrt(simsB)
 
             # forward similarity
-            sim_1, sim_1_alignments = _compute_similarity(
+            sim_1, sim_1_alignments = _compute_similarity_alignment(
                 simsA, simsB
             )  # skew-symmetric alignment
             # backward similarity
-            sim_2, sim_2_alignments = _compute_similarity(
+            sim_2, sim_2_alignments = _compute_similarity_alignment(
                 _reverse_complement(simsA), simsB
             )  # symmetric alignment
         
         case "jss":
-            sim_1, sim_1_alignments = _compute_similarity_jss(
+            sim_1, sim_1_alignments = _compute_similarity_alignment_jss(
                 simsA, simsB
             )
-            sim_2, sim_2_alignments = _compute_similarity_jss(
+            sim_2, sim_2_alignments = _compute_similarity_alignment_jss(
                 _reverse_complement(simsA), simsB
             )
 
@@ -52,6 +52,46 @@ def gpu_compute_similarity_and_align(
     sim_alignments = cp.where(sim_fb == 0, sim_1_alignments, sim_2_alignments)
     sim_alignments[sim == 0] = 0  # alignment erroneously always -29
     return sim.get(), sim_fb.get(), sim_alignments.get()
+
+
+def gpu_compute_similarity(
+    simsA: np.ndarray, simsB: np.ndarray, 
+    alignment_fr: np.ndarray, alignment_h: np.ndarray,
+    sim_type: str,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Computes similarity and alignment taking into account reverse complements."""
+    # convert to cupy
+    simsA = cp.asarray(simsA)
+    simsB = cp.asarray(simsB)
+    
+    # L1 normalize
+    simsA = simsA / cp.sum(simsA, axis=(1, 2), keepdims=True)
+    simsB = simsB / cp.sum(simsB, axis=(1, 2), keepdims=True)
+
+    match sim_type:
+        case "l2" | "sqrt":
+            if sim_type == "l2":
+                # L2 normalization
+                simsA = simsA / cp.linalg.norm(simsA, axis=(1, 2), keepdims=True)
+                simsB = simsB / cp.linalg.norm(simsB, axis=(1, 2), keepdims=True)
+            elif sim_type == "sqrt":
+                # square root
+                simsA = cp.sqrt(simsA)
+                simsB = cp.sqrt(simsB)
+
+            # forward similarity
+            similarity = _compute_similarity(
+                simsA, simsB,
+                alignment_fr, alignment_h
+            ) 
+        
+        case "jss":
+            similarity = _compute_similarity_jss(
+                simsA, simsB,
+                alignment_fr, alignment_h
+            )
+
+    return similarity.get()
 
 
 def gpu_similarity_worker(gpu_idx, inputs):
@@ -72,7 +112,7 @@ def _reverse_complement(motifs: cp.ndarray) -> cp.ndarray:
     return motifs[:, ::-1, ::-1]
 
 
-def _compute_similarity(
+def _compute_similarity_alignment(
     motif_set_1: cp.ndarray, motif_set_2: cp.ndarray
 ) -> tuple[cp.ndarray, cp.ndarray]:
     """Computes similarity and alignment for two sets of motifs."""
@@ -112,7 +152,7 @@ def _compute_similarity(
     return best_alignment_scores, best_alignments
 
 
-def _compute_similarity_jss(
+def _compute_similarity_alignment_jss(
     motifsP: cp.ndarray, motifsQ: cp.ndarray
 ) -> tuple[cp.ndarray, cp.ndarray]:
     """Computes Jensen-Shannon Similarity (JSS) and alignment for two sets of motifs,
@@ -133,8 +173,8 @@ def _compute_similarity_jss(
     motifsP_flat = motifsP.reshape(N, -1) # (N, 30*K)
     motifsQ_flat = motifsQ.reshape(M, -1) # (M, 30*K)
     
-    js_similarity = (cp.sum(motifsP_flat * cp.where(motifsP_flat == 0, 0, cp.log2(motifsP_flat)), axis=1)[:, cp.newaxis] \
-        + cp.sum(motifsQ_flat * cp.where(motifsQ_flat == 0, 0, cp.log2(motifsQ_flat)), axis=1)[cp.newaxis, :])[:, cp.newaxis, :] # (N, 1, M)
+    js_similarity = (cp.sum(motifsP_flat * cp.log2(motifsP_flat, where=(motifsP_flat != 0)), axis=1)[:, cp.newaxis] \
+        + cp.sum(motifsQ_flat * cp.log2(motifsQ_flat, where=(motifsQ_flat != 0)), axis=1)[cp.newaxis, :])[:, cp.newaxis, :] # (N, 1, M)
     
     del motifsP_flat, motifsQ_flat
 
@@ -144,7 +184,7 @@ def _compute_similarity_jss(
         right_side_tensorQ = cp.tensordot(_RIGHTTENSOR(), motifsQ[:,:,k], axes=[[0],[1]])[cp.newaxis, cp.newaxis, :, :] # (1, 1, 88, M)
 
         mixed_tensorM_log = 0.5*(left_side_tensorP + right_side_tensorQ) # (N, 59, 88, M)
-        mixed_tensorM_log = cp.where(mixed_tensorM_log == 0, 0, cp.log2(mixed_tensorM_log)) # (N, 59, 88, M)
+        mixed_tensorM_log = cp.log2(mixed_tensorM_log, where=(mixed_tensorM_log != 0)) # (N, 59, 88, M)
         
         # Update JSD
         js_similarity = js_similarity - cp.sum((left_side_tensorP * mixed_tensorM_log + right_side_tensorQ * mixed_tensorM_log), axis=2) # (N, 59, M)
@@ -167,6 +207,86 @@ def _compute_similarity_jss(
     assert best_alignment_scores.shape == (N_original, M_original)
     assert best_alignments.shape == (N_original, M_original)
     return best_alignment_scores, best_alignments
+
+
+def _compute_similarity(
+    motif_set_1: cp.ndarray, motif_set_2: cp.ndarray,
+    alignment_fr: cp.ndarray, alignment_h: cp.ndarray
+) -> cp.ndarray:
+    """Computes similarity and alignment for two sets of motifs."""
+    # TRANSPOSE FOR EFFICIENCY
+    N_original = motif_set_1.shape[0]
+    M_original = motif_set_2.shape[0]
+    if N_original > M_original:
+        temp = motif_set_1
+        motif_set_1 = motif_set_2
+        motif_set_2 = temp
+    transpose = N_original > M_original
+    N = motif_set_1.shape[0]
+    M = motif_set_2.shape[0]
+    # COMPUTE LEFT SIDE TENSOR ## TO BE UPDATED
+    left_side_matrices = _compute_similarity_left_side(motif_set_1)
+    # COMPUTE RIGHT SIDE TENSOR ## TO BE UPDATED
+    right_side_matrices = _compute_similarity_right_side(motif_set_2)
+    # SUM ACROSS ATCG
+    convs = cp.stack(
+        [
+            left_side_matrices[i] @ right_side_matrices[i]
+            for i in range(len(left_side_matrices))
+        ]
+    )  # need to stack
+    similarity_scores = cp.sum(convs, axis=0)
+    
+    assert similarity_scores.shape == (N_original, M_original)
+    return similarity_scores
+
+
+def _compute_similarity_jss(
+    motif_set_1: cp.ndarray, motif_set_2: cp.ndarray,
+    alignment_fr: cp.ndarray, alignment_h: cp.ndarray
+) -> cp.ndarray:
+    """Computes Jensen-Shannon Similarity (JSS) and alignment for two sets of motifs,
+    where JSS = 1 - sqrt(Jensen-Shannon Divergence)."""
+    # TRANSPOSE FOR EFFICIENCY
+    N_original = motifsP.shape[0]
+    M_original = motifsQ.shape[0]
+    if N_original > M_original:
+        temp = motifsP
+        motifsP = motifsQ
+        motifsQ = temp
+    transpose = N_original > M_original
+    N = motifsP.shape[0] # (N, 30, K)
+    M = motifsQ.shape[0] # (M, 30, K)
+    K = motifsP.shape[2]
+
+    ## COMPUTE JSD I: SELF-ENTROPY
+    motifsP_flat = motifsP.reshape(N, -1) # (N, 30*K)
+    motifsQ_flat = motifsQ.reshape(M, -1) # (M, 30*K)
+    
+    js_similarity = (cp.sum(motifsP_flat * cp.log2(motifsP_flat, where=(motifsP_flat != 0)), axis=1)[:, cp.newaxis] \
+        + cp.sum(motifsQ_flat * cp.log2(motifsQ_flat, where=(motifsQ_flat != 0)), axis=1)[cp.newaxis, :])[:, cp.newaxis, :] # (N, 1, M)
+    
+    del motifsP_flat, motifsQ_flat
+
+    ## COMPUTE JSD II: ENTROPY DIFFERENCE
+    for k in range(K):
+        ## TO BE UPDATED: LEFTTENSOR, RIGHTTENSOR --> ALIGNMENTS FR, H
+        left_side_tensorP = cp.tensordot(motifsP[:,:,k], _LEFTTENSOR(), axes=[[1],[2]])[:, :, :, cp.newaxis] # (N, 88, 1)
+        right_side_tensorQ = cp.tensordot(_RIGHTTENSOR(), motifsQ[:,:,k], axes=[[0],[1]])[cp.newaxis, cp.newaxis, :, :] # (1, 88, M)
+
+        mixed_tensorM_log = 0.5*(left_side_tensorP + right_side_tensorQ) # (N, 88, M)
+        mixed_tensorM_log = cp.log2(mixed_tensorM_log, where=(mixed_tensorM_log != 0)) # (N, 88, M)
+        
+        # Update JSD
+        js_similarity = js_similarity - cp.sum((left_side_tensorP * mixed_tensorM_log + right_side_tensorQ * mixed_tensorM_log), axis=1) # (N, M)
+
+    ## JS SIMILARITY
+    js_similarity = 0.5 * js_similarity
+    js_similarity = cp.clip(js_similarity, 0, 1)
+    js_similarity = 1 - cp.sqrt(js_similarity)
+
+    assert js_similarity.shape == (N_original, M_original)
+    return js_similarity
 
 
 def _compute_similarity_left_side(motifs: cp.ndarray) -> list[cp.ndarray]:
