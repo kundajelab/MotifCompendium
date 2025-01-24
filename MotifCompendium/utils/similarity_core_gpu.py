@@ -123,9 +123,8 @@ def _compute_similarity_alignment(
         temp = motif_set_1
         motif_set_1 = motif_set_2
         motif_set_2 = temp
+        del temp
     transpose = N_original > M_original
-    N = motif_set_1.shape[0]
-    M = motif_set_2.shape[0]
     # COMPUTE LEFT SIDE TENSOR
     left_side_matrices = _compute_similarity_left_side(motif_set_1)
     # COMPUTE RIGHT SIDE TENSOR
@@ -137,10 +136,10 @@ def _compute_similarity_alignment(
             for i in range(len(left_side_matrices))
         ]
     )  # need to stack
-    total_sum = cp.sum(convs, axis=0)
+    convs = cp.sum(convs, axis=0)
     # COMPUTE ALIGNMENT
-    best_alignment_scores = cp.max(total_sum, axis=1)
-    best_alignments = cp.argmax(total_sum, axis=1) - 29
+    best_alignment_scores = cp.max(convs, axis=1)
+    best_alignments = cp.argmax(convs, axis=1) - 29
     # REALIGN IF NEEDED
     if transpose:
         best_alignment_scores = best_alignment_scores.T
@@ -221,21 +220,20 @@ def _compute_similarity(
         temp = motif_set_1
         motif_set_1 = motif_set_2
         motif_set_2 = temp
+        del temp
     transpose = N_original > M_original
-    N = motif_set_1.shape[0]
-    M = motif_set_2.shape[0]
     # COMPUTE LEFT SIDE TENSOR ## TO BE UPDATED
     left_side_matrices = _compute_similarity_left_side(motif_set_1)
     # COMPUTE RIGHT SIDE TENSOR ## TO BE UPDATED
     right_side_matrices = _compute_similarity_right_side(motif_set_2)
     # SUM ACROSS ATCG
-    convs = cp.stack(
+    similarity_scores = cp.stack(
         [
             left_side_matrices[i] @ right_side_matrices[i]
             for i in range(len(left_side_matrices))
         ]
     )  # need to stack
-    similarity_scores = cp.sum(convs, axis=0)
+    similarity_scores = cp.sum(similarity_scores, axis=0)
     
     assert similarity_scores.shape == (N_original, M_original)
     return similarity_scores
@@ -332,3 +330,11 @@ def _RIGHTTENSOR() -> cp.ndarray:
     x = cp.zeros((30, 88))
     x[:, 29:59] = cp.eye(30)
     return x
+
+
+def print_cupy_memory_usage():
+    """Prints the memory usage of the current CuPy device. (For debugging use only)"""
+    mempool = cp.get_default_memory_pool()
+    
+    print(f"Used memory: {mempool.used_bytes() / (1024**2):.2f} MB")
+    print(f"Total memory allocated: {mempool.total_bytes() / (1024**2):.2f} MB")
