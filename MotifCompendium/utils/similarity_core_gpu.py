@@ -64,6 +64,7 @@ def _compute_similarity(
         temp = motif_set_1
         motif_set_1 = motif_set_2
         motif_set_2 = temp
+        del temp
     transpose = N_original > M_original
     N = motif_set_1.shape[0]
     M = motif_set_2.shape[0]
