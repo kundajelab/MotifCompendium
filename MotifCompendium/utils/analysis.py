@@ -400,41 +400,25 @@ def calculate_entropy(
                 for i in range(mc.motifs.shape[0]):
                     metric = utils_motif.calculate_motif_entropy(mc.motifs[i])
                     metrics_list.append(metric)
-                metrics_df = pd.DataFrame(metrics_list, columns=["motif_entropy"])
-                mc.metadata = pd.concat(
-                    [mc.metadata, metrics_df], axis=1
-                )  # Update mc.metadata
+                mc["motif_entropy"] = metrics_list
 
             case "posbase_entropy_ratio":
                 for i in range(mc.motifs.shape[0]):
                     metric = utils_motif.calculate_posbase_entropy_ratio(mc.motifs[i])
                     metrics_list.append(metric)
-                metrics_df = pd.DataFrame(
-                    metrics_list, columns=["posbase_entropy_ratio"]
-                )
-                mc.metadata = pd.concat(
-                    [mc.metadata, metrics_df], axis=1
-                )  # Update mc.metadata
+                mc["posbase_entropy_ratio"] = metrics_list
 
             case "copair_entropy_ratio":
                 for i in range(mc.motifs.shape[0]):
                     metric = utils_motif.calculate_copair_entropy_ratio(mc.motifs[i])
                     metrics_list.append(metric)
-                metrics_df = pd.DataFrame(
-                    metrics_list, columns=["copair_entropy_ratio"]
-                )
-                mc.metadata = pd.concat(
-                    [mc.metadata, metrics_df], axis=1
-                )  # Update mc.metadata
+                mc["copair_entropy_ratio"] = metrics_list
 
             case "dinuc_entropy_ratio":
                 for i in range(mc.motifs.shape[0]):
                     metric = utils_motif.calculate_dinuc_entropy_ratio(mc.motifs[i])
                     metrics_list.append(metric)
-                metrics_df = pd.DataFrame(metrics_list, columns=["dinuc_entropy_ratio"])
-                mc.metadata = pd.concat(
-                    [mc.metadata, metrics_df], axis=1
-                )  # Update mc.metadata
+                mc["dinuc_entropy_ratio"] = metrics_list
 
             case _:
                 raise ValueError(
