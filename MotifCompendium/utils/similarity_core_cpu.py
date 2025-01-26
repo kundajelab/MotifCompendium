@@ -4,7 +4,7 @@ import numpy as np
 ####################
 # PUBLIC FUNCTIONS #
 ####################
-def compute_similarity_and_align(
+def cpu_compute_similarity_and_align(
     simsA: np.ndarray, simsB: np.ndarray, sim_type: str,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Computes similarity and alignment taking into account reverse complements."""
@@ -51,7 +51,7 @@ def compute_similarity_and_align(
     return sim, sim_fb, sim_alignments
     
 
-def compute_similarity(
+def cpu_compute_similarity(
     simsA: np.ndarray, simsB: np.ndarray, 
     alignment_fr: np.ndarray, alignment_h: np.ndarray,
     sim_type: str,
@@ -73,10 +73,18 @@ def compute_similarity(
                 simsB = np.sqrt(simsB)
 
             # forward similarity
-            similarity = _compute_similarity(
-                simsA, simsB,
-                alignment_fr, alignment_h
-            ) 
+            sim_1, _ = _compute_similarity_alignment(
+                simsA, simsB
+            )  # skew-symmetric alignment
+            # backward similarity
+            sim_2, _ = _compute_similarity_alignment(
+                _reverse_complement(simsA), simsB
+            )  # symmetric alignment
+
+            # aligning
+            sim_12 = np.stack([sim_1, sim_2])
+            sim = np.max(sim_12, axis=0)
+            return sim.get()
         
         case "jss":
             similarity = _compute_similarity_jss(
@@ -201,40 +209,8 @@ def _compute_similarity_alignment_jss(
     return best_alignment_scores, best_alignments
 
 
-def _compute_similarity(
-    motif_set_1: np.ndarray, motif_set_2: np.ndarray,
-    alignment_fr: np.ndarray, alignment_h: np.ndarray
-) -> np.ndarray:
-    """Computes similarity and alignment for two sets of motifs."""
-    # TRANSPOSE FOR EFFICIENCY
-    N_original = motif_set_1.shape[0]
-    M_original = motif_set_2.shape[0]
-    if N_original > M_original:
-        temp = motif_set_1
-        motif_set_1 = motif_set_2
-        motif_set_2 = temp
-    transpose = N_original > M_original
-    N = motif_set_1.shape[0]
-    M = motif_set_2.shape[0]
-    # COMPUTE LEFT SIDE TENSOR ## TO BE UPDATED
-    left_side_matrices = _compute_similarity_left_side(motif_set_1)
-    # COMPUTE RIGHT SIDE TENSOR ## TO BE UPDATED
-    right_side_matrices = _compute_similarity_right_side(motif_set_2)
-    # SUM ACROSS ATCG
-    convs = np.stack(
-        [
-            left_side_matrices[i] @ right_side_matrices[i]
-            for i in range(len(left_side_matrices))
-        ]
-    )  # need to stack
-    similarity_scores = np.sum(convs, axis=0)
-    
-    assert similarity_scores.shape == (N_original, M_original)
-    return similarity_scores
-
-
 def _compute_similarity_jss(
-    motif_set_1: np.ndarray, motif_set_2: np.ndarray,
+    motifsP: np.ndarray, motifsQ: np.ndarray,
     alignment_fr: np.ndarray, alignment_h: np.ndarray
 ) -> np.ndarray:
     """Computes Jensen-Shannon Similarity (JSS) and alignment for two sets of motifs,
@@ -246,37 +222,62 @@ def _compute_similarity_jss(
         temp = motifsP
         motifsP = motifsQ
         motifsQ = temp
+        del temp
     transpose = N_original > M_original
+    
     N = motifsP.shape[0] # (N, 30, K)
     M = motifsQ.shape[0] # (M, 30, K)
-    K = motifsP.shape[2]
+    L = motifsP.shape[1] # (30)
+    L_flank = L - 1
+    H = motifsP.shape[1] * 3 - 2 # (88)
 
     ## COMPUTE JSD I: SELF-ENTROPY
     motifsP_flat = motifsP.reshape(N, -1) # (N, 30*K)
     motifsQ_flat = motifsQ.reshape(M, -1) # (M, 30*K)
     
     js_similarity = (np.sum(motifsP_flat * np.log2(motifsP_flat, where=(motifsP_flat != 0)), axis=1)[:, np.newaxis] \
-        + np.sum(motifsQ_flat * np.log2(motifsQ_flat, where=(motifsQ_flat != 0)), axis=1)[np.newaxis, :])[:, np.newaxis, :] # (N, 1, M)
+        + np.sum(motifsQ_flat * np.log2(motifsQ_flat, where=(motifsQ_flat != 0)), axis=1)[np.newaxis, :]) # (N, M)
     
     del motifsP_flat, motifsQ_flat
 
     ## COMPUTE JSD II: ENTROPY DIFFERENCE
-    left_side_tensorP = np.tensordot(motifsP, _LEFTTENSOR, axes=[[1],[2]])[:, :, :, :, np.newaxis] # (N, K, 88, 1)
-    right_side_tensorQ = np.transpose(np.tensordot(_RIGHTTENSOR, motifsQ, axes=[[0],[1]]), axes=(2,0,1))[np.newaxis,:, np.newaxis, :, :] # (1, K, 88, M)
+    motifsQ = np.pad(motifsQ, ((0, 0), (L_flank, L_flank), (0, 0))) # (M, 88, K)
+    # Alignment_h: Forward
+    align_fr = 0
+    H_min = int(np.min(alignment_h * (1 - alignment_fr)))
+    H_max = int(np.max(alignment_h * (1 - alignment_fr)))
 
-    mixed_tensorM_log = 0.5*(left_side_tensorP + right_side_tensorQ) # (N, K, 88, M)
-    mixed_tensorM_log = np.log2(mixed_tensorM_log, where=(mixed_tensorM_log != 0)) # (N, K, 88, M)
+    for align_h in range(H_min, H_max + 1): # Alignment_h
+        idx = np.where((alignment_fr == align_fr) & (alignment_h == align_h)) # (n)
+        motifsQ_select = motifsQ[idx[1], :, :] # (n, 88, K)
+        motifsP_select = np.pad(motifsP[idx[0], :, :], ((0, 0), (align_h + L_flank, H - L - align_h - L_flank), (0, 0))) # (n, 88, K)
+        mixed_tensorM_log = 0.5*(motifsP_select + motifsQ_select) # (n, 88, K)
+        mixed_tensorM_log = np.log2(mixed_tensorM_log, where=(mixed_tensorM_log != 0)) # (n, 88, K)
 
-    js_similarity = js_similarity - np.sum((left_side_tensorP * mixed_tensorM_log + right_side_tensorQ * mixed_tensorM_log), axis=(1, 2)) # (N, M)
+        js_similarity[idx] = js_similarity[idx] - np.sum((motifsP_select * mixed_tensorM_log + motifsQ_select * mixed_tensorM_log), axis=(1, 2)) # (n, m)
+    
+    # Alignment_fr: Backward
+    align_fr = 1
+    H_min = int(np.min(alignment_h * alignment_fr))
+    H_max = int(np.max(alignment_h * alignment_fr))
 
-    del left_side_tensorP, right_side_tensorQ, mixed_tensorM_log
+    for align_h in range(H_min, H_max + 1): # Alignment_h
+        idx = np.where((alignment_fr == align_fr) & (alignment_h == align_h)) # (n)
+        motifsQ_select = motifsQ[idx[1], :, :] # (n, 88, K)
+        motifsP_select = np.pad(motifsP[idx[0], :, :], ((0, 0), (align_h + L_flank, H - L - align_h - L_flank), (0, 0))) # (n, 88, K)
+        mixed_tensorM_log = 0.5*(motifsP_select + motifsQ_select) # (n, 88, K)
+        mixed_tensorM_log = np.log2(mixed_tensorM_log, where=(mixed_tensorM_log != 0)) # (n, 88, K)
 
+        js_similarity[idx] = js_similarity[idx] - np.sum((motifsP_select * mixed_tensorM_log + motifsQ_select * mixed_tensorM_log), axis=(1, 2)) # (n, m)
+    
+    del motifsQ_select, motifsP_select, mixed_tensorM_log
+    motifsQ = motifsQ[:, L_flank:H - L_flank, :] # (M, 30, K)
 
     ## JS SIMILARITY
-    js_similarity = 0.5 * js_similarity
-    js_similarity = np.clip(js_similarity, 0, 1)
-    js_similarity = 1 - np.sqrt(js_similarity)
+    js_similarity = 1 - np.sqrt(np.clip((0.5*js_similarity), 0, 1))
 
+    if transpose:
+        js_similarity = js_similarity.T
     assert js_similarity.shape == (N_original, M_original)
     return js_similarity
 

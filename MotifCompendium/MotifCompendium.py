@@ -420,6 +420,38 @@ class MotifCompendium:
         ):
             raise TypeError("Attribute shapes do not align.")
 
+    def calculate_similarity(
+        self,
+        max_chunk: int | None = None,
+        max_cpus: int | None = None,
+        use_gpu: bool | None = None,
+        sim_type: str | None = None,
+    ) -> None:
+        """Calculates the similarity matrix of the current MotifCompendium.
+
+        Args:
+            max_chunk: The maximum number of motifs to compute similarity on at a time.
+            max_cpus: The maximum number of CPUs to use for computing similarity (only
+              used if use_gpu is False).
+            use_gpu: Whether or not to use GPUs to accelerate computing similarity.
+            sim_type: The type of similarity metric to compute: 'l2', 'sqrt', 'jss'.
+
+        Notes:
+            Use GPU if possible to accelerate calculation (CuPy required.) Otherwise,
+              parallelize across CPUs by setting max_cpus to the number of available
+              CPUs.
+            Currently, multi-GPU calculation is not supported. If use_gpu is True then
+              max_cpus will be set to None.
+            If memory constraints are not an issue, leave chunk as None for faster
+              performance. Otherwise, decrease max_chunk until calculations fit in memory.
+              For a GPU with ~12GB of memory, use max_chunk=1000.
+        """
+        self.similarity = utils_similarity.compute_similarities(
+            [self.motifs], [(0, 0)], 
+            [self.alignment_fr], [self.alignment_h],
+            max_chunk, max_cpus, use_gpu, sim_type
+        )[0]
+
     def __str__(self) -> str:
         """String representation of the MotifCompendium."""
         return f"Motif Compendium with {len(self)} motifs.\n{self.metadata}"

@@ -3,8 +3,6 @@ import multiprocessing
 import numpy as np
 
 from .motif import validate_motif_stack
-from .similarity_core_cpu import compute_similarity_and_align, compute_similarity
-
 
 ####################
 # PUBLIC FUNCTIONS #
@@ -82,9 +80,10 @@ def compute_similarities_alignments(
 
 
 def compute_similarities(
-    motifs: np.ndarray,
-    alignment_fr: np.ndarray,
-    alignment_h: np.ndarray,
+    motif_stack_list: list[np.ndarray],
+    calculations: list[tuple[int, int]],
+    alignfr_stack_list: list[np.ndarray],
+    alignh_stack_list: list[np.ndarray],
     max_chunk: int | None,
     max_cpus: int | None,
     use_gpu: bool | None,
@@ -93,9 +92,13 @@ def compute_similarities(
     """Performs similarity calculations, for known alignments.
 
     Args:
-        motifs: A (N, L, C) np.ndarray representing a stack of motifs.
-        alignment_fr: A (N, L) np.ndarray representing the forward-reverse alignment.
-        alignment_h: A (N, L) np.ndarray representing the horizontal alignment.
+        motif_stack_list: A list of np.ndarrays representing stacks of motifs.
+        calculations: A list of calculation orders, where each element specifies a motif 
+          similarity calculation
+        alignfr_stack_list: A list of (N, M) np.ndarray representing the forward-reverse alignment
+          for each calculation.
+        alignh_stack_list: A list of (N, M) np.ndarray representing the horizontal alignment
+          for each calculation.
         max_chunk: The maximum size of a motif stack to perform similarity calculations
           on. All motif stacks larger than max_chunk will be chunked into smaller motif
           stacks of size <= max_chunk by _chunk_motif_stacks_and_calcs(). Calculations
@@ -124,25 +127,30 @@ def compute_similarities(
         max_cpus = None
 
     if max_chunk is not None:
-        # TO BE IMPLEMENTED
-        assert False, "Not yet implemented"
-        # Chunk motifs
+        # Chunk motifs, calculations, and alignments
         (
-            chunked_motif_stack_list,
-            chunked_calculations,
+            chunked_motif_stack_list, chunked_calculations,
+            chunked_alignfr_stack_list, chunked_alignh_stack_list,
             chunk_map,
-        ) = _chunk_motif_stacks_and_calcs(motif_stack_list, calculations, max_chunk)
+        ) = _chunk_motifs_calcs_alignments(
+            motif_stack_list, calculations, 
+            alignfr_stack_list, alignh_stack_list,
+            max_chunk,
+        )
         
-        chunked_results = _compute_similarity(
-            chunked_motif_stack_list, chunked_alignfr_stack_list, chunked_alignh_stack_list,
+        chunked_simliarities = _compute_similarity(
+            chunked_motif_stack_list, chunked_calculations,
+            chunked_alignfr_stack_list, chunked_alignh_stack_list,
             max_cpus, use_gpu, sim_type
         )
-        return _reassemble_results(
-            calculations, chunked_calculations, chunked_results, chunk_map
+
+        return _reassemble_similarity(
+            calculations, chunked_calculations, chunked_simliarities, chunk_map
         )
     else:
         return _compute_similarity(
-            [motifs], [alignment_fr], [alignment_h],
+            motif_stack_list, calculations,
+            alignfr_stack_list, alignh_stack_list,
             max_cpus, use_gpu, sim_type
         )
 
@@ -182,6 +190,58 @@ def _chunk_motif_stacks_and_calcs(
     return chunked_motif_stack_list, chunked_calculations, chunk_map
 
 
+def _chunk_motifs_calcs_alignments(
+    motif_stack_list: list[np.ndarray],
+    calculations: list[tuple[int, int]],
+    alignfr_stack_list: list[np.ndarray],
+    alignh_stack_list: list[np.ndarray],
+    max_chunk: int,
+) -> tuple[list[np.ndarray], list[tuple[int, int]], list[list[np.ndarray]], list[list[np.ndarray]], dict[int, int]]:
+    """Chunks motifs and calculations."""
+    # CHUNK MOTIFS
+    chunked_motif_stack_list = []
+    chunk_map = dict()
+    current_idx = 0
+    for i, motif_stack in enumerate(motif_stack_list):
+        if motif_stack.shape[0] <= max_chunk:
+            chunked_motif_stack_list.append(motif_stack)
+            chunk_map[i] = [current_idx]
+            current_idx += 1
+        else:
+            motif_stack_chunks = _chunk_axis_0(motif_stack, max_chunk)
+            chunk_map_entry = []
+            for chunk in motif_stack_chunks:
+                chunked_motif_stack_list.append(chunk)
+                chunk_map_entry.append(current_idx)
+                current_idx += 1
+            chunk_map[i] = chunk_map_entry
+    
+    # CHUNK ALIGNMENTS
+    chunked_alignfr_stack_list = []
+    chunked_alignh_stack_list = []
+    for i, (alignfr, alignh) in enumerate(zip(alignfr_stack_list, alignh_stack_list)):
+        if alignfr.shape[0] <= max_chunk:
+            chunked_alignfr_stack_list.append(alignfr)
+            chunked_alignh_stack_list.append(alignh)
+        else:
+            alignfr_chunks = _chunk_2D(alignfr, max_chunk)
+            alignh_chunks = _chunk_2D(alignh, max_chunk)
+            for alignfr_chunk, alignh_chunk in zip(alignfr_chunks, alignh_chunks):
+                chunked_alignfr_stack_list.append(alignfr_chunk)
+                chunked_alignh_stack_list.append(alignh_chunk)
+
+    # CHUNK CALCULATIONS
+    chunked_calculations = []
+    for c0, c1 in calculations:
+        for c0_chunk in chunk_map[c0]:
+            for c1_chunk in chunk_map[c1]:
+                chunked_calculations.append((c0_chunk, c1_chunk))
+
+    return (chunked_motif_stack_list, chunked_calculations,
+        chunked_alignfr_stack_list, chunked_alignh_stack_list,
+        chunk_map)
+
+
 def _chunk_axis_0(X: np.ndarray, chunk_size: int) -> list[np.ndarray]:
     """Chunks along axis 0."""
     N = X.shape[0]
@@ -193,6 +253,22 @@ def _chunk_axis_0(X: np.ndarray, chunk_size: int) -> list[np.ndarray]:
     assert len(X_chunks) == int(np.ceil(N / chunk_size))
     return X_chunks
 
+
+def _chunk_2D(X: np.ndarray, chunk_size: int) -> list[list[np.ndarray]]:
+    """Chunks along both axes."""
+    N = X.shape[0]
+    M = X.shape[1]
+    X_chunks = []
+    for i in range(int(np.ceil(N / chunk_size))):
+        Y_chunks = []
+        for j in range(int(np.ceil(M / chunk_size))):
+            i_end = min(int((i + 1) * chunk_size), N)
+            j_end = min(int((j + 1) * chunk_size), M)
+            Y_chunks.append(X[i * chunk_size : i_end, j * chunk_size : j_end])
+        X_chunks.append(Y_chunks)
+    assert len(X_chunks) == int(np.ceil(N / chunk_size))
+    return X_chunks
+            
 
 def _compute_similarity_and_align_parallel(
     motif_stack_list: list[np.ndarray],
@@ -209,17 +285,19 @@ def _compute_similarity_and_align_parallel(
 
             return [
                 gpu_compute_similarity_and_align(
-                    motif_stack_list[c[0]], motif_stack_list[c[1]], sim_type
+                    motif_stack_list[c0], motif_stack_list[c1], sim_type
                 )
-                for c in calculations
+                for c0, c1 in calculations
             ]
         else:
             # SINGLE CPU CALCULATIONS
+            from .similarity_core_cpu import cpu_compute_similarity_and_align
+
             return [
-                compute_similarity_and_align(
-                    motif_stack_list[c[0]], motif_stack_list[c[1]], sim_type,
+                cpu_compute_similarity_and_align(
+                    motif_stack_list[c0], motif_stack_list[c1], sim_type,
                 )
-                for c in calculations
+                for c0, c1 in calculations
             ]
     else:
         if use_gpu:
@@ -228,26 +306,28 @@ def _compute_similarity_and_align_parallel(
             assert False
         else:
             # MULTI-CPU CALCULATIONS
+            from .similarity_core_cpu import cpu_compute_similarity_and_align
+
             inputs = [
-                (motif_stack_list[c[0]], motif_stack_list[c[1]], sim_type)
-                for c in calculations
+                (motif_stack_list[c0], motif_stack_list[c1], sim_type)
+                for c0, c1 in calculations
             ]
             num_processes = min(
                 max_cpus, multiprocessing.cpu_count()
             )  # don't use more CPUs than available
             with multiprocessing.Pool(processes=num_processes) as p:
-                return p.starmap(compute_similarity_and_align, inputs)
+                return p.starmap(cpu_compute_similarity_and_align, inputs)
 
 
 def _compute_similarity(
     motif_stack_list: list[np.ndarray],
-    alignfr_stack_list: list[np.ndarray],
-    alignh_stack_list: list[np.ndarray],
     calculations: list[tuple[int, int]],
+    alignfr_stack_list: list[list[np.ndarray]],
+    alignh_stack_list: list[list[np.ndarray]],
     max_cpus: int | None,
     use_gpu: bool,
     sim_type: str,
-) -> list[tuple[np.ndarray, np.ndarray, np.ndarray]]:
+) -> list[np.ndarray]:
     """Compute similarities and alignments."""
     if max_cpus is None:
         if use_gpu:
@@ -256,21 +336,23 @@ def _compute_similarity(
 
             return [
                 gpu_compute_similarity(
-                    motif_stack_list[c[0]], motif_stack_list[c[1]], 
-                    alignfr_stack_list[i], alignh_stack_list[i],
+                    motif_stack_list[c0], motif_stack_list[c1], 
+                    alignfr_stack_list[c0][c1], alignh_stack_list[c0][c1],
                     sim_type
                 )
-                for i, c in enumerate(calculations)
+                for c0, c1 in calculations
             ]
         else:
             # SINGLE CPU CALCULATIONS
+            from .similarity_core_cpu import cpu_compute_similarity
+
             return [
-                compute_similarity(
-                    motif_stack_list[c[0]], motif_stack_list[c[1]], 
-                    alignfr_stack_list[i], alignh_stack_list[i],
+                cpu_compute_similarity(
+                    motif_stack_list[c0], motif_stack_list[c1], 
+                    alignfr_stack_list[c0][c1], alignh_stack_list[c0][c1],
                     sim_type
                 )
-                for i, c in enumerate(calculations)
+                for c0, c1 in calculations
             ]
     else:
         if use_gpu:
@@ -279,17 +361,19 @@ def _compute_similarity(
             assert False
         else:
             # MULTI-CPU CALCULATIONS
+            from .similarity_core_cpu import cpu_compute_similarity_and_align
+
             inputs = [
-                (motif_stack_list[c[0]], motif_stack_list[c[1]], 
-                    alignfr_stack_list[i], alignh_stack_list[i],
-                    sim_type)
-                for i, c in enumerate(calculations)
+                (motif_stack_list[c0], motif_stack_list[c1], 
+                 alignfr_stack_list[c0][c1], alignh_stack_list[c0][c1],
+                 sim_type)
+                for c0, c1 in calculations
             ]
             num_processes = min(
                 max_cpus, multiprocessing.cpu_count()
             )  # don't use more CPUs than available
             with multiprocessing.Pool(processes=num_processes) as p:
-                return p.starmap(compute_similarity, inputs)
+                return p.starmap(cpu_compute_similarity, inputs)
 
 
 def _reassemble_results(
@@ -323,6 +407,31 @@ def _reassemble_results(
         fb = np.block(fb_block)
         ali = np.block(ali_block)
         results.append((sim, fb, ali))
+    assert len(results) == len(calculations)
+    return results
+
+
+def _reassemble_similarity(
+    calculations: list[tuple[int, int]],
+    chunked_calculations: list[tuple[int, int]],
+    chunked_simliarities: list[np.ndarray],
+    chunk_map: dict[int, int],
+) -> np.ndarray:
+    """Reassemble chunked results."""
+    chunked_calculations_revmap = {c: i for i, c in enumerate(chunked_calculations)}
+    results = []
+    for c0, c1 in calculations:
+        sim_block = []
+        for c0_chunk in chunk_map[c0]:
+            sim_block_row = []
+            for c1_chunk in chunk_map[c1]:
+                sim = chunked_simliarities[
+                    chunked_calculations_revmap[(c0_chunk, c1_chunk)]
+                ]
+                sim_block_row.append(sim)
+            sim_block.append(sim_block_row)
+        sim = np.block(sim_block)
+        results.append(sim)
     assert len(results) == len(calculations)
     return results
 
