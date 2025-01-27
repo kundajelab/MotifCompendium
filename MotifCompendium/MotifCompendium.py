@@ -924,6 +924,7 @@ class MotifCompendium:
         other_cluster_col: str = "cluster",
         save_col_sim: str = "mc_match_similarity",
         save_col_match: str = "mc_match",
+        save_col_logo: str = "LOGOIMAGEDATA__mc match logo",
         max_chunk: int | None = None,
         max_cpus: int | None = None,
         use_gpu: bool | None = None,
@@ -942,6 +943,7 @@ class MotifCompendium:
               names of each motif.
             save_col_sim: The column under which the highest similarity will be stored.
             save_col_match: The column under which the closest match will be stored.
+            save_col_logo: The column under which the logo of the closest match will be stored.
             max_chunk: The maximum number of motifs to compute similarity on at a time.
             max_cpus: The maximum number of CPUs to use for computing similarity (only
               used if use_gpu is False).
@@ -962,3 +964,24 @@ class MotifCompendium:
             other[other_cluster_col].tolist()[x]
             for x in np.argmax(mc_similarity, axis=1)
         ]
+        motifs = (
+            utils_motif.motif_8_to_4(other.motifs)
+            if other.motifs.shape[2] == 8
+            else other.motifs
+        )
+        match_motif_dicts = [
+            {"motif": utils_motif.motif_to_df(motifs[x])} for x in np.argmax(mc_similarity, axis=1)
+        ]
+        # Create motif plots
+        if max_cpus is None:
+            match_motif_strings = []
+            for i in range(len(match_motif_dicts)):
+                match_motif_strings.append(utils_plotting._motifdict_to_utf8_plot(match_motif_dicts[i]))
+        else:
+            # Plot in parallel
+            num_processes = min(
+                max_cpus, multiprocessing.cpu_count()
+            )  # don't use more CPUs than available
+            with multiprocessing.Pool(processes=num_processes) as p:
+                match_motif_strings = p.map(utils_plotting._motifdict_to_utf8_plot, match_motif_dicts)
+        self[save_col_logo] = match_motif_strings
