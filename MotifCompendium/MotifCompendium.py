@@ -758,6 +758,7 @@ class MotifCompendium:
         self,
         cluster_name: str = "cluster",
         aggregations: list[tuple[str]] = [("name", "count", "num_constituents")],
+        weight_col: str | None = None,
         max_chunk: int | None = None,
         max_cpus: int | None = None,
         use_gpu: bool | None = None,
@@ -779,6 +780,7 @@ class MotifCompendium:
               "source": Name of column in metadata to aggregate.
               "method": Aggregation method to use. Ex: "count", "sum", "concatenate".
               "save": Name of column in new metadata, to save the aggregated data.
+            weight_col: Name of column in metadata to use for weighted averaging.
             max_chunk: The maximum number of motifs to compute similarity on at a time.
             max_cpus: The maximum number of CPUs to use for computing similarity (only
               used if use_gpu is False).
@@ -812,6 +814,14 @@ class MotifCompendium:
         cluster_idxs = defaultdict(list)
         for i, c in enumerate(self.metadata[cluster_name]):
             cluster_idxs[c].append(i)
+        # Check weights
+        if weight_col:
+            if weight_col in self.metadata.columns:
+                weights = self.metadata[weight_col]
+            else:
+                raise ValueError(f"{weight_col} is not a column in metadata.")
+        else:
+            weights = None
         # Prepare averaging
         clusters = sorted(cluster_idxs.keys())
         cluster_motif_avgs, cluster_names = [], []
@@ -823,8 +833,10 @@ class MotifCompendium:
             motifs_c = self.motifs[c_idxs, :, :]
             alignment_fr_c = self.alignment_fr[c_idxs, :][:, c_idxs]
             alignment_h_c = self.alignment_h[c_idxs, :][:, c_idxs]
+            # Average motifs
             motif_avg_c = utils_motif.average_motifs(
-                motifs_c, alignment_fr_c, alignment_h_c
+                motifs_c, alignment_fr_c, alignment_h_c, 
+                weights=weights.loc[c_idxs] if weights is not None else None
             )
             cluster_motif_avgs.append(motif_avg_c)
             # Aggregations
