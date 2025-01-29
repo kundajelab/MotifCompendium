@@ -52,6 +52,7 @@ def ic_invert(x: np.ndarray) -> np.ndarray:
     ic = 1 - entropy
     return x / ic
 
+
 def motif_4_to_8(x: np.ndarray) -> np.ndarray:
     """Converts a 4 channel motif into an 8 channel motif."""
     x_pos = np.maximum(x, 0)
@@ -132,7 +133,8 @@ def resize_motif(motif: np.ndarray, resize_to: int = 30) -> np.ndarray:
 def average_motifs(
     motifs_8: np.ndarray, 
     alignment_fb: np.ndarray, 
-    alignment_h: np.ndarray
+    alignment_h: np.ndarray,
+    weights: list[float | int] | None = None
 ) -> np.ndarray:
     """Compute the average of many motifs.
 
@@ -145,6 +147,7 @@ def average_motifs(
           relationship between any two motifs.
         alignment_h: A np.ndarray containing the horizontal shift information between
           any two motifs.
+        weights: A list of weights to apply to each motif. (Optional)
 
     Returns:
         An 8 channel motif that is an average of the provided motif stack.
@@ -159,62 +162,17 @@ def average_motifs(
     max_shift = np.max(alignment_h[:, 0])
     min_shift = np.min(alignment_h[:, 0])
     width = 30 + max_shift - min_shift
-    motif_sum = np.zeros((width, 4))
-    for i in range(N):
-        s = alignment_h[i, 0]
-        motif_sum[np.abs(min_shift) + s : np.abs(min_shift) + s + 30, :] += (
-            motifs_4[i, :, :] if alignment_fb[i, 0] == 0 else motifs_4[i, ::-1, ::-1]
-        )
-    motif_avg = motif_sum / N
-    squashed_motif = resize_motif(motif_avg)
-    squashed_motif_8 = motif_4_to_8(squashed_motif)
-    squashed_motif_8 /= np.sum(squashed_motif_8)
-    return squashed_motif_8
+    if weights is None:
+        weights = np.ones(N)
 
-
-def weighted_average_motifs(
-    motifs_8: np.ndarray, 
-    alignment_fb: np.ndarray, 
-    alignment_h: np.ndarray,
-    weights: list[float | int]
-) -> np.ndarray:
-    """Compute the weighted average of many motifs.
-
-    Takes in a stack of motifs and aligns them based on alignment matrices. Then,
-      averages them based on a selected metadata column, and crops as necessary.
-
-    Args:
-        motifs_8: A np.ndarray reprsenting a stack of 8 channel motifs to average.
-        alignment_fb: A np.ndarray containing the forward/reverse complement
-          relationship between any two motifs.
-        alignment_h: A np.ndarray containing the horizontal shift information between
-          any two motifs.
-        weights: A list of weights to apply to each motif.
-
-    Returns:
-        An 8 channel motif that is an average of the provided motif stack.
-
-    Notes:
-        Assumes that the input is an 8 channel motif of shape (N, 30, 8).
-    """
-    motifs_4 = motif_8_to_4(motifs_8)
-    N = motifs_4.shape[0]
-    if N == 1:
-        return motifs_8[0, :, :]
-    max_shift = np.max(alignment_h[:, 0])
-    min_shift = np.min(alignment_h[:, 0])
-    width = 30 + max_shift - min_shift
-    weights_sum = np.sum(weights)
-    
-    # Weighted average
     motif_sum = np.zeros((width, 4))
     for i in range(N):
         s = alignment_h[i, 0]
         motif_sum[np.abs(min_shift) + s : np.abs(min_shift) + s + 30, :] += (
             motifs_4[i, :, :] if alignment_fb[i, 0] == 0 else motifs_4[i, ::-1, ::-1]
         ) * weights[i]
-    motif_avg = motif_sum / weights_sum
-    
+    motif_avg = motif_sum / np.sum(weights)
+
     squashed_motif = resize_motif(motif_avg)
     squashed_motif_8 = motif_4_to_8(squashed_motif)
     squashed_motif_8 /= np.sum(squashed_motif_8)

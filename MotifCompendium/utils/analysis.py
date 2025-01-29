@@ -243,7 +243,8 @@ def export_clusters_modisco(
         mc: The MotifCompendium to analyze.
         cluster_name: The motif clustering to compute average motifs on.
         save_loc: The location to save the Modisco h5py to.
-        ic: Whether or not to revert IC-scaled motifs back to linear space.
+        ic: Whether or not to revert IC-scaled motifs back to linear space, by applying
+          inverse IC-scaling.
         max_chunk: The maximum number of motifs to compute similarity on at a time.
         max_cpus: The maximum number of CPUs to use for computing similarity (only used
           if use_gpu is False).
