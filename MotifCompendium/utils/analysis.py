@@ -228,10 +228,11 @@ def export_clusters_modisco(
     mc: MotifCompendium,
     cluster_name: str,
     save_loc: str,
+    ic: bool = False,
     max_chunk: int | None = None,
     max_cpus: int | None = None,
     use_gpu: bool | None = None,
-    l2: bool | None = None,
+    sim_type: str | None = None,
 ) -> None:
     """Exports cluster averages in the Modisco file format.
 
@@ -242,12 +243,13 @@ def export_clusters_modisco(
         mc: The MotifCompendium to analyze.
         cluster_name: The motif clustering to compute average motifs on.
         save_loc: The location to save the Modisco h5py to.
+        ic: Whether or not to revert IC-scaled motifs back to linear space, by applying
+          inverse IC-scaling.
         max_chunk: The maximum number of motifs to compute similarity on at a time.
         max_cpus: The maximum number of CPUs to use for computing similarity (only used
           if use_gpu is False).
         use_gpu: Whether or not to use GPUs to accelerate computing similarity.
-        l2: Whether or not to use L2 normalization (instead of sqrt normalization) when
-          computing motif similarity.
+        sim_type: The type of similarity metric to compute: 'l2', 'sqrt', 'jss'
         safe: Whether or not to construct the MotifCompendium safely.
 
     Notes:
@@ -259,7 +261,7 @@ def export_clusters_modisco(
         max_chunk=max_chunk,
         max_cpus=max_cpus,
         use_gpu=use_gpu,
-        l2=l2,
+        sim_type=sim_type,
         safe=False,
     )  # kwargs for new avg similarity calculations
     pos_neg = np.sum(mc_cluster_avg.motifs, axis=(1, 2)) > 0
@@ -274,6 +276,8 @@ def export_clusters_modisco(
             for i in range(len(mc_cluster_avg_pos)):
                 name = str(mc_cluster_avg_pos.metadata.loc[i, "name"])
                 cwm = mc_cluster_avg_pos.motifs[i, :, :]
+                if ic:
+                    cwm = utils_motif.ic_invert(cwm)
                 pos_cluster = pos_group.create_group(name)
                 pos_cluster.create_dataset("contrib_scores", data=cwm)
         # Negative
@@ -283,6 +287,8 @@ def export_clusters_modisco(
             for i in range(len(mc_cluster_avg_neg)):
                 name = str(mc_cluster_avg_neg.metadata.loc[i, "name"])
                 cwm = mc_cluster_avg_neg.motifs[i, :, :]
+                if ic:
+                    cwm = utils_motif.ic_invert(cwm)
                 neg_cluster = neg_group.create_group(name)
                 neg_cluster.create_dataset("contrib_scores", data=cwm)
 
