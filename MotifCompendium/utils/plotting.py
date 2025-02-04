@@ -66,7 +66,7 @@ def motif_collection_html(
         )  # don't use more CPUs than available
         with multiprocessing.Pool(processes=num_processes) as p:
             all_motif_dicts = p.map(
-                _motifdict_to_utf8_plot_update, all_motif_dicts
+                _motifdict_utf8_plot_update, all_motif_dicts
             )  # Not pass by ref
         # Redefine motif_groups using updated motif dicts
         for group_name in group_to_motif_dict_idx:
