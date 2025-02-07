@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
+from MotifCompendium.utils.config import get_max_cpus
 from MotifCompendium.utils.motif import motif_to_df
 
 
@@ -24,8 +25,7 @@ from MotifCompendium.utils.motif import motif_to_df
 ####################
 def motif_collection_html(
     motif_groups: dict[str, list[dict[str, Any]]],
-    html_out: str,
-    max_cpus: int | None = None,
+    html_out: str
 ) -> None:
     """Creates an html file displaying groups of motifs.
 
@@ -46,7 +46,7 @@ def motif_collection_html(
     current_backend = matplotlib.get_backend()
     matplotlib.use("Agg")  # Use Agg backend
     # Create motif plots
-    if max_cpus is None:
+    if get_max_cpus() == 1:
         for group in motif_groups.values():
             for motif_dict in group:
                 _motifdict_utf8_plot_update(motif_dict)
@@ -62,7 +62,7 @@ def motif_collection_html(
             all_motif_dicts += group
         # Plot in parallel
         num_processes = min(
-            max_cpus, multiprocessing.cpu_count()
+            get_max_cpus(), multiprocessing.cpu_count()
         )  # don't use more CPUs than available
         with multiprocessing.Pool(processes=num_processes) as p:
             all_motif_dicts = p.map(
@@ -89,8 +89,7 @@ def motif_collection_html(
 def summary_table_html(
     motifs: np.ndarray,
     metadata: pd.DataFrame,
-    html_out: str,
-    max_cpus: int | None = None,
+    html_out: str
 ) -> None:
     """Creates an html file displaying motifs with information about each motif.
 
@@ -104,7 +103,6 @@ def summary_table_html(
         motifs: A stack of motifs.
         metadata: A table of metadata for each motif in the summary table.
         html_out: The path to save he html file.
-        max_cpus: The maximum number of CPUs to use for parallelizing plotting.
 
     Notes:
         The motifs are expected to be of shape (N, 30, 4) where N is the number of
@@ -122,7 +120,7 @@ def summary_table_html(
         {"motif": motif_to_df(motifs[i, ::-1, ::-1])} for i in range(motifs.shape[0])
     ]
     # Create motif plots
-    if max_cpus is None:
+    if get_max_cpus() is None:
         fwd_motif_strings = []
         rev_motif_strings = []
         for i in range(motifs.shape[0]):
@@ -131,7 +129,7 @@ def summary_table_html(
     else:
         # Plot in parallel
         num_processes = min(
-            max_cpus, multiprocessing.cpu_count()
+            get_max_cpus(), multiprocessing.cpu_count()
         )  # don't use more CPUs than available
         with multiprocessing.Pool(processes=num_processes) as p:
             fwd_motif_strings = p.map(_motifdict_to_utf8_plot, fwd_motif_dicts)

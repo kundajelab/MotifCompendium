@@ -4,5 +4,6 @@ from .MotifCompendium import (
     build,
     build_from_modisco,
     combine,
+    set_compute_options,
     MotifCompendium,
 )

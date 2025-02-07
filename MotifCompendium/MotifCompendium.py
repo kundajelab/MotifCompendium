@@ -1,16 +1,50 @@
 from __future__ import annotations
 from collections import defaultdict
-import warnings
 
 import h5py
 import numpy as np
 import pandas as pd
 
 import MotifCompendium.utils.clustering as utils_clustering
+import MotifCompendium.utils.config as utils_config
 import MotifCompendium.utils.loader as utils_loader
 import MotifCompendium.utils.motif as utils_motif
 import MotifCompendium.utils.plotting as utils_plotting
 import MotifCompendium.utils.similarity as utils_similarity
+
+
+############
+# SETTINGS #
+############
+def set_compute_options(
+    max_chunk: int | None = None,
+    max_cpus: int | None = None,
+    use_gpu: bool | None = None
+):
+    """Set default values for max_chunk, max_cpus, and use_gpu.
+    
+    Args:
+        max_chunk: The maximum number of motifs to compute similarity on at a time. SET
+          TO -1 TO USE NO CHUNKING.
+        max_cpus: The maximum number of CPUs to use. Used while loading multiple Modisco
+          files, generating plots, and, when use_gpu is False, computing similarity.
+        use_gpu: Whether or not to GPU accelerate similarity computations.
+    
+    Notes:
+        Use GPU if possible to accelerate calculation (CuPy required.) Otherwise,
+          parallelize across CPUs by setting max_cpus to the number of available
+          CPUs.
+        Currently, multi-GPU calculation is not supported.
+        If memory constraints are not an issue, set as None for faster
+          performance. Otherwise, decrease max_chunk until calculations fit in memory.
+          For a GPU with ~12GB of memory, use max_chunk=1000.
+    """
+    if max_chunk is not None:
+        utils_config.set_max_chunk(max_chunk)
+    if max_cpus is not None:
+        utils_config.set_max_cpus(max_cpus)
+    if use_gpu is not None:
+        utils_config.set_use_gpu(use_gpu)
 
 
 ######################################
@@ -33,12 +67,17 @@ def load(file_loc: str, safe: bool = True) -> MotifCompendium:
         Safe loading validates object integrity but may take significantly longer for
           large objects.
     """
-    with h5py.File(file_loc, "r") as f:
-        motifs = f["motifs"][:]
-        similarity = f["similarity"][:]
-        alignment_fr = f["alignment_fr"][:]
-        alignment_h = f["alignment_h"][:]
-    metadata = pd.read_hdf(file_loc, key="metadata")
+    try:
+        with h5py.File(file_loc, "r") as f:
+            motifs = f["motifs"][:]
+            similarity = f["similarity"][:]
+            alignment_fr = f["alignment_fr"][:]
+            alignment_h = f["alignment_h"][:]
+        metadata = pd.read_hdf(file_loc, key="metadata")
+    except:
+        raise ValueError(
+            "File does not contain the necessary datasets to load a MotifCompendium."
+        )
     return MotifCompendium(
         motifs, similarity, alignment_fr, alignment_h, metadata, safe
     )
@@ -56,7 +95,10 @@ def inspect(file_loc: str) -> pd.DataFrame:
     Notes:
         Does not ever explicitly load the object, just the metadata from the object.
     """
-    metadata = pd.read_hdf(file_loc, key="metadata")
+    try:
+        metadata = pd.read_hdf(file_loc, key="metadata")
+    except:
+        raise KeyError("File does not contain metadata.")
     print(f"Motif Compendium with {len(metadata)} motifs.\n{metadata}")
     return metadata
 
@@ -64,25 +106,18 @@ def inspect(file_loc: str) -> pd.DataFrame:
 def build(
     motifs: np.ndarray,
     metadata: pd.DataFrame | None = None,
-    max_chunk: int | None = None,
-    max_cpus: int | None = None,
-    use_gpu: bool | None = None,
     l2: bool | None = None,
     safe: bool = True,
 ) -> MotifCompendium:
     """Builds a MotifCompendium object from a set of motifs.
 
-    Computes pairwise similarities on a set of motifs. Creates a metadata if needed.
-      Then, passes everything to the MotifCompendium constructor.
+    Computes pairwise similarities on a set of motifs. Creates metadata if needed. Then,
+      passes everything to the MotifCompendium constructor.
 
     Args:
         motifs: A stack of motifs of shape (N, 30, 8/4).
         metadata: The metadata for all motifs. If None, it will be set to a DataFrame
           with generic motif names.
-        max_chunk: The maximum number of motifs to compute similarity on at a time.
-        max_cpus: The maximum number of CPUs to use for computing similarity (only used
-          if use_gpu is False).
-        use_gpu: Whether or not to use GPUs to accelerate computing similarity.
         l2: Whether or not to use L2 normalization (instead of sqrt normalization) when
           computing motif similarity.
         safe: Whether or not to construct the MotifCompendium safely.
@@ -91,14 +126,8 @@ def build(
         A MotifCompendium object containing all motifs in motifs.
 
     Notes:
-        Use GPU if possible to accelerate calculation (CuPy required.) Otherwise,
-          parallelize across CPUs by setting max_cpus to the number of available
-          CPUs.
-        Currently, multi-GPU calculation is not supported. If use_gpu is True then
-          max_cpus will be set to None.
-        If memory constraints are not an issue, leave chunk as None for faster
-          performance. Otherwise, decrease max_chunk until calculations fit in memory.
-          For a GPU with ~12GB of memory, use max_chunk=1000.
+        Motifs are assumed to be in ACGT order if 4-channel or A+A-C+C-G-G+T-T+ order if
+          8-channel.
         Safe building validates object integrity but may take significantly longer for
           large objects.
     """
@@ -109,19 +138,12 @@ def build(
         metadata = pd.DataFrame()
         metadata["name"] = [f"motif_{i}" for i in range(motifs.shape[0])]
     # Compute similarity
-    if use_gpu and (max_cpus is not None):
-        warnings.warn(
-            "use_gpu is True but max_cpus is not None... setting max_cpus to None"
-        )
-        max_cpus = None
     similarity, alignment_fr, alignment_h = utils_similarity.compute_similarities(
-        [motifs], [(0, 0)], max_chunk, max_cpus, use_gpu, l2
+        [motifs], [(0, 0)], l2
     )[0]
-    np.fill_diagonal(
-        similarity, 1
-    )  # Sometimes diagonal similarity is 0.999... but should be 1
-    # similarity = np.round(similarity, 10) # Precision cutoff to ensure symmetric
-    similarity = (similarity + similarity.T) / 2
+    # Guarantee similarity properties
+    np.fill_diagonal(similarity, 1)  # Sometimes diagonal is 0.999... but should be 1
+    similarity = (similarity + similarity.T) / 2 # Ensure symmetric
     # Construct object
     return MotifCompendium(
         motifs, similarity, alignment_fr, alignment_h, metadata, safe
@@ -131,9 +153,6 @@ def build(
 def build_from_modisco(
     modisco_dict: dict[str, str],
     ic: bool = True,
-    max_chunk: int | None = None,
-    max_cpus: int | None = None,
-    use_gpu: bool | None = None,
     l2: bool | None = None,
     safe: bool = True,
 ) -> MotifCompendium:
@@ -144,11 +163,6 @@ def build_from_modisco(
     Args:
         modisco_dict: A dictionary from model name to modisco file path.
         ic: Whether or not to apply information content scaling to Modisco motifs.
-        max_chunk: The maximum number of motifs to compute similarity on at a time.
-        max_cpus: The maximum number of CPUs to use for loading Modisco motifs and
-          computing similarity (only used for similarity calculation if use_gpu is
-          False).
-        use_gpu: Whether or not to use GPUs to accelerate computing similarity.
         l2: Whether or not to use L2 normalization (instead of sqrt normalization) when
           computing motif similarity.
         safe: Whether or not to construct the MotifCompendium safely.
@@ -157,28 +171,14 @@ def build_from_modisco(
         A MotifCompendium object containing all motifs in all Modisco objects.
 
     Notes:
-        Multiple Modisco outputs can be loaded and processed in parallel by setting
-          max_cpus to the number of available CPUs.
         Assumes the model names have no '-'' or '.' in them.
-        Use GPU if possible to accelerate calculation (CuPy required.) Otherwise,
-          parallelize across CPUs by setting max_cpus to the number of available
-          CPUs.
-        Currently, multi-GPU calculation is not supported. If use_gpu is True then
-          max_cpus will be used to load Modisco objects but will be set to None for
-          similarity calculations.
-        If memory constraints are not an issue, leave chunk as None for faster
-          performance. Otherwise, decrease max_chunk until calculations fit in memory.
-          For a GPU with ~12GB of memory, use max_chunk=1000.
         Using information content scaling is highly recommended.
         Safe building validates object integrity but may take significantly longer for
           large objects.
     """
-    # Determine CPU usage for Modisco/similarity
-    max_cpus_modisco = max_cpus
-    max_cpus_similarity = None if use_gpu else max_cpus
     # Load from Modisco
     motifs, motif_names, seqlet_counts, model_names = utils_loader.load_modiscos(
-        modisco_dict, ic, max_cpus_modisco
+        modisco_dict, ic
     )
     # Build metadata
     metadata = pd.DataFrame()
@@ -190,9 +190,6 @@ def build_from_modisco(
     return build(
         motifs,
         metadata=metadata,
-        max_chunk=max_chunk,
-        max_cpus=max_cpus_similarity,
-        use_gpu=use_gpu,
         l2=l2,
         safe=safe,
     )
@@ -200,9 +197,6 @@ def build_from_modisco(
 
 def combine(
     compendiums: list[MotifCompendium],
-    max_chunk: int | None = None,
-    max_cpus: int | None = None,
-    use_gpu: bool | None = None,
     l2: bool | None = None,
     safe: bool = True,
 ) -> MotifCompendium:
@@ -214,10 +208,6 @@ def combine(
 
     Args:
         compendiums: A list of MotifCompendium objects.
-        max_chunk: The maximum number of motifs to compute similarity on at a time.
-        max_cpus: The maximum number of CPUs to use for computing similarity (only used
-          if use_gpu is False).
-        use_gpu: Whether or not to use GPUs to accelerate computing similarity.
         l2: Whether or not to use L2 normalization (instead of sqrt normalization) when
           computing motif similarity.
         safe: Whether or not to construct the MotifCompendium safely.
@@ -227,14 +217,6 @@ def combine(
           MotifCompendium.
 
     Notes:
-        Use GPU if possible to accelerate calculation (CuPy required.) Otherwise,
-          parallelize across CPUs by setting max_cpus to the number of available
-          CPUs.
-        Currently, multi-GPU calculation is not supported. If use_gpu is True then
-          max_cpus will be set to None.
-        If memory constraints are not an issue, leave chunk as None for faster
-          performance. Otherwise, decrease max_chunk until calculations fit in memory.
-          For a GPU with ~12GB of memory, use max_chunk=1000.
         Safe building validates object integrity but may take significantly longer for
           large objects.
     """
@@ -246,7 +228,7 @@ def combine(
         for j in range(i + 1, n):
             calculations.append((i, j))
     similarity_results = utils_similarity.compute_similarities(
-        motifs_list, calculations, max_chunk, max_cpus, use_gpu, l2
+        motifs_list, calculations, l2
     )
     similarity_block = [[None for i in range(n)] for i in range(n)]
     alignment_fr_block = [[None for i in range(n)] for i in range(n)]
@@ -508,8 +490,7 @@ class MotifCompendium:
         self, 
         html_out: str, 
         group_by: str, 
-        average_motif: bool = True,
-        max_cpus: int | None = None
+        average_motif: bool = True
     ) -> None:
         """Creates an html file displaying all motifs in the current MotifCompendium.
 
@@ -522,12 +503,9 @@ class MotifCompendium:
             group_by: The column in the metadata to group motifs by for visualization.
               Or, an externally provided pd.Series that fulfills the same role.
             average_motif: Whether or not to show the average motif per cluster.
-            max_cpus: The maximum number of CPUs to use for parallelizing plotting.
 
         Notes:
             Assumes self.metadata has a "name" column.
-            Plotting can take a long time. Increase max_cpus to improve plotting
-              time.
             If you just want to plot cluster averages, consider doing
               mc.cluster_averages(group_by).motif_collection_html(html_out, "name") with
               the appropriate CPU/GPU/chunking options.
@@ -593,7 +571,7 @@ class MotifCompendium:
                 }
                 group.insert(0, average_dict)
         # Submit to plotting function
-        utils_plotting.motif_collection_html(motif_groups, html_out, max_cpus)
+        utils_plotting.motif_collection_html(motif_groups, html_out)
 
     def summary_table_html(
         self, 
@@ -611,11 +589,8 @@ class MotifCompendium:
             html_out: The path to save the html file.
             columns: The list of column names in the metadata to display as columns in
               the summary table.
-            max_cpus: The maximum number of CPUs to use for parallelizing plotting.
 
         Notes:
-            Plotting can take a long time. Increase max_cpus to improve plotting
-              time.
             It is highly suggested that this function just be run on a MotifCompendium
               of motif clusters. Consider doing
               mc.cluster_averages(cluster).summary_table_html(html_out, summary_cols)
@@ -627,7 +602,7 @@ class MotifCompendium:
             else self.motifs
         )
         utils_plotting.summary_table_html(
-            motifs, self.metadata[columns], html_out, max_cpus
+            motifs, self.metadata[columns], html_out
         )
 
     def heatmap(
@@ -759,9 +734,6 @@ class MotifCompendium:
         cluster_name: str = "cluster",
         aggregations: list[tuple[str]] = [("name", "count", "num_constituents")],
         weight_col: str | None = None,
-        max_chunk: int | None = None,
-        max_cpus: int | None = None,
-        use_gpu: bool | None = None,
         l2: bool | None = None,
         safe: bool = True,
     ) -> MotifCompendium:
@@ -864,7 +836,7 @@ class MotifCompendium:
         for agg_dict in aggregations_dicts:
             metadata[agg_dict["save"]] = agg_dict["values"]
         return build(
-            cluster_motif_avgs, metadata, max_chunk, max_cpus, use_gpu, l2, safe
+            cluster_motif_avgs, metadata, l2, safe
         )
 
     def get_similarity_slice(
@@ -942,9 +914,6 @@ class MotifCompendium:
         other_cluster_col: str = "cluster",
         save_col_sim: str = "mc_match_similarity",
         save_col_match: str = "mc_match",
-        max_chunk: int | None = None,
-        max_cpus: int | None = None,
-        use_gpu: bool | None = None,
         l2: bool | None = None,
     ) -> None:
         """Assign clusters to motifs based on an existing clustered MotifCompendium.
@@ -973,7 +942,7 @@ class MotifCompendium:
         """
         assert self.motifs.shape[2] == other.motifs.shape[2]
         mc_similarity, _, _ = utils_similarity.compute_similarities(
-            [self.motifs, other.motifs], [(0, 1)], max_chunk, max_cpus, use_gpu, l2=l2
+            [self.motifs, other.motifs], [(0, 1)], l2=l2
         )[0]
         self[save_col_sim] = np.max(mc_similarity, axis=1)
         self[save_col_match] = [
