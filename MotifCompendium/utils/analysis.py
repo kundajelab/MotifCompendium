@@ -1,4 +1,5 @@
 import os
+import multiprocessing
 
 import h5py
 import matplotlib.pyplot as plt
@@ -10,6 +11,7 @@ import MotifCompendium
 import MotifCompendium.utils.loader as utils_loader
 import MotifCompendium.utils.motif as utils_motif
 import MotifCompendium.utils.similarity as utils_similarity
+import MotifCompendium.utils.plotting as utils_plotting
 
 
 #######################
@@ -232,7 +234,7 @@ def export_clusters_modisco(
     max_chunk: int | None = None,
     max_cpus: int | None = None,
     use_gpu: bool | None = None,
-    sim_type: str | None = None,
+    sim_type: str = "l2",
 ) -> None:
     """Exports cluster averages in the Modisco file format.
 
@@ -295,8 +297,8 @@ def export_clusters_modisco(
 
 def export_modisco(
     mc: MotifCompendium,
-    name_col: str,
     save_loc: str,
+    name_col: str = "name",
     ic: bool = False,
 ) -> None:
     """Exports MotifCompendium in the Modisco file format.
@@ -448,10 +450,11 @@ def label_from_pfms(
     pfm_file: str,
     save_col_sim: str = "pfm_match_similarity",
     save_col_match: str = "pfm_match",
+    save_col_logo: str | None = None,
     max_chunk: int | None = None,
     max_cpus: int | None = None,
     use_gpu: bool | None = None,
-    sim_type: str | None = None,
+    sim_type: str = "l2",
 ) -> None:
     """Automatic labeling of motifs from a pfm file.
 
@@ -482,8 +485,137 @@ def label_from_pfms(
     mc_motifs = mc.motifs
     if mc_motifs.shape[2] == 8:
         mc_motifs = utils_motif.motif_8_to_4_abs(mc_motifs)
-    pfm_similarity, _, _ = utils_similarity.compute_similarities_alignments(
+    pfm_similarity, _, _ = utils_similarity.compute_similarities_and_alignments(
         [mc_motifs, pfm_motifs], [(0, 1)], max_chunk, max_cpus, use_gpu, sim_type=sim_type
     )[0]
     mc[save_col_sim] = np.max(pfm_similarity, axis=1)
     mc[save_col_match] = [names[x] for x in np.argmax(pfm_similarity, axis=1)]
+
+    # Create matched pfm logos
+    if save_col_logo:
+        save_col_logo = "LOGOIMAGEDATA__" + save_col_logo
+        match_motif_dicts = [
+            {"motif": utils_motif.motif_to_df(pfm_motifs[x])} for x in np.argmax(pfm_similarity, axis=1)
+        ]
+        # Create motif plots
+        if max_cpus is None:
+            match_motif_strings = []
+            for i in range(len(match_motif_dicts)):
+                match_motif_strings.append(utils_plotting._motifdict_to_utf8_plot(match_motif_dicts[i]))
+        else:
+            # Plot in parallel
+            num_processes = min(
+                max_cpus, multiprocessing.cpu_count()
+            )  # don't use more CPUs than available
+            with multiprocessing.Pool(processes=num_processes) as p:
+                match_motif_strings = p.map(utils_plotting._motifdict_to_utf8_plot, match_motif_dicts)
+        mc[save_col_logo] = match_motif_strings
+
+
+def label_composites_from_pfm(
+    mc: MotifCompendium,
+    pfm_file: str,
+    num_composites: int = 2,
+    save_col_comp_sim: str = "pfm_composite_similarity",
+    save_col_comp_match: str = "pfm_composite_match",
+    save_col_logo: str | None = None,
+    max_chunk: int | None = None,
+    max_cpus: int | None = None,
+    use_gpu: bool | None = None,
+    sim_type: str = "l2",
+) -> None:
+    """Label composite motifs from a pfm file.
+    
+    For each motif in the MotifCompendium, computes the best similarity and alignment
+      between that motif and all motifs in the PFM file. The best matching PFM motif
+      is subtracted from the motif. With the remaining motif, another best similarity
+      is calculated against all motifs in the PFM file. The process continue for 
+      the specified number of times. The composite score is the similarity score during. 
+      the final iteration. Composite score and best matching PFM motifs are saved as columns
+      in the MotifCompendium metadata.
+    
+    Args:
+        mc: The MotifCompendium to analyze.
+        pfm_file: The PFM file path.
+        num_composites: The number of composite iterations to compute.
+        save_col_comp_sim: The column under which the final composite similarity will be stored.
+        save_col_comp_match: The column under which the composite matches will be stored.
+        max_chunk: The maximum number of motifs to compute similarity on at a time. If
+          None, it will compute the entire similarity matrix at once.
+        max_cpus: The maximum number of CPUs to use for computing similarity. If None,
+          it will only use a single CPU.
+        use_gpu: Whether or not to use GPUs to accelerate computing similarity. Uses
+          only CPUs by default.
+        sim_type: The type of similarity metric to compute: 'l2', 'sqrt', 'jss'"""
+    # Load pfm
+    if pfm_file.endswith("_pfms.txt"):
+        pfm_motifs, names = utils_loader.load_pfm(pfm_file)
+    elif pfm_file.endswith(".meme.txt") or pfm_file.endswith(".meme"):
+        pfm_motifs, names = utils_loader.load_meme(pfm_file)
+    else:
+        raise ValueError("pfm_file must be a _pfm.txt, .meme, or .meme.txt file.")
+    mc_motifs = mc.motifs
+    if mc_motifs.shape[2] == 8:
+        mc_motifs = utils_motif.motif_8_to_4_abs(mc_motifs)
+
+    # Pre-normalize motifs
+    mc_motifs = utils_motif.normalize_motifs(mc_motifs, sim_type=sim_type)
+    pfm_motifs = utils_motif.normalize_motifs(pfm_motifs, sim_type=sim_type)
+
+    # Perform un-normalized similarity calculations
+    match sim_type:
+        case "l2" | "sqrt" | "dot":
+            calc_type = "dot"
+        case "jss" | "log":
+            calc_type = "log"
+
+    # Calculate composite similarity
+    comp_names = []
+    for i in range(num_composites):
+        pfm_similarity, pfm_alignfr, pfm_alignh = utils_similarity.compute_similarities_and_alignments(
+            [mc_motifs, pfm_motifs], [(0, 1)], 
+            max_chunk, max_cpus, use_gpu, sim_type=calc_type, safe=False,
+        )[0]
+
+        comp_sims = np.max(pfm_similarity, axis=1)
+        pfm_match_idx = np.argmax(pfm_similarity, axis=1)
+        comp_names.append([names[x] for x in pfm_match_idx])
+        pfm_alignfr = pfm_alignfr[np.arange(pfm_alignfr.shape[0]), pfm_match_idx]
+        pfm_alignh = pfm_alignh[np.arange(pfm_alignh.shape[0]), pfm_match_idx]
+
+        # Subtract best match
+        mc_motifs = utils_motif.subtract_motifs(mc_motifs, pfm_motifs, pfm_match_idx, pfm_alignfr, pfm_alignh)
+
+        # Create matched pfm logos
+        if save_col_logo:
+            save_col_logo = f"LOGOIMAGEDATA__{save_col_logo}{i}"
+            match_motif_dicts = [{"motif": utils_motif.motif_to_df(pfm_motifs[x])} for x in pfm_match_idx]
+            # Create motif plots
+            if max_cpus is None:
+                match_motif_strings = []
+                for i in range(len(match_motif_dicts)):
+                    match_motif_strings.append(utils_plotting._motifdict_to_utf8_plot(match_motif_dicts[i]))
+            else:
+                # Plot in parallel
+                num_processes = min(
+                    max_cpus, multiprocessing.cpu_count()
+                )  # don't use more CPUs than available
+                with multiprocessing.Pool(processes=num_processes) as p:
+                    match_motif_strings = p.map(utils_plotting._motifdict_to_utf8_plot, match_motif_dicts)
+            mc[save_col_logo] = match_motif_strings
+
+    # Scale score
+    match sim_type:
+        case "l2":
+            scale = 1 / np.sqrt(num_composites)
+        case "jss":
+            scale = 1 - np.sqrt(0.5 * (-np.log(num_composites) 
+                - (num_composites + 1) / num_composites * np.log((num_composites + 1) / (2 * num_composites)) 
+                + (num_composites - 1) / num_composites * np.log(2 * num_composites)))
+        case _:
+            scale = 1
+
+    # Save in metadata table
+    mc[save_col_comp_sim] = comp_sims / scale
+    for i in range(num_composites):
+        mc[save_col_comp_match + f"{i}"] = comp_names[i]

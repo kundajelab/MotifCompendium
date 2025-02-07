@@ -67,7 +67,7 @@ def build(
     max_chunk: int | None = None,
     max_cpus: int | None = None,
     use_gpu: bool | None = None,
-    sim_type: str | None = None,
+    sim_type: str = "l2",
     safe: bool = True,
 ) -> MotifCompendium:
     """Builds a MotifCompendium object from a set of motifs.
@@ -113,7 +113,7 @@ def build(
             "use_gpu is True but max_cpus is not None... setting max_cpus to None"
         )
         max_cpus = None
-    similarity, alignment_fr, alignment_h = utils_similarity.compute_similarities_alignments(
+    similarity, alignment_fr, alignment_h = utils_similarity.compute_similarities_and_alignments(
         [motifs], [(0, 0)], max_chunk, max_cpus, use_gpu, sim_type
     )[0]
     np.fill_diagonal(
@@ -133,7 +133,7 @@ def build_from_modisco(
     max_chunk: int | None = None,
     max_cpus: int | None = None,
     use_gpu: bool | None = None,
-    sim_type: str | None = None,
+    sim_type: str = "l2",
     safe: bool = True,
 ) -> MotifCompendium:
     """Builds a MotifCompendium object from a set of Modisco outputs.
@@ -201,7 +201,7 @@ def combine(
     max_chunk: int | None = None,
     max_cpus: int | None = None,
     use_gpu: bool | None = None,
-    sim_type: str | None = None,
+    sim_type: str = "l2",
     safe: bool = True,
 ) -> MotifCompendium:
     """Combines multiple MotifCompendium into one MotifCompendium.
@@ -242,7 +242,7 @@ def combine(
     for i in range(n):
         for j in range(i + 1, n):
             calculations.append((i, j))
-    similarity_results = utils_similarity.compute_similarities_alignments(
+    similarity_results = utils_similarity.compute_similarities_and_alignments(
         motifs_list, calculations, max_chunk, max_cpus, use_gpu, sim_type
     )
     similarity_block = [[None for i in range(n)] for i in range(n)]
@@ -425,7 +425,7 @@ class MotifCompendium:
         max_chunk: int | None = None,
         max_cpus: int | None = None,
         use_gpu: bool | None = None,
-        sim_type: str | None = None,
+        sim_type: str = "l2",
     ) -> None:
         """Calculates the similarity matrix of the current MotifCompendium.
 
@@ -446,7 +446,7 @@ class MotifCompendium:
               performance. Otherwise, decrease max_chunk until calculations fit in memory.
               For a GPU with ~12GB of memory, use max_chunk=1000.
         """
-        self.similarity = utils_similarity.compute_similarities(
+        self.similarity = utils_similarity.compute_similarities_known_alignments(
             [self.motifs], [(0, 0)], 
             [self.alignment_fr], [self.alignment_h],
             max_chunk, max_cpus, use_gpu, sim_type
@@ -791,7 +791,7 @@ class MotifCompendium:
         max_chunk: int | None = None,
         max_cpus: int | None = None,
         use_gpu: bool | None = None,
-        sim_type: str | None = None,
+        sim_type: str = "l2",
         safe: bool = True,
     ) -> MotifCompendium:
         """Creates a MotifCompendium where each motif represents a cluster of motifs.
@@ -975,7 +975,7 @@ class MotifCompendium:
         max_chunk: int | None = None,
         max_cpus: int | None = None,
         use_gpu: bool | None = None,
-        sim_type: str | None = None,
+        sim_type: str = "l2",
     ) -> None:
         """Assign clusters to motifs based on an existing clustered MotifCompendium.
 
@@ -1001,7 +1001,7 @@ class MotifCompendium:
               their motifs. (Ex: 4 and 4 or 8 and 8.)
         """
         assert self.motifs.shape[2] == other.motifs.shape[2]
-        mc_similarity, _, _ = utils_similarity.compute_similarities_alignments(
+        mc_similarity, _, _ = utils_similarity.compute_similarities_and_alignments(
             [self.motifs, other.motifs], [(0, 1)], max_chunk, max_cpus, use_gpu, sim_type=sim_type
         )[0]
         self[save_col_sim] = np.max(mc_similarity, axis=1)

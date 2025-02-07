@@ -7,13 +7,14 @@ from .motif import validate_motif_stack
 ####################
 # PUBLIC FUNCTIONS #
 ####################
-def compute_similarities_alignments(
+def compute_similarities_and_alignments(
     motif_stack_list: list[np.ndarray],
     calculations: list[tuple[int, int]],
     max_chunk: int | None,
     max_cpus: int | None,
     use_gpu: bool | None,
     sim_type: str | None,
+    safe: bool = True,
 ) -> list[tuple[np.ndarray, np.ndarray, np.ndarray]]:
     """Performs similarity and alignment calculations between sets of motif stacks.
 
@@ -57,8 +58,10 @@ def compute_similarities_alignments(
     # TODO: FIX EDGE CASE THAT HAS ARISEN DUE TO DEFAULTS
     if use_gpu:
         max_cpus = None
-    for motif_stack in motif_stack_list:
-        validate_motif_stack(motif_stack)
+    if safe:
+        for motif_stack in motif_stack_list:
+            validate_motif_stack(motif_stack)
+            
     if max_chunk is not None:
         (
             chunked_motif_stack_list,
@@ -79,7 +82,7 @@ def compute_similarities_alignments(
         )
 
 
-def compute_similarities(
+def compute_similarities_known_alignments(
     motif_stack_list: list[np.ndarray],
     calculations: list[tuple[int, int]],
     alignfr_stack_list: list[np.ndarray],
@@ -132,13 +135,13 @@ def compute_similarities(
             chunked_motif_stack_list, chunked_calculations,
             chunked_alignfr_stack_list, chunked_alignh_stack_list,
             chunk_map,
-        ) = _chunk_motifs_calcs_alignments(
+        ) = _chunk_motifs_calcs_aligns(
             motif_stack_list, calculations, 
             alignfr_stack_list, alignh_stack_list,
             max_chunk,
         )
         
-        chunked_simliarities = _compute_similarity(
+        chunked_simliarities = _compute_similarity_known_alignment(
             chunked_motif_stack_list, chunked_calculations,
             chunked_alignfr_stack_list, chunked_alignh_stack_list,
             max_cpus, use_gpu, sim_type
@@ -148,7 +151,7 @@ def compute_similarities(
             calculations, chunked_calculations, chunked_simliarities, chunk_map
         )
     else:
-        return _compute_similarity(
+        return _compute_similarity_known_alignment(
             motif_stack_list, calculations,
             alignfr_stack_list, alignh_stack_list,
             max_cpus, use_gpu, sim_type
@@ -190,7 +193,7 @@ def _chunk_motif_stacks_and_calcs(
     return chunked_motif_stack_list, chunked_calculations, chunk_map
 
 
-def _chunk_motifs_calcs_alignments(
+def _chunk_motifs_calcs_aligns(
     motif_stack_list: list[np.ndarray],
     calculations: list[tuple[int, int]],
     alignfr_stack_list: list[np.ndarray],
@@ -319,7 +322,7 @@ def _compute_similarity_and_align_parallel(
                 return p.starmap(cpu_compute_similarity_and_align, inputs)
 
 
-def _compute_similarity(
+def _compute_similarity_known_alignment(
     motif_stack_list: list[np.ndarray],
     calculations: list[tuple[int, int]],
     alignfr_stack_list: list[list[np.ndarray]],
@@ -332,10 +335,10 @@ def _compute_similarity(
     if max_cpus is None:
         if use_gpu:
             # SINGLE GPU CALCULATIONS
-            from .similarity_core_gpu import gpu_compute_similarity
+            from .similarity_core_gpu import gpu_compute_similarity_known_alignment
 
             return [
-                gpu_compute_similarity(
+                gpu_compute_similarity_known_alignment(
                     motif_stack_list[c0], motif_stack_list[c1], 
                     alignfr_stack_list[c0][c1], alignh_stack_list[c0][c1],
                     sim_type
@@ -344,10 +347,10 @@ def _compute_similarity(
             ]
         else:
             # SINGLE CPU CALCULATIONS
-            from .similarity_core_cpu import cpu_compute_similarity
+            from .similarity_core_cpu import cpu_compute_similarity_known_alignment
 
             return [
-                cpu_compute_similarity(
+                cpu_compute_similarity_known_alignment(
                     motif_stack_list[c0], motif_stack_list[c1], 
                     alignfr_stack_list[c0][c1], alignh_stack_list[c0][c1],
                     sim_type

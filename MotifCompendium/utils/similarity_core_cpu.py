@@ -8,35 +8,43 @@ def cpu_compute_similarity_and_align(
     simsA: np.ndarray, simsB: np.ndarray, sim_type: str,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Computes similarity and alignment taking into account reverse complements."""
-    # L1 normalize
-    simsA = simsA / np.sum(simsA, axis=(1, 2), keepdims=True)
-    simsB = simsB / np.sum(simsB, axis=(1, 2), keepdims=True)
-
+    # Normalize motifs
     match sim_type:
-        case "l2" | "sqrt":
-            if sim_type == "l2":
-                # L2 normalization
-                simsA = simsA / np.linalg.norm(simsA, axis=(1, 2), keepdims=True)
-                simsB = simsB / np.linalg.norm(simsB, axis=(1, 2), keepdims=True)
-            elif sim_type == "sqrt":
-                # square root
-                simsA = np.sqrt(simsA)
-                simsB = np.sqrt(simsB)
-
+        case "sqrt":
+            simsA = simsA / np.sum(simsA, axis=(1, 2), keepdims=True) # L1 normalize
+            simsB = simsB / np.sum(simsB, axis=(1, 2), keepdims=True)
+            simsA = np.sqrt(simsA) # Sqrt normalize
+            simsB = np.sqrt(simsB)
+        case "l2":
+            simsA = simsA / np.sum(simsA, axis=(1, 2), keepdims=True) # L1 normalize
+            simsB = simsB / np.sum(simsB, axis=(1, 2), keepdims=True) 
+            simsA = simsA / np.linalg.norm(simsA, axis=(1, 2), keepdims=True) # L2 normalize
+            simsB = simsB / np.linalg.norm(simsB, axis=(1, 2), keepdims=True)
+        case "jss":
+            simsA = simsA / np.sum(simsA, axis=(1, 2), keepdims=True) # L1 normalize
+            simsB = simsB / np.sum(simsB, axis=(1, 2), keepdims=True)
+        case "dot" | "log":
+            pass
+    
+    # Caculate similarity and alignment
+    match sim_type:
+        # Cosine similarity
+        case "l2" | "sqrt" | "dot":
             # forward similarity
-            sim_1, sim_1_alignments = _compute_similarity_alignment(
+            sim_1, sim_1_alignments = _compute_similarity_and_alignment(
                 simsA, simsB
             )  # skew-symmetric alignment
             # backward similarity
-            sim_2, sim_2_alignments = _compute_similarity_alignment(
+            sim_2, sim_2_alignments = _compute_similarity_and_alignment(
                 _reverse_complement(simsA), simsB
             )  # symmetric alignment
         
-        case "jss":
-            sim_1, sim_1_alignments = _compute_similarity_alignment_jss(
+        # Jensen-Shannon Similarity
+        case "jss" | "log":
+            sim_1, sim_1_alignments = _compute_similarity_and_alignment_jss(
                 simsA, simsB
             )
-            sim_2, sim_2_alignments = _compute_similarity_alignment_jss(
+            sim_2, sim_2_alignments = _compute_similarity_and_alignment_jss(
                 _reverse_complement(simsA), simsB
             )
     
@@ -51,33 +59,40 @@ def cpu_compute_similarity_and_align(
     return sim, sim_fb, sim_alignments
     
 
-def cpu_compute_similarity(
+def cpu_compute_similarity_known_alignment(
     simsA: np.ndarray, simsB: np.ndarray, 
     alignment_fr: np.ndarray, alignment_h: np.ndarray,
     sim_type: str,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Computes similarity and alignment taking into account reverse complements."""
-    # L1 normalize
-    simsA = simsA / np.sum(simsA, axis=(1, 2), keepdims=True)
-    simsB = simsB / np.sum(simsB, axis=(1, 2), keepdims=True)
-
+    # Normalize motifs
     match sim_type:
-        case "l2" | "sqrt":
-            if sim_type == "l2":
-                # L2 normalization
-                simsA = simsA / np.linalg.norm(simsA, axis=(1, 2), keepdims=True)
-                simsB = simsB / np.linalg.norm(simsB, axis=(1, 2), keepdims=True)
-            elif sim_type == "sqrt":
-                # square root
-                simsA = np.sqrt(simsA)
-                simsB = np.sqrt(simsB)
+        case "sqrt":
+            simsA = simsA / np.sum(simsA, axis=(1, 2), keepdims=True) # L1 normalize
+            simsB = simsB / np.sum(simsB, axis=(1, 2), keepdims=True)
+            simsA = np.sqrt(simsA) # Sqrt normalize
+            simsB = np.sqrt(simsB)
+        case "l2":
+            simsA = simsA / np.sum(simsA, axis=(1, 2), keepdims=True) # L1 normalize
+            simsB = simsB / np.sum(simsB, axis=(1, 2), keepdims=True) 
+            simsA = simsA / np.linalg.norm(simsA, axis=(1, 2), keepdims=True) # L2 normalize
+            simsB = simsB / np.linalg.norm(simsB, axis=(1, 2), keepdims=True)
+        case "jss":
+            simsA = simsA / np.sum(simsA, axis=(1, 2), keepdims=True) # L1 normalize
+            simsB = simsB / np.sum(simsB, axis=(1, 2), keepdims=True)
+        case "dot" | "log":
+            pass
 
+    # Caculate similarity
+    match sim_type:
+        # Cosine similarity
+        case "l2" | "sqrt" | "dot":
             # forward similarity
-            sim_1, _ = _compute_similarity_alignment(
+            sim_1, _ = _compute_similarity_and_alignment(
                 simsA, simsB
             )  # skew-symmetric alignment
             # backward similarity
-            sim_2, _ = _compute_similarity_alignment(
+            sim_2, _ = _compute_similarity_and_alignment(
                 _reverse_complement(simsA), simsB
             )  # symmetric alignment
 
@@ -86,8 +101,9 @@ def cpu_compute_similarity(
             sim = np.max(sim_12, axis=0)
             return sim.get()
         
-        case "jss":
-            similarity = _compute_similarity_jss(
+        # Jensen-Shannon Similarity
+        case "jss" | "log":
+            similarity = _compute_known_similarity_jss(
                 simsA, simsB,
                 alignment_fr, alignment_h
             )
@@ -114,7 +130,7 @@ def _reverse_complement(motifs: np.ndarray) -> np.ndarray:
     return motifs[:, ::-1, ::-1]
 
 
-def _compute_similarity_alignment(
+def _compute_similarity_and_alignment(
     motif_set_1: np.ndarray, motif_set_2: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray]:
     """Computes similarity and alignment for two sets of motifs."""
@@ -152,7 +168,7 @@ def _compute_similarity_alignment(
     return best_alignment_scores, best_alignments
 
 
-def _compute_similarity_alignment_jss(
+def _compute_similarity_and_alignment_jss(
     motifsP: np.ndarray, motifsQ: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray]:
     """Computes Jensen-Shannon Similarity (JSS) and alignment for two sets of motifs,
@@ -209,7 +225,7 @@ def _compute_similarity_alignment_jss(
     return best_alignment_scores, best_alignments
 
 
-def _compute_similarity_jss(
+def _compute_known_similarity_jss(
     motifsP: np.ndarray, motifsQ: np.ndarray,
     alignment_fr: np.ndarray, alignment_h: np.ndarray
 ) -> np.ndarray:

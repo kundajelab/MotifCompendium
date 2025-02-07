@@ -179,6 +179,82 @@ def average_motifs(
     return squashed_motif_8
 
 
+def normalize_motifs(motifs: np.ndarray, sim_type: str) -> np.ndarray:
+    """Normalize a stack of motifs, based on the similarity type.
+
+    Args:
+        motifs: A np.ndarray representing a stack of motifs. (N, 30, 4)
+        sim_type: The similarity type to use for normalization.
+    
+    Returns:
+        A np.ndarray representing the normalized motifs. (N, 30, 4)
+    """
+    match sim_type:
+        case "sqrt":
+            return np.sqrt(motifs / np.sum(motifs, axis=(1, 2), keepdims=True)) # L1 sqrt normalize
+        case "l2":
+            return motifs / np.linalg.norm(motifs, axis=(1, 2), keepdims=True) # L2 normalize
+        case "jss":
+            return motifs / np.sum(motifs, axis=(1, 2), keepdims=True) # L1 normalize
+        case "dot" | "log":
+            return motifs
+
+
+def subtract_motifs(
+    motifs_core: np.ndarray, 
+    motifs_subtract: np.ndarray, 
+    align_idx: np.ndarray,
+    align_fr: np.ndarray,
+    align_h: np.ndarray
+) -> np.ndarray:
+    """Subtract two motifs.
+
+    Args:
+        motifs_core: A np.ndarray representing a stack of 4 channel motifs,
+          to subtract from. (N, 30, 4)
+        motifs_subtract: A np.ndarray representing a stack of 4 channel motifs,
+          to be subtracted. (M, 30, 4)
+        align_idx: A np.ndarray containing the index of the motif in motifs_sub
+          to subtract per motif in motifs_core. (N,)
+        align_fr: A np.ndarray containing the forward/reverse complement
+          relationship between any two motifs. (N,)
+        align_h: A np.ndarray containing the horizontal shift information between
+          any two motifs. (N,)
+
+    Returns:
+        A np.ndarray representing the subtracted motifs. (N, 30, 4)
+    """
+    updated_motifs = np.zeros_like(motifs_core)
+    for i in range(motifs_core.shape[0]):
+        motif_subtract = motifs_subtract[align_idx[i], :, :] # (30, 4)
+        if align_fr[i] == 1:
+            motif_subtract = motif_subtract[::-1, ::-1] # Align fr: Reverse complement
+            motif_subtract = shift_and_zero_pad(motif_subtract, align_h[i])
+        else:
+            motif_subtract = shift_and_zero_pad(motif_subtract, -align_h[i])
+        updated_motifs[i, :, :] = np.clip(motifs_core[i, :, :] - motif_subtract, 0, None) # Clip negative values
+    return updated_motifs
+
+
+def shift_and_zero_pad(motif: np.ndarray, shift: int) -> np.ndarray:
+    """Shift a motif and zero pad it.
+
+    Args:
+        motif: A np.ndarray representing a 4 channel motif. (30, 4)
+        shift: The amount to shift the motif by.
+    """
+    if abs(shift) >= motif.shape[0]:
+        raise ValueError("Shift value exceeds the length of the motif.")
+    shifted = np.zeros_like(motif)
+    if shift > 0:
+        shifted[shift:, :] = motif[:-shift, :]
+    elif shift < 0:
+        shifted[:shift, :] = motif[-shift:, :]
+    else:
+        shifted = motif
+    return shifted
+
+
 ###########
 # ENTROPY #
 ###########
