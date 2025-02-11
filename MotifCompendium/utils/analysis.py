@@ -578,24 +578,24 @@ def label_composites_from_pfms(
     composite_names = []
     composite_idxs = []
     iter = 0
-    max_composite_sim = 1
-    while iter < max_constituents and max_composite_sim > min_score:
+    max_composite_score = 1
+    while iter < max_constituents and max_composite_score > min_score:
         pfm_similarity, pfm_alignfr, pfm_alignh = utils_similarity.compute_similarities_and_alignments(
             [mc_motifs, pfm_motifs], [(0, 1)], 
             max_chunk, max_cpus, use_gpu, sim_type=calc_type, safe=False,)[0]
 
-        composite_sims = np.max(pfm_similarity, axis=1) / _calculate_composite_scale(iter+1, sim_type)
+        composite_score = np.max(pfm_similarity, axis=1) / _calculate_composite_scale(iter+1, sim_type)
         pfm_match_idx = np.argmax(pfm_similarity, axis=1)
         pfm_alignfr = pfm_alignfr[np.arange(pfm_alignfr.shape[0]), pfm_match_idx]
         pfm_alignh = pfm_alignh[np.arange(pfm_alignh.shape[0]), pfm_match_idx]
         match_names = []
         for i, x in enumerate(pfm_match_idx):
-            if composite_sims[i] > min_score:
+            if composite_score[i] > min_score:
                 match_names.append(pfm_names[x])
             else:
                 match_names.append(None)
-                composite_sims[i] = 0
-        composite_scores.append(composite_sims)
+                composite_score[i] = 0
+        composite_scores.append(composite_score)
         composite_names.append(match_names)
         composite_idxs.append(pfm_match_idx)
 
@@ -603,7 +603,7 @@ def label_composites_from_pfms(
         mc_motifs = utils_motif.subtract_motifs(mc_motifs, pfm_motifs, pfm_match_idx, pfm_alignfr, pfm_alignh)
         
         # Iterate
-        max_composite_sim = np.max(composite_sims) # To determine whether to continue        
+        max_composite_score = np.max(composite_score) # To determine whether to continue        
         iter += 1
 
     # Save in metadata table
@@ -614,7 +614,12 @@ def label_composites_from_pfms(
     # Create matched pfm logos
     if save_col_logo:
         for i in range(iter):
-            match_motif_dicts = [{"motif": utils_motif.motif_to_df(pfm_motifs[x])} for x in composite_idxs[i]]
+            match_motif_dicts = []
+            for j, x in enumerate(composite_idxs[i]):
+                if composite_scores[i][j] > min_score:
+                    match_motif_dicts.append({"motif": utils_motif.motif_to_df(pfm_motifs[x])})
+                else:
+                    match_motif_dicts.append(None)
             # Create motif plots
             if max_cpus is None:
                 match_motif_strings = []
@@ -629,8 +634,7 @@ def label_composites_from_pfms(
                     match_motif_strings = p.map(utils_plotting._motifdict_to_utf8_plot, match_motif_dicts)
         
             # Save in metadata table
-            save_col_logo = f"LOGOIMAGEDATA__{save_col_logo}{i}"
-            mc[save_col_logo] = match_motif_strings
+            mc[f"{save_col_logo}{i}"] = match_motif_strings
     
 
 def _calculate_composite_scale(iter: int, sim_type: str) -> float:
