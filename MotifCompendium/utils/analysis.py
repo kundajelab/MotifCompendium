@@ -512,10 +512,11 @@ def label_from_pfms(
         mc[save_col_logo] = match_motif_strings
 
 
-def label_composites_from_pfm(
+def label_composites_from_pfms(
     mc: MotifCompendium,
     pfm_file: str,
-    num_composites: int = 2,
+    min_score: float = 0.5,
+    max_constituents: int = 3,
     save_col_comp_sim: str = "pfm_composite_similarity",
     save_col_comp_match: str = "pfm_composite_match",
     save_col_logo: str | None = None,
@@ -537,9 +538,12 @@ def label_composites_from_pfm(
     Args:
         mc: The MotifCompendium to analyze.
         pfm_file: The PFM file path.
-        num_composites: The number of composite iterations to compute.
-        save_col_comp_sim: The column under which the final composite similarity will be stored.
-        save_col_comp_match: The column under which the composite matches will be stored.
+        min_score: The minimum similarity score to consider as a composite match.
+        max_constituents: The maximum number of constituent motifs to conside in a composite.
+        save_col_comp_sim: The columns under which the final composite similarity scores 
+          will be stored, as save_col_comp_sim0, save_col_comp_sim1, etc.
+        save_col_comp_match: The columns under which the composite matches will be stored,
+          as save_col_comp_match0, save_col_comp_match1, etc.
         max_chunk: The maximum number of motifs to compute similarity on at a time. If
           None, it will compute the entire similarity matrix at once.
         max_cpus: The maximum number of CPUs to use for computing similarity. If None,
@@ -549,9 +553,9 @@ def label_composites_from_pfm(
         sim_type: The type of similarity metric to compute: 'l2', 'sqrt', 'jss'"""
     # Load pfm
     if pfm_file.endswith("_pfms.txt"):
-        pfm_motifs, names = utils_loader.load_pfm(pfm_file)
+        pfm_motifs, pfm_names = utils_loader.load_pfm(pfm_file)
     elif pfm_file.endswith(".meme.txt") or pfm_file.endswith(".meme"):
-        pfm_motifs, names = utils_loader.load_meme(pfm_file)
+        pfm_motifs, pfm_names = utils_loader.load_meme(pfm_file)
     else:
         raise ValueError("pfm_file must be a _pfm.txt, .meme, or .meme.txt file.")
     mc_motifs = mc.motifs
@@ -570,31 +574,52 @@ def label_composites_from_pfm(
             calc_type = "log"
 
     # Calculate composite similarity
-    comp_names = []
-    for i in range(num_composites):
+    composite_scores = []
+    composite_names = []
+    composite_idxs = []
+    iter = 0
+    max_composite_sim = 1
+    while iter < max_constituents and max_composite_sim > min_score:
         pfm_similarity, pfm_alignfr, pfm_alignh = utils_similarity.compute_similarities_and_alignments(
             [mc_motifs, pfm_motifs], [(0, 1)], 
-            max_chunk, max_cpus, use_gpu, sim_type=calc_type, safe=False,
-        )[0]
+            max_chunk, max_cpus, use_gpu, sim_type=calc_type, safe=False,)[0]
 
-        comp_sims = np.max(pfm_similarity, axis=1)
+        composite_sims = np.max(pfm_similarity, axis=1) / _calculate_composite_scale(iter+1, sim_type)
         pfm_match_idx = np.argmax(pfm_similarity, axis=1)
-        comp_names.append([names[x] for x in pfm_match_idx])
         pfm_alignfr = pfm_alignfr[np.arange(pfm_alignfr.shape[0]), pfm_match_idx]
         pfm_alignh = pfm_alignh[np.arange(pfm_alignh.shape[0]), pfm_match_idx]
+        match_names = []
+        for i, x in enumerate(pfm_match_idx):
+            if composite_sims[i] > min_score:
+                match_names.append(pfm_names[x])
+            else:
+                match_names.append(None)
+                composite_sims[i] = 0
+        composite_scores.append(composite_sims)
+        composite_names.append(match_names)
+        composite_idxs.append(pfm_match_idx)
 
         # Subtract best match
         mc_motifs = utils_motif.subtract_motifs(mc_motifs, pfm_motifs, pfm_match_idx, pfm_alignfr, pfm_alignh)
+        
+        # Iterate
+        max_composite_sim = np.max(composite_sims) # To determine whether to continue        
+        iter += 1
 
-        # Create matched pfm logos
-        if save_col_logo:
-            save_col_logo = f"LOGOIMAGEDATA__{save_col_logo}{i}"
-            match_motif_dicts = [{"motif": utils_motif.motif_to_df(pfm_motifs[x])} for x in pfm_match_idx]
+    # Save in metadata table
+    for i in range(iter):
+        mc[f"{save_col_comp_sim}{i}"] = composite_scores[i]
+        mc[f"{save_col_comp_match}{i}"] = composite_names[i]
+    
+    # Create matched pfm logos
+    if save_col_logo:
+        for i in range(iter):
+            match_motif_dicts = [{"motif": utils_motif.motif_to_df(pfm_motifs[x])} for x in composite_idxs[i]]
             # Create motif plots
             if max_cpus is None:
                 match_motif_strings = []
-                for i in range(len(match_motif_dicts)):
-                    match_motif_strings.append(utils_plotting._motifdict_to_utf8_plot(match_motif_dicts[i]))
+                for j in range(len(match_motif_dicts)):
+                    match_motif_strings.append(utils_plotting._motifdict_to_utf8_plot(match_motif_dicts[j]))
             else:
                 # Plot in parallel
                 num_processes = min(
@@ -602,20 +627,24 @@ def label_composites_from_pfm(
                 )  # don't use more CPUs than available
                 with multiprocessing.Pool(processes=num_processes) as p:
                     match_motif_strings = p.map(utils_plotting._motifdict_to_utf8_plot, match_motif_dicts)
+        
+            # Save in metadata table
+            save_col_logo = f"LOGOIMAGEDATA__{save_col_logo}{i}"
             mc[save_col_logo] = match_motif_strings
+    
 
-    # Scale score
-    match sim_type:
-        case "l2":
-            scale = 1 / np.sqrt(num_composites)
-        case "jss":
-            scale = 1 - np.sqrt(0.5 * (-np.log(num_composites) 
-                - (num_composites + 1) / num_composites * np.log((num_composites + 1) / (2 * num_composites)) 
-                + (num_composites - 1) / num_composites * np.log(2 * num_composites)))
-        case _:
-            scale = 1
-
-    # Save in metadata table
-    mc[save_col_comp_sim] = comp_sims / scale
-    for i in range(num_composites):
-        mc[save_col_comp_match + f"{i}"] = comp_names[i]
+def _calculate_composite_scale(iter: int, sim_type: str) -> float:
+    """Calculate the scale factor for composite similarity calculation,
+      based on the number of iterations and similarity metric type."""
+    if iter > 1:
+        match sim_type:
+            case "l2":
+                return 1 / np.sqrt(iter)
+            case "jss":
+                return 1 - np.sqrt(0.5 * (-np.log(iter) 
+                    - (iter + 1) / iter * np.log((iter + 1) / (2 * iter)) 
+                    + (iter - 1) / iter * np.log(2 * iter)))
+            case _:
+                return 1.0
+    else:
+        return 1.0

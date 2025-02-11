@@ -200,6 +200,21 @@ def normalize_motifs(motifs: np.ndarray, sim_type: str) -> np.ndarray:
             return motifs
 
 
+def calculate_least_squares_scale(var_motif: np.ndarray, ref_motif: np.ndarray) -> float:
+    """Find the best scaling factor, a,  to apply to the variable motif to match the scale
+      of the reference motif, by minimizing the least squares between the two motifs
+      (i.e., min ||a * target - ref||^2).
+    
+    Args:
+        var_motif: A np.ndarray representing the target motif. (30, 4)
+        ref_motif: A np.ndarray representing the reference motif. (30, 4)
+        
+    Returns:
+        A float representing the best scaling factor.
+    """
+    return np.sum(var_motif * ref_motif) / np.sum(var_motif ** 2)
+
+
 def subtract_motifs(
     motifs_core: np.ndarray, 
     motifs_subtract: np.ndarray, 
@@ -207,7 +222,7 @@ def subtract_motifs(
     align_fr: np.ndarray,
     align_h: np.ndarray
 ) -> np.ndarray:
-    """Subtract two motifs.
+    """Subtract two motif stacks, based on idx, alignment, and forward/reverse complement.
 
     Args:
         motifs_core: A np.ndarray representing a stack of 4 channel motifs,
@@ -226,18 +241,20 @@ def subtract_motifs(
     """
     updated_motifs = np.zeros_like(motifs_core)
     for i in range(motifs_core.shape[0]):
+        motif_core = motifs_core[i, :, :] # (30, 4)
         motif_subtract = motifs_subtract[align_idx[i], :, :] # (30, 4)
         if align_fr[i] == 1:
             motif_subtract = motif_subtract[::-1, ::-1] # Align fr: Reverse complement
-            motif_subtract = shift_and_zero_pad(motif_subtract, align_h[i])
+            motif_subtract = shift_and_fill_zero(motif_subtract, align_h[i])
         else:
-            motif_subtract = shift_and_zero_pad(motif_subtract, -align_h[i])
-        updated_motifs[i, :, :] = np.clip(motifs_core[i, :, :] - motif_subtract, 0, None) # Clip negative values
+            motif_subtract = shift_and_fill_zero(motif_subtract, -align_h[i])
+        motif_subtract = motif_subtract * calculate_least_squares_scale(motif_subtract, motif_core) # Scale to best match core
+        updated_motifs[i, :, :] = np.clip(motif_core - motif_subtract, 0, None) # Clip negative values
     return updated_motifs
 
 
-def shift_and_zero_pad(motif: np.ndarray, shift: int) -> np.ndarray:
-    """Shift a motif and zero pad it.
+def shift_and_fill_zero(motif: np.ndarray, shift: int) -> np.ndarray:
+    """Shift a motif and replace with zeros.
 
     Args:
         motif: A np.ndarray representing a 4 channel motif. (30, 4)
