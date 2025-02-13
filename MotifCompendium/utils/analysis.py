@@ -612,7 +612,7 @@ def label_composites_from_pfms(
         mc[f"{save_col_comp_match}{i}"] = composite_names[i]
     
     # Create matched pfm logos
-    if save_col_logo:
+    if save_col_logo is not None:
         for i in range(iter):
             match_motif_dicts = []
             for j, x in enumerate(composite_idxs[i]):
