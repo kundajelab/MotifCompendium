@@ -5,7 +5,7 @@ dependencies:
 - jinja2
 - numpy
 - pandas
-- tables
+- pytables
 - seaborn
 - scikit-learn
 - pip
