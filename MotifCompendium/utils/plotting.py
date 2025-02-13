@@ -204,6 +204,8 @@ def _motifdict_to_utf8_plot(motif_dict: dict[str, Any]) -> str:
     Returns:
         A UTF-8 encoded string of a motif plot.
     """
+    if motif_dict is None:
+        return ""
     # Parse through arguments in motif_dict
     motif = motif_dict["motif"]
     face_color = motif_dict["bgcolor"] if "bgcolor" in motif_dict else "white"

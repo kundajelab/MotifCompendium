@@ -451,6 +451,23 @@ class MotifCompendium:
             [self.alignment_fr], [self.alignment_h],
             max_chunk, max_cpus, use_gpu, sim_type
         )[0]
+    
+    def sort_values(self, by: str, ascending: bool = False) -> None:
+        """Sorts the MotifCompendium by a column in the metadata.
+
+        Args:
+            metadata_column: The column in the metadata to sort the MotifCompendium by.
+            ascending: Whether or not to sort the MotifCompendium in ascending order.
+              (Default is False; i.e., in descending order.)
+
+        Notes:
+            This function is an in-place operation.
+        """
+        self.metadata.sort_values(by=by, ascending=ascending, inplace=True)
+        self.motifs = self.motifs[self.metadata.index, :, :]
+        self.similarity = self.similarity[self.metadata.index, :][:, self.metadata.index]
+        self.alignment_fr = self.alignment_fr[self.metadata.index, :][:, self.metadata.index]
+        self.alignment_h = self.alignment_h[self.metadata.index, :][:, self.metadata.index]
 
     def __str__(self) -> str:
         """String representation of the MotifCompendium."""

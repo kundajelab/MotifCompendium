@@ -508,7 +508,7 @@ def label_from_pfms(
                 max_cpus, multiprocessing.cpu_count()
             )  # don't use more CPUs than available
             with multiprocessing.Pool(processes=num_processes) as p:
-                match_motif_strings = p.map(utils_plotting._motifdict_to_utf8_plot, match_motif_dicts)
+                match_motif_strings = p.map(utils_plotting._motifdict_to_utf8_plot, filter(None, match_motif_dicts))
         mc[save_col_logo] = match_motif_strings
 
 
