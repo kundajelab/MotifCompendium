@@ -634,7 +634,7 @@ def label_composites_from_pfms(
                     match_motif_strings = p.map(utils_plotting._motifdict_to_utf8_plot, match_motif_dicts)
         
             # Save in metadata table
-            mc[f"{save_col_logo}{i}"] = match_motif_strings
+            mc[f"LOGOIMAGEDATA__{save_col_logo}{i}"] = match_motif_strings
     
 
 def _calculate_composite_scale(iter: int, sim_type: str) -> float:
