@@ -96,35 +96,33 @@
 </head>
 <body>
 
-<h2>DataFrame Table</h2>
-
-<table id="dataTable">
+<table id="DataTable">
     <tr>
         {% for col in columns %}
-            {% if loop.index0 == 0 or loop.index0 == 1 %}
-	    <th>{{ col }}</th>
-	    {% else %}
+            {% if image_column[loop.index0] %}
+                <th>{{ col }}</th>
+            {% else %}
                 <th>
                     {{ col }}
-		    <button class="sort-button" onclick="sortTable({{ loop.index0 }}, true)">&uarr;</button>
-		    <button class="sort-button" onclick="sortTable({{ loop.index0 }}, false)">&darr;</button>
+                    <button class="sort-button" onclick="sortTable({{ loop.index0 }}, true)">&uarr;</button>
+                    <button class="sort-button" onclick="sortTable({{ loop.index0 }}, false)">&darr;</button>
                 </th>
-	    {% endif %}
+            {% endif %}
         {% endfor %}
     </tr>
     <tr>
         {% for col in columns %}
-            {% if loop.index0 == 0 or loop.index0 == 1 %}
-	        <td></td>
-	    {% else %}
-	        <td><input type="text" class="filterInput" onkeyup="filterTable()"></td>
-	    {% endif %}
+            {% if image_column[loop.index0] %}
+                <td></td>
+            {% else %}
+            <td><input type="text" class="filterInput" onkeyup="filterTable()" data-columnindex="{{ loop.index0 }}"></td>
+            {% endif %}
         {% endfor %}
     </tr>
     {% for row in rows %}
         <tr>
             {% for col in columns %}
-                {% if loop.index0 == 0 or loop.index0 == 1 %}
+                {% if image_column[loop.index0] %}
                     <td><img src="data:image/png;base64,{{ row[col] }}" class="plot-image"></td>
                 {% else %}
                     <td>{{ row[col] }}</td>
