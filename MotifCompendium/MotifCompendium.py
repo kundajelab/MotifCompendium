@@ -972,6 +972,7 @@ class MotifCompendium:
         other_cluster_col: str = "cluster",
         save_col_sim: str = "mc_match_similarity",
         save_col_match: str = "mc_match",
+        save_col_logo: str = "mc_match_logo",
         l2: bool | None = None,
     ) -> None:
         """Assign clusters to motifs based on an existing clustered MotifCompendium.
@@ -987,10 +988,7 @@ class MotifCompendium:
               names of each motif.
             save_col_sim: The column under which the highest similarity will be stored.
             save_col_match: The column under which the closest match will be stored.
-            max_chunk: The maximum number of motifs to compute similarity on at a time.
-            max_cpus: The maximum number of CPUs to use for computing similarity (only
-              used if use_gpu is False).
-            use_gpu: Whether or not to use GPUs to accelerate computing similarity.
+            save_col_logo: The column under which the closest match logo will be stored.
             l2: Whether or not to use L2 normalization (instead of sqrt normalization)
               when computing motif similarity.
 
@@ -998,12 +996,37 @@ class MotifCompendium:
             Assumes that this MotifCompendium and other have the same dimensions for
               their motifs. (Ex: 4 and 4 or 8 and 8.)
         """
-        assert self.motifs.shape[2] == other.motifs.shape[2]
+        if self.motifs.shape[2] != other.motifs.shape[2]:
+            raise TypeError(
+                "MotifCompendiums must have the same motif dimensionality to compare."
+            )
+        # Compute similarity
         mc_similarity, _, _ = utils_similarity.compute_similarities(
             [self.motifs, other.motifs], [(0, 1)], l2=l2
         )[0]
-        self[save_col_sim] = np.max(mc_similarity, axis=1)
-        self[save_col_match] = [
-            other[other_cluster_col].tolist()[x]
-            for x in np.argmax(mc_similarity, axis=1)
-        ]
+        closest_similarity = np.max(mc_similarity, axis=1)
+        closest_index = np.argmax(mc_similarity, axis=1)
+        # Save match information
+        self[save_col_sim] = closest_similarity
+        other_clusters = other.metadata[other_cluster_col].tolist()
+        self[save_col_match] = [other_clusters[x] for x in closest_index]
+        if "logo (fwd)" not in other.__images.columns:
+            # Generate forward logos if not already generated
+            motifs = (
+                utils_motif.motif_8_to_4(other.motifs)
+                if other.motifs.shape[2] == 8
+                else other.motifs
+            )
+            motif_plotting_inputs = [
+                utils_plotting.LogoPlottingInput(motif) for motif in motifs
+            ]
+            self.__images[save_col_logo] = [
+                motif_input.utf8_plot
+                for motif_input in utils_plotting.plot_many_motif_logos(
+                    motif_plotting_inputs
+                )
+            ]
+        else:
+            # Copy forward logos from other MotifCompendium
+            other_fwd_strings = other.__images["logo (fwd)"].tolist()
+            self.__images[save_col_logo] = [other_fwd_strings[x] for x in closest_index]

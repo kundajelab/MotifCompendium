@@ -9,6 +9,7 @@ import seaborn as sns
 import MotifCompendium
 import MotifCompendium.utils.loader as utils_loader
 import MotifCompendium.utils.motif as utils_motif
+import MotifCompendium.utils.plotting as utils_plotting
 import MotifCompendium.utils.similarity as utils_similarity
 
 
@@ -228,10 +229,7 @@ def export_clusters_modisco(
     mc: MotifCompendium,
     cluster_name: str,
     save_loc: str,
-    ic: bool = False,
-    max_chunk: int | None = None,
-    max_cpus: int | None = None,
-    use_gpu: bool | None = None,
+    inverse_ic: bool = False,
     sim_type: str | None = None,
 ) -> None:
     """Exports cluster averages in the Modisco file format.
@@ -243,12 +241,8 @@ def export_clusters_modisco(
         mc: The MotifCompendium to analyze.
         cluster_name: The motif clustering to compute average motifs on.
         save_loc: The location to save the Modisco h5py to.
-        ic: Whether or not to revert IC-scaled motifs back to linear space, by applying
+        inverse_ic: Whether or not to revert IC-scaled motifs back to linear space, by applying
           inverse IC-scaling.
-        max_chunk: The maximum number of motifs to compute similarity on at a time.
-        max_cpus: The maximum number of CPUs to use for computing similarity (only used
-          if use_gpu is False).
-        use_gpu: Whether or not to use GPUs to accelerate computing similarity.
         sim_type: The type of similarity metric to compute: 'l2', 'sqrt', 'jss'
         safe: Whether or not to construct the MotifCompendium safely.
 
@@ -258,9 +252,6 @@ def export_clusters_modisco(
     mc_cluster_avg = mc.cluster_averages(
         cluster_name,
         aggregations=[],
-        max_chunk=max_chunk,
-        max_cpus=max_cpus,
-        use_gpu=use_gpu,
         sim_type=sim_type,
         safe=False,
     )  # kwargs for new avg similarity calculations
@@ -276,7 +267,7 @@ def export_clusters_modisco(
             for i in range(len(mc_cluster_avg_pos)):
                 name = str(mc_cluster_avg_pos.metadata.loc[i, "name"])
                 cwm = mc_cluster_avg_pos.motifs[i, :, :]
-                if ic:
+                if inverse_ic:
                     cwm = utils_motif.ic_invert(cwm)
                 pos_cluster = pos_group.create_group(name)
                 pos_cluster.create_dataset("contrib_scores", data=cwm)
@@ -287,7 +278,7 @@ def export_clusters_modisco(
             for i in range(len(mc_cluster_avg_neg)):
                 name = str(mc_cluster_avg_neg.metadata.loc[i, "name"])
                 cwm = mc_cluster_avg_neg.motifs[i, :, :]
-                if ic:
+                if inverse_ic:
                     cwm = utils_motif.ic_invert(cwm)
                 neg_cluster = neg_group.create_group(name)
                 neg_cluster.create_dataset("contrib_scores", data=cwm)
@@ -440,9 +431,7 @@ def label_from_pfms(
     pfm_file: str,
     save_col_sim: str = "pfm_match_similarity",
     save_col_match: str = "pfm_match",
-    max_chunk: int | None = None,
-    max_cpus: int | None = None,
-    use_gpu: bool | None = None,
+    save_col_logo: str = "pfm_match_logo",
     l2: bool | None = None,
 ) -> None:
     """Automatic labeling of motifs from a pfm file.
@@ -457,26 +446,34 @@ def label_from_pfms(
         pfm_file: The PFM file path.
         save_col_sim: The column under which the highest similarity will be stored.
         save_col_match: The column under which the closest match will be stored.
-        max_chunk: The maximum number of motifs to compute similarity on at a time. If
-          None, it will compute the entire similarity matrix at once.
-        max_cpus: The maximum number of CPUs to use for computing similarity. If None,
-          it will only use a single CPU.
-        use_gpu: Whether or not to use GPUs to accelerate computing similarity. Uses
-          only CPUs by default.
         l2: Whether or not to use L2 normalization (instead of sqrt normalization) when
           computing motif similarity.
     """
+    # Load PFM database
     if pfm_file.endswith("_pfms.txt"):
         pfm_motifs, names = utils_loader.load_pfm(pfm_file)
     elif pfm_file.endswith(".meme.txt") or pfm_file.endswith(".meme"):
         pfm_motifs, names = utils_loader.load_meme(pfm_file)
     else:
         raise ValueError("pfm_file must be a _pfm.txt, .meme, or .meme.txt file.")
+    # Compute similarity
     mc_motifs = mc.motifs
     if mc_motifs.shape[2] == 8:
         mc_motifs = utils_motif.motif_8_to_4_abs(mc_motifs)
     pfm_similarity, _, _ = utils_similarity.compute_similarities(
-        [mc_motifs, pfm_motifs], [(0, 1)], max_chunk, max_cpus, use_gpu, l2=l2
+        [mc_motifs, pfm_motifs], [(0, 1)], l2=l2
     )[0]
-    mc[save_col_sim] = np.max(pfm_similarity, axis=1)
-    mc[save_col_match] = [names[x] for x in np.argmax(pfm_similarity, axis=1)]
+    closest_similarity = np.max(pfm_similarity, axis=1)
+    closest_index = np.argmax(pfm_similarity, axis=1)
+    # Save match information
+    mc[save_col_sim] = closest_similarity
+    mc[save_col_match] = [names[x] for x in closest_index]
+    motif_plotting_inputs = [
+        utils_plotting.LogoPlottingInput(motif) for motif in pfm_motifs
+    ]
+    mc.__images[save_col_logo] = [
+        motif_input.utf8_plot
+        for motif_input in utils_plotting.plot_many_motif_logos(
+            motif_plotting_inputs
+        )
+    ]
