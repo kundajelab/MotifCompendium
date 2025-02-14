@@ -45,7 +45,9 @@ def cluster(
             )
             return modularity_leiden_clustering(adjacency_matrix, **kwargs)
         case "cpm" | "cpm_leiden" | "cpm_weighted_leiden":
-            adjacency_matrix = similarity_matrix * (similarity_matrix >= similarity_threshold)
+            adjacency_matrix = similarity_matrix * (
+                similarity_matrix >= similarity_threshold
+            )
             return cpm_leiden_clustering(adjacency_matrix, **kwargs)
         # Connected-component
         case "cc":

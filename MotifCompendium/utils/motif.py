@@ -35,13 +35,13 @@ def ic_scale(x: np.ndarray) -> np.ndarray:
 
 def ic_invert(x: np.ndarray) -> np.ndarray:
     """Invert a motif by information content scaling.
-    
+
     Args:
         x: A (L, 4) motif, in log_4 space.
-        
+
     Returns:
         An information content inverted (L, 4) motif, in linear space.
-    
+
     Notes:
         Motifs must be in log_4 space. (e.g., After ic_scale)
     """
@@ -131,10 +131,10 @@ def resize_motif(motif: np.ndarray, resize_to: int = 30) -> np.ndarray:
 
 
 def average_motifs(
-    motifs_8: np.ndarray, 
-    alignment_fb: np.ndarray, 
+    motifs_8: np.ndarray,
+    alignment_fb: np.ndarray,
     alignment_h: np.ndarray,
-    weights: list[float | int] | None = None
+    weights: list[float | int] | None = None,
 ) -> np.ndarray:
     """Compute the average of many motifs.
 

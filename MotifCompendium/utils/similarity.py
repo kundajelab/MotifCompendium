@@ -53,16 +53,26 @@ def compute_similarities(
             chunked_motif_stack_list,
             chunked_calculations,
             chunk_map,
-        ) = _chunk_motif_stacks_and_calcs(motif_stack_list, calculations, utils_config.get_max_chunk())
+        ) = _chunk_motif_stacks_and_calcs(
+            motif_stack_list, calculations, utils_config.get_max_chunk()
+        )
         chunked_results = _compute_similarity_and_align_parallel(
-            chunked_motif_stack_list, chunked_calculations, utils_config.get_max_cpus(), utils_config.get_use_gpu(), l2
+            chunked_motif_stack_list,
+            chunked_calculations,
+            utils_config.get_max_cpus(),
+            utils_config.get_use_gpu(),
+            l2,
         )
         return _reassemble_results(
             calculations, chunked_calculations, chunked_results, chunk_map
         )
     else:
         return _compute_similarity_and_align_parallel(
-            motif_stack_list, calculations, utils_config.get_max_cpus(), utils_config.get_use_gpu(), l2
+            motif_stack_list,
+            calculations,
+            utils_config.get_max_cpus(),
+            utils_config.get_use_gpu(),
+            l2,
         )
 
 
@@ -124,6 +134,7 @@ def _compute_similarity_and_align_parallel(
     if use_gpu:
         # SINGLE GPU CALCULATIONS
         from .similarity_core_gpu import gpu_compute_similarity_and_align
+
         return [
             gpu_compute_similarity_and_align(
                 motif_stack_list[c[0]], motif_stack_list[c[1]], l2

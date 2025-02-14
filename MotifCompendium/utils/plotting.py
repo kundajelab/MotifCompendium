@@ -6,6 +6,7 @@ import logomaker
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.style as mplstyle
+
 mplstyle.use("fast")
 import numpy as np
 import pandas as pd
@@ -52,7 +53,7 @@ class LogoPlottingInput:
         bgcolor: str = "white",
         encode: bool = True,
         ax: matplotlib.axes.Axes | None = None,
-        save_loc: str | None = None
+        save_loc: str | None = None,
     ) -> None:
         """LogoPlottingInput constructor.
 
@@ -141,10 +142,10 @@ def plot_motif_logo(motif_info: LogoPlottingInput) -> LogoPlottingInput:
 
 
 def plot_many_motif_logos(
-    motif_info_list: list[LogoPlottingInput]
+    motif_info_list: list[LogoPlottingInput],
 ) -> list[LogoPlottingInput]:
     """Plot the logos of multiple motifs.
-    
+
     Calls plot_motif_logo() on each motif in motif_info_list and returns the updated
       list. Parallelizes the plotting if allowed by config.get_max_cpus() > 1.
 
@@ -160,8 +161,8 @@ def plot_many_motif_logos(
     matplotlib.use("Agg")  # Use Agg backend
     # Determine the number of processes to use
     num_processes = min(
-            get_max_cpus(), multiprocessing.cpu_count()
-        )  # don't use more CPUs than available
+        get_max_cpus(), multiprocessing.cpu_count()
+    )  # don't use more CPUs than available
     # Plot
     if num_processes == 1:
         for motif_info in motif_info_list:

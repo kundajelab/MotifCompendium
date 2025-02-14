@@ -49,9 +49,7 @@ def motif_collection_html(
         f.write(rendered_html)
 
 
-def table_html(
-    table: pd.DataFrame, image_column: list[bool], html_out: str
-) -> None:
+def table_html(table: pd.DataFrame, image_column: list[bool], html_out: str) -> None:
     """Creates an html file displaying the values in a pd.DataFrame.
 
     Creates a table HTML file of the values in a pd.DataFrame. Some of the columns can
@@ -72,7 +70,9 @@ def table_html(
     # Load HTML template
     template = env.get_template("table_template.html")
     # Render HTML with data
-    rendered_html = template.render(columns=columns, rows=rows, image_column=image_column)
+    rendered_html = template.render(
+        columns=columns, rows=rows, image_column=image_column
+    )
     # Write HTML to file
     with open(html_out, "w") as f:
         f.write(rendered_html)

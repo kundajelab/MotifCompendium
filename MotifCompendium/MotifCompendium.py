@@ -424,7 +424,7 @@ class MotifCompendium:
             and (self.motifs.shape[0] == len(self.metadata))
         ):
             raise TypeError("Attribute shapes do not align.")
-    
+
     def get_saved_images(self) -> list[str]:
         """Returns a list of saved images in the MotifCompendium."""
         return list(self.__images.columns)
@@ -633,7 +633,12 @@ class MotifCompendium:
             motif_plotting_inputs = [
                 utils_plotting.LogoPlottingInput(motif) for motif in motifs
             ]
-            self.__images["logo (fwd)"] = [motif_input.utf8_plot for motif_input in utils_plotting.plot_many_motif_logos(motif_plotting_inputs)]
+            self.__images["logo (fwd)"] = [
+                motif_input.utf8_plot
+                for motif_input in utils_plotting.plot_many_motif_logos(
+                    motif_plotting_inputs
+                )
+            ]
         if "logo (rev)" not in self.__images.columns:
             motifs = (
                 utils_motif.motif_8_to_4(self.motifs)
@@ -641,9 +646,15 @@ class MotifCompendium:
                 else self.motifs
             )
             motif_plotting_inputs = [
-                utils_plotting.LogoPlottingInput(motif, revcomp=True) for motif in motifs
+                utils_plotting.LogoPlottingInput(motif, revcomp=True)
+                for motif in motifs
             ]
-            self.__images["logo (rev)"] = [motif_input.utf8_plot for motif_input in utils_plotting.plot_many_motif_logos(motif_plotting_inputs)]
+            self.__images["logo (rev)"] = [
+                motif_input.utf8_plot
+                for motif_input in utils_plotting.plot_many_motif_logos(
+                    motif_plotting_inputs
+                )
+            ]
         # Build table
         columns = ["logo (fwd)", "logo (rev)"] + columns
         table_columns = []
@@ -651,7 +662,9 @@ class MotifCompendium:
         for c in columns:
             if c in self.metadata.columns:
                 if c in self.__images.columns:
-                    raise KeyError(f"Column {c} is a column in metadata and __images. Object invalid.")
+                    raise KeyError(
+                        f"Column {c} is a column in metadata and __images. Object invalid."
+                    )
                 else:
                     table_columns.append(self.metadata[c])
                     image_column.append(False)
@@ -659,9 +672,11 @@ class MotifCompendium:
                 table_columns.append(self.__images[c])
                 image_column.append(True)
             else:
-                raise KeyError(f"{c} must be a column in metadata or a generated image.")
+                raise KeyError(
+                    f"{c} must be a column in metadata or a generated image."
+                )
         table_df = pd.concat(table_columns, axis=1)
-            
+
         utils_visualization.table_html(table_df, image_column, html_out)
 
     def heatmap(

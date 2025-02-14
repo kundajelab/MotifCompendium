@@ -4,14 +4,15 @@ import h5py
 import numpy as np
 import pandas as pd
 
-from .motif import ic_scale, motif_4_to_8, resize_motif
+from MotifCompendium.utils.config import get_max_cpus
+from MotifCompendium.utils.motif import ic_scale, motif_4_to_8, resize_motif
 
 
 ####################
 # PUBLIC FUNCTIONS #
 ####################
 def load_modiscos(
-    modisco_dict: dict[str, str], ic: bool = True, max_cpus: int | None = None
+    modisco_dict: dict[str, str], ic: bool = True
 ) -> tuple[np.ndarray, list[str], list[int]]:
     """Load motifs, names, seqlet counts, and model names from multiple Modisco file.
 
@@ -21,20 +22,18 @@ def load_modiscos(
     Args:
         modisco_dict: A dictionary from model name to Modisco file path.
         ic: Whether or not to apply information content scaling to Modisco motifs.
-        max_cpus: The maximum number of processes to use for loading motifs from
-          Modisco files. If None, Modisco files will be loaded serially.
 
     Returns:
         A tuple of motifs, motif names, number of seqlets per motifs, and model names.
 
     Notes:
         For parallel loading, the number of processes used will be the minimum of
-          max_cpus and multiprocessing.cpu_count().
+          get_max_cpus and multiprocessing.cpu_count().
         Assumes that all motifs are stored within "pos_patterns" or "neg_patterns".
         Motifs are returned as an (N, 30, 8) motif stack.
         Using ic scaling is highly recommended.
     """
-    if max_cpus is None:
+    if get_max_cpus is None:
         # Load serially
         sims, motif_names, seqlet_counts, model_names = [], [], [], []
         for m_name, m_loc in modisco_dict.items():
@@ -48,7 +47,7 @@ def load_modiscos(
     else:
         # Load in parallel
         num_processes = min(
-            max_cpus, multiprocessing.cpu_count()
+            get_max_cpus, multiprocessing.cpu_count()
         )  # don't use more CPUs than available
         m_names, m_locs = [], []
         for m_name, m_loc in modisco_dict.items():
@@ -185,7 +184,9 @@ def load_meme(meme_file: str) -> tuple[np.ndarray, list[str]]:
             if not active_pwm:
                 if x.startswith("MOTIF"):
                     active_pwm = True
-                    current_pwm_name = x.split(" ")[-1]  # MEME ALLOWS FOR ALTERNATE NAMES IN [2]
+                    current_pwm_name = x.split(" ")[
+                        -1
+                    ]  # MEME ALLOWS FOR ALTERNATE NAMES IN [2]
                     looking_for_motif_info = True
             else:
                 if looking_for_motif_info:
