@@ -38,6 +38,9 @@ class LogoPlottingInput:
         name: A str representing the name of the motif. Not plotted.
         encode: A bool representing whether the plot should be encoded as a UTF-8
           string.
+        fast_plot: A bool representing whether or not the plot should be generated
+          quickly using custom plotting code. If True, use fast plotting code. If False,
+          plot using logomaker.
         bgcolor: A str representing the background color of the logo.
         ax: A matplotlib.axes.Axes object representing the axes of the plot.
         save_loc: A str representing the location where the plot should be saved.
@@ -52,6 +55,7 @@ class LogoPlottingInput:
         name: str = "motif",
         bgcolor: str = "white",
         encode: bool = True,
+        fast_plot: bool = True,
         ax: matplotlib.axes.Axes | None = None,
         save_loc: str | None = None,
     ) -> None:
@@ -66,6 +70,7 @@ class LogoPlottingInput:
             name: A str that is assigned to self.name.
             bgcolor: A str that is assigned to self.bgcolor.
             encode: A bool that is assigned to self.encode.
+            fast_plot: A bool that is assigned to self.fast_plot.
             ax: A matplotlib.axes.Axes object that is assigned to self.ax.
             save_loc: A str that is assigned to self.save_loc.
         """
@@ -79,6 +84,7 @@ class LogoPlottingInput:
         # Plot options
         self.bgcolor = bgcolor
         self.encode = encode
+        self.fast_plot = fast_plot
         # Outputs
         self.ax = ax
         self.save_loc = save_loc
@@ -99,8 +105,7 @@ class LogoPlottingInput:
         # Then shift
         motif_df.index += self.pos
         # Then set bounds
-        motif_df.reindex(range(self.xmin, self.xmax + 1), fill_value=0)
-        return motif_df
+        return motif_df.reindex(range(self.xmin, self.xmax + 1), fill_value=0)
 
 
 ###########################
@@ -121,14 +126,19 @@ def plot_motif_logo(motif_info: LogoPlottingInput) -> LogoPlottingInput:
     Returns:
         A LogoPlottingInput object containing the plot of the motif.
     """
+    print(f"\n--- plotting {motif_info.name} ---")
     # Get Axes
     if motif_info.ax is None:
         fig, ax = plt.subplots(figsize=(6, 2), facecolor=motif_info.bgcolor)
         plot_ax = ax
     else:
         plot_ax = motif_info.ax
+        plot_ax.set_facecolor(motif_info.bgcolor)
     # Plot
-    logomaker.Logo(motif_info.get_motif_df(), ax=plot_ax)
+    if motif_info.fast_plot:
+        plot_logo_on_axis_custom(motif_info.get_motif_df(), plot_ax)
+    else:
+        logomaker.Logo(motif_info.get_motif_df(), ax=plot_ax)
     plot_ax.spines[["top", "right", "bottom", "left"]].set_visible(False)
     plot_ax.set_axis_off()
     # Save
@@ -139,6 +149,110 @@ def plot_motif_logo(motif_info: LogoPlottingInput) -> LogoPlottingInput:
         motif_info.utf8_plot = encode_figure_as_utf8(fig)
     # Return updated LogoPlottingInput
     return motif_info
+
+
+def plot_logo_on_axis_custom(motif_df: pd.DataFrame, ax: matplotlib.axes.Axes) -> None:
+    """Plots a motif with rectangles.
+
+    Fast custom code for plotting a motif with rectangles. This is faster than using
+        logomaker.Logo().
+
+    Args:
+        motif_df: A pd.DataFrame of the motif.
+        ax: A matplotlib.axes.Axes object to plot the motif on.
+    """
+    cols = motif_df.columns
+    max_y = 0
+    min_y = 0
+    for index, row in motif_df.iterrows():
+        # Get order of nucleotides
+        pos_nucleotides = []
+        neg_nucleotides = []
+        for c in cols:
+            if row[c] > 0:
+                pos_nucleotides.append((row[c], c))
+            if row[c] < 0:
+                neg_nucleotides.append((row[c], c))
+        pos_nucleotides = sorted(pos_nucleotides)
+        neg_nucleotides = sorted(neg_nucleotides, reverse=True)
+        # Plot
+        x = index - 0.5  # Between (index - 0.5, index + 0.5)
+        # Plot pos nucleotides
+        y = 0
+        for n_height, n in pos_nucleotides:
+            match (n):
+                case "A":
+                    __plot_a(x+0.05, y, 0.9, n_height, ax)
+                case "T":
+                    __plot_t(x+0.05, y, 0.9, n_height, ax)
+                case "C":
+                    __plot_c(x+0.05, y, 0.9, n_height, ax)
+                case "G":
+                    __plot_g(x+0.05, y, 0.9, n_height, ax)
+                case _:
+                    raise KeyError("Illegal nucleotide")
+            y += n_height
+        max_y = max(max_y, y)
+        # Plot neg nucleotides
+        y = 0
+        for n_height, n in neg_nucleotides:
+            match (n):
+                case "A":
+                    __plot_a(x+0.05, y, 0.9, n_height, ax)
+                case "T":
+                    __plot_t(x+0.05, y, 0.9, n_height, ax)
+                case "C":
+                    __plot_c(x+0.05, y, 0.9, n_height, ax)
+                case "G":
+                    __plot_g(x+0.05, y, 0.9, n_height, ax)
+                case _:
+                    raise KeyError("Illegal nucleotide")
+            y += n_height
+        min_y = min(min_y, y)
+    # Set xlim, ylim
+    ax.set_xlim([min(motif_df.index) - 0.5, max(motif_df.index) + 0.5])
+    ax.set_ylim([1.1 * min_y, 1.1 * max_y])
+    print(ax.get_xlim(), ax.get_ylim())
+
+
+def __plot_a(x, y, width, height, ax) -> None:
+    """Plots adenine."""
+    dx = width/4
+    dy = height/6
+    ax.add_patch(matplotlib.patches.Rectangle((x, y), dx, 5*dy, facecolor="green"))
+    ax.add_patch(matplotlib.patches.Rectangle((x+3*dx, y), dx, 5*dy, facecolor="green"))
+    ax.add_patch(matplotlib.patches.Rectangle((x+dx, y+5*dy), 2*dx, dy, facecolor="green"))
+    ax.add_patch(matplotlib.patches.Rectangle((x+dx, y+3*dy), 2*dx, dy, facecolor="green"))
+
+
+def __plot_t(x, y, width, height, ax) -> None:
+    """Plots thyamine."""
+    dx = width/8
+    dy = height/6
+    ax.add_patch(matplotlib.patches.Rectangle((x, y+5*dy), 8*dx, dy, facecolor="red"))
+    ax.add_patch(matplotlib.patches.Rectangle((x+3*dx, y), 2*dx, 5*dy, facecolor="red"))
+
+
+def __plot_c(x, y, width, height, ax) -> None:
+    """Plots cytosine."""
+    dx = width/4
+    dy = height/6
+    ax.add_patch(matplotlib.patches.Rectangle((x+dx, y), 2*dx, dy, facecolor="mediumblue"))
+    ax.add_patch(matplotlib.patches.Rectangle((x+dx, y+5*dy), 2*dx, dy, facecolor="mediumblue"))
+    ax.add_patch(matplotlib.patches.Rectangle((x+3*dx, y+dy), dx, dy, facecolor="mediumblue"))
+    ax.add_patch(matplotlib.patches.Rectangle((x+3*dx, y+4*dy), dx, dy, facecolor="mediumblue"))
+    ax.add_patch(matplotlib.patches.Rectangle((x, y+dy), dx, 4*dy, facecolor="mediumblue"))
+
+def __plot_g(x, y, width, height, ax) -> None:
+    """Plots guanine."""
+    dx = width/4
+    dy = height/6
+    ax.add_patch(matplotlib.patches.Rectangle((x+dx, y), 2*dx, dy, facecolor="orange"))
+    ax.add_patch(matplotlib.patches.Rectangle((x+dx, y+5*dy), 2*dx, dy, facecolor="orange"))
+    ax.add_patch(matplotlib.patches.Rectangle((x+3*dx, y+dy), dx, dy, facecolor="orange"))
+    ax.add_patch(matplotlib.patches.Rectangle((x+3*dx, y+4*dy), dx, dy, facecolor="orange"))
+    ax.add_patch(matplotlib.patches.Rectangle((x, y+dy), dx, 4*dy, facecolor="orange"))
+    ax.add_patch(matplotlib.patches.Rectangle((x+2*dx, y+2*dy), 2*dx, dy, facecolor="orange"))
 
 
 def plot_many_motif_logos(
@@ -178,13 +292,13 @@ def plot_many_motif_logos(
     return motif_info_list
 
 
-def encode_figure_as_utf8(fig: plt.figure.Figure) -> str:
+def encode_figure_as_utf8(fig: matplotlib.figure.Figure) -> str:
     """Encodes a figure as a UTF-8 string.
 
     Encodes a figure as a UTF-8 string and returns the string.
 
     Args:
-        fig: A plt.figure.Figure object.
+        fig: A matplotlib.figure.Figure object.
 
     Returns:
         A UTF-8 encoded string of the figure.

@@ -473,7 +473,5 @@ def label_from_pfms(
     ]
     mc.__images[save_col_logo] = [
         motif_input.utf8_plot
-        for motif_input in utils_plotting.plot_many_motif_logos(
-            motif_plotting_inputs
-        )
+        for motif_input in utils_plotting.plot_many_motif_logos(motif_plotting_inputs)
     ]

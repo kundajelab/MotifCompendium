@@ -33,7 +33,7 @@ def load_modiscos(
         Motifs are returned as an (N, 30, 8) motif stack.
         Using ic scaling is highly recommended.
     """
-    if get_max_cpus is None:
+    if get_max_cpus() is None:
         # Load serially
         sims, motif_names, seqlet_counts, model_names = [], [], [], []
         for m_name, m_loc in modisco_dict.items():
@@ -47,7 +47,7 @@ def load_modiscos(
     else:
         # Load in parallel
         num_processes = min(
-            get_max_cpus, multiprocessing.cpu_count()
+            get_max_cpus(), multiprocessing.cpu_count()
         )  # don't use more CPUs than available
         m_names, m_locs = [], []
         for m_name, m_loc in modisco_dict.items():

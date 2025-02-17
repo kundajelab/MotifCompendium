@@ -464,7 +464,9 @@ class MotifCompendium:
             keep_idxs = list(metadata_slice.index)
             metadata_slice = metadata_slice.reset_index(drop=True)
             # __images
-            __images_slice = self.__images[key].reset_index(drop=True)
+            __images_slice = self.__images[
+                key.reindex(self.__images.index)
+            ].reset_index(drop=True)
             # matrices
             motifs_slice = self.motifs[keep_idxs, :, :]
             similarity_slice = self.similarity[keep_idxs, :][:, keep_idxs]
@@ -593,12 +595,15 @@ class MotifCompendium:
                 group_motifs = [motif_info.get_motif_df() for motif_info in group]
                 motifs_concat = pd.concat(group_motifs)
                 average_motif_df = motifs_concat.groupby(motifs_concat.index).mean()
+                min_index_val = min(average_motif_df.index)
+                max_index_val = max(average_motif_df.index)
                 average_motif_info = utils_plotting.LogoPlottingInput(
                     average_motif_df.to_numpy(),
-                    pos=min(average_motif_df.index),
+                    pos=min_index_val,
                     name="AVERAGE",
                     bgcolor="palegreen",
                 )
+                average_motif_info.set_bounds(min_index_val, max_index_val)
                 group.insert(0, average_motif_info)
         # Submit to plotting function
         utils_visualization.motif_collection_html(motif_groups, html_out)

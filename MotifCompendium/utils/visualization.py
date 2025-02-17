@@ -35,7 +35,7 @@ def motif_collection_html(
     # Plot
     all_motifs = utils_plotting.plot_many_motif_logos(all_motifs)
     # Redefine motif_groups using updated LogoPlottingInput objects
-    for (start, end), group_name in group_to_motif_idx.items():
+    for group_name, (start, end) in group_to_motif_idx.items():
         motif_groups[group_name] = all_motifs[start:end]
     # Create Jinja2 environment
     current_dir = os.path.dirname(os.path.abspath(__file__))
