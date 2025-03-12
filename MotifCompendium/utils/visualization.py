@@ -49,7 +49,9 @@ def motif_collection_html(
         f.write(rendered_html)
 
 
-def table_html(table: pd.DataFrame, image_column: list[bool], html_out: str) -> None:
+def table_html(
+    table: pd.DataFrame, image_column: list[bool], html_out: str, editable: bool
+) -> None:
     """Creates an html file displaying the values in a pd.DataFrame.
 
     Creates a table HTML file of the values in a pd.DataFrame. Some of the columns can
@@ -61,6 +63,7 @@ def table_html(table: pd.DataFrame, image_column: list[bool], html_out: str) -> 
         image_column: A list of booleans indicating which columns contain UTF-8 encoded
           images.
         html_out: The path to save he html file.
+        editable: A boolean of whether or not the text values in the table can be edited.
     """
     columns = table.columns.tolist()
     rows = table.to_dict(orient="records")
@@ -71,7 +74,7 @@ def table_html(table: pd.DataFrame, image_column: list[bool], html_out: str) -> 
     template = env.get_template("table_template.html")
     # Render HTML with data
     rendered_html = template.render(
-        columns=columns, rows=rows, image_column=image_column
+        columns=columns, rows=rows, image_column=image_column, editable=editable
     )
     # Write HTML to file
     with open(html_out, "w") as f:

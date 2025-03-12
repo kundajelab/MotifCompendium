@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
-from MotifCompendium.utils.config import get_max_cpus
+from MotifCompendium.utils.config import get_fast_plotting, get_max_cpus
 from MotifCompendium.utils.motif import motif_to_df
 
 
@@ -55,7 +55,6 @@ class LogoPlottingInput:
         name: str = "motif",
         bgcolor: str = "white",
         encode: bool = True,
-        fast_plot: bool = True,
         ax: matplotlib.axes.Axes | None = None,
         save_loc: str | None = None,
     ) -> None:
@@ -70,7 +69,6 @@ class LogoPlottingInput:
             name: A str that is assigned to self.name.
             bgcolor: A str that is assigned to self.bgcolor.
             encode: A bool that is assigned to self.encode.
-            fast_plot: A bool that is assigned to self.fast_plot.
             ax: A matplotlib.axes.Axes object that is assigned to self.ax.
             save_loc: A str that is assigned to self.save_loc.
         """
@@ -84,7 +82,6 @@ class LogoPlottingInput:
         # Plot options
         self.bgcolor = bgcolor
         self.encode = encode
-        self.fast_plot = fast_plot
         # Outputs
         self.ax = ax
         self.save_loc = save_loc
@@ -126,16 +123,14 @@ def plot_motif_logo(motif_info: LogoPlottingInput) -> LogoPlottingInput:
     Returns:
         A LogoPlottingInput object containing the plot of the motif.
     """
-    print(f"\n--- plotting {motif_info.name} ---")
     # Get Axes
     if motif_info.ax is None:
         fig, ax = plt.subplots(figsize=(6, 2), facecolor=motif_info.bgcolor)
         plot_ax = ax
     else:
         plot_ax = motif_info.ax
-        plot_ax.set_facecolor(motif_info.bgcolor)
     # Plot
-    if motif_info.fast_plot:
+    if get_fast_plotting():
         plot_logo_on_axis_custom(motif_info.get_motif_df(), plot_ax)
     else:
         logomaker.Logo(motif_info.get_motif_df(), ax=plot_ax)
@@ -182,13 +177,13 @@ def plot_logo_on_axis_custom(motif_df: pd.DataFrame, ax: matplotlib.axes.Axes) -
         for n_height, n in pos_nucleotides:
             match (n):
                 case "A":
-                    __plot_a(x+0.05, y, 0.9, n_height, ax)
+                    __plot_a(x + 0.05, y, 0.9, n_height, ax)
                 case "T":
-                    __plot_t(x+0.05, y, 0.9, n_height, ax)
+                    __plot_t(x + 0.05, y, 0.9, n_height, ax)
                 case "C":
-                    __plot_c(x+0.05, y, 0.9, n_height, ax)
+                    __plot_c(x + 0.05, y, 0.9, n_height, ax)
                 case "G":
-                    __plot_g(x+0.05, y, 0.9, n_height, ax)
+                    __plot_g(x + 0.05, y, 0.9, n_height, ax)
                 case _:
                     raise KeyError("Illegal nucleotide")
             y += n_height
@@ -198,13 +193,13 @@ def plot_logo_on_axis_custom(motif_df: pd.DataFrame, ax: matplotlib.axes.Axes) -
         for n_height, n in neg_nucleotides:
             match (n):
                 case "A":
-                    __plot_a(x+0.05, y, 0.9, n_height, ax)
+                    __plot_a(x + 0.05, y, 0.9, n_height, ax)
                 case "T":
-                    __plot_t(x+0.05, y, 0.9, n_height, ax)
+                    __plot_t(x + 0.05, y, 0.9, n_height, ax)
                 case "C":
-                    __plot_c(x+0.05, y, 0.9, n_height, ax)
+                    __plot_c(x + 0.05, y, 0.9, n_height, ax)
                 case "G":
-                    __plot_g(x+0.05, y, 0.9, n_height, ax)
+                    __plot_g(x + 0.05, y, 0.9, n_height, ax)
                 case _:
                     raise KeyError("Illegal nucleotide")
             y += n_height
@@ -212,47 +207,222 @@ def plot_logo_on_axis_custom(motif_df: pd.DataFrame, ax: matplotlib.axes.Axes) -
     # Set xlim, ylim
     ax.set_xlim([min(motif_df.index) - 0.5, max(motif_df.index) + 0.5])
     ax.set_ylim([1.1 * min_y, 1.1 * max_y])
-    print(ax.get_xlim(), ax.get_ylim())
 
 
 def __plot_a(x, y, width, height, ax) -> None:
     """Plots adenine."""
-    dx = width/4
-    dy = height/6
-    ax.add_patch(matplotlib.patches.Rectangle((x, y), dx, 5*dy, facecolor="green"))
-    ax.add_patch(matplotlib.patches.Rectangle((x+3*dx, y), dx, 5*dy, facecolor="green"))
-    ax.add_patch(matplotlib.patches.Rectangle((x+dx, y+5*dy), 2*dx, dy, facecolor="green"))
-    ax.add_patch(matplotlib.patches.Rectangle((x+dx, y+3*dy), 2*dx, dy, facecolor="green"))
+    dx = width / 4
+    dy = height / 6
+    # left
+    ax.add_patch(
+        matplotlib.patches.Rectangle((x, y), dx, 5 * dy, facecolor="green", aa=False)
+    )
+    # right
+    ax.add_patch(
+        matplotlib.patches.Rectangle(
+            (x + 3 * dx, y), dx, 5 * dy, facecolor="green", aa=False
+        )
+    )
+    # top
+    ax.add_patch(
+        matplotlib.patches.Rectangle(
+            (x + dx, y + 5 * dy), 2 * dx, dy, facecolor="green", aa=False
+        )
+    )
+    ax.add_patch(
+        matplotlib.patches.Polygon(
+            [[x, y + 5 * dy],  [x + dx, y + 5*dy], [x + dx, y + 6 * dy]],
+            closed=False,
+            facecolor="green",
+            aa=False
+        )
+    )
+    ax.add_patch(
+        matplotlib.patches.Polygon(
+            [[x + 4 * dx, y + 5 * dy], [x + 3 * dx, y + 5 * dy], [x + 3 * dx, y + 6 * dy]],
+            closed=False,
+            facecolor="green",
+            aa=False
+        )
+    )
+    # middle
+    ax.add_patch(
+        matplotlib.patches.Rectangle(
+            (x + dx, y + 3 * dy), 2 * dx, dy, facecolor="green", aa=False
+        )
+    )
 
 
 def __plot_t(x, y, width, height, ax) -> None:
     """Plots thyamine."""
-    dx = width/8
-    dy = height/6
-    ax.add_patch(matplotlib.patches.Rectangle((x, y+5*dy), 8*dx, dy, facecolor="red"))
-    ax.add_patch(matplotlib.patches.Rectangle((x+3*dx, y), 2*dx, 5*dy, facecolor="red"))
+    dx = width / 8
+    dy = height / 6
+    # top
+    ax.add_patch(
+        matplotlib.patches.Rectangle(
+            (x, y + 5 * dy), 8 * dx, dy, facecolor="red", aa=False
+        )
+    )
+    # middle
+    ax.add_patch(
+        matplotlib.patches.Rectangle(
+            (x + 3 * dx, y), 2 * dx, 5 * dy, facecolor="red", aa=False
+        )
+    )
 
 
 def __plot_c(x, y, width, height, ax) -> None:
     """Plots cytosine."""
-    dx = width/4
-    dy = height/6
-    ax.add_patch(matplotlib.patches.Rectangle((x+dx, y), 2*dx, dy, facecolor="mediumblue"))
-    ax.add_patch(matplotlib.patches.Rectangle((x+dx, y+5*dy), 2*dx, dy, facecolor="mediumblue"))
-    ax.add_patch(matplotlib.patches.Rectangle((x+3*dx, y+dy), dx, dy, facecolor="mediumblue"))
-    ax.add_patch(matplotlib.patches.Rectangle((x+3*dx, y+4*dy), dx, dy, facecolor="mediumblue"))
-    ax.add_patch(matplotlib.patches.Rectangle((x, y+dy), dx, 4*dy, facecolor="mediumblue"))
+    dx = width / 4
+    dy = height / 6
+    # right bottom lip
+    ax.add_patch(
+        matplotlib.patches.Rectangle(
+            (x + 3 * dx, y + dy), dx, dy, facecolor="mediumblue", aa=False
+        )
+    )
+    # right top lip
+    ax.add_patch(
+        matplotlib.patches.Rectangle(
+            (x + 3 * dx, y + 4 * dy), dx, dy, facecolor="mediumblue", aa=False
+        )
+    )
+    # left
+    ax.add_patch(
+        matplotlib.patches.Rectangle(
+            (x, y + dy), dx, 4 * dy, facecolor="mediumblue", aa=False
+        )
+    )
+    # bottom
+    ax.add_patch(
+        matplotlib.patches.Polygon(
+            [[x, y + dy], [x + 4 * dx, y + dy], [x + 3 * dx, y], [x + dx, y]],
+            closed=False,
+            facecolor="mediumblue",
+            aa=False,
+        )
+    )
+    # ax.add_patch(matplotlib.patches.Rectangle((x+dx, y), 2*dx, dy, facecolor="mediumblue", aa=False)) # bottom
+    # ax.add_patch(matplotlib.patches.Polygon(
+    #     [[x, y + dy], [x+dx, y + dy], [x+dx, y]],
+    #     closed=False,
+    #     facecolor="mediumblue",
+    #     aa=False
+    # ))
+    # ax.add_patch(matplotlib.patches.Polygon(
+    #     [[x+4*dx, y+dy], [x+3*dx, y+dy], [x+3*dx, y]],
+    #     closed=False,
+    #     facecolor="mediumblue",
+    #     aa=False
+    # ))
+    # top
+    ax.add_patch(
+        matplotlib.patches.Polygon(
+            [
+                [x, y + 5 * dy],
+                [x + 4 * dx, y + 5 * dy],
+                [x + 3 * dx, y + 6 * dy],
+                [x + dx, y + 6 * dy],
+            ],
+            closed=False,
+            facecolor="mediumblue",
+            aa=False,
+        )
+    )
+    # ax.add_patch(matplotlib.patches.Rectangle((x+dx, y+5*dy), 2*dx, dy, facecolor="mediumblue", aa=False)) # top
+    # ax.add_patch(matplotlib.patches.Polygon(
+    #     [[x, y + 5*dy], [x + dx, y + 5*dy], [x + dx, y + 6*dy]],
+    #     closed=False,
+    #     facecolor="mediumblue",
+    #     aa=False
+    # ))
+    # ax.add_patch(matplotlib.patches.Polygon(
+    #     [[x+4*dx, y + 5*dy], [x + 3*dx, y + 5*dy], [x + 3*dx, y + 6*dy]],
+    #     closed=False,
+    #     facecolor="mediumblue",
+    #     aa=False
+    # ))
+    return
+
 
 def __plot_g(x, y, width, height, ax) -> None:
     """Plots guanine."""
-    dx = width/4
-    dy = height/6
-    ax.add_patch(matplotlib.patches.Rectangle((x+dx, y), 2*dx, dy, facecolor="orange"))
-    ax.add_patch(matplotlib.patches.Rectangle((x+dx, y+5*dy), 2*dx, dy, facecolor="orange"))
-    ax.add_patch(matplotlib.patches.Rectangle((x+3*dx, y+dy), dx, dy, facecolor="orange"))
-    ax.add_patch(matplotlib.patches.Rectangle((x+3*dx, y+4*dy), dx, dy, facecolor="orange"))
-    ax.add_patch(matplotlib.patches.Rectangle((x, y+dy), dx, 4*dy, facecolor="orange"))
-    ax.add_patch(matplotlib.patches.Rectangle((x+2*dx, y+2*dy), 2*dx, dy, facecolor="orange"))
+    dx = width / 4
+    dy = height / 6
+    # right bottom lip
+    ax.add_patch(
+        matplotlib.patches.Rectangle(
+            (x + 3 * dx, y + dy), dx, dy, facecolor="orange", aa=False
+        )
+    )
+    # right top lip
+    ax.add_patch(
+        matplotlib.patches.Rectangle(
+            (x + 3 * dx, y + 4 * dy), dx, dy, facecolor="orange", aa=False
+        )
+    )
+    # left
+    ax.add_patch(
+        matplotlib.patches.Rectangle(
+            (x, y + dy), dx, 4 * dy, facecolor="orange", aa=False
+        )
+    )
+    # G line
+    ax.add_patch(
+        matplotlib.patches.Rectangle(
+            (x + 2 * dx, y + 2 * dy), 2 * dx, dy, facecolor="orange", aa=False
+        )
+    )
+    # bottom
+    ax.add_patch(
+        matplotlib.patches.Polygon(
+            [[x, y + dy], [x + 4 * dx, y + dy], [x + 3 * dx, y], [x + dx, y]],
+            closed=False,
+            facecolor="orange",
+            aa=False,
+        )
+    )
+    # ax.add_patch(matplotlib.patches.Rectangle((x+dx, y), 2*dx, dy, facecolor="orange", aa=False)) # bottom
+    # ax.add_patch(matplotlib.patches.Polygon(
+    #     [[x, y + dy], [x+dx, y + dy], [x+dx, y]],
+    #     closed=False,
+    #     facecolor="orange",
+    #     aa=False
+    # ))
+    # ax.add_patch(matplotlib.patches.Polygon(
+    #     [[x+4*dx, y+dy], [x+3*dx, y+dy], [x+3*dx, y]],
+    #     closed=False,
+    #     facecolor="orange",
+    #     aa=False
+    # ))
+    # top
+    ax.add_patch(
+        matplotlib.patches.Polygon(
+            [
+                [x, y + 5 * dy],
+                [x + 4 * dx, y + 5 * dy],
+                [x + 3 * dx, y + 6 * dy],
+                [x + dx, y + 6 * dy],
+            ],
+            closed=False,
+            facecolor="orange",
+            aa=False,
+        )
+    )
+    # ax.add_patch(matplotlib.patches.Rectangle((x+dx, y+5*dy), 2*dx, dy, facecolor="orange", aa=False)) # top
+    # ax.add_patch(matplotlib.patches.Polygon(
+    #     [[x, y + 5*dy], [x + dx, y + 5*dy], [x + dx, y + 6*dy]],
+    #     closed=False,
+    #     facecolor="orange",
+    #     aa=False
+    # ))
+    # ax.add_patch(matplotlib.patches.Polygon(
+    #     [[x+4*dx, y + 5*dy], [x + 3*dx, y + 5*dy], [x + 3*dx, y + 6*dy]],
+    #     closed=False,
+    #     facecolor="orange",
+    #     aa=False
+    # ))
+    return
 
 
 def plot_many_motif_logos(
