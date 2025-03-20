@@ -1,5 +1,6 @@
 import base64
 import io
+import itertools
 import multiprocessing
 
 import logomaker
@@ -13,7 +14,7 @@ import pandas as pd
 import seaborn as sns
 
 from MotifCompendium.utils.config import get_fast_plotting, get_max_cpus
-from MotifCompendium.utils.motif import motif_to_df
+from MotifCompendium.utils.motif import motif_to_df, validate_motif_stack_standard
 
 
 #######################
@@ -27,7 +28,7 @@ class LogoPlottingInput:
       logomaker.
 
     Attributes:
-        motif: A np.ndarray of shape (30, 4) representing the motif that needs to be
+        motif: A np.ndarray of shape (L, 4) representing the motif that needs to be
           plotted.
         revcomp: A boolean indicating whether the motif needs to be reverse
           complemented.
@@ -43,7 +44,6 @@ class LogoPlottingInput:
           plot using logomaker.
         bgcolor: A str representing the background color of the logo.
         ax: A matplotlib.axes.Axes object representing the axes of the plot.
-        save_loc: A str representing the location where the plot should be saved.
         utf8_plot: A str representing the UTF-8 encoded plot of the motif.
     """
 
@@ -56,7 +56,6 @@ class LogoPlottingInput:
         bgcolor: str = "white",
         encode: bool = True,
         ax: matplotlib.axes.Axes | None = None,
-        save_loc: str | None = None,
     ) -> None:
         """LogoPlottingInput constructor.
 
@@ -70,7 +69,6 @@ class LogoPlottingInput:
             bgcolor: A str that is assigned to self.bgcolor.
             encode: A bool that is assigned to self.encode.
             ax: A matplotlib.axes.Axes object that is assigned to self.ax.
-            save_loc: A str that is assigned to self.save_loc.
         """
         # Motif
         self.motif = motif
@@ -84,7 +82,6 @@ class LogoPlottingInput:
         self.encode = encode
         # Outputs
         self.ax = ax
-        self.save_loc = save_loc
         self.utf8_plot = ""
 
     def set_bounds(self, xmin: int, xmax: int) -> None:
@@ -108,12 +105,191 @@ class LogoPlottingInput:
 ###########################
 # LOGO PLOTTING FUNCTIONS #
 ###########################
-def plot_motif_logo(motif_info: LogoPlottingInput) -> LogoPlottingInput:
+def plot_motif_stack(
+    motif_stack: np.ndarray,
+    alignment_rc: np.ndarray | None = None,
+    alignment_h: np.ndarray | None = None,
+    show: bool = False,
+    save_loc: str | None = None,
+) -> None:
+    """Plots a stack of motifs.
+
+    Plots a stack of motifs by calling plot_many_motif_logos(). If alignment information
+      is provided, the motifs are aligned accordingly. All motifs are plotted on the same
+      figure. If show is True, the figure is shown.
+
+    Args:
+        motif_stack: A stack of motifs to be plotted.
+        alignment_rc: A (N, ) forward/reverse complement alignment vector. If None, no
+          alignment is performed.
+        alignment_h: A (N, ) horizontal alignment vector. If None, no alignment is
+          performed.
+        show: Whether or not to show the heatmap with plt.show().
+        save_loc: Where to save the motif plot to. If None, the motif plot is not saved.
+    """
+    # Check inputs
+    validate_motif_stack_standard(motif_stack)
+    N = motif_stack.shape[0]
+    if alignment_rc is not None and not (
+        isinstance(alignment_rc, np.ndarray) and alignment_rc.shape == (N,)
+    ):
+        raise TypeError(
+            "alignment_rc must be a vector whose length matches that of the motif stack."
+        )
+    if alignment_h is not None and not (
+        isinstance(alignment_h, np.ndarray) and alignment_h.shape == (N,)
+    ):
+        raise TypeError(
+            "alignment_h must be a vector whose length matches that of the motif stack."
+        )
+    # Defaults for alignment_rc and alignment_h
+    if alignment_rc is None:
+        alignment_rc = np.zeros(N).astype(bool)
+    if alignment_h is None:
+        alignment_h = np.zeros(N)
+    # Create figure
+    fig, axs = plt.subplots(N, figsize=(6, 2 * N))
+    # Prepare inputs
+    motif_info_list = []
+    for i, ax in enumerate(axs):
+        motif_info_list.append(
+            LogoPlottingInput(
+                motif_stack[i],
+                revcomp=alignment_rc[i],
+                pos=alignment_h[i],
+                encode=False,
+                ax=ax,
+            )
+        )
+    x_min = int(np.min(alignment_h))
+    x_max = int(np.max(alignment_h)) + motif_stack.shape[1]
+    for motif_info in motif_info_list:
+        motif_info.set_bounds(x_min, x_max)
+    # Plot
+    motif_info_list = plot_many_motif_logos(motif_info_list)
+    # Determine if plots need to be transferred (ocurrs when parallel plotting)
+    if motif_info_list[0].ax.figure != fig:
+        # Create new figure
+        new_fig = plt.figure(figsize=(6, 2 * N))
+        for motif_info in motif_info_list:
+            # Get variables
+            motif_info_ax = motif_info.ax
+            motif_info_figure = motif_info_ax.figure
+            # Assign axis to new figure
+            motif_info_ax.remove()
+            motif_info_ax.figure = new_fig
+            new_fig.add_axes(motif_info_ax)
+            # Remove axis's figure
+            plt.close(motif_info_figure)
+        # Remove old figure
+        plt.close(fig)
+        fig = new_fig
+        fig.tight_layout()
+    # Output
+    if save_loc is not None:
+        fig.savefig(save_loc, bbox_inches="tight")
+    if show:
+        plt.show()
+
+
+def plot_many_motif_logos(
+    motif_info_list: list[LogoPlottingInput],
+) -> list[LogoPlottingInput]:
+    """Plot the logos of multiple motifs.
+
+    Calls plot_motif_logo() on each motif in motif_info_list and returns the updated
+      list. Parallelizes the plotting if allowed by config.get_max_cpus() > 1.
+
+    Args:
+        motif_info_list: A list of LogoPlottingInput object specifying how each motif
+          should be plotted.
+
+    Returns:
+        A LogoPlottingInput object containing the plot of the motif.
+    """
+    # Use Agg backend
+    current_backend = matplotlib.get_backend()
+    matplotlib.use("Agg")  # Use Agg backend
+    # Determine the number of processes to use
+    num_processes = min(
+        get_max_cpus(), multiprocessing.cpu_count()
+    )  # don't use more CPUs than available
+    # Plot
+    if num_processes == 1 or len(motif_info_list) == 1:
+        for motif_info in motif_info_list:
+            _plot_motif_logo(motif_info)
+    else:
+        with multiprocessing.Pool(processes=num_processes) as p:
+            motif_info_list = p.map(
+                _plot_motif_logo, motif_info_list
+            )  # Overwrite because map not pass by ref
+    # Reset backend
+    matplotlib.use(current_backend)
+    # Return updated LogoPlottingInputs
+    return motif_info_list
+
+
+def encode_figure_as_utf8(fig: matplotlib.figure.Figure) -> str:
+    """Encodes a figure as a UTF-8 string.
+
+    Encodes a figure as a UTF-8 string and returns the string.
+
+    Args:
+        fig: A matplotlib.figure.Figure object.
+
+    Returns:
+        A UTF-8 encoded string of the figure.
+    """
+    buf = io.BytesIO()
+    fig.savefig(buf, bbox_inches="tight", format="png")
+    plt.close(fig)
+    buf.seek(0)
+    return base64.b64encode(buf.read()).decode("utf-8")
+
+
+############################
+# OTHER PLOTTING FUNCTIONS #
+############################
+def plot_heatmap(
+    data: np.ndarray,
+    annot: bool = False,
+    labels: list[str] | None = None,
+    show: bool = False,
+    save_loc: str | None = None,
+):
+    """Plot a heatmap.
+
+    Creates a heatmap. Includes additional options to annotate/label the heatmap and
+      optionally show and/or save the resulting plot.
+
+    Args:
+        data: A np.ndarray to plot a heatmap of.
+        annot: Whether or not to annotate each cell of the heatmap with its value.
+        labels: Labels for the rows/columns of the heatmap. If None, rows and columns
+          are not annotated. If labels are provided, data is assumed to be square.
+        show: Whether or not to show the heatmap with plt.show().
+        save_loc: Where to save the heatmap to. If None, the heatmap is not saved.
+    """
+    if labels is None:
+        df = pd.DataFrame(data)
+    else:
+        df = pd.DataFrame(data, index=labels, columns=labels)
+    plt.figure(figsize=(10, 10))
+    heatmap = sns.heatmap(df, annot=annot)
+    if save_loc is not None:
+        heatmap.get_figure().savefig(save_loc)
+    if show:
+        plt.show()
+
+
+###################################
+# PRIVATE LOGO PLOTTING FUNCTIONS #
+###################################
+def _plot_motif_logo(motif_info: LogoPlottingInput) -> LogoPlottingInput:
     """Plots the logo of a motif.
 
     Plots the logo of a motif as specified by a LogoPlottingInput object. If
       motif_info.ax is not None, the logo is plotted to that Axes object. If
-      motif_info.save_loc, the plot figure is saved to that location. If
       motif_info.encode is True, the plot is encoded as a UTF-8 string and stored in
       motif_info.utf8_plot. Returns the updated LogoPlottingInput object.
 
@@ -131,14 +307,11 @@ def plot_motif_logo(motif_info: LogoPlottingInput) -> LogoPlottingInput:
         plot_ax = motif_info.ax
     # Plot
     if get_fast_plotting():
-        plot_logo_on_axis_custom(motif_info.get_motif_df(), plot_ax)
+        _plot_logo_on_axis_fast(motif_info.get_motif_df(), plot_ax)
     else:
         logomaker.Logo(motif_info.get_motif_df(), ax=plot_ax)
     plot_ax.spines[["top", "right", "bottom", "left"]].set_visible(False)
     plot_ax.set_axis_off()
-    # Save
-    if motif_info.save_loc is not None:
-        plot_ax.figure.savefig(motif_info.save_loc, bbox_inches="tight")
     # Encode image in UTF-8
     if motif_info.encode:
         motif_info.utf8_plot = encode_figure_as_utf8(fig)
@@ -146,7 +319,7 @@ def plot_motif_logo(motif_info: LogoPlottingInput) -> LogoPlottingInput:
     return motif_info
 
 
-def plot_logo_on_axis_custom(motif_df: pd.DataFrame, ax: matplotlib.axes.Axes) -> None:
+def _plot_logo_on_axis_fast(motif_df: pd.DataFrame, ax: matplotlib.axes.Axes) -> None:
     """Plots a motif with rectangles.
 
     Fast custom code for plotting a motif with rectangles. This is faster than using
@@ -177,13 +350,13 @@ def plot_logo_on_axis_custom(motif_df: pd.DataFrame, ax: matplotlib.axes.Axes) -
         for n_height, n in pos_nucleotides:
             match (n):
                 case "A":
-                    __plot_a(x + 0.05, y, 0.9, n_height, ax)
+                    _plot_a(x + 0.05, y, 0.9, n_height, ax)
                 case "T":
-                    __plot_t(x + 0.05, y, 0.9, n_height, ax)
+                    _plot_t(x + 0.05, y, 0.9, n_height, ax)
                 case "C":
-                    __plot_c(x + 0.05, y, 0.9, n_height, ax)
+                    _plot_c(x + 0.05, y, 0.9, n_height, ax)
                 case "G":
-                    __plot_g(x + 0.05, y, 0.9, n_height, ax)
+                    _plot_g(x + 0.05, y, 0.9, n_height, ax)
                 case _:
                     raise KeyError("Illegal nucleotide")
             y += n_height
@@ -193,13 +366,13 @@ def plot_logo_on_axis_custom(motif_df: pd.DataFrame, ax: matplotlib.axes.Axes) -
         for n_height, n in neg_nucleotides:
             match (n):
                 case "A":
-                    __plot_a(x + 0.05, y, 0.9, n_height, ax)
+                    _plot_a(x + 0.05, y, 0.9, n_height, ax)
                 case "T":
-                    __plot_t(x + 0.05, y, 0.9, n_height, ax)
+                    _plot_t(x + 0.05, y, 0.9, n_height, ax)
                 case "C":
-                    __plot_c(x + 0.05, y, 0.9, n_height, ax)
+                    _plot_c(x + 0.05, y, 0.9, n_height, ax)
                 case "G":
-                    __plot_g(x + 0.05, y, 0.9, n_height, ax)
+                    _plot_g(x + 0.05, y, 0.9, n_height, ax)
                 case _:
                     raise KeyError("Illegal nucleotide")
             y += n_height
@@ -209,7 +382,7 @@ def plot_logo_on_axis_custom(motif_df: pd.DataFrame, ax: matplotlib.axes.Axes) -
     ax.set_ylim([1.1 * min_y, 1.1 * max_y])
 
 
-def __plot_a(x, y, width, height, ax) -> None:
+def _plot_a(x, y, width, height, ax) -> None:
     """Plots adenine."""
     dx = width / 4
     dy = height / 6
@@ -231,18 +404,22 @@ def __plot_a(x, y, width, height, ax) -> None:
     )
     ax.add_patch(
         matplotlib.patches.Polygon(
-            [[x, y + 5 * dy],  [x + dx, y + 5*dy], [x + dx, y + 6 * dy]],
+            [[x, y + 5 * dy], [x + dx, y + 5 * dy], [x + dx, y + 6 * dy]],
             closed=False,
             facecolor="green",
-            aa=False
+            aa=False,
         )
     )
     ax.add_patch(
         matplotlib.patches.Polygon(
-            [[x + 4 * dx, y + 5 * dy], [x + 3 * dx, y + 5 * dy], [x + 3 * dx, y + 6 * dy]],
+            [
+                [x + 4 * dx, y + 5 * dy],
+                [x + 3 * dx, y + 5 * dy],
+                [x + 3 * dx, y + 6 * dy],
+            ],
             closed=False,
             facecolor="green",
-            aa=False
+            aa=False,
         )
     )
     # middle
@@ -253,7 +430,7 @@ def __plot_a(x, y, width, height, ax) -> None:
     )
 
 
-def __plot_t(x, y, width, height, ax) -> None:
+def _plot_t(x, y, width, height, ax) -> None:
     """Plots thyamine."""
     dx = width / 8
     dy = height / 6
@@ -271,7 +448,7 @@ def __plot_t(x, y, width, height, ax) -> None:
     )
 
 
-def __plot_c(x, y, width, height, ax) -> None:
+def _plot_c(x, y, width, height, ax) -> None:
     """Plots cytosine."""
     dx = width / 4
     dy = height / 6
@@ -345,7 +522,7 @@ def __plot_c(x, y, width, height, ax) -> None:
     return
 
 
-def __plot_g(x, y, width, height, ax) -> None:
+def _plot_g(x, y, width, height, ax) -> None:
     """Plots guanine."""
     dx = width / 4
     dy = height / 6
@@ -425,91 +602,108 @@ def __plot_g(x, y, width, height, ax) -> None:
     return
 
 
-def plot_many_motif_logos(
-    motif_info_list: list[LogoPlottingInput],
-) -> list[LogoPlottingInput]:
-    """Plot the logos of multiple motifs.
-
-    Calls plot_motif_logo() on each motif in motif_info_list and returns the updated
-      list. Parallelizes the plotting if allowed by config.get_max_cpus() > 1.
-
-    Args:
-        motif_info_list: A list of LogoPlottingInput object specifying how each motif
-          should be plotted.
-
-    Returns:
-        A LogoPlottingInput object containing the plot of the motif.
+def _transfer_axis_content(source_ax, target_ax):
     """
-    # Use Agg backend
-    current_backend = matplotlib.get_backend()
-    matplotlib.use("Agg")  # Use Agg backend
-    # Determine the number of processes to use
-    num_processes = min(
-        get_max_cpus(), multiprocessing.cpu_count()
-    )  # don't use more CPUs than available
-    # Plot
-    if num_processes == 1:
-        for motif_info in motif_info_list:
-            plot_motif_logo(motif_info)
-    else:
-        with multiprocessing.Pool(processes=num_processes) as p:
-            motif_info_list = p.map(
-                plot_motif_logo, motif_info_list
-            )  # Overwrite because map not pass by ref
-    # Reset backend
-    matplotlib.use(current_backend)
-    # Return updated LogoPlottingInputs
-    return motif_info_list
-
-
-def encode_figure_as_utf8(fig: matplotlib.figure.Figure) -> str:
-    """Encodes a figure as a UTF-8 string.
-
-    Encodes a figure as a UTF-8 string and returns the string.
-
-    Args:
-        fig: A matplotlib.figure.Figure object.
-
-    Returns:
-        A UTF-8 encoded string of the figure.
+    Transfer all content from source_ax to target_ax
     """
-    buf = io.BytesIO()
-    fig.savefig(buf, bbox_inches="tight", format="png")
-    plt.close(fig)
-    buf.seek(0)
-    return base64.b64encode(buf.read()).decode("utf-8")
+    # Transfer patches (rectangles, polygons, etc)
+    for patch in source_ax.patches[
+        :
+    ]:  # Use [:] to make a copy since we'll modify the list
+        patch_type = type(patch)
 
+        # Get general properties that apply to most patches
+        props = {
+            "alpha": patch.get_alpha(),
+            "facecolor": patch.get_facecolor(),
+            "edgecolor": patch.get_edgecolor(),
+            "linewidth": patch.get_linewidth(),
+            "linestyle": patch.get_linestyle(),
+            "zorder": patch.get_zorder(),
+            "aa": getattr(patch, "_antialiased", False),  # Your patches use aa=False
+        }
 
-############################
-# OTHER PLOTTING FUNCTIONS #
-############################
-def plot_heatmap(
-    data: np.ndarray,
-    annot: bool = False,
-    labels: list[str] | None = None,
-    show: bool = False,
-    save_loc: str | None = None,
-):
-    """Plot a heatmap.
+        # Filter out None properties
+        props = {k: v for k, v in props.items() if v is not None}
 
-    Creates a heatmap. Includes additional options to annotate/label the heatmap and
-      optionally show and/or save the resulting plot.
+        # Handle specific patch types
+        if isinstance(patch, matplotlib.patches.Rectangle):
+            xy = patch.get_xy()
+            width = patch.get_width()
+            height = patch.get_height()
+            new_patch = matplotlib.patches.Rectangle(xy, width, height, **props)
 
-    Args:
-        data: A np.ndarray to plot a heatmap of.
-        annot: Whether or not to annotate each cell of the heatmap with its value.
-        labels: Labels for the rows/columns of the heatmap. If None, rows and columns
-          are not annotated. If labels are provided, data is assumed to be square.
-        show: Whether or not to show the heatmap with plt.show().
-        save_loc: Where to save the heatmap to. If None, the heatmap is not saved.
-    """
-    if labels is None:
-        df = pd.DataFrame(data)
-    else:
-        df = pd.DataFrame(data, index=labels, columns=labels)
-    plt.figure(figsize=(10, 10))
-    heatmap = sns.heatmap(df, annot=annot)
-    if save_loc is not None:
-        heatmap.get_figure().savefig(save_loc)
-    if show:
-        plt.show()
+        elif isinstance(patch, matplotlib.patches.Polygon):
+            vertices = patch.get_xy()
+            closed = patch.get_closed()
+            new_patch = matplotlib.patches.Polygon(vertices, closed=closed, **props)
+
+        # Add other patch types as needed
+        else:
+            print(f"Warning: Patch type {patch_type} not handled")
+            continue
+
+        target_ax.add_patch(new_patch)
+
+    # Transfer lines
+    for line in source_ax.lines[:]:
+        target_ax.plot(
+            line.get_xdata(),
+            line.get_ydata(),
+            color=line.get_color(),
+            linestyle=line.get_linestyle(),
+            linewidth=line.get_linewidth(),
+            marker=line.get_marker(),
+            markersize=line.get_markersize(),
+            alpha=line.get_alpha(),
+            zorder=line.get_zorder(),
+        )
+
+    # Transfer text elements
+    for text in source_ax.texts[:]:
+        target_ax.text(
+            text.get_position()[0],
+            text.get_position()[1],
+            text.get_text(),
+            fontsize=text.get_fontsize(),
+            color=text.get_color(),
+            ha=text.get_ha(),
+            va=text.get_va(),
+            alpha=text.get_alpha(),
+            rotation=text.get_rotation(),
+            zorder=text.get_zorder(),
+        )
+
+    # Transfer collections (like scatter plots)
+    for collection in source_ax.collections[:]:
+        # This is a bit complex as collections can vary
+        # Possible to add more specific handling based on your needs
+        target_ax.add_collection(collection.copy())
+
+    # Transfer images
+    for image in source_ax.images[:]:
+        target_ax.imshow(
+            image.get_array(),
+            extent=image.get_extent(),
+            alpha=image.get_alpha(),
+            zorder=image.get_zorder(),
+        )
+
+    # Copy axis limits and settings
+    target_ax.set_xlim(source_ax.get_xlim())
+    target_ax.set_ylim(source_ax.get_ylim())
+    target_ax.set_xscale(source_ax.get_xscale())
+    target_ax.set_yscale(source_ax.get_yscale())
+
+    # Copy visibility settings for spines
+    for spine in source_ax.spines:
+        target_ax.spines[spine].set_visible(source_ax.spines[spine].get_visible())
+
+    # Copy axis visibility
+    if not source_ax.axison:
+        target_ax.set_axis_off()
+
+    # Make sure changes are reflected
+    target_ax.figure.canvas.draw_idle()
+
+    return target_ax

@@ -23,6 +23,8 @@ def motif_collection_html(
           specified as a list of LogoPlottingInput objects.
         html_out: The path to save he html file.
     """
+    if not html_out.endswith(".html"):
+        html_out += ".html"
     # Keep track of which plots come from which groups to reorder them later
     all_motifs = []
     group_to_motif_idx = dict()
@@ -65,6 +67,8 @@ def table_html(
         html_out: The path to save he html file.
         editable: A boolean of whether or not the text values in the table can be edited.
     """
+    if not html_out.endswith(".html"):
+        html_out += ".html"
     columns = table.columns.tolist()
     rows = table.to_dict(orient="records")
     # Create Jinja2 environment

@@ -10,6 +10,7 @@ dependencies:
 - scikit-learn
 - pip
 - pip:
+    - beautifulsoup4
     - igraph
     - leidenalg
     - logomaker
