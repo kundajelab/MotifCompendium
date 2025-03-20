@@ -2,7 +2,7 @@ from .MotifCompendium import (
     set_compute_options,
     load,
     inspect,
-    load_old,
+    load_old_compendium,
     build,
     build_from_modisco,
     MotifCompendium,

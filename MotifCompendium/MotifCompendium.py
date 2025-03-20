@@ -122,6 +122,52 @@ def inspect(file_loc: str) -> pd.DataFrame:
     return metadata
 
 
+def load_old_compendium(file_loc: str) -> MotifCompendium:
+    """Loads an old MotifCompendium object from file.
+
+    Args:
+        file_loc: The MotifCompendium file path.
+
+    Returns:
+        The corresponding MotifCompendium object.
+
+    Notes:
+        Assumes the file is an h5py file with datasets 'motifs', 'similarity',
+          'alignment_fr', and 'alignment_h', as well as a DataFrame called 'metadata'.
+        This is meant for loading MotifCompendium objects saved before the 1.0 release.
+        Objects will forcibly be loaded safely.
+    """
+    if not os.path.exists(file_loc):
+        raise FileNotFoundError(f"File {file_loc} does not exist.")
+    try:
+        with h5py.File(file_loc, "r") as f:
+            motifs = f["motifs"][:]
+            similarity = f["similarity"][:].astype(np.single)
+            alignment_rc = f["alignment_fr"][:].astype(np.bool)
+            alignment_h = f["alignment_h"][:].astype(np.byte)
+        metadata = pd.read_hdf(file_loc, key="metadata")
+    except:
+        raise ValueError(
+            "File does not contain the necessary datasets to load a MotifCompendium."
+        )
+    metadata_columns = list(metadata.columns)
+    image_columns = [x for x in metadata_columns if x.startswith("LOGOIMAGEDATA__")]
+    nonimage_columns = [x for x in metadata_columns if x not in image_columns]
+    metadata_nonimage = metadata[nonimage_columns]
+    __images = pd.DataFrame(index=metadata.index)
+    for image_column in image_columns:
+        __images[image_column.split("LOGOIMAGEDATA__")[1]] = metadata[image_column]
+    return MotifCompendium(
+        motifs,
+        similarity,
+        alignment_rc,
+        alignment_h,
+        metadata_nonimage,
+        __images,
+        safe=True,
+    )
+
+
 def build(
     motifs: np.ndarray,
     metadata: pd.DataFrame | None = None,

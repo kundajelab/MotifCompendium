@@ -77,10 +77,10 @@ def leiden_clustering(
     weighted_adjacency_matrix: np.ndarray,
     resolution_parameter: float = 1.0,
     n_iterations: int = -1,
-    seeds: list[int] = [1]
+    seeds: list[int] = [1],
 ) -> list[int]:
     """Perform Leiden clustering with R&B's quality and a configuration null.
-    
+
     Args:
         weighted_adjacency_matrix: A square weighted adjacency matrix.
         resolution_parameter: The resolution parameter for the Leiden algorithm. A
@@ -93,12 +93,12 @@ def leiden_clustering(
           independent run of Leiden. The clustering from the run with the highest
           quailty will be returned. The length of seeds is equal to the number of
           runs of Leiden that are performed.
-    
+
     Returns:
         A list of integers where each element represents the cluster that index
           corresponds to. All elements with the same value have been assigned to the
           same cluster.
-    
+
     Notes:
         Uses Reichardt & Bornholdt's quality function with a configuration model as a
           a null. See leidenalg.RBConfigurationVertexPartition for more details.
@@ -125,10 +125,10 @@ def cpm_leiden_clustering(
     weighted_adjacency_matrix: np.ndarray,
     resolution_parameter: float = 1.0,
     n_iterations: int = -1,
-    seeds: list[int] = [1]
+    seeds: list[int] = [1],
 ) -> list[int]:
     """Perform Leiden clustering with the constant Potts model.
-    
+
     Args:
         weighted_adjacency_matrix: A square weighted adjacency matrix.
         resolution_parameter: The resolution parameter for the Leiden algorithm.
@@ -139,12 +139,12 @@ def cpm_leiden_clustering(
           independent run of Leiden. The clustering from the run with the highest
           quailty will be returned. The length of seeds is equal to the number of
           runs of Leiden that are performed.
-    
+
     Returns:
         A list of integers where each element represents the cluster that index
           corresponds to. All elements with the same value have been assigned to the
           same cluster.
-    
+
     Notes:
         Uses the constant Potts model. See leidenalg.CPMVertexPartition for more details.
     """
