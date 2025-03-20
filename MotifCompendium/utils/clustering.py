@@ -11,8 +11,8 @@ import sklearn.cluster
 ######################
 def cluster(
     similarity_matrix: np.ndarray,
-    algorithm: str = "cpm_leiden",
-    similarity_threshold: float = 0.9,
+    similarity_threshold: float,
+    algorithm: str,
     **kwargs,
 ) -> list[int]:
     """Cluster a similarity matrix.
@@ -25,7 +25,13 @@ def cluster(
         similarity_matrix: A square similarity matrix.
         similarity_threshold: The threshold above which two motifs are considered to be
           similar.
-        algorithm: A string representing which clustering algorithm to use.
+        algorithm: Which clustering algorithm to use. Supported options:
+            - "leiden": Leiden clustering with Reichardt & Bornholdt's quality function
+                and a configuration model as a null.
+            - "cpm" or "cpm_leiden": Leiden clustering with the constant Potts model.
+            - "cc": Connected-component clustering.
+            - "dense_cc": Densely connected-component clustering.
+            - "spectral": Spectral clustering.
         **kwargs: Any additional arguments to be passed to the clustering algorithm of
           choice.
 
@@ -39,16 +45,16 @@ def cluster(
     """
     match algorithm:
         # Leiden
-        case "leiden" | "weighted_leiden" | "modularity_leiden":
-            adjacency_matrix = similarity_matrix * (
+        case "leiden":
+            weighted_adjacency_matrix = similarity_matrix * (
                 similarity_matrix >= similarity_threshold
             )
-            return modularity_leiden_clustering(adjacency_matrix, **kwargs)
-        case "cpm" | "cpm_leiden" | "cpm_weighted_leiden":
-            adjacency_matrix = similarity_matrix * (
+            return leiden_clustering(weighted_adjacency_matrix, **kwargs)
+        case "cpm" | "cpm_leiden":
+            weighted_adjacency_matrix = similarity_matrix * (
                 similarity_matrix >= similarity_threshold
             )
-            return cpm_leiden_clustering(adjacency_matrix, **kwargs)
+            return cpm_leiden_clustering(weighted_adjacency_matrix, **kwargs)
         # Connected-component
         case "cc":
             adjacency_matrix = similarity_matrix >= similarity_threshold
@@ -67,25 +73,47 @@ def cluster(
 #####################
 # LEIDEN CLUSTERING #
 #####################
-def modularity_leiden_clustering(
-    adjacency_matrix: np.ndarray,
+def leiden_clustering(
+    weighted_adjacency_matrix: np.ndarray,
     resolution_parameter: float = 1.0,
     n_iterations: int = -1,
-    n_seeds: int = 2,
+    seeds: list[int] = [1]
 ) -> list[int]:
-    """Perform Leiden clustering (modularity) on a weighted similarity matrix."""
-    g = ig.Graph.Weighted_Adjacency(adjacency_matrix, mode="undirected")
-
+    """Perform Leiden clustering with R&B's quality and a configuration null.
+    
+    Args:
+        weighted_adjacency_matrix: A square weighted adjacency matrix.
+        resolution_parameter: The resolution parameter for the Leiden algorithm. A
+          resolution_parameter of 1 is equivalent to using modularity as the quality
+          function.
+        n_iterations: The number of iterations that Leiden is allowed to run. If
+          n_iterations is -1, then Leiden will run until there is no longer any
+          improvement in quality.
+        seeds: Seeds with which to run Leiden. Each seed will corresponding to an
+          independent run of Leiden. The clustering from the run with the highest
+          quailty will be returned. The length of seeds is equal to the number of
+          runs of Leiden that are performed.
+    
+    Returns:
+        A list of integers where each element represents the cluster that index
+          corresponds to. All elements with the same value have been assigned to the
+          same cluster.
+    
+    Notes:
+        Uses Reichardt & Bornholdt's quality function with a configuration model as a
+          a null. See leidenalg.RBConfigurationVertexPartition for more details.
+    """
+    g = ig.Graph.Weighted_Adjacency(weighted_adjacency_matrix, mode="undirected")
     best_quality = None
     best_membership = None
-    for seed in range(1, n_seeds + 1):
+    for seed in len(seeds):
         partition = la.find_partition(
             graph=g,
             partition_type=la.RBConfigurationVertexPartition,
             weights="weight",
             resolution_parameter=resolution_parameter,
             n_iterations=n_iterations,
-            seed=seed * 100,
+            seed=seed,
         )
         if best_quality is None or partition.quality() > best_quality:
             best_quality = partition.quality()
@@ -94,31 +122,43 @@ def modularity_leiden_clustering(
 
 
 def cpm_leiden_clustering(
-    adjacency_matrix: np.ndarray,
+    weighted_adjacency_matrix: np.ndarray,
     resolution_parameter: float = 1.0,
     n_iterations: int = -1,
-    n_seeds: int = 2,
+    seeds: list[int] = [1]
 ) -> list[int]:
-    """Perform Leiden clustering (CPM) on a weighted similarity matrix."""
-    n_vertices = adjacency_matrix.shape[0]
-    rows, cols = np.nonzero(adjacency_matrix)
-    edges = list(zip(rows, cols))
-    weights = adjacency_matrix[rows, cols]
-
-    # Create igraph object
-    g = ig.Graph(n_vertices, edges=edges)
-    g.es["weight"] = weights
-
+    """Perform Leiden clustering with the constant Potts model.
+    
+    Args:
+        weighted_adjacency_matrix: A square weighted adjacency matrix.
+        resolution_parameter: The resolution parameter for the Leiden algorithm.
+        n_iterations: The number of iterations that Leiden is allowed to run. If
+          n_iterations is -1, then Leiden will run until there is no longer any
+          improvement in quality.
+        seeds: Seeds with which to run Leiden. Each seed will corresponding to an
+          independent run of Leiden. The clustering from the run with the highest
+          quailty will be returned. The length of seeds is equal to the number of
+          runs of Leiden that are performed.
+    
+    Returns:
+        A list of integers where each element represents the cluster that index
+          corresponds to. All elements with the same value have been assigned to the
+          same cluster.
+    
+    Notes:
+        Uses the constant Potts model. See leidenalg.CPMVertexPartition for more details.
+    """
+    g = ig.Graph.Weighted_Adjacency(weighted_adjacency_matrix, mode="undirected")
     best_quality = None
     best_membership = None
-    for seed in range(1, n_seeds + 1):
+    for seed in len(seeds):
         partition = la.find_partition(
             graph=g,
             partition_type=la.CPMVertexPartition,
             weights="weight",
             resolution_parameter=resolution_parameter,
             n_iterations=n_iterations,
-            seed=seed * 100,
+            seed=seed,
         )
         if best_quality is None or partition.quality() > best_quality:
             best_quality = partition.quality()

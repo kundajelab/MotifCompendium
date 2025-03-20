@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+import upsetplot
 
 import MotifCompendium
 import MotifCompendium.utils.loader as utils_loader
@@ -20,24 +21,27 @@ def plot_similarity_distribution(
     mc: MotifCompendium,
     save_loc: str,
     vals: list[float] = [0.99, 0.98, 0.97, 0.96, 0.95, 0.9, 0.85, 0.8, 0.75, 0.7],
-    n_per: int = 5,
+    tolerance: float = 0.001,
+    n_per: int = 3,
 ) -> None:
     """Plots examples of various similarities in a MotifCompendium.
 
     For a set of similarities, create an html file displaying multiple examples of pairs
-      of motifs that have a similarity within +-0.01 of the specified similarity values.
+      of motifs that have a similarity within +-tolerance of the specified similarity
+      values.
 
     Args:
         mc: The MotifCompendium to analyze.
         save_loc: The location where to save the output html file.
         vals: The list of similarity scores to display examples of.
+        tolerance: The tolerance of error with respect to target similarity values to display.
         n_per: The number of examples of each similarity score to display.
     """
     clustering = [False for _ in range(len(mc))]
     similarity = mc.similarity
     for val in vals:
-        # Find all locations where similarity is val-0.005 < similarity < val+0.005
-        indices = np.where(np.abs(similarity - val) < 0.005)
+        # Find all locations where similarity is val-tolerance < similarity < val+tolerance
+        indices = np.where(np.abs(similarity - val) < tolerance)
         indices = list(zip(indices[0], indices[1]))
         p = 1
         for i, j in indices:
@@ -157,7 +161,7 @@ def judge_clustering(mc: MotifCompendium, clustering: str, save_loc: str) -> Non
     axs[1].set_xlabel("similarity")
     plt.suptitle(f"{clustering} ({n_clusters} clusters)")
     plt.savefig(save_loc)
-    plt.close()
+    plt.close(fig)
 
 
 #######################
@@ -217,77 +221,19 @@ def cluster_grouping_upset_plot(
     membership_lists = [
         list(set(mc[mc[clustering] == c][grouping])) for c in set(mc[clustering])
     ]
-    import upsetplot
 
     clusters_by_grouping = upsetplot.from_memberships(membership_lists)
-    upsetplot.UpSet(clusters_by_grouping, subset_size="count", **kwargs).plot()
+    fig = plt.figure()
+    upsetplot.UpSet(clusters_by_grouping, subset_size="count", **kwargs).plot(fig=fig)
     plt.savefig(save_loc, bbox_inches="tight")
-    plt.close()
+    plt.close(fig=fig)
 
 
-def export_clusters_modisco(
-    mc: MotifCompendium,
-    cluster_name: str,
-    save_loc: str,
-    inverse_ic: bool = False,
-    sim_type: str | None = None,
-) -> None:
-    """Exports cluster averages in the Modisco file format.
-
-    Given a clustering, compute cluster averages and export them in an h5py structure
-      that matches Modisco outputs.
-
-    Args:
-        mc: The MotifCompendium to analyze.
-        cluster_name: The motif clustering to compute average motifs on.
-        save_loc: The location to save the Modisco h5py to.
-        inverse_ic: Whether or not to revert IC-scaled motifs back to linear space, by applying
-          inverse IC-scaling.
-        sim_type: The type of similarity metric to compute: 'l2', 'sqrt', 'jss'
-        safe: Whether or not to construct the MotifCompendium safely.
-
-    Notes:
-        The resultant h5py file can be fed directly into FiNeMo (hitcaller).
-    """
-    mc_cluster_avg = mc.cluster_averages(
-        cluster_name,
-        aggregations=[],
-        sim_type=sim_type,
-        safe=False,
-    )  # kwargs for new avg similarity calculations
-    pos_neg = np.sum(mc_cluster_avg.motifs, axis=(1, 2)) > 0
-    pos_neg = ["pos" if x > 0 else "neg" for x in pos_neg]
-    mc_cluster_avg.metadata["pos_neg"] = pos_neg
-    with h5py.File(save_loc, "w") as f:
-        f.attrs["window_size"] = 30
-        # Positive
-        if "pos" in set(mc_cluster_avg["pos_neg"]):
-            pos_group = f.create_group("pos_patterns")
-            mc_cluster_avg_pos = mc_cluster_avg[mc_cluster_avg["pos_neg"] == "pos"]
-            for i in range(len(mc_cluster_avg_pos)):
-                name = str(mc_cluster_avg_pos.metadata.loc[i, "name"])
-                cwm = mc_cluster_avg_pos.motifs[i, :, :]
-                if inverse_ic:
-                    cwm = utils_motif.ic_invert(cwm)
-                pos_cluster = pos_group.create_group(name)
-                pos_cluster.create_dataset("contrib_scores", data=cwm)
-        # Negative
-        if "neg" in set(mc_cluster_avg["pos_neg"]):
-            neg_group = f.create_group("neg_patterns")
-            mc_cluster_avg_neg = mc_cluster_avg[mc_cluster_avg["pos_neg"] == "neg"]
-            for i in range(len(mc_cluster_avg_neg)):
-                name = str(mc_cluster_avg_neg.metadata.loc[i, "name"])
-                cwm = mc_cluster_avg_neg.motifs[i, :, :]
-                if inverse_ic:
-                    cwm = utils_motif.ic_invert(cwm)
-                neg_cluster = neg_group.create_group(name)
-                neg_cluster.create_dataset("contrib_scores", data=cwm)
-
-
-def export_modisco(
+def export_full_compendium_modisco(
     mc: MotifCompendium,
     name_col: str,
     save_loc: str,
+    inverse_ic: bool = False,
 ) -> None:
     """Exports MotifCompendium in the Modisco file format.
 
@@ -299,43 +245,89 @@ def export_modisco(
         name_col: The column in the MotifCompendium to name the motifs by.
         save_loc: The location to save the Modisco h5py to.
     Notes:
-        The motif names cannot have slashes (/) in them!
         The resultant h5py file can be fed directly into FiNeMo (hitcaller).
+        Motif names cannot have slashes (/) in them!
     """
+    utils_motif.validate_motif_stack_similarity(mc.motifs)
     size_4 = mc.motifs.shape[2] == 4
-    motifs = mc.motifs if size_4 else utils_motif.motif_8_to_4(mc.motifs)
-    pos_neg = np.sum(motifs, axis=(1, 2)) > 0
-    pos_neg = ["pos" if x > 0 else "neg" for x in pos_neg]
+    motifs = mc.motifs if size_4 else utils_motif.motif_8_to_4_signed(mc.motifs)
+    pos_neg = utils_motif.motif_posneg(motifs)
     with h5py.File(save_loc, "w") as f:
-        f.attrs["window_size"] = 30
+        f.attrs["window_size"] = motifs.shape[1]
         # Positive
         if "pos" in pos_neg:
             pos_group = f.create_group("pos_patterns")
             mc_pos = mc[pd.Series(pos_neg) == "pos"]
+            motifs_pos = (
+                mc_pos.motifs
+                if size_4
+                else utils_motif.motif_8_to_4_signed(mc_pos.motifs)
+            )
             for i in range(len(mc_pos)):
-                name = str(mc_pos.metadata.loc[i, name_col])
-                assert "/" not in name
-                cwm = (
-                    mc_pos.motifs[i, :, :]
-                    if size_4
-                    else utils_motif.motif_8_to_4(mc_pos.motifs[i, :, :])
-                )
+                name = f"{mc_pos.metadata.loc[i, name_col]}_{i}"
+                if "/" in name:
+                    raise ValueError("Motif names cannot have slashes (/) in them!")
+                motif = motifs_pos[i, :, :]
+                if inverse_ic:
+                    motif = utils_motif.ic_scale(motif, invert=True)
                 pos_cluster = pos_group.create_group(name)
-                pos_cluster.create_dataset("contrib_scores", data=cwm)
+                pos_cluster.create_dataset("contrib_scores", data=motif)
         # Negative
         if "neg" in pos_neg:
             neg_group = f.create_group("neg_patterns")
             mc_neg = mc[pd.Series(pos_neg) == "neg"]
+            motifs_neg = (
+                mc_neg.motifs
+                if size_4
+                else utils_motif.motif_8_to_4_signed(mc_neg.motifs)
+            )
             for i in range(len(mc_neg)):
-                name = str(mc_neg.metadata.loc[i, name_col])
-                assert "/" not in name
-                cwm = (
-                    mc_neg.motifs[i, :, :]
-                    if size_4
-                    else utils_motif.motif_8_to_4(mc_neg.motifs[i, :, :])
-                )
+                name = f"{mc_neg.metadata.loc[i, name_col]}_{i}"
+                if "/" in name:
+                    raise ValueError("Motif names cannot have slashes (/) in them!")
+                motif = motifs_neg[i, :, :]
+                if inverse_ic:
+                    motif = utils_motif.ic_scale(motif, invert=True)
                 neg_cluster = neg_group.create_group(name)
-                neg_cluster.create_dataset("contrib_scores", data=cwm)
+                neg_cluster.create_dataset("contrib_scores", data=motif)
+
+
+def export_clusters_modisco(
+    mc: MotifCompendium,
+    cluster_name: str,
+    save_loc: str,
+    inverse_ic: bool = False,
+) -> None:
+    """Exports cluster average motifs in the Modisco file format.
+
+    Given a clustering, compute the average MotifCompendium and call
+      export_full_compendium_modisco() on it to export them to an h5py structure that
+      matches Modisco outputs.
+
+    Args:
+        mc: The MotifCompendium to analyze.
+        cluster_name: The motif clustering to compute average motifs on.
+        save_loc: The location to save the Modisco h5py to.
+        inverse_ic: Whether or not to revert IC scaling on motifs. Consider using if
+          motifs were ingested from Modisco with IC scaling.
+        safe: Whether or not to construct the MotifCompendium safely.
+
+    Notes:
+        The resultant h5py file can be fed directly into FiNeMo (hitcaller).
+        Cluster names cannot have slashes (/) in them!
+    """
+    mc_cluster_avg = mc.cluster_averages(
+        cluster_name,
+        aggregations=[],
+        safe=False,
+    )
+    mc_cluster_avg["name"] = (mc_cluster_avg["name"].str.split("#").str[1]).astype(
+        mc[cluster_name].dtype
+    )
+    mc_cluster_avg.sort_values("name", inplace=True)
+    export_full_compendium_modisco(
+        mc_cluster_avg, "name", save_loc, inverse_ic=inverse_ic
+    )
 
 
 ####################

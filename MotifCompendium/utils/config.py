@@ -4,6 +4,7 @@
 _MAX_CHUNK = -1
 _MAX_CPUS = 1
 _USE_GPU = False
+_FAST_PLOTTING = False
 
 
 def get_max_chunk() -> int:
@@ -16,6 +17,10 @@ def get_max_cpus() -> int:
 
 def get_use_gpu() -> bool:
     return _USE_GPU
+
+
+def get_fast_plotting() -> bool:
+    return _FAST_PLOTTING
 
 
 def set_max_chunk(max_chunk: int) -> None:
@@ -41,3 +46,10 @@ def set_use_gpu(use_gpu: bool) -> None:
         raise TypeError("Use GPU must be a boolean.")
     global _USE_GPU
     _USE_GPU = use_gpu
+
+
+def set_fast_plotting(fast_plotting: bool) -> None:
+    if not isinstance(fast_plotting, bool):
+        raise TypeError("Fast plotting must be a boolean.")
+    global _FAST_PLOTTING
+    _FAST_PLOTTING = fast_plotting

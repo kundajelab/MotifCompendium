@@ -1,6 +1,8 @@
 from __future__ import annotations
 from collections import defaultdict
+import os
 
+from bs4 import BeautifulSoup
 import h5py
 import numpy as np
 import pandas as pd
@@ -21,6 +23,7 @@ def set_compute_options(
     max_chunk: int | None = None,
     max_cpus: int | None = None,
     use_gpu: bool | None = None,
+    fast_plotting: bool | None = None,
 ):
     """Set default values for max_chunk, max_cpus, and use_gpu.
 
@@ -30,6 +33,8 @@ def set_compute_options(
         max_cpus: The maximum number of CPUs to use. Used while loading multiple Modisco
           files, generating plots, and, when use_gpu is False, computing similarity.
         use_gpu: Whether or not to GPU accelerate similarity computations.
+        fast_plotting: Whether or not to use fast plotting instead of logomaker when
+          generating motif plots.
 
     Notes:
         Use GPU if possible to accelerate calculation (CuPy required.) Otherwise,
@@ -46,6 +51,8 @@ def set_compute_options(
         utils_config.set_max_cpus(max_cpus)
     if use_gpu is not None:
         utils_config.set_use_gpu(use_gpu)
+    if fast_plotting:
+        utils_config.set_fast_plotting(fast_plotting)
 
 
 ######################################
@@ -63,16 +70,18 @@ def load(file_loc: str, safe: bool = True) -> MotifCompendium:
 
     Notes:
         Assumes the file is an h5py file with datasets 'motifs', 'similarity',
-          'alignment_fr', and 'alignment_h', as well as a DataFrame called 'metadata'.
+          'alignment_rc', and 'alignment_h', as well as a DataFrame called 'metadata'.
         Old objects may be incompatable with the newest version of the load function.
         Safe loading validates object integrity but may take significantly longer for
           large objects.
     """
+    if not os.path.exists(file_loc):
+        raise FileNotFoundError(f"File {file_loc} does not exist.")
     try:
         with h5py.File(file_loc, "r") as f:
             motifs = f["motifs"][:]
             similarity = f["similarity"][:]
-            alignment_fr = f["alignment_fr"][:]
+            alignment_rc = f["alignment_rc"][:]
             alignment_h = f["alignment_h"][:]
         metadata = pd.read_hdf(file_loc, key="metadata")
         __images = pd.read_hdf(file_loc, key="__images")
@@ -81,7 +90,7 @@ def load(file_loc: str, safe: bool = True) -> MotifCompendium:
             "File does not contain the necessary datasets to load a MotifCompendium."
         )
     return MotifCompendium(
-        motifs, similarity, alignment_fr, alignment_h, metadata, __images, safe
+        motifs, similarity, alignment_rc, alignment_h, metadata, __images, safe
     )
 
 
@@ -97,6 +106,8 @@ def inspect(file_loc: str) -> pd.DataFrame:
     Notes:
         Does not ever explicitly load the object, just the metadata from the object.
     """
+    if not os.path.exists(file_loc):
+        raise FileNotFoundError(f"File {file_loc} does not exist.")
     try:
         metadata = pd.read_hdf(file_loc, key="metadata")
     except:
@@ -114,7 +125,6 @@ def inspect(file_loc: str) -> pd.DataFrame:
 def build(
     motifs: np.ndarray,
     metadata: pd.DataFrame | None = None,
-    l2: bool | None = None,
     safe: bool = True,
 ) -> MotifCompendium:
     """Builds a MotifCompendium object from a set of motifs.
@@ -126,8 +136,6 @@ def build(
         motifs: A stack of motifs of shape (N, 30, 8/4).
         metadata: The metadata for all motifs. If None, it will be set to a DataFrame
           with generic motif names.
-        l2: Whether or not to use L2 normalization (instead of sqrt normalization) when
-          computing motif similarity.
         safe: Whether or not to construct the MotifCompendium safely.
 
     Returns:
@@ -140,12 +148,11 @@ def build(
           large objects.
     """
     # Check motifs
-    utils_motif.validate_motif_stack(motifs)
+    utils_motif.validate_motif_stack_similarity(motifs)
     # Compute similarity
-    similarity, alignment_fr, alignment_h = utils_similarity.compute_similarities(
-        [motifs], [(0, 0)], l2
+    similarity, alignment_rc, alignment_h = utils_similarity.compute_similarities(
+        [motifs], [(0, 0)]
     )[0]
-    # Guarantee similarity properties
     np.fill_diagonal(similarity, 1)  # Sometimes diagonal is 0.999... but should be 1
     similarity = (similarity + similarity.T) / 2  # Ensure symmetric
     # Metadata
@@ -153,17 +160,16 @@ def build(
         metadata = pd.DataFrame()
         metadata["name"] = [f"motif_{i}" for i in range(motifs.shape[0])]
     # Images
-    __images = pd.DataFrame()
+    __images = pd.DataFrame(index=metadata.index)
     # Construct object
     return MotifCompendium(
-        motifs, similarity, alignment_fr, alignment_h, metadata, __images, safe
+        motifs, similarity, alignment_rc, alignment_h, metadata, __images, safe
     )
 
 
 def build_from_modisco(
     modisco_dict: dict[str, str],
     ic: bool = True,
-    l2: bool | None = None,
     safe: bool = True,
 ) -> MotifCompendium:
     """Builds a MotifCompendium object from a set of Modisco outputs.
@@ -172,7 +178,6 @@ def build_from_modisco(
 
     Args:
         modisco_dict: A dictionary from model name to modisco file path.
-        ic: Whether or not to apply information content scaling to Modisco motifs.
         l2: Whether or not to use L2 normalization (instead of sqrt normalization) when
           computing motif similarity.
         safe: Whether or not to construct the MotifCompendium safely.
@@ -181,7 +186,7 @@ def build_from_modisco(
         A MotifCompendium object containing all motifs in all Modisco objects.
 
     Notes:
-        Assumes the model names have no '-'' or '.' in them.
+        Assumes the model names have no '-'s or '.'s in them.
         Using information content scaling is highly recommended.
         Safe building validates object integrity but may take significantly longer for
           large objects.
@@ -200,14 +205,12 @@ def build_from_modisco(
     return build(
         motifs,
         metadata=metadata,
-        l2=l2,
         safe=safe,
     )
 
 
 def combine(
     compendiums: list[MotifCompendium],
-    l2: bool | None = None,
     safe: bool = True,
 ) -> MotifCompendium:
     """Combines multiple MotifCompendium into one MotifCompendium.
@@ -238,40 +241,40 @@ def combine(
         for j in range(i + 1, n):
             calculations.append((i, j))
     similarity_results = utils_similarity.compute_similarities(
-        motifs_list, calculations, l2
+        motifs_list, calculations
     )
-    similarity_block = [[None for i in range(n)] for i in range(n)]
-    alignment_fr_block = [[None for i in range(n)] for i in range(n)]
-    alignment_h_block = [[None for i in range(n)] for i in range(n)]
+    similarity_block = [[None for _ in range(n)] for _ in range(n)]
+    alignment_rc_block = [[None for _ in range(n)] for _ in range(n)]
+    alignment_h_block = [[None for _ in range(n)] for _ in range(n)]
     for i in range(n):
         for j in range(n):
             if i == j:
                 similarity_block[i][j] = compendiums[i].similarity
-                alignment_fr_block[i][j] = compendiums[i].alignment_fr
+                alignment_rc_block[i][j] = compendiums[i].alignment_rc
                 alignment_h_block[i][j] = compendiums[i].alignment_h
             elif i < j:
                 (
                     similarity_block[i][j],
-                    alignment_fr_block[i][j],
+                    alignment_rc_block[i][j],
                     alignment_h_block[i][j],
                 ) = similarity_results[calculations.index((i, j))]
             elif i > j:
                 similarity_block[i][j] = similarity_block[j][i].T
-                alignment_fr_block[i][j] = alignment_fr_block[j][i].T
+                alignment_rc_block[i][j] = alignment_rc_block[j][i].T
                 alignment_h_block[i][j] = alignment_h_block[j][i].T
     similarity = np.block(similarity_block)
     # Guarantee diagonal symmetry
     np.fill_diagonal(similarity, 1)
     similarity = (similarity + similarity.T) / 2
 
-    alignment_fr = np.block(alignment_fr_block)
+    alignment_rc = np.block(alignment_rc_block)
     alignment_h = np.block(alignment_h_block)
     # motifs
     motifs = np.concatenate(motifs_list, axis=0)
     # METADATA
     metadata = pd.concat([mc.metadata for mc in compendiums], ignore_index=True)
     return MotifCompendium(
-        motifs, similarity, alignment_fr, alignment_h, metadata, safe
+        motifs, similarity, alignment_rc, alignment_h, metadata, safe
     )
 
 
@@ -287,17 +290,17 @@ class MotifCompendium:
       EX: mc_neural = mc[mc["organ"] == "brain"].
 
     Attributes:
-        motifs: A np.ndarray representing the motifs. Of shape (N, 30, 8/4). motifs[i, :, :]
-          represents motif i.
-        similarity: A np.ndarray containing the pairwise similarity scores between each
-          motif. Of shape (N, N). similarity[i, j] is the similarity between motif i and
-          motif j.
-        alignment_fr: A np.ndarray containing the forward/reverse complement
-          relationship between two motifs. Of shape (N, N). alignment_fr[i, j] is 0/1 if
-          motif i should/shouldn't be reverse complemented to best align with motif j.
-        alignment_h: A np.ndarray containing the horizontal shift information between
-          two motifs. Of shape (N, N). alignment_h[i, j] represents how many bases to
-          the right motif i should be shifted to best align with motif j.
+        motifs: A np.ndarray representing the motifs. Of shape (N, 30, 8/4).
+          motifs[i, :, :] represents motif i.
+        similarity: A np.ndarray of floats containing the pairwise similarity scores
+          between each motif. Of shape (N, N). similarity[i, j] is the similarity
+          between motif i and motif j and can be within [0, 1].
+        alignment_rc: A np.ndarray of bools containing the reverse complement
+          relationship between two motifs. Of shape (N, N). alignment_rc[i, j] is True
+          if motif i should be reverse complemented to best align with motif j.
+        alignment_h: A np.ndarray of ints containing the horizontal shift information
+          between two motifs. Of shape (N, N). alignment_h[i, j] represents how many
+          bases to the right motif i should be shifted to best align with motif j.
         metadata: A pd.DataFrame containing metadata for each motif. Of length N.
           metadata.iloc[i, :] contains metadata about motif i.
         __images: A pd.DataFrame containing UTF-8 embedded images related to each motif.
@@ -311,7 +314,7 @@ class MotifCompendium:
         self,
         motifs: np.ndarray,
         similarity: np.ndarray,
-        alignment_fr: np.ndarray,
+        alignment_rc: np.ndarray,
         alignment_h: np.ndarray,
         metadata: pd.DataFrame,
         __images: pd.DataFrame,
@@ -325,7 +328,7 @@ class MotifCompendium:
         Args:
             motifs: A np.ndarray that is assigned to self.motifs.
             similarity: A np.ndarray that is assigned to self.similarity.
-            alignment_fr: A np.ndarray that is assigned to self.alignment_fr.
+            alignment_rc: A np.ndarray that is assigned to self.alignment_rc.
             alignment_h: A np.ndarray that is assigned to self.alignment_h.
             metadata: A pd.DataFrame that is assigned to self.metadata.
             __images: A pd.DataFrame that is assigned to self.__images.
@@ -339,7 +342,7 @@ class MotifCompendium:
         """
         self.motifs = motifs
         self.similarity = similarity
-        self.alignment_fr = alignment_fr
+        self.alignment_rc = alignment_rc
         self.alignment_h = alignment_h
         self.metadata = metadata
         self.__images = __images
@@ -359,7 +362,7 @@ class MotifCompendium:
         with h5py.File(save_loc, "w") as f:
             f.create_dataset("motifs", data=self.motifs)
             f.create_dataset("similarity", data=self.similarity)
-            f.create_dataset("alignment_fr", data=self.alignment_fr)
+            f.create_dataset("alignment_rc", data=self.alignment_rc)
             f.create_dataset("alignment_h", data=self.alignment_h)
         self.metadata.to_hdf(save_loc, key="metadata", mode="a")
         self.__images.to_hdf(save_loc, key="__images", mode="a")
@@ -373,39 +376,50 @@ class MotifCompendium:
             This function can take a long time to run, especially for very large MotifCompendium.
         """
         # motifs
-        utils_motif.validate_motif_stack(self.motifs)
+        utils_motif.validate_motif_stack_similarity(self.motifs)
         # similarity
-        if not isinstance(self.similarity, np.ndarray):
-            raise TypeError("self.similarity must be a np.ndarray.")
+        if not (
+            isinstance(self.similarity, np.ndarray)
+            and self.similarity.dtype == np.single
+        ):
+            raise TypeError("self.similarity must be a np.ndarray of floats.")
         if not (
             (len(self.similarity.shape) == 2)
-            and (np.allclose(self.similarity, self.similarity.T))
+            and (self.similarity == self.similarity.T).all()
         ):
             raise ValueError("self.similarity must be a square transpose matrix.")
-        if not ((np.max(self.similarity) == 1) and ((self.similarity >= 0).all())):
-            raise ValueError("self.similarity must have similarities between (0, 1].")
-        # alignment_fr
-        if not isinstance(self.alignment_fr, np.ndarray):
-            raise TypeError("self.alignment_fr must be a np.ndarray.")
+        if not (np.max(self.similarity) <= 1) and (np.min(self.similarity) >= 0):
+            raise ValueError("self.similarity must have similarities between [0, 1].")
+        if not (np.diag(self.similarity) == 1).all():
+            raise ValueError("self.similarity must have 1s on the diagonal.")
+        # alignment_rc
         if not (
-            (len(self.alignment_fr.shape) == 2)
-            and (np.allclose(self.alignment_fr, self.alignment_fr.T))
+            isinstance(self.alignment_rc, np.ndarray)
+            and self.alignment_rc.dtype == np.bool
         ):
-            raise ValueError("self.alignment_fr must be a square transpose matrix.")
-        if not ((self.alignment_fr == 0) | (self.alignment_fr == 1)).all():
-            raise ValueError("self.alignment_fr must have values being either 0 or 1.")
+            raise TypeError("self.alignment_rc must be a np.ndarray of bools.")
+        if not (
+            (len(self.alignment_rc.shape) == 2)
+            and (self.alignment_rc == self.alignment_rc.T).all()
+        ):
+            raise ValueError("self.alignment_rc must be a square transpose matrix.")
+        if not ((self.alignment_rc == 0) | (self.alignment_rc == 1)).all():
+            raise ValueError("self.alignment_rc must have values being either 0 or 1.")
         # alignment_h
-        if not isinstance(self.alignment_h, np.ndarray):
-            raise TypeError("self.alignment_h must be a np.ndarray.")
+        if not (
+            isinstance(self.alignment_h, np.ndarray)
+            and self.alignment_h.dtype == np.byte
+        ):
+            raise TypeError("self.alignment_h must be a np.ndarray of ints.")
         if not (len(self.alignment_h.shape) == 2):
             raise ValueError("self.alignment_h must be a square matrix.")
         if not (
-            np.allclose(
-                self.alignment_h,
-                np.where(
-                    self.alignment_fr == 0, -self.alignment_h.T, self.alignment_h.T
-                ),
-            )
+            (
+                self.alignment_h
+                == np.where(
+                    self.alignment_rc == 0, -self.alignment_h.T, self.alignment_h.T
+                )
+            ).all()
         ):
             raise ValueError(
                 "self.alignment_h is symmetric for reverse complement motifs and skew-symmetric for motifs that are already aligned."
@@ -419,15 +433,12 @@ class MotifCompendium:
         # shape matches
         if not (
             (self.motifs.shape[0] == self.similarity.shape[0])
-            and (self.motifs.shape[0] == self.alignment_fr.shape[0])
+            and (self.motifs.shape[0] == self.alignment_rc.shape[0])
             and (self.motifs.shape[0] == self.alignment_h.shape[0])
             and (self.motifs.shape[0] == len(self.metadata))
+            and (self.motifs.shape[0] == len(self.__images))
         ):
             raise TypeError("Attribute shapes do not align.")
-
-    def get_saved_images(self) -> list[str]:
-        """Returns a list of saved images in the MotifCompendium."""
-        return list(self.__images.columns)
 
     def __str__(self) -> str:
         """String representation of the MotifCompendium."""
@@ -437,6 +448,22 @@ class MotifCompendium:
         """Length of the MotifCompendium."""
         return len(self.metadata)
 
+    def __eq__(self, other: MotifCompendium) -> bool:
+        """Checks object equality between MotifCompendium."""
+        if isinstance(other, MotifCompendium):
+            return (
+                (self.motifs == other.motifs).all()
+                and (self.similarity == other.similarity).all()
+                and (self.alignment_rc == other.alignment_rc).all()
+                and (self.alignment_h == other.alignment_h).all()
+                and self.metadata.equals(other.metadata)
+                and self.__images.equals(other.__images)
+            )
+        return False
+
+    ########################
+    # OBJECT MANIPULATIONS #
+    ########################
     def __getitem__(self, key: str | pd.Series) -> pd.Series | MotifCompendium:
         """Get columns or subsets of the MotifCompendium.
 
@@ -464,18 +491,16 @@ class MotifCompendium:
             keep_idxs = list(metadata_slice.index)
             metadata_slice = metadata_slice.reset_index(drop=True)
             # __images
-            __images_slice = self.__images[
-                key.reindex(self.__images.index)
-            ].reset_index(drop=True)
+            __images_slice = self.__images.iloc[keep_idxs].reset_index(drop=True)
             # matrices
             motifs_slice = self.motifs[keep_idxs, :, :]
             similarity_slice = self.similarity[keep_idxs, :][:, keep_idxs]
-            alignment_fr_slice = self.alignment_fr[keep_idxs, :][:, keep_idxs]
+            alignment_rc_slice = self.alignment_rc[keep_idxs, :][:, keep_idxs]
             alignment_h_slice = self.alignment_h[keep_idxs, :][:, keep_idxs]
             return MotifCompendium(
                 motifs_slice,
                 similarity_slice,
-                alignment_fr_slice,
+                alignment_rc_slice,
                 alignment_h_slice,
                 metadata_slice,
                 __images_slice,
@@ -502,405 +527,114 @@ class MotifCompendium:
         else:
             raise TypeError("MotifCompendium column names must be strings.")
 
-    def __eq__(self, other: MotifCompendium) -> bool:
-        """Checks object equality between MotifCompendium."""
-        if isinstance(other, MotifCompendium):
-            return (
-                np.allclose(self.motifs, other.motifs)
-                and np.allclose(self.similarity, other.similarity)
-                and np.allclose(self.alignment_fr, other.alignment_fr)
-                and np.allclose(self.alignment_h, other.alignment_h)
-                and self.metadata.equals(other.metadata)
-                and self.__images.equals(other.__images)
-            )
-        return False
+    def get_standard_motif_stack(self) -> np.ndarray:
+        """Returns the motifs in a standard (N, L, 4) shape."""
+        return utils_motif.motif_8_to_4_signed(self.motifs)
 
-    ###########################
-    # VIZUALIZATION FUNCTIONS #
-    ###########################
-    def motif_collection_html(
-        self, html_out: str, group_by: str, average_motif: bool = True
-    ) -> None:
-        """Creates an html file displaying all motifs in the current MotifCompendium.
+    def get_saved_images(self) -> list[str]:
+        """Returns a list of saved images in the MotifCompendium."""
+        return list(self.__images.columns)
 
-        Produces an html file at the specified location with all motifs from the current
-          MotifCompendium. Motifs are grouped by the group_by field in the metadata.
-          Group averages are plotted with a green background at the top of each group.
+    def delete_column(self, column: str | list[str]) -> None:
+        """Deletes the specified column(s) from the metadata.
 
         Args:
-            html_out: The path to save the html file.
-            group_by: The column in the metadata to group motifs by for visualization.
-              Or, an externally provided pd.Series that fulfills the same role.
-            average_motif: Whether or not to show the average motif per cluster.
-
-        Notes:
-            Assumes self.metadata has a "name" column.
-            If you just want to plot cluster averages, consider doing
-              mc.cluster_averages(group_by).motif_collection_html(html_out, "name") with
-              the appropriate CPU/GPU/chunking options.
+            column: The column or columns to delete from self.metadata.
         """
-        # Prepare motifs/names/groups
-        motifs = (
-            utils_motif.motif_8_to_4(self.motifs)
-            if self.motifs.shape[2] == 8
-            else self.motifs
-        )
-        names = list(self.metadata["name"])
-        if isinstance(group_by, str):
-            if group_by in self.metadata.columns:
-                groups = list(self.metadata[group_by])
-            else:
-                raise KeyError(f"{group_by} not in metadata.")
-        elif isinstance(group_by, list):
-            groups = group_by
-        else:
-            raise TypeError(
-                "group_by must either be a string (column name in metadata) or a list."
-            )
-        # Group motifs
-        motif_groups = dict()  # group name --> {motif name --> motif dict}
-        group_seeds = dict()  # group name --> index of seed motif in group
-        group_xmin_xmax = dict()  # group name --> group name --> (xmin, xmax) for group
-        for i, x in enumerate(groups):
-            if x in motif_groups:
-                cluster_x_seed = group_seeds[x]
-                motif_info_i = utils_plotting.LogoPlottingInput(
-                    motifs[i],
-                    revcomp=(self.alignment_fr[i, cluster_x_seed] == 1),
-                    pos=self.alignment_h[i, cluster_x_seed],
-                    name=names[i],
-                )
-                group_xmin_xmax[x] = (
-                    min(group_xmin_xmax[x][0], self.alignment_h[i, cluster_x_seed]),
-                    max(
-                        group_xmin_xmax[x][1],
-                        self.alignment_h[i, cluster_x_seed] + motifs.shape[1],
-                    ),
-                )
-                motif_groups[x].append(motif_info_i)
-            else:
-                motif_info_i = utils_plotting.LogoPlottingInput(
-                    motifs[i], name=names[i]
-                )
-                motif_groups[x] = [motif_info_i]
-                group_seeds[x] = i
-                group_xmin_xmax[x] = (0, motifs.shape[1])
-        # Reindex all motifs + average
-        for group_name, group in motif_groups.items():
-            # Reindex all motifs in group
-            for motif_info in group:
-                motif_info.set_bounds(*group_xmin_xmax[group_name])
-            # Average
-            if average_motif:
-                group_motifs = [motif_info.get_motif_df() for motif_info in group]
-                motifs_concat = pd.concat(group_motifs)
-                average_motif_df = motifs_concat.groupby(motifs_concat.index).mean()
-                min_index_val = min(average_motif_df.index)
-                max_index_val = max(average_motif_df.index)
-                average_motif_info = utils_plotting.LogoPlottingInput(
-                    average_motif_df.to_numpy(),
-                    pos=min_index_val,
-                    name="AVERAGE",
-                    bgcolor="palegreen",
-                )
-                average_motif_info.set_bounds(min_index_val, max_index_val)
-                group.insert(0, average_motif_info)
-        # Submit to plotting function
-        utils_visualization.motif_collection_html(motif_groups, html_out)
+        if not (
+            isinstance(column, str)
+            or (isinstance(column, list) and all([isinstance(x, str) for x in column]))
+        ):
+            raise TypeError("column must be a string or a list of strings.")
+        self.metadata.drop(column, axis=1, inplace=True)
 
-    def summary_table_html(self, html_out: str, columns: list[str] = ["name"]) -> None:
-        """Creates an html file summarizing all motifs and metadata about them.
-
-        Produces an html file at the specified location with all motifs from the current
-          MotifCompendium. Each motif has one row in the summary table. Logos for the
-          forward and reverse complement of each motif will be displayed in the first
-          two columns. Columns from the current metadata as well as other images saved
-          in the object (which can be viewed with MotifCompendium.get_saved_images())
-          can be displayed as columns in the summary table.
+    def delete_image(self, image_column: str | list[str]) -> None:
+        """Deletes the specified column(s) from the saved images.
 
         Args:
-            html_out: The path to save the html file.
-            columns: The list of column names in the metadata or saved images to display
-              as columns in the summary table.
-
-        Notes:
-            It is highly suggested that this function just be run on a MotifCompendium
-              of motif clusters. Consider doing
-              mc.cluster_averages(cluster).summary_table_html(html_out, summary_cols).
+            image_column: The column or columns to delete from self.__images.
         """
-        # If forward and reverse logos aren't in __images, create and add them
-        if "logo (fwd)" not in self.__images.columns:
-            motifs = (
-                utils_motif.motif_8_to_4(self.motifs)
-                if self.motifs.shape[2] == 8
-                else self.motifs
+        if not (
+            isinstance(image_column, str)
+            or (
+                isinstance(image_column, list)
+                and all([isinstance(x, str) for x in image_column])
             )
-            motif_plotting_inputs = [
-                utils_plotting.LogoPlottingInput(motif) for motif in motifs
-            ]
-            self.__images["logo (fwd)"] = [
-                motif_input.utf8_plot
-                for motif_input in utils_plotting.plot_many_motif_logos(
-                    motif_plotting_inputs
-                )
-            ]
-        if "logo (rev)" not in self.__images.columns:
-            motifs = (
-                utils_motif.motif_8_to_4(self.motifs)
-                if self.motifs.shape[2] == 8
-                else self.motifs
-            )
-            motif_plotting_inputs = [
-                utils_plotting.LogoPlottingInput(motif, revcomp=True)
-                for motif in motifs
-            ]
-            self.__images["logo (rev)"] = [
-                motif_input.utf8_plot
-                for motif_input in utils_plotting.plot_many_motif_logos(
-                    motif_plotting_inputs
-                )
-            ]
-        # Build table
-        columns = ["logo (fwd)", "logo (rev)"] + columns
-        table_columns = []
-        image_column = []
-        for c in columns:
-            if c in self.metadata.columns:
-                if c in self.__images.columns:
-                    raise KeyError(
-                        f"Column {c} is a column in metadata and __images. Object invalid."
-                    )
-                else:
-                    table_columns.append(self.metadata[c])
-                    image_column.append(False)
-            elif c in self.__images.columns:
-                table_columns.append(self.__images[c])
-                image_column.append(True)
-            else:
-                raise KeyError(
-                    f"{c} must be a column in metadata or a generated image."
-                )
-        table_df = pd.concat(table_columns, axis=1)
+        ):
+            raise TypeError("image_column must be a string or a list of strings.")
+        self.__images.drop(image_column, axis=1, inplace=True)
 
-        utils_visualization.table_html(table_df, image_column, html_out)
-
-    def heatmap(
+    def sort(
         self,
-        annot: bool = False,
-        label: bool = False,
-        show: bool = False,
-        save_loc: str | None = None,
-    ) -> None:
-        """Creates a heatmap of the similarity matrix.
+        by: str | list[str],
+        ascending: bool | list[bool] = True,
+        inplace: bool = False,
+    ) -> MotifCompendium | None:
+        """Sort the MotifCompendium.
 
-        Produces a heatmap of the similarity matrix of this MotifCompendium with various
-          formatting, display, and save options.
+        Sorts the MotifCompendium by the specified columns in the metadata.
 
         Args:
-            annot: Whether or not to display the similarity score value in each cell in
-              the heatmap.
-            label: Whether or not to label rows and columns with motif names.
-            show: Whether or not to show the heatmap with plt.show().
-            save_loc: Where to save the heatmap to. If None, the heatmap is not saved.
+            by: The column or columns to sort by.
+            ascending: Whether or not to sort in ascending order. Must have one per column.
+            inplace: Whether or not to sort the MotifCompendium in place. If False,
+              returns a new MotifCompendium. If True, the current MotifCompendium is
+              reordered to be sorted.
 
-        Notes:
-            Assumes self.metadata has a "name" column.
-            Consider visualizing just one cluster at a time with
-              mc[mc["cluster"] == "cluster_1"].heatmap().
         """
-        if label:
-            utils_plotting.plot_heatmap(
-                self.similarity,
-                annot=annot,
-                labels=list(self.metadata["name"]),
-                show=show,
-                save_loc=save_loc,
-            )
+        if not (
+            isinstance(by, str)
+            or (isinstance(by, list) and all([isinstance(x, str) for x in by]))
+        ):
+            raise TypeError("by must be a string or a list of strings.")
+        if isinstance(by, str):
+            if by not in self.metadata.columns:
+                raise KeyError(f"{by} not in metadata.")
         else:
-            utils_plotting.plot_heatmap(
-                self.similarity, annot=annot, show=show, save_loc=save_loc
+            for x in by:
+                if x not in self.metadata.columns:
+                    raise KeyError(f"{x} not in metadata.")
+        if not (
+            isinstance(ascending, bool)
+            or (
+                isinstance(ascending, list)
+                and all([isinstance(x, bool) for x in ascending])
             )
-
-    ######################
-    # ANALYSIS FUNCTIONS #
-    ######################
-    def cluster(
-        self,
-        algorithm: str = "leiden",
-        similarity_threshold: float = 0.9,
-        save_name: str = "cluster",
-        **kwargs,
-    ) -> None:
-        """Cluster motifs.
-
-        Cluster motifs using the algorithm of choice and the similarity threshold. The
-            cluster assignment will be saved into the metadata in column save_name.
-
-        Args:
-            algorithm: The clustering algorithm to cluster with.
-                (1) Leiden clustering: "leiden", "weighted_leiden", "modularity_leiden"
-                    Leiden clustering, using modularity as quality function.
-                (2) CPM Leiden: "cpm_leiden", "cpm_weighted_leiden"
-                    Leiden clustering, using Constant Potts Model (CPM) as quality function.
-                (3) Connected-components clustering: "cc"
-                (4) Dense connected-components clustering: "dense_cc"
-                (5) Spectral clustering: "spectral"
-            similarity_threshold: The similarity threshold on which to create a graph.
-                Any similarity threshold below the threshold will not create an edge.
-            save_name: The name of the column in metadata to save motif clustering
-                results into.
-            **kwargs: Additional named arguments specific to the clustering algorithm of
-                choice.
-
-        Notes:
-            Review the clustering algorithms available in utils/clustering.cluster().
-        """
-        self.metadata[save_name] = utils_clustering.cluster(
-            similarity_matrix=self.similarity,
-            algorithm=algorithm,
-            similarity_threshold=similarity_threshold,
-            **kwargs,
-        )
-
-    def clustering_quality(
-        self, cluster_name: str = "cluster", with_names: bool = False
-    ) -> np.ndarray | pd.DataFrame:
-        """Produces a matrix that summarizes the quality of a particular clustering.
-
-        Produce a matrix where diagonal entries represent lowest intra-cluster
-          similarity and off-diagonal entries represent highest inter-cluster
-          similarities.
-
-        Args:
-            cluster_name: The name of the column in metadata containing clustering
-              annotations to group motifs by.
-            with_names: Whether or not to return a raw quality matrix or a quality
-              matrix with row/column labels in the form or a pd.DataFrame.
-
-        Returns:
-            A square np.ndarray or pd.DataFrame where diagonal entries represent lowest
-              intra-cluster similarity and off-diagonal entries represent highest
-              inter-cluster similarities. Returns an np.ndarray if with_names is False
-              and a pd.DataFrame otherwise
-        """
-        # Cache cluster --> idxs dictionary
-        ci_idxs = defaultdict(list)
-        for i, c in enumerate(self.metadata[cluster_name]):
-            ci_idxs[c].append(i)
-        # Iterate through pairs of clusters
-        clusters = sorted(ci_idxs.keys())
-        quality = np.zeros((len(clusters), len(clusters)))
-        for i, c1 in enumerate(clusters):
-            c1_idxs = ci_idxs[c1]
-            c1_similarity_slice = self.similarity[c1_idxs, :]
-            for j, c2 in enumerate(clusters):
-                if j < i:
-                    continue
-                c2_idxs = ci_idxs[c2]
-                similarity_slice_ij = c1_similarity_slice[:, c2_idxs]
-                if i == j:
-                    quality[i, j] = np.min(similarity_slice_ij)
-                else:
-                    quality[i, j] = np.max(similarity_slice_ij)
-                    quality[j, i] = quality[i, j]
-        if with_names:
-            return pd.DataFrame(quality, index=clusters, columns=clusters)
+        ):
+            raise TypeError("ascending must be a bool or a list of bools.")
+        if not (
+            (isinstance(ascending, bool) and isinstance(by, str))
+            or (len(by) == len(ascending))
+        ):
+            raise ValueError("The format of ascending must match the format of by.")
+        # Sort
+        metadata_sorted = self.metadata.sort_values(by=by, ascending=ascending)
+        sorted_idx = list(metadata_sorted.index)
+        # Create sorted attributes
+        metadata_sorted.reset_index(drop=True, inplace=True)
+        __images_sorted = self.__images.iloc[sorted_idx].reset_index(drop=True)
+        motifs_sorted = self.motifs[sorted_idx, :, :]
+        similarity_sorted = self.similarity[sorted_idx, :][:, sorted_idx]
+        alignment_rc_sorted = self.alignment_rc[sorted_idx, :][:, sorted_idx]
+        alignment_h_sorted = self.alignment_h[sorted_idx, :][:, sorted_idx]
+        # Return
+        if inplace:
+            self.metadata = metadata_sorted
+            self.__images = __images_sorted
+            self.motifs = motifs_sorted
+            self.similarity = similarity_sorted
+            self.alignment_rc = alignment_rc_sorted
+            self.alignment_h = alignment_h_sorted
         else:
-            return quality
-
-    def cluster_averages(
-        self,
-        cluster_name: str = "cluster",
-        aggregations: list[tuple[str]] = [("name", "count", "num_constituents")],
-        weight_col: str | None = None,
-        l2: bool | None = None,
-        safe: bool = True,
-    ) -> MotifCompendium:
-        """Creates a MotifCompendium where each motif represents a cluster of motifs.
-
-        For each cluster, the average aligned motif is computed. Specified metadata
-          columns can be aggregated and retained in the new cluster. The average motifs
-          and aggregated metadata are passed to build() and the resulting
-          MotifCompendium in which each motif represents a cluster in the current
-          MotifCompendium is returned.
-
-        Args:
-            cluster_name: Name of column in metadata, containing clustering
-              annotations to group motifs by.
-            aggregations: A list of tuples of string: ("source", "method", "save").
-              "source": Name of column in metadata to aggregate.
-              "method": Aggregation method to use. Ex: "count", "sum", "concatenate".
-              "save": Name of column in new metadata, to save the aggregated data.
-            weight_col: Name of column in metadata to use for weighted averaging.
-            l2: Whether or not to use L2 normalization (instead of sqrt normalization)
-              when computing motif similarity.
-            safe: Whether or not to construct the MotifCompendium safely.
-
-        Returns:
-            A MotifCompendium where each entry represents a motif cluster in the current
-              MotifCompendium.
-        """
-        # Set up aggregations
-        aggregations_dicts = [
-            {"source": x[0], "method": x[1], "save": x[2], "values": []}
-            for x in aggregations
-        ]
-        # Cache cluster --> idxs dictionary
-        cluster_idxs = defaultdict(list)
-        for i, c in enumerate(self.metadata[cluster_name]):
-            cluster_idxs[c].append(i)
-        # Check weights
-        if weight_col:
-            if weight_col in self.metadata.columns:
-                weights = self.metadata[weight_col]
-            else:
-                raise ValueError(f"{weight_col} is not a column in metadata.")
-        else:
-            weights = None
-        # Prepare averaging
-        clusters = sorted(cluster_idxs.keys())
-        cluster_motif_avgs, cluster_names = [], []
-        for c in clusters:
-            # Cluster name
-            cluster_names.append(f"{cluster_name}#{c}")
-            # Cluster average motif
-            c_idxs = cluster_idxs[c]
-            motifs_c = self.motifs[c_idxs, :, :]
-            alignment_fr_c = self.alignment_fr[c_idxs, :][:, c_idxs]
-            alignment_h_c = self.alignment_h[c_idxs, :][:, c_idxs]
-            # Average motifs
-            motif_avg_c = utils_motif.average_motifs(
-                motifs_c,
-                alignment_fr_c,
-                alignment_h_c,
-                weights=weights.loc[c_idxs] if weights is not None else None,
+            return MotifCompendium(
+                motifs_sorted,
+                similarity_sorted,
+                alignment_rc_sorted,
+                alignment_h_sorted,
+                metadata_sorted,
+                __images_sorted,
+                safe=False,
             )
-            cluster_motif_avgs.append(motif_avg_c)
-            # Aggregations
-            for agg_dict in aggregations_dicts:
-                agg_c_data = self.metadata.loc[c_idxs, agg_dict["source"]]
-                match agg_dict["method"]:
-                    case "count":
-                        agg_dict["values"].append(len(agg_c_data))
-                    case "sum":
-                        agg_dict["values"].append(np.sum(agg_c_data))
-                    case "average" | "avg":
-                        agg_dict["values"].append(np.mean(agg_c_data))
-                    case "concatenate" | "concat":
-                        agg_dict["values"].append(",".join(sorted(set(agg_c_data))))
-                    case "unique":
-                        agg_dict["values"].append(len(set(agg_c_data)))
-                    case _:
-                        raise ValueError(
-                            f"{agg_dict['method']} is not a supported aggregation method."
-                        )
-        # Construct cluster average MotifCompendium
-        cluster_motif_avgs = np.stack(cluster_motif_avgs, axis=0)
-        metadata = pd.DataFrame()
-        metadata["name"] = cluster_names
-        for agg_dict in aggregations_dicts:
-            metadata[agg_dict["save"]] = agg_dict["values"]
-        return build(cluster_motif_avgs, metadata, l2, safe)
 
     def get_similarity_slice(
         self,
@@ -966,6 +700,508 @@ class MotifCompendium:
                 )
                 return similarity_slice_df
 
+    ########################
+    # CLUSTERING FUNCTIONS #
+    ########################
+    def cluster(
+        self,
+        algorithm: str = "leiden",
+        similarity_threshold: float = 0.9,
+        save_name: str = "cluster",
+        cluster_on: str | None = None,
+        **kwargs,
+    ) -> None:
+        """Cluster motifs.
+
+        Cluster motifs using the algorithm of choice and the similarity threshold. The
+            cluster assignment will be saved into the metadata in column save_name.
+
+        Args:
+            algorithm: The clustering algorithm to cluster with. Please see
+              MotifCompendium.utils.clustering.cluster() for available algorithms.
+            similarity_threshold: The similarity threshold above which motifs should be
+              considered similar.
+            save_name: The name of the column in the metadata to save motif clustering
+                results into.
+            **kwargs: Additional named arguments specific to the clustering algorithm of
+                choice.
+
+        Notes:
+            Review MotifCompendium.utils.clustering.cluster() for available clustering
+              algorithms and algorithm-specific arguments.
+        """
+        if cluster_on is None:
+            self.metadata[save_name] = utils_clustering.cluster(
+                similarity_matrix=self.similarity,
+                algorithm=algorithm,
+                similarity_threshold=similarity_threshold,
+                **kwargs,
+            )
+        else:
+            if not cluster_on in self.metadata.columns:
+                raise KeyError(f"{cluster_on} not in metadata.")
+            #
+            # Average
+            mc_average = self.cluster_averages(cluster_name=cluster_on, safe=False)
+            # Cluster
+            mc_average.metadata["cluster"] = utils_clustering.cluster(
+                similarity_matrix=mc_average.similarity,
+                algorithm=algorithm,
+                similarity_threshold=similarity_threshold,
+                **kwargs,
+            )
+            # Map back
+            cluster_map = {
+                row["source_cluster"]: row["cluster"]
+                for _, row in mc_average.metadata.iterrows()
+            }
+            self.metadata[save_name] = [
+                cluster_map[c] for c in self.metadata[cluster_on]
+            ]
+
+    def clustering_quality(
+        self, cluster_col: str, with_names: bool = False
+    ) -> np.ndarray | pd.DataFrame:
+        """Produces a matrix that summarizes the quality of a particular clustering.
+
+        Produce a matrix where diagonal entries represent lowest intra-cluster
+          similarity and off-diagonal entries represent highest inter-cluster
+          similarities.
+
+        Args:
+            cluster_col: The name of the column in metadata containing clustering
+              annotations to group motifs by.
+            with_names: Whether or not to return a raw quality matrix or a quality
+              matrix with row/column labels in the form or a pd.DataFrame.
+
+        Returns:
+            A square np.ndarray or pd.DataFrame where diagonal entries represent lowest
+              intra-cluster similarity and off-diagonal entries represent highest
+              inter-cluster similarities. Returns an np.ndarray if with_names is False
+              and a pd.DataFrame otherwise
+        """
+        # Cache cluster --> idxs dictionary
+        ci_idxs = defaultdict(list)
+        for i, c in enumerate(self.metadata[cluster_col]):
+            ci_idxs[c].append(i)
+        # Iterate through pairs of clusters
+        clusters = sorted(ci_idxs.keys())
+        quality = np.zeros((len(clusters), len(clusters)))
+        for i, c1 in enumerate(clusters):
+            c1_idxs = ci_idxs[c1]
+            c1_similarity_slice = self.similarity[c1_idxs, :]
+            for j, c2 in enumerate(clusters):
+                if j < i:
+                    continue
+                c2_idxs = ci_idxs[c2]
+                similarity_slice_ij = c1_similarity_slice[:, c2_idxs]
+                if i == j:
+                    quality[i, j] = np.min(similarity_slice_ij)
+                else:
+                    quality[i, j] = np.max(similarity_slice_ij)
+                    quality[j, i] = quality[i, j]
+        if with_names:
+            return pd.DataFrame(quality, index=clusters, columns=clusters)
+        else:
+            return quality
+
+    def cluster_averages(
+        self,
+        cluster_col: str,
+        aggregations: list[tuple[str]] = [("name", "count", "num_constituents")],
+        weight_col: str | None = None,
+    ) -> MotifCompendium:
+        """Creates a MotifCompendium where each motif represents a cluster of motifs.
+
+        For each cluster, the average aligned motif is computed. Specified metadata
+          columns can be aggregated and retained in the new cluster. The average motifs
+          and aggregated metadata are passed to build() and the resulting
+          MotifCompendium in which each motif represents a cluster in the current
+          MotifCompendium is returned.
+
+        Args:
+            cluster_col: The name of the column in metadata containing clustering
+              annotations to group motifs by. Each row in the new MotifCompendium will
+              correspond to a value in this column.
+            aggregations: A list of tuples of strings: (source, method, save).
+                source: The name of the column in the metadata to aggregate.
+                method: The aggregation method to use. The possible choices are:
+                    - "count": This option counts the number of values in the source
+                        column for each cluster.
+                    - "unique": This option counts the number of unique values in the
+                        source column for each cluster.
+                    - "sum": This option sums the values in the source column for each
+                        cluster.
+                    - "average" or "avg": This option averages the values in the source
+                        column for each cluster.
+                    - "concatenate" or "concat": This option lists all the unique values
+                        in the source column for each cluster.
+                    - "concat_counted": This option lists all the unique values and
+                        their number of occurrences in the source column for each
+                        cluster.
+                save: The name of the column in the new metadata to save the aggregated
+                  data to.
+            weight_col: The name of the metadata column to be used to weight motifs when
+              computing motif averages. Should be numeric.
+
+        Returns:
+            A MotifCompendium where each entry represents a motif cluster in the current
+              MotifCompendium.
+            Any non-supported aggregations types must be added manually.
+        """
+        # Set up aggregations
+        aggregations_dicts = []
+        for x in aggregations:
+            if x[2] in ["name", "source_cluster"]:
+                raise ValueError(f"{x[2]} is a reserved column name.")
+            aggregations_dicts.append(
+                {"source": x[0], "method": x[1], "save": x[2], "values": []}
+            )
+        # Check weights
+        if weight_col is not None:
+            if weight_col in self.metadata_columns:
+                weights = self.metadata[weight_col].to_numpy()
+            else:
+                raise ValueError(f"{weight_col} is not a column in metadata.")
+        else:
+            weights = None
+        # Cache cluster --> idxs dictionary
+        cluster_idxs = defaultdict(list)
+        for i, c in enumerate(self.metadata[cluster_col]):
+            cluster_idxs[c].append(i)
+        # Perform averaging per cluster
+        clusters = sorted(cluster_idxs.keys())
+        cluster_motif_avgs, cluster_names = [], []
+        for c in clusters:
+            # Cluster name
+            cluster_names.append(f"{cluster_col}#{c}")
+            # Cluster average motif
+            c_idxs = cluster_idxs[c]
+            motifs_c = self.motifs[c_idxs, :, :]
+            alignment_rc_c = self.alignment_rc[c_idxs, :][:, c_idxs][
+                0, :
+            ]  # vector of alignment
+            alignment_h_c = self.alignment_h[c_idxs, :][:, c_idxs][
+                0, :
+            ]  # vector of alignment
+            # Average motifs
+            motif_avg_c = utils_motif.average_motifs(
+                motifs_c, alignment_rc_c, alignment_h_c, weights=weights
+            )
+            cluster_motif_avgs.append(motif_avg_c)
+            # Aggregations
+            for agg_dict in aggregations_dicts:
+                agg_c_data = self.metadata.loc[c_idxs, agg_dict["source"]]
+                match agg_dict["method"]:
+                    case "count":
+                        agg_dict["values"].append(len(agg_c_data))
+                    case "unique":
+                        agg_dict["values"].append(len(set(agg_c_data)))
+                    case "sum":
+                        agg_dict["values"].append(np.sum(agg_c_data))
+                    case "average" | "avg":
+                        agg_dict["values"].append(np.mean(agg_c_data))
+                    case "concatenate" | "concat":
+                        agg_dict["values"].append(",".join(sorted(set(agg_c_data))))
+                    case "concat_counted":
+                        val_counts = defaultdict(int)
+                        for x in agg_c_data:
+                            val_counts[x] += 1
+                        val_strings = []
+                        for x in sorted(val_counts.keys()):
+                            val_strings.append(f"{x} ({val_counts[x]})")
+                        agg_dict["values"].append(",".join(val_strings))
+                    case _:
+                        raise ValueError(
+                            f"{agg_dict['method']} is not a supported aggregation method."
+                        )
+        # Construct cluster average MotifCompendium
+        cluster_motif_avgs = np.stack(cluster_motif_avgs, axis=0)
+        metadata = pd.DataFrame()
+        metadata["name"] = cluster_names
+        metadata["source_cluster"] = clusters
+        for agg_dict in aggregations_dicts:
+            metadata[agg_dict["save"]] = agg_dict["values"]
+        return build(cluster_motif_avgs, metadata, safe=False)
+
+    ###########################
+    # VIZUALIZATION FUNCTIONS #
+    ###########################
+    def motif_collection_html(
+        self, html_out: str, group_by: str | list, average_motif: bool = True
+    ) -> None:
+        """Creates an html file displaying all motifs in the current MotifCompendium.
+
+        Produces an html file at the specified location with all motifs from the current
+          MotifCompendium. Motifs are grouped by the group_by field in the metadata.
+          Group averages are plotted with a green background at the top of each group.
+
+        Args:
+            html_out: The path to save the html file.
+            group_by: The column in the metadata to group motifs by for visualization.
+              Alternatively, an externally provided list can fulfill the same role.
+            average_motif: Whether or not to show the average motif per cluster.
+
+        Notes:
+            Assumes self.metadata has a "name" column.
+            If you just want to plot cluster averages, consider doing
+              mc.cluster_averages(group_by).motif_collection_html(html_out, "name").
+        """
+        # Prepare groups/names/motifs
+        if isinstance(group_by, str):
+            if group_by in self.metadata.columns:
+                groups = list(self.metadata[group_by])
+            else:
+                raise KeyError(f"{group_by} not in metadata.")
+        elif isinstance(group_by, list):
+            groups = group_by
+        else:
+            raise TypeError(
+                "group_by must either be a string (column name in metadata) or a list."
+            )
+        if "name" not in self.metadata.columns:
+            raise KeyError("metadata must have a 'name' column.")
+        names = list(self.metadata["name"])
+        motifs = (
+            utils_motif.motif_8_to_4_signed(self.motifs)
+            if self.motifs.shape[2] == 8
+            else self.motifs
+        )
+        # Group motifs
+        motif_groups = dict()  # group name --> {motif name --> motif dict}
+        group_seeds = dict()  # group name --> index of seed motif in group
+        group_xmin_xmax = dict()  # group name --> group name --> (xmin, xmax) for group
+        for i, x in enumerate(groups):
+            if x in motif_groups:
+                cluster_x_seed = group_seeds[x]
+                motif_info_i = utils_plotting.LogoPlottingInput(
+                    motifs[i],
+                    revcomp=(self.alignment_rc[i, cluster_x_seed]),
+                    pos=self.alignment_h[i, cluster_x_seed],
+                    name=names[i],
+                )
+                group_xmin_xmax[x] = (
+                    min(group_xmin_xmax[x][0], self.alignment_h[i, cluster_x_seed]),
+                    max(
+                        group_xmin_xmax[x][1],
+                        self.alignment_h[i, cluster_x_seed] + motifs.shape[1],
+                    ),
+                )
+                motif_groups[x].append(motif_info_i)
+            else:
+                motif_info_i = utils_plotting.LogoPlottingInput(
+                    motifs[i], name=names[i]
+                )
+                motif_groups[x] = [motif_info_i]
+                group_seeds[x] = i
+                group_xmin_xmax[x] = (0, motifs.shape[1])
+        # Reindex all motifs + average
+        for group_name, group in motif_groups.items():
+            # Reindex all motifs in group
+            for motif_info in group:
+                motif_info.set_bounds(*group_xmin_xmax[group_name])
+            # Average
+            if average_motif:
+                group_motifs = [motif_info.get_motif_df() for motif_info in group]
+                motifs_concat = pd.concat(group_motifs)
+                average_motif_df = motifs_concat.groupby(motifs_concat.index).mean()
+                min_index_val = min(average_motif_df.index)
+                max_index_val = max(average_motif_df.index)
+                average_motif_info = utils_plotting.LogoPlottingInput(
+                    average_motif_df.to_numpy(),
+                    pos=min_index_val,
+                    name="AVERAGE",
+                    bgcolor="palegreen",
+                )
+                average_motif_info.set_bounds(min_index_val, max_index_val)
+                group.insert(0, average_motif_info)
+        # Submit to plotting function
+        utils_visualization.motif_collection_html(motif_groups, html_out)
+
+    def summary_table_html(
+        self, html_out: str, columns: None | list[str] = None, editable=False
+    ) -> None:
+        """Creates an html file summarizing all motifs and metadata about them.
+
+        Produces an html file at the specified location with all motifs from the current
+          MotifCompendium. Each motif has one row in the summary table. Logos for the
+          forward and reverse complement of each motif will be displayed in the first
+          two columns. Columns from the current metadata as well as other images saved
+          in the object (which can be viewed with MotifCompendium.get_saved_images())
+          can be displayed as columns in the summary table.
+
+        Args:
+            html_out: The path to save the html file.
+            columns: The list of column names in the metadata or saved images to display
+              as columns in the summary table. If None, uses all columns.
+            editable: Whether or not the table is editable.
+
+        Notes:
+            It is highly suggested that this function just be run on a MotifCompendium
+              of motif clusters. Consider doing
+              mc.cluster_averages(cluster).summary_table_html(html_out, summary_cols).
+        """
+        # Check columns
+        if columns is None:
+            columns = list(self.metadata.columns)
+        elif not all([c in self.metadata.columns for c in columns]):
+            raise KeyError("All columns must be metadata columns or saved images.")
+        # If forward and reverse logos aren't in __images, create and add them
+        if "logo (fwd)" not in self.__images.columns:
+            motifs = (
+                utils_motif.motif_8_to_4_signed(self.motifs)
+                if self.motifs.shape[2] == 8
+                else self.motifs
+            )
+            motif_plotting_inputs = [
+                utils_plotting.LogoPlottingInput(motif) for motif in motifs
+            ]
+            self.__images["logo (fwd)"] = [
+                motif_input.utf8_plot
+                for motif_input in utils_plotting.plot_many_motif_logos(
+                    motif_plotting_inputs
+                )
+            ]
+        if "logo (rev)" not in self.__images.columns:
+            motifs = (
+                utils_motif.motif_8_to_4_signed(self.motifs)
+                if self.motifs.shape[2] == 8
+                else self.motifs
+            )
+            motif_plotting_inputs = [
+                utils_plotting.LogoPlottingInput(motif, revcomp=True)
+                for motif in motifs
+            ]
+            self.__images["logo (rev)"] = [
+                motif_input.utf8_plot
+                for motif_input in utils_plotting.plot_many_motif_logos(
+                    motif_plotting_inputs
+                )
+            ]
+        # Build table
+        columns = ["logo (fwd)", "logo (rev)"] + columns
+        table_columns = []
+        image_column = []
+        for c in columns:
+            if c in self.metadata.columns:
+                if c in self.__images.columns:
+                    raise KeyError(
+                        f"Column {c} is a column in metadata and __images. Object invalid."
+                    )
+                else:
+                    table_columns.append(self.metadata[c])
+                    image_column.append(False)
+            elif c in self.__images.columns:
+                table_columns.append(self.__images[c])
+                image_column.append(True)
+            else:
+                raise KeyError(
+                    f"{c} must be a column in metadata or a generated image."
+                )
+        table_df = pd.concat(table_columns, axis=1)
+        utils_visualization.table_html(table_df, image_column, html_out, editable)
+
+    def update_from_summary_table(self, html_loc: str) -> None:
+        # Read the summary table HTML
+        if not os.path.exists(html_loc):
+            raise FileNotFoundError(f"{html_loc} does not exist.")
+        with open(html_loc, "r") as f:
+            html_content = f.read()
+        # Get DataTable
+        soup = BeautifulSoup(html_content, "html.parser")
+        table = soup.find("table", {"id": "DataTable"})
+        # Get headers (first row)
+        headers = []
+        image_columns = []
+        for i, th in enumerate(table.find_all("th")):
+            # Check if column has sort buttons (non-image column)
+            if th.find("button"):
+                # Non-image columns have buttons that need to be removed
+                header_name = th.text.strip().split("\n")[0]
+                headers.append(header_name)
+                image_columns.append(False)
+            else:
+                headers.append(th.text.strip())
+                image_columns.append(True)
+        # Get data rows (ignore first and second row)
+        rows = []
+        for tr in table.find_all("tr")[2:]:  # Skip header and filter rows
+            row_data = []
+            for i, td in enumerate(tr.find_all("td")):
+                if not image_columns[i]:  # Skip image columns
+                    val = td.text.strip()
+                    try:
+                        val = int(val)
+                    except:
+                        try:
+                            val = float(val)
+                        except:
+                            pass
+                    row_data.append(val)
+            rows.append(row_data)
+        # Create DataFrame
+        non_image_headers = [
+            h for h, is_img in zip(headers, image_columns) if not is_img
+        ]
+        df = pd.DataFrame(rows, columns=non_image_headers)
+        # Update metadata
+        for col in df.columns:
+            self.metadata[col] = df[col]
+
+    def heatmap(
+        self,
+        annot: bool = False,
+        label: bool = False,
+        show: bool = False,
+        save_loc: str | None = None,
+    ) -> None:
+        """Creates a heatmap of the similarity matrix.
+
+        Produces a heatmap of the similarity matrix of this MotifCompendium with various
+          formatting, display, and save options.
+
+        Args:
+            annot: Whether or not to display the similarity score value in each cell in
+              the heatmap.
+            label: Whether or not to label rows and columns with motif names.
+            show: Whether or not to show the heatmap with plt.show().
+            save_loc: Where to save the heatmap to. If None, the heatmap is not saved.
+
+        Notes:
+            Assumes self.metadata has a "name" column.
+            Consider visualizing just one cluster at a time with
+              mc[mc["cluster"] == "cluster_1"].heatmap().
+        """
+        if label:
+            if "name" not in self.metadata.columns:
+                raise KeyError("metadata must have a 'name' column.")
+            utils_plotting.plot_heatmap(
+                self.similarity,
+                annot=annot,
+                labels=list(self.metadata["name"]),
+                show=show,
+                save_loc=save_loc,
+            )
+        else:
+            utils_plotting.plot_heatmap(
+                self.similarity, annot=annot, show=show, save_loc=save_loc
+            )
+
+    ######################
+    # ANALYSIS FUNCTIONS #
+    ######################
+    def add_motif_strings(
+        self, name="motif_string", specificity=0.7, importance=1 / 30
+    ) -> None:
+        """Adds a column to the metadata that is a string representation of each motif.
+
+        Adds a "motif_string" column to the metadata that contains the motif as a string.
+        """
+        motif_str_revstrs = utils_motif.motif_to_string(
+            self.motifs, specificity, importance
+        )
+        self.metadata[name] = [f"{x[0]}\n{x[1]}" for x in motif_str_revstrs]
+
     def extend(self):
         """Add new motifs to the current MotifCompendium."""
         print("not yet implemented")
@@ -978,7 +1214,6 @@ class MotifCompendium:
         save_col_sim: str = "mc_match_similarity",
         save_col_match: str = "mc_match",
         save_col_logo: str = "mc_match_logo",
-        l2: bool | None = None,
     ) -> None:
         """Assign clusters to motifs based on an existing clustered MotifCompendium.
 
@@ -994,8 +1229,6 @@ class MotifCompendium:
             save_col_sim: The column under which the highest similarity will be stored.
             save_col_match: The column under which the closest match will be stored.
             save_col_logo: The column under which the closest match logo will be stored.
-            l2: Whether or not to use L2 normalization (instead of sqrt normalization)
-              when computing motif similarity.
 
         Notes:
             Assumes that this MotifCompendium and other have the same dimensions for
@@ -1007,7 +1240,7 @@ class MotifCompendium:
             )
         # Compute similarity
         mc_similarity, _, _ = utils_similarity.compute_similarities(
-            [self.motifs, other.motifs], [(0, 1)], l2=l2
+            [self.motifs, other.motifs], [(0, 1)]
         )[0]
         closest_similarity = np.max(mc_similarity, axis=1)
         closest_index = np.argmax(mc_similarity, axis=1)
@@ -1018,7 +1251,7 @@ class MotifCompendium:
         if "logo (fwd)" not in other.__images.columns:
             # Generate forward logos if not already generated
             motifs = (
-                utils_motif.motif_8_to_4(other.motifs)
+                utils_motif.motif_8_to_4_signed(other.motifs)
                 if other.motifs.shape[2] == 8
                 else other.motifs
             )

@@ -1,9 +1,9 @@
 from .MotifCompendium import (
+    set_compute_options,
     load,
     inspect,
+    load_old,
     build,
     build_from_modisco,
-    combine,
-    set_compute_options,
     MotifCompendium,
 )

@@ -33,21 +33,22 @@ def load_modiscos(
         Motifs are returned as an (N, 30, 8) motif stack.
         Using ic scaling is highly recommended.
     """
-    if get_max_cpus() is None:
+    max_cpus = get_max_cpus()
+    if max_cpus == 1:
         # Load serially
-        sims, motif_names, seqlet_counts, model_names = [], [], [], []
+        motifs, motif_names, seqlet_counts, model_names = [], [], [], []
         for m_name, m_loc in modisco_dict.items():
-            m_sims, m_motif_names, m_seqlet_counts = load_modisco(m_loc, ic=ic)
+            m_motifs, m_motif_names, m_seqlet_counts = load_modisco(m_loc, ic=ic)
             m_motif_names = [f"{m_name}-{x}" for x in m_motif_names]
-            sims.append(m_sims)
+            motifs.append(m_motifs)
             motif_names += m_motif_names
             seqlet_counts += m_seqlet_counts
             model_names += [m_name] * len(m_motif_names)
-        sims = np.concatenate(sims, axis=0)
+        motifs = np.concatenate(motifs, axis=0)
     else:
         # Load in parallel
         num_processes = min(
-            get_max_cpus(), multiprocessing.cpu_count()
+            max_cpus, multiprocessing.cpu_count()
         )  # don't use more CPUs than available
         m_names, m_locs = [], []
         for m_name, m_loc in modisco_dict.items():
@@ -56,16 +57,16 @@ def load_modiscos(
         payloads = [(m_loc, ic) for m_loc in m_locs]
         with multiprocessing.Pool(processes=num_processes) as p:
             results = p.starmap(load_modisco, payloads)
-        sims, motif_names, seqlet_counts, model_names = [], [], [], []
+        motifs, motif_names, seqlet_counts, model_names = [], [], [], []
         for i, r in enumerate(results):
-            m_sims, m_motif_names, m_seqlet_counts = r
+            m_motifs, m_motif_names, m_seqlet_counts = r
             m_motif_names = [f"{m_names[i]}-{x}" for x in m_motif_names]
-            sims.append(m_sims)
+            motifs.append(m_motifs)
             motif_names += m_motif_names
             seqlet_counts += m_seqlet_counts
             model_names += [m_names[i]] * len(m_motif_names)
-        sims = np.concatenate(sims, axis=0)
-    return sims, motif_names, seqlet_counts, model_names
+        motifs = np.concatenate(motifs, axis=0)
+    return motifs, motif_names, seqlet_counts, model_names
 
 
 def load_modisco(
@@ -89,24 +90,24 @@ def load_modisco(
         Motifs are returned as an (N, 30, 8) 8 channel motif stack.
         Using ic scaling is highly recommended.
     """
-    sims, motif_names, seqlet_counts = [], [], []
+    motifs, motif_names, seqlet_counts = [], [], []
     with h5py.File(modisco_file, "r") as f:
         if "pos_patterns" in f:
             for pattern in list(f["pos_patterns"]):
                 seqlets = f["pos_patterns"][pattern]["seqlets"]["contrib_scores"][()]
                 motif_sim = _sequence_importance_from_seqlets(seqlets, ic)
-                sims.append(motif_sim)
+                motifs.append(motif_sim)
                 motif_names.append(f"pos.{pattern}")
                 seqlet_counts.append(seqlets.shape[0])
         if "neg_patterns" in f:
             for pattern in list(f["neg_patterns"]):
                 seqlets = f["neg_patterns"][pattern]["seqlets"]["contrib_scores"][()]
                 motif_sim = _sequence_importance_from_seqlets(seqlets, ic)
-                sims.append(motif_sim)
+                motifs.append(motif_sim)
                 motif_names.append(f"neg.{pattern}")
                 seqlet_counts.append(seqlets.shape[0])
-    sims = np.stack(sims, axis=0)
-    return sims, motif_names, seqlet_counts
+    motifs = np.stack(motifs, axis=0)
+    return motifs, motif_names, seqlet_counts
 
 
 def load_pfm(pfm_file: str) -> tuple[np.ndarray, list[str]]:
@@ -249,7 +250,7 @@ def _sequence_importance_from_seqlets(seqlets: np.ndarray, ic: bool) -> np.ndarr
         An (L, 8) sequence importance matrix.
 
     Note:
-        The returned sim will be non-negative and have a sum equal to 1.
+        The returned motif will be non-negative and have a sum equal to 1.
     """
     # INPUT = (N, L, 4)
     # Normalize
@@ -260,7 +261,7 @@ def _sequence_importance_from_seqlets(seqlets: np.ndarray, ic: bool) -> np.ndarr
     # Information content scaling
     if ic:
         seqlets_avg = ic_scale(seqlets_avg)
-    # Create sim
-    sim = motif_4_to_8(seqlets_avg)
-    sim /= np.sum(sim)
-    return sim
+    # Convert to 8 channel
+    motif = motif_4_to_8(seqlets_avg)
+    # Final normalize
+    return motif / np.sum(motif)
