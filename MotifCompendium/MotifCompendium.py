@@ -925,10 +925,10 @@ class MotifCompendium:
             c_idxs = cluster_idxs[c]
             motifs_c = self.motifs[c_idxs, :, :]
             alignment_rc_c = self.alignment_rc[c_idxs, :][:, c_idxs][
-                0, :
+                :, 0
             ]  # vector of alignment
             alignment_h_c = self.alignment_h[c_idxs, :][:, c_idxs][
-                0, :
+                :, 0
             ]  # vector of alignment
             # Average motifs
             motif_avg_c = utils_motif.average_motifs(
@@ -948,7 +948,7 @@ class MotifCompendium:
                     case "average" | "avg":
                         agg_dict["values"].append(np.mean(agg_c_data))
                     case "concatenate" | "concat":
-                        agg_dict["values"].append(",".join(sorted(set(agg_c_data))))
+                        agg_dict["values"].append(", ".join(sorted(set(agg_c_data))))
                     case "concat_counted":
                         val_counts = defaultdict(int)
                         for x in agg_c_data:
@@ -956,7 +956,7 @@ class MotifCompendium:
                         val_strings = []
                         for x in sorted(val_counts.keys()):
                             val_strings.append(f"{x} ({val_counts[x]})")
-                        agg_dict["values"].append(",".join(val_strings))
+                        agg_dict["values"].append(", ".join(val_strings))
                     case _:
                         raise ValueError(
                             f"{agg_dict['method']} is not a supported aggregation method."
