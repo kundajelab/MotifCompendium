@@ -48,24 +48,25 @@ def cluster(
     match algorithm.lower():
         # Leiden
         case "mod_leiden" | "modularity_leiden" | "rb_leiden":
-            adjacency_matrix = similarity_matrix * (
+            weighted_adjacency_matrix  = similarity_matrix * (
                     similarity_matrix >= similarity_threshold
                 )
             if get_use_gpu():
-                return modularity_leiden_clustering_gpu(adjacency_matrix, **kwargs)
+                print("Warning: GPU version not yet implemented. Falling back to CPU.")
+                return modularity_leiden_clustering_cpu(weighted_adjacency_matrix , **kwargs)
             else:
-                return modularity_leiden_clustering_cpu(adjacency_matrix, **kwargs)
+                return modularity_leiden_clustering_cpu(weighted_adjacency_matrix , **kwargs)
         case "cpm" | "cpm_leiden" | "constant_potts_leiden":
-            adjacency_matrix = similarity_matrix * (
+            weighted_adjacency_matrix  = similarity_matrix * (
                 similarity_matrix >= similarity_threshold
             )
-            return cpm_leiden_clustering(adjacency_matrix, **kwargs)
+            return cpm_leiden_clustering(weighted_adjacency_matrix , **kwargs)
         case "leiden" | "leidenalg":
             print("Warning: Falling back to default Leiden algorithm: Constant Potts model")
-            adjacency_matrix = similarity_matrix * (
+            weighted_adjacency_matrix  = similarity_matrix * (
                 similarity_matrix >= similarity_threshold
             )
-            return cpm_leiden_clustering(adjacency_matrix, **kwargs)
+            return cpm_leiden_clustering(weighted_adjacency_matrix , **kwargs)
         # Connected-components
         case "cc":
             adjacency_matrix = similarity_matrix >= similarity_threshold
@@ -85,7 +86,7 @@ def cluster(
 # LEIDEN CLUSTERING #
 #####################
 def modularity_leiden_clustering_cpu(
-    adjacency_matrix: np.ndarray,
+    weighted_adjacency_matrix : np.ndarray,
     resolution_parameter: float = 1.0,
     n_iterations: int = -1,
     seeds: list[int] = [1],
@@ -93,7 +94,7 @@ def modularity_leiden_clustering_cpu(
     """Perform Leiden clustering with R&B quality and a configuration null.
 
     Args:
-        adjacency_matrix: A square weighted adjacency matrix.
+        weighted_adjacency_matrix : A square weighted adjacency matrix.
         resolution_parameter: The resolution parameter for the Leiden algorithm. A
           resolution_parameter of 1 is equivalent to using modularity as the quality
           function.
@@ -114,7 +115,7 @@ def modularity_leiden_clustering_cpu(
         Uses Reichardt & Bornholdt's quality function with a configuration model as a
           a null. See leidenalg.RBConfigurationVertexPartition for more details.
     """
-    g = ig.Graph.Weighted_Adjacency(adjacency_matrix, mode="undirected")
+    g = ig.Graph.Weighted_Adjacency(weighted_adjacency_matrix , mode="undirected")
     best_quality = None
     best_membership = None
     for seed in len(seeds):
@@ -133,7 +134,7 @@ def modularity_leiden_clustering_cpu(
 
 
 def cpm_leiden_clustering(
-    adjacency_matrix: np.ndarray,
+    weighted_adjacency_matrix : np.ndarray,
     resolution_parameter: float = 1.0,
     n_iterations: int = -1,
     seeds: list[int] = [1],
@@ -141,7 +142,7 @@ def cpm_leiden_clustering(
     """Perform Leiden clustering with the Constant Potts model.
 
     Args:
-        adjacency_matrix: A square weighted adjacency matrix.
+        weighted_adjacency_matrix : A square weighted adjacency matrix.
         resolution_parameter: The resolution parameter for the Leiden algorithm.
         n_iterations: The number of iterations that Leiden is allowed to run. If
           n_iterations is -1, then Leiden will run until there is no longer any
@@ -159,7 +160,7 @@ def cpm_leiden_clustering(
     Notes:
         Uses the Constant Potts model. See leidenalg.CPMVertexPartition for more details.
     """
-    g = ig.Graph.Weighted_Adjacency(adjacency_matrix, mode="undirected")
+    g = ig.Graph.Weighted_Adjacency(weighted_adjacency_matrix , mode="undirected")
     best_quality = None
     best_membership = None
     for seed in len(seeds):
@@ -178,7 +179,7 @@ def cpm_leiden_clustering(
 
 
 def modularity_leiden_clustering_gpu(
-    adjacency_matrix: np.ndarray,
+    weighted_adjacency_matrix : np.ndarray,
     resolution_parameter: float = 1.0,
     n_iterations: int = 100,
     n_seeds: int = 2,
@@ -187,7 +188,7 @@ def modularity_leiden_clustering_gpu(
     Perform Leiden clustering with R&B quality and a configuration null, on GPU.
 
     Args:
-        adjacency_matrix: A square weighted adjacency matrix.
+        weighted_adjacency_matrix : A square weighted adjacency matrix.
         resolution_parameter: The resolution parameter for the Leiden algorithm. A
           resolution_parameter of 1 is equivalent to using modularity as the quality
           function.
@@ -208,6 +209,8 @@ def modularity_leiden_clustering_gpu(
         Uses Leiden method described in: Traag, V. A., Waltman, L., & van Eck, N. J. (2019). 
         From Louvain to Leiden: guaranteeing well-connected communities. Scientific reports, 
         9(1), 5233. doi: 10.1038/s41598-019-41695-z. See cugraph.leiden for more details.
+    """
+    ValueError("GPU version not yet implemented.")
     """
     import cugraph
     import cudf
@@ -244,6 +247,7 @@ def modularity_leiden_clustering_gpu(
             best_quality = quality
             best_membership = partition['partition'].to_numpy().tolist()
     return best_membership
+    """
 
 
 #################

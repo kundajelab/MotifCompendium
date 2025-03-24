@@ -259,7 +259,9 @@ def ic_scale(x: np.ndarray, invert: bool = False) -> np.ndarray:
 
 @single_or_many_motifs
 def calculate_ls_scale(var_motif: np.ndarray, ref_motif: np.ndarray) -> np.ndarray:
-    """Find the best scaling factor, a, to apply to the variable motif to match the scale
+    """Calculate least squares scaling factor.
+    
+    Find the best scaling factor, a, to apply to the variable motif to match the scale
       of the reference motif, by minimizing the least squares between the two motifs
       (i.e., min ||a * variable - ref||^2).
     
@@ -281,6 +283,11 @@ def subtract_motifs(
     align_h: np.ndarray
 ) -> np.ndarray:
     """Subtract two motif stacks, based on idx, alignment, and forward/reverse complement.
+
+    Given two motif stacks, motifs_core and motifs_subtract, align motifs_subtract based on 
+    align_rc and align_h, scale motifs_subtract by least squares to match scale of motifs_core, 
+    subtract motifs_core by motifs_subtract with clipping, to return the remaining components
+    of motifs_core.
 
     Args:
         motifs_core: A np.ndarray representing a stack of K channel motifs,
