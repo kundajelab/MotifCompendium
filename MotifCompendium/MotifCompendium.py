@@ -1250,7 +1250,7 @@ class MotifCompendium:
             motif_str_revstrs = utils_motif.motif_to_string(
                 self.motifs, specificity, importance
             )
-        self.metadata[name] = [f"{x[0]}\n{x[1]}" for x in motif_str_revstrs]
+        self.metadata[name] = [f"{x[0]}<br/>{x[1]}" for x in motif_str_revstrs]
 
     def extend(self):
         """Add new motifs to the current MotifCompendium."""

@@ -335,7 +335,7 @@ def motif_to_df(motif: np.ndarray) -> pd.DataFrame:
 
 @single_or_many_motifs
 def motif_to_string(
-    x: np.ndarray, importance: float = 1 / 30, specificity: float = 0.7
+    x: np.ndarray, specificity: float = 0.7, importance: float = 1 / 30
 ) -> str | list[str]:
     """Transforms motifs into ATCG strings.
 
@@ -348,10 +348,10 @@ def motif_to_string(
 
     Args:
         x: A (L, 4) motif or (N, L, 4) motif stack representing motifs to compute strings from.
-        importance: The minimum level of importance a position must have to be included
-          in the string.
         specificity: The percentage of importance a base must have at a position to be
           included in the string.
+        importance: The minimum level of importance a position must have to be included
+          in the string.
 
     Returns:
         A string or list of strings representing the motifs.
@@ -360,10 +360,10 @@ def motif_to_string(
     validate_motif_stack_standard(x)
     if not (x >= 0).all():
         raise ValueError("Motif strings can only be generated for non-negative motifs.")
-    if not (isinstance(importance, (int, float)) and 0 <= importance <= 1):
-        raise ValueError("importance must be a number in [0, 1].")
     if not (isinstance(specificity, (int, float)) and 0.5 < specificity <= 1):
         raise ValueError("specificity must be a number in (0.5, 1].")
+    if not (isinstance(importance, (int, float)) and 0 <= importance <= 1):
+        raise ValueError("importance must be a number in [0, 1].")
     # Turns to 1s and 0s
     per_position_totals = np.sum(x, axis=2, keepdims=True)
     meets_specificity = x / per_position_totals >= specificity
