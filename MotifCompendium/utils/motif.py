@@ -177,7 +177,7 @@ def average_motifs(
     alignment_rc: np.ndarray,
     alignment_h: np.ndarray,
     match_original_length: bool = True,
-    l1_normalize: bool = True,
+    l1_norm: bool = True,
     weights: np.ndarray | None = None,
 ) -> np.ndarray:
     """Compute the average motif of a stack of motifs.
@@ -193,7 +193,7 @@ def average_motifs(
           True, the average motif will be made to be the same length as the original
           motifs. If False, the average motif will have the length of the aligned motif
           stack.
-        l1_normalize: Whether or not to L1 normalize the average motif before returning.
+        l1_norm: Whether or not to L1 normalize the average motif before returning.
         weights: A (N, ) vector of weights for each motif. If None, all motifs are
           weighed equally.
 
@@ -214,7 +214,7 @@ def average_motifs(
     average_motif = np.average(aligned_motifs, axis=0, weights=weights)
     if match_original_length:
         average_motif = resize_motif(average_motif, resize_to=motif_stack.shape[1])
-    if l1_normalize:
+    if l1_norm:
         average_motif = average_motif / np.sum(np.abs(average_motif))
     return average_motif
 
@@ -255,6 +255,57 @@ def ic_scale(x: np.ndarray, invert: bool = False) -> np.ndarray:
     else:
         scaled = x * ic
     return scaled
+
+
+@single_or_many_motifs
+def calculate_ls_scale(var_motif: np.ndarray, ref_motif: np.ndarray) -> np.ndarray:
+    """Find the best scaling factor, a, to apply to the variable motif to match the scale
+      of the reference motif, by minimizing the least squares between the two motifs
+      (i.e., min ||a * variable - ref||^2).
+    
+    Args:
+        var_motif: A np.ndarray representing the variable motif. (N, L, K)
+        ref_motif: A np.ndarray representing the reference motif. (N, L, K)
+        
+    Returns:
+        A np.ndarray representing the best scaling factor. (N,)
+    """
+    return np.sum((var_motif * ref_motif), axis=(1,2)) / np.sum((var_motif ** 2), axis=(1,2))
+
+
+@single_or_many_motifs
+def subtract_motifs(
+    motifs_core: np.ndarray, 
+    motifs_subtract: np.ndarray,
+    align_rc: np.ndarray,
+    align_h: np.ndarray
+) -> np.ndarray:
+    """Subtract two motif stacks, based on idx, alignment, and forward/reverse complement.
+
+    Args:
+        motifs_core: A np.ndarray representing a stack of K channel motifs,
+          to subtract from. (N, L, K)
+        motifs_subtract: A np.ndarray representing a stack of K channel motifs,
+          to be subtracted by, following order of motifs_core. (N, L, K)
+        align_rc: A np.ndarray containing the forward/reverse complement
+          relationship between any two motifs. (N,)
+        align_h: A np.ndarray containing the horizontal shift information between
+          any two motifs. (N,)
+
+    Returns:
+        A np.ndarray representing the subtracted motifs. (N, L, K)
+    """
+    # Check inputs
+    validate_motif_stack(motifs_core)
+    validate_motif_stack(motifs_subtract_set)
+    if not (align_idx.shape == align_rc.shape == align_h.shape == (motifs_core.shape[0],)):
+        raise ValueError("align_idx, align_rc, and align_h must have the same length as motifs_core.")
+
+    # Subtract motifs
+    motifs_subtract = align_motifs(motifs_subtract, align_rc, align_h) # Align motifs
+    motifs_subtract = motifs_subtract * calculate_ls_scale(motifs_subtract, motifs_core) # L2 scale to best match core
+    updated_motifs = np.clip(motifs_core - motifs_subtract, 0, None) # Clip negative values
+    return updated_motifs
 
 
 _MOTIF_4_TO_8_POS = np.zeros((4, 8))

@@ -23,29 +23,29 @@ def compute_similarity_and_align(
     )
     del motifsA_xp, motifsB_xp  # Free up memory
     # Forward similarity
-    sim_1, sim_1_alignments = _compute_similarity(
+    sim_1, sim_1_aligns = _compute_similarity(
         motifsA_normalized, motifsB_normalized, xp
     )  # skew-symmetric alignment
     # Reverse complement
     motifsA_normalized_revcomp = _reverse_complement(motifsA_normalized)
     del motifsA_normalized  # Free up memory
     # Backward similarity
-    sim_2, sim_2_alignments = _compute_similarity(
+    sim_2, sim_2_aligns = _compute_similarity(
         motifsA_normalized_revcomp, motifsB_normalized, xp
     )  # symmetric alignment
     # Pick best similarity
     sim_12 = xp.stack([sim_1, sim_2])
     sim = xp.max(sim_12, axis=0)
-    sim_fr = xp.argmax(sim_12, axis=0)
-    sim_alignments = xp.where(sim_fr == 0, sim_1_alignments, sim_2_alignments)
+    align_rc = xp.argmax(sim_12, axis=0)
+    align_h = xp.where(align_rc == 0, sim_1_aligns, sim_2_aligns)
     # Guarantee similarity properties
-    sim_alignments[sim == 0] = (
+    align_h[sim == 0] = (
         0  # When 0 similarity, set alignment to 0 for alignment symmetry properties
     )
     # Return
     if get_use_gpu():
-        sim, sim_fr, sim_alignments = sim.get(), sim_fr.get(), sim_alignments.get()
-    return sim.astype(np.single), sim_fr.astype(np.bool), sim_alignments.astype(np.byte)
+        sim, align_rc, align_h = sim.get(), align_rc.get(), align_h.get()
+    return sim.astype(np.single), align_rc.astype(np.bool), align_h.astype(np.byte)
 
 
 ####################
@@ -101,18 +101,18 @@ def _compute_similarity(motif_set_1, motif_set_2, xp):
     total_sum = xp.sum(xp.stack(sims), axis=0)
     del sims  # Free up memory
     # Compute alignment
-    best_alignment_scores = xp.max(total_sum, axis=1)
-    best_alignments = xp.argmax(total_sum, axis=1) - (L - 1)
+    best_align_scores = xp.max(total_sum, axis=1)
+    best_align_h = xp.argmax(total_sum, axis=1) - (L - 1)
     del total_sum  # Free up memory
     # Undo transpose if needed
     if transpose:
-        best_alignment_scores = best_alignment_scores.T
-        best_alignments = (
-            -best_alignments.T
+        best_align_scores = best_align_scores.T
+        best_align_h = (
+            -best_align_h.T
         )  # negative because transposing flips alignment
-    assert best_alignment_scores.shape == (N, M)
-    assert best_alignments.shape == (N, M)
-    return best_alignment_scores, best_alignments
+    assert best_align_scores.shape == (N, M)
+    assert best_align_h.shape == (N, M)
+    return best_align_scores, best_align_h
 
 
 def _compute_similarity_right_side(motifs, xp):

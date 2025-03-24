@@ -333,19 +333,19 @@ def export_clusters_modisco(
 ####################
 # ENTROPY ANALYSES #
 ####################
-def calculate_entropy(
+def calculate_filters(
     mc: MotifCompendium,
-    entropy_list: list[str] = [
+    metric_list: list[str] = [
         "motif_entropy",
         "posbase_entropy_ratio",
         "copair_entropy_ratio",
         "dinuc_entropy_ratio",
     ],
 ) -> None:
-    """Calculate entropy metrics, to quantify motif information complexity.
-    Update metadata table with entropy metric values.
+    """Calculate filter metrics, to be used for filtering low quality motifs.
+    Update metadata table with filter metric values.
 
-    List of Entropy metrics:
+    List of filter metrics:
         (1) Motif entropy:
             Calculation: Shannon entropy on (L,8)
             Purpose:    (Low) Archetype #1: Sharp nucleotide peak (e.g., G)
@@ -363,55 +363,62 @@ def calculate_entropy(
             Purpose:    (High) Dinucleotide repeats (e.g., GCGCGC, ATATAT)
 
     Args:
-        entropy_list: List of entropy metrics to calculate.
+        metric_list: List of filter metrics to calculate.
           Possible values: ['motif_entropy', 'posbase_entropy_ratio',
           'copair_entropy_ratio', 'dinuc_entropy_ratio']
     """
-    # Check if entropy metrics are valid
-    entropy_list = list(set(entropy_list))  # Convert entropy_list into a unique list
-    valid_entropy_metrics = [
+    # Check if filter metrics are valid
+    metric_list = list(set(metric_list))  # Convert metric_list into a unique list
+    valid_filter_metrics = [
         "motif_entropy",
         "posbase_entropy_ratio",
         "copair_entropy_ratio",
         "dinuc_entropy_ratio",
     ]
-    for entropy_metric in entropy_list:
-        if entropy_metric not in valid_entropy_metrics:
+    for filter_metric in metric_list:
+        if filter_metric not in valid_filter_metrics:
             raise ValueError(
-                f"Entropy metric {entropy_metric} is not valid. Must be one of: {valid_entropy_metrics}"
+                f"Filter metric {filter_metric} is not valid. Must be one of: {valid_filter_metrics}"
             )
 
-    # Calculate entropy metrics
-    for entropy_metric in entropy_list:
+    # Calculate filter metrics
+    for filter_metric in metric_list:
         metrics_list = []
-        match entropy_metric:
+        match filter_metric:
             case "motif_entropy":
-                for i in range(mc.motifs.shape[0]):
-                    metric = utils_motif.calculate_motif_entropy(mc.motifs[i])
+                for motif in mc.motifs:
+                    metric = utils_motif.calculate_motif_entropy(motif)
                     metrics_list.append(metric)
                 mc["motif_entropy"] = metrics_list
 
             case "posbase_entropy_ratio":
-                for i in range(mc.motifs.shape[0]):
-                    metric = utils_motif.calculate_posbase_entropy_ratio(mc.motifs[i])
+                for motif in mc.motifs:
+                    metric = utils_motif.calculate_posbase_entropy_ratio(motif)
                     metrics_list.append(metric)
                 mc["posbase_entropy_ratio"] = metrics_list
 
             case "copair_entropy_ratio":
-                for i in range(mc.motifs.shape[0]):
-                    metric = utils_motif.calculate_copair_entropy_ratio(mc.motifs[i])
+                for motif in mc.motifs:
+                    metric = utils_motif.calculate_copair_entropy_ratio(motif)
                     metrics_list.append(metric)
                 mc["copair_entropy_ratio"] = metrics_list
 
             case "dinuc_entropy_ratio":
-                for i in range(mc.motifs.shape[0]):
-                    metric = utils_motif.calculate_dinuc_entropy_ratio(mc.motifs[i])
+                for motif in mc.motifs:
+                    metric = utils_motif.calculate_dinuc_entropy_ratio(motif)
                     metrics_list.append(metric)
                 mc["dinuc_entropy_ratio"] = metrics_list
+            
+            case "negpattern_pospeak":
+                for i in range(len(mc)):
+                    if mc.metadata["posneg"][i] == "neg":
+                        metric = utils_motif.check_negpattern_pospeak(mc.motifs[i])
+                        metrics_list.append(metric)
+                mc["negpattern_pospeak"] = metrics_list
 
             case _:
                 raise ValueError(
-                    f"Entropy metric {entropy_metric} is not valid. Must be one of: {valid_entropy_metrics}"
+                    f"filter metric {filter_metric} is not valid. Must be one of: {valid_filter_metrics}"
                 )
 
 
@@ -424,7 +431,8 @@ def label_from_pfms(
     save_col_sim: str = "pfm_match_similarity",
     save_col_match: str = "pfm_match",
     save_col_logo: str = "pfm_match_logo",
-    l2: bool | None = None,
+    max_submotifs: int = 1,
+    min_score: float = 0.5,
 ) -> None:
     """Automatic labeling of motifs from a pfm file.
 
@@ -438,8 +446,9 @@ def label_from_pfms(
         pfm_file: The PFM file path.
         save_col_sim: The column under which the highest similarity will be stored.
         save_col_match: The column under which the closest match will be stored.
-        l2: Whether or not to use L2 normalization (instead of sqrt normalization) when
-          computing motif similarity.
+        save_col_logo: The column under which the closest match logo will be stored.
+        max_submotifs: The maximum number of submotifs to consider in a match.
+        min_score: The minimum similarity score to consider as a match.
     """
     # Load PFM database
     if pfm_file.endswith("_pfms.txt"):
@@ -448,22 +457,62 @@ def label_from_pfms(
         pfm_motifs, names = utils_loader.load_meme(pfm_file)
     else:
         raise ValueError("pfm_file must be a _pfm.txt, .meme, or .meme.txt file.")
-    # Compute similarity
-    mc_motifs = mc.motifs
+
+    mc_motifs = mc.motifs.copy()
     if mc_motifs.shape[2] == 8:
-        mc_motifs = utils_motif.motif_8_to_4_abs(mc_motifs)
-    pfm_similarity, _, _ = utils_similarity.compute_similarities(
-        [mc_motifs, pfm_motifs], [(0, 1)], l2=l2
-    )[0]
-    closest_similarity = np.max(pfm_similarity, axis=1)
-    closest_index = np.argmax(pfm_similarity, axis=1)
+        mc_motifs = utils_motif.motif_8_to_4_unsigned(mc_motifs)
+    
+    # Find best match, per iteration
+    match_scores = []
+    match_names = []
+    match_motifs = []
+    match_idxs = []
+    iter = 0
+    max_match_score = 1
+    while iter < max_submotifs and max_match_score > min_score:
+        # Calcualte similarity
+        pfm_sim, pfm_align_rc, pfm_align_h = utils_similarity.compute_similarities(
+            [mc_motifs, pfm_motifs], [(0, 1)], 
+        )[0]
+        # Unscale L2 similarity, for dot product only
+        pfm_sim = pfm_sim * (np.linalg.norm(mc_motifs, axis=axis=(1, 2))[:, np.newaxis] 
+            * np.linalg.norm(pfm_motifs, axis=axis=(1, 2))[np.newaxis, :]) # (N, N)
+        # Scale score by iter
+        match_score = np.max(pfm_sim, axis=1) * np.sqrt(iter) # (N,)
+        pfm_match_idx = np.argmax(pfm_sim, axis=1) # (N,)
+        pfm_align_rc = pfm_align_rc[np.arange(pfm_align_rc.shape[0]), pfm_match_idx] # (N,)
+        pfm_align_h = pfm_align_h[np.arange(pfm_align_h.shape[0]), pfm_match_idx] # (N,)
+        match_name = []
+        match_motif = []
+        for i, x in enumerate(pfm_match_idx):
+            if match_score[i] > min_score:
+                match_name.append(names[x])
+                match_motif.append(pfm_motifs[x])
+            else:
+                match_name.append(None)
+                match_motif.append(None)
+        match_scores.append(match_score)
+        match_names.append(match_name)
+        match_motifs.append(match_motif)
+        match_idxs.append(pfm_match_idx)
+
+        # Subtract best match
+        mc_motifs = utils_motif.subtract_motifs(mc_motifs, pfm_motifs[pfm_match_idx, :, :], pfm_align_rc, pfm_align_h)
+
+        # Iterate
+        max_match_score = np.max(match_score) # To determine whether to continue
+        iter += 1
+
     # Save match information
-    mc[save_col_sim] = closest_similarity
-    mc[save_col_match] = [names[x] for x in closest_index]
-    motif_plotting_inputs = [
-        utils_plotting.LogoPlottingInput(motif) for motif in pfm_motifs
-    ]
-    mc.__images[save_col_logo] = [
-        motif_input.utf8_plot
-        for motif_input in utils_plotting.plot_many_motif_logos(motif_plotting_inputs)
-    ]
+    for i in range(iter):
+        if iter == 1:
+            i = ""
+        mc[f"{save_col_sim}{i}"] = match_scores[i]
+        mc[f"{save_col_match}{i}"] = match_names[i]
+        motif_plotting_inputs = [
+            utils_plotting.LogoPlottingInput(motif) for motif in match_motifs[i]
+        ]
+        mc.__images[f"{save_col_logo}{i}"] = [
+            motif_input.utf8_plot
+            for motif_input in utils_plotting.plot_many_motif_logos(motif_plotting_inputs)
+        ]

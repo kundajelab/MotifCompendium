@@ -157,25 +157,25 @@ def _reassemble_results(
     results = []
     for c0, c1 in calculations:
         sim_block = []
-        fb_block = []
+        rc_block = []
         ali_block = []
         for c0_chunk in chunk_map[c0]:
             sim_block_row = []
-            fb_block_row = []
+            rc_block_row = []
             ali_block_row = []
             for c1_chunk in chunk_map[c1]:
-                sim, fb, ali = chunked_results[
+                sim, rc, ali = chunked_results[
                     chunked_calculations_revmap[(c0_chunk, c1_chunk)]
                 ]
                 sim_block_row.append(sim)
-                fb_block_row.append(fb)
+                rc_block_row.append(rc)
                 ali_block_row.append(ali)
             sim_block.append(sim_block_row)
-            fb_block.append(fb_block_row)
+            rc_block.append(rc_block_row)
             ali_block.append(ali_block_row)
         sim = np.block(sim_block)
-        fb = np.block(fb_block)
+        rc = np.block(rc_block)
         ali = np.block(ali_block)
-        results.append((sim, fb, ali))
+        results.append((sim, rc, ali))
     assert len(results) == len(calculations)
     return results

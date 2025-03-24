@@ -224,8 +224,7 @@ def build_from_modisco(
 
     Args:
         modisco_dict: A dictionary from model name to modisco file path.
-        l2: Whether or not to use L2 normalization (instead of sqrt normalization) when
-          computing motif similarity.
+        ic: Whether or not to apply information content scaling to Modisco motifs.
         safe: Whether or not to construct the MotifCompendium safely.
 
     Returns:
@@ -267,8 +266,6 @@ def combine(
 
     Args:
         compendiums: A list of MotifCompendium objects.
-        l2: Whether or not to use L2 normalization (instead of sqrt normalization) when
-          computing motif similarity.
         safe: Whether or not to construct the MotifCompendium safely.
 
     Returns:
@@ -751,7 +748,7 @@ class MotifCompendium:
     ########################
     def cluster(
         self,
-        algorithm: str = "leiden",
+        algorithm: str = "cpm_leiden",
         similarity_threshold: float = 0.9,
         save_name: str = "cluster",
         cluster_on: str | None = None,
@@ -925,10 +922,10 @@ class MotifCompendium:
             c_idxs = cluster_idxs[c]
             motifs_c = self.motifs[c_idxs, :, :]
             alignment_rc_c = self.alignment_rc[c_idxs, :][:, c_idxs][
-                0, :
+                :, 0
             ]  # vector of alignment
             alignment_h_c = self.alignment_h[c_idxs, :][:, c_idxs][
-                0, :
+                :, 0
             ]  # vector of alignment
             # Average motifs
             motif_avg_c = utils_motif.average_motifs(
@@ -948,7 +945,7 @@ class MotifCompendium:
                     case "average" | "avg":
                         agg_dict["values"].append(np.mean(agg_c_data))
                     case "concatenate" | "concat":
-                        agg_dict["values"].append(",".join(sorted(set(agg_c_data))))
+                        agg_dict["values"].append(", ".join(sorted(set(agg_c_data))))
                     case "concat_counted":
                         val_counts = defaultdict(int)
                         for x in agg_c_data:
@@ -956,7 +953,7 @@ class MotifCompendium:
                         val_strings = []
                         for x in sorted(val_counts.keys()):
                             val_strings.append(f"{x} ({val_counts[x]})")
-                        agg_dict["values"].append(",".join(val_strings))
+                        agg_dict["values"].append(", ".join(val_strings))
                     case _:
                         raise ValueError(
                             f"{agg_dict['method']} is not a supported aggregation method."
@@ -1253,13 +1250,15 @@ class MotifCompendium:
         print("not yet implemented")
         assert False
 
-    def assign_clusters_from_other(
+    def assign_label_from_other(
         self,
         other: MotifCompendium,
-        other_cluster_col: str = "cluster",
+        other_col_match: str = "name",
         save_col_sim: str = "mc_match_similarity",
         save_col_match: str = "mc_match",
         save_col_logo: str = "mc_match_logo",
+        max_submotifs: int = 1,
+        min_score: float = 0.0,
     ) -> None:
         """Assign clusters to motifs based on an existing clustered MotifCompendium.
 
@@ -1270,11 +1269,13 @@ class MotifCompendium:
 
         Args:
             other: The other MotifCompendium to compare against.
-            other_cluster_col: The column in the other MotifCompendium with cluster
-              names of each motif.
+            other_col_match: The column in the other MotifCompendium to match against.
             save_col_sim: The column under which the highest similarity will be stored.
-            save_col_match: The column under which the closest match will be stored.
+            save_col_match: The column under which the closest matching label (from 
+              other_col_match) will be stored.
             save_col_logo: The column under which the closest match logo will be stored.
+            max_submotifs: The maximum number of submotifs to consider in a match.
+            min_score: The minimum similarity score to consider as a match.
 
         Notes:
             Assumes that this MotifCompendium and other have the same dimensions for
@@ -1284,33 +1285,70 @@ class MotifCompendium:
             raise TypeError(
                 "MotifCompendiums must have the same motif dimensionality to compare."
             )
-        # Compute similarity
-        mc_similarity, _, _ = utils_similarity.compute_similarities(
-            [self.motifs, other.motifs], [(0, 1)]
-        )[0]
-        closest_similarity = np.max(mc_similarity, axis=1)
-        closest_index = np.argmax(mc_similarity, axis=1)
+        # Find best match, per iteration
+        mc_motifs = self.motifs.copy()
+        other_col_names = other.metadata[other_col_match].tolist()
+        match_scores = []
+        match_names = []
+        match_motifs = []
+        match_idxs = []
+        iter = 0
+        max_match_score = 1
+        while iter < max_submotifs and max_match_score > min_score:
+            # Compute similarity
+            sim, align_rc, align_h = utils_similarity.compute_similarities(
+                [mc_motifs, other.motifs], [(0, 1)]
+            )[0]
+            # Unscale L2 similarity, for dot product only
+            sim = sim * (np.linalg.norm(mc_motifs, axis=axis=(1, 2))[:, np.newaxis] 
+                * np.linalg.norm(other.motifs, axis=axis=(1, 2))[np.newaxis, :]) # (N, N)
+            # Scale score by iter
+            match_score = np.max(sim, axis=1) * np.sqrt(iter) # (N,)
+            match_idx = np.argmax(sim, axis=1) # (N,)
+            align_rc = align_rc[np.arange(align_rc.shape[0]), match_idx] # (N,)
+            align_h = align_h[np.arange(align_h.shape[0]), match_idx] # (N,)
+            match_name = []
+            match_motif = []
+            for i, idx in enumerate(match_idx):
+                if match_score[i] > min_score:
+                    match_name.append(other_col_names[x])
+                    match_motif.append(other.motifs[x])
+                else:
+                    match_name.append(None)
+                    match_motif.append(None)
+            match_scores.append(match_score)
+            match_names.append(match_name)
+            match_motifs.append(match_motif)
+            match_idxs.append(match_idx)
+
+            # Subtract best match
+            mc_motifs = utils_motif.subtract_motifs(mc_motifs, other.motifs[match_idx, :, :], align_rc, align_h)
+
+            # Iterate
+            max_match_score = np.max(match_score) # To determine whether to continue
+            iter += 1
+
         # Save match information
-        self[save_col_sim] = closest_similarity
-        other_clusters = other.metadata[other_cluster_col].tolist()
-        self[save_col_match] = [other_clusters[x] for x in closest_index]
-        if "logo (fwd)" not in other.__images.columns:
-            # Generate forward logos if not already generated
-            motifs = (
-                utils_motif.motif_8_to_4_signed(other.motifs)
-                if other.motifs.shape[2] == 8
-                else other.motifs
-            )
-            motif_plotting_inputs = [
-                utils_plotting.LogoPlottingInput(motif) for motif in motifs
-            ]
-            self.__images[save_col_logo] = [
-                motif_input.utf8_plot
-                for motif_input in utils_plotting.plot_many_motif_logos(
-                    motif_plotting_inputs
-                )
-            ]
-        else:
-            # Copy forward logos from other MotifCompendium
-            other_fwd_strings = other.__images["logo (fwd)"].tolist()
-            self.__images[save_col_logo] = [other_fwd_strings[x] for x in closest_index]
+        for i in range(iter):
+            if iter == 1:
+                i = ""
+            self[f"{save_col_sim}{i}"] = match_scores[i]
+            self[f"{save_col_match}{i}"] = match_names[i]
+            if "logo (fwd)" not in other.__images.columns:
+                # Generate forward logos if not already generated
+                motif_plotting_inputs = [
+                    utils_plotting.LogoPlottingInput(utils_motif.motif_8_to_4_signed(motif)) 
+                    if motif.shape[2] == 8 
+                    else utils_plotting.LogoPlottingInput(motif) 
+                    for motif in match_motifs[i]
+                ]
+                self.__images[f"{save_col_logo}{i}"] = [
+                    motif_input.utf8_plot
+                    for motif_input in utils_plotting.plot_many_motif_logos(
+                        motif_plotting_inputs
+                    )
+                ]
+            else:
+                # Copy forward logos from other MotifCompendium
+                other_fwd_strings = other.__images["logo (fwd)"].tolist()
+                self.__images[f"{save_col_logo}{i}"] = [other_fwd_strings[x] for x in match_idxs[i]]
