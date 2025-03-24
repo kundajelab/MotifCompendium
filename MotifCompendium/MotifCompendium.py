@@ -76,7 +76,7 @@ def build(
       Then, passes everything to the MotifCompendium constructor.
 
     Args:
-        motifs: A stack of motifs of shape (N, 30, 8/4).
+        motifs: A stack of motifs of shape (N, L, 8/4).
         metadata: The metadata for all motifs. If None, it will be set to a DataFrame
           with generic motif names.
         max_chunk: The maximum number of motifs to compute similarity on at a time.
@@ -291,7 +291,7 @@ class MotifCompendium:
       EX: mc_neural = mc[mc["organ"] == "brain"].
 
     Attributes:
-        motifs: A np.ndarray representing the motifs. Of shape (N, 30, 8/4). motifs[i, :, :]
+        motifs: A np.ndarray representing the motifs. Of shape (N, L, 8/4). motifs[i, :, :]
           represents motif i.
         similarity: A np.ndarray containing the pairwise similarity scores between each
           motif. Of shape (N, N). similarity[i, j] is the similarity between motif i and
@@ -422,10 +422,12 @@ class MotifCompendium:
 
     def calculate_similarity(
         self,
+        keep_alignment: bool = False,
         max_chunk: int | None = None,
         max_cpus: int | None = None,
         use_gpu: bool | None = None,
         sim_type: str = "l2",
+        safe: bool = True,
     ) -> None:
         """Calculates the similarity matrix of the current MotifCompendium.
 
@@ -435,6 +437,7 @@ class MotifCompendium:
               used if use_gpu is False).
             use_gpu: Whether or not to use GPUs to accelerate computing similarity.
             sim_type: The type of similarity metric to compute: 'l2', 'sqrt', 'jss'.
+            safe: Whether or not to construct the MotifCompendium safely.
 
         Notes:
             Use GPU if possible to accelerate calculation (CuPy required.) Otherwise,
@@ -446,11 +449,19 @@ class MotifCompendium:
               performance. Otherwise, decrease max_chunk until calculations fit in memory.
               For a GPU with ~12GB of memory, use max_chunk=1000.
         """
-        self.similarity = utils_similarity.compute_similarities_known_alignments(
-            [self.motifs], [(0, 0)], 
-            [self.alignment_fr], [self.alignment_h],
-            max_chunk, max_cpus, use_gpu, sim_type
-        )[0]
+        if keep_alignment:
+            self.similarity = utils_similarity.compute_similarities_known_alignments(
+                [self.motifs], [(0, 0)], 
+                [self.alignment_fr], [self.alignment_h],
+                max_chunk, max_cpus, use_gpu, sim_type
+            )[0]
+        else:
+            self.similarity, self.alignment_fr, self.alignment_h = utils_similarity.compute_similarities_and_alignments(
+                [self.motifs], [(0, 0)], max_chunk, max_cpus, use_gpu, sim_type
+            )[0]
+        
+        if safe:
+            self.validate()
     
     def sort_values(self, by: str, ascending: bool = False) -> None:
         """Sorts the MotifCompendium by a column in the metadata.
@@ -721,6 +732,7 @@ class MotifCompendium:
         algorithm: str = "leiden",
         similarity_threshold: float = 0.9,
         save_name: str = "cluster",
+        use_gpu: bool | None = None,
         **kwargs,
     ) -> None:
         """Cluster motifs.
@@ -751,6 +763,7 @@ class MotifCompendium:
             similarity_matrix=self.similarity,
             algorithm=algorithm,
             similarity_threshold=similarity_threshold,
+            use_gpu=use_gpu,
             **kwargs,
         )
 

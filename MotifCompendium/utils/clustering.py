@@ -1,9 +1,7 @@
-import igraph as ig
-import leidenalg as la
+import warnings
 import numpy as np
 import pandas as pd
 import scipy.sparse
-import sklearn.cluster
 
 
 ######################
@@ -13,6 +11,7 @@ def cluster(
     similarity_matrix: np.ndarray,
     algorithm: str = "cpm_leiden",
     similarity_threshold: float = 0.9,
+    use_gpu: bool | None = None,
     **kwargs,
 ) -> list[int]:
     """Cluster a similarity matrix.
@@ -26,6 +25,7 @@ def cluster(
         similarity_threshold: The threshold above which two motifs are considered to be
           similar.
         algorithm: A string representing which clustering algorithm to use.
+        use_gpu: Whether to use the GPU for clustering. If None, the function will use CPU.
         **kwargs: Any additional arguments to be passed to the clustering algorithm of
           choice.
 
@@ -39,24 +39,37 @@ def cluster(
     """
     match algorithm:
         # Leiden
-        case "leiden" | "weighted_leiden" | "modularity_leiden":
-            adjacency_matrix = similarity_matrix * (
-                similarity_matrix >= similarity_threshold
-            )
-            return modularity_leiden_clustering(adjacency_matrix, **kwargs)
+        case "leiden" | "mod_leiden" | "weighted_leiden" | "modularity_leiden":
+            if use_gpu:
+                adjacency_matrix = similarity_matrix * (similarity_matrix >= similarity_threshold)
+                return modularity_leiden_clustering_gpu(adjacency_matrix, **kwargs)
+            else:
+                adjacency_matrix = similarity_matrix * (similarity_matrix >= similarity_threshold)
+                return modularity_leiden_clustering_cpu(adjacency_matrix, **kwargs)
         case "cpm" | "cpm_leiden" | "cpm_weighted_leiden":
+            if use_gpu:
+                warnings.warn("CPM Leiden clustering is not implemented for GPU. Falling back to CPU.")
             adjacency_matrix = similarity_matrix * (similarity_matrix >= similarity_threshold)
-            return cpm_leiden_clustering(adjacency_matrix, **kwargs)
+            return cpm_leiden_clustering_cpu(adjacency_matrix, **kwargs)
+        
         # Connected-component
         case "cc":
+            if use_gpu:
+                warnings.warn("Connected-component clustering is not implemented for GPU. Falling back to CPU.")
             adjacency_matrix = similarity_matrix >= similarity_threshold
             return cc_clustering(adjacency_matrix)
         case "dense_cc":
+            if use_gpu:
+                warnings.warn("Densely connected-component clustering is not implemented for GPU. Falling back to CPU.")
             adjacency_matrix = similarity_matrix >= similarity_threshold
             return densely_cc_clustering(adjacency_matrix, **kwargs)
+        
         # Spectral
         case "spectral":
+            if use_gpu:
+                warnings.warn("Spectral clustering is not implemented for GPU. Falling back to CPU.")
             return spectral_clustering_k(similarity_matrix, **kwargs)
+        
         # Other
         case _:
             raise ValueError(f"Unsupported clustering algorithm: {algorithm}")
@@ -65,17 +78,20 @@ def cluster(
 #####################
 # LEIDEN CLUSTERING #
 #####################
-def modularity_leiden_clustering(
+def modularity_leiden_clustering_cpu(
     adjacency_matrix: np.ndarray,
     resolution_parameter: float = 1.0,
     n_iterations: int = -1,
     n_seeds: int = 2,
 ) -> list[int]:
     """Perform Leiden clustering (modularity) on a weighted similarity matrix."""
-    g = ig.Graph.Weighted_Adjacency(adjacency_matrix, mode="undirected")
+    import igraph as ig
+    import leidenalg as la
 
+    g = ig.Graph.Weighted_Adjacency(adjacency_matrix, mode="undirected")
     best_quality = None
     best_membership = None
+
     for seed in range(1, n_seeds + 1):
         partition = la.find_partition(
             graph=g,
@@ -91,13 +107,16 @@ def modularity_leiden_clustering(
     return best_membership
 
 
-def cpm_leiden_clustering(
+def cpm_leiden_clustering_cpu(
     adjacency_matrix: np.ndarray,
     resolution_parameter: float = 1.0,
     n_iterations: int = -1,
     n_seeds: int = 2,
 ) -> list[int]:
     """Perform Leiden clustering (CPM) on a weighted similarity matrix."""
+    import igraph as ig
+    import leidenalg as la
+
     n_vertices = adjacency_matrix.shape[0]
     rows, cols = np.nonzero(adjacency_matrix)
     edges = list(zip(rows, cols))
@@ -121,6 +140,50 @@ def cpm_leiden_clustering(
         if best_quality is None or partition.quality() > best_quality:
             best_quality = partition.quality()
             best_membership = partition.membership
+    return best_membership
+
+
+def modularity_leiden_clustering_gpu(
+    adjacency_matrix: np.ndarray,
+    resolution_parameter: float = 1.0,
+    n_iterations: int = 100,
+    n_seeds: int = 2,
+) -> list[int]:
+    """Perform Leiden clustering (modularity) on a weighted similarity matrix."""
+    import cugraph
+    import cudf
+    
+    # Convert adjacency matrix to sparse format
+    sparse_matrix = scipy.sparse.coo_matrix(adjacency_matrix)
+    
+    # Create a cuGraph graph from edge list
+    for int_prec, flt_prec in [(np.int64, np.float64), (np.int64, np.float32), (np.int32, np.float32)]:
+        try:
+            G = cugraph.Graph()
+            G.from_cudf_edgelist(cudf.DataFrame({
+                        'src': sparse_matrix.row.astype(int_prec),
+                        'dst': sparse_matrix.col.astype(int_prec),
+                        'weight': sparse_matrix.data.astype(flt_prec),
+                    }), source='src', destination='dst', edge_attr='weight', renumber=False)
+            break
+        except Exception as e:
+            print(f"Failed to convert adjacency matrix with {int_prec} and {flt_prec}: {e}")
+            continue
+    else:
+        raise ValueError("Failed to convert adjacency matrix to cuDF.")
+    
+    # Run Leiden clustering
+    best_quality = None
+    best_membership = None
+    for seed in range(1, n_seeds + 1):
+        partition, quality = cugraph.leiden(G, 
+            resolution=resolution_parameter, 
+            max_iter=n_iterations, 
+            random_state=seed * 100
+        )
+        if best_quality is None or quality > best_quality:
+            best_quality = quality
+            best_membership = partition['partition'].to_numpy().tolist()
     return best_membership
 
 
@@ -176,6 +239,8 @@ def spectral_clustering_k(
     similarity_matrix: np.ndarray, k: int = 40, cluster_qr: bool = False
 ) -> list[int]:
     """Spectral clustering on a similarity matrix for a fixed number of clusters."""
+    import sklearn.cluster
+
     if cluster_qr:
         clustering = (
             sklearn.cluster.SpectralClustering(

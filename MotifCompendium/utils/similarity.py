@@ -141,21 +141,31 @@ def compute_similarities_known_alignments(
             max_chunk,
         )
         
-        chunked_simliarities = _compute_similarity_known_alignment(
+        chunked_similarities = _compute_similarity_known_alignment(
             chunked_motif_stack_list, chunked_calculations,
             chunked_alignfr_stack_list, chunked_alignh_stack_list,
             max_cpus, use_gpu, sim_type
         )
 
-        return _reassemble_similarity(
-            calculations, chunked_calculations, chunked_simliarities, chunk_map
+        similarities = _reassemble_similarity(
+            calculations, chunked_calculations, chunked_similarities, chunk_map
         )
+
+        # Ensure symmetry and [0, 1]
+        for idx, similarity in enumerate(similarities):
+            similarities[idx] = np.clip((similarity + similarity.T) / 2, 0, 1)
+        return similarities
     else:
-        return _compute_similarity_known_alignment(
+        similarities = _compute_similarity_known_alignment(
             motif_stack_list, calculations,
             alignfr_stack_list, alignh_stack_list,
             max_cpus, use_gpu, sim_type
         )
+        
+        # Ensure symmetry and [0, 1]
+        for idx, similarity in enumerate(similarities):
+            similarities[idx] = np.clip((similarity + similarity.T) / 2, 0, 1)
+        return similarities
 
 
 #####################
@@ -224,8 +234,8 @@ def _chunk_motifs_calcs_aligns(
     chunked_alignh_stack_list = []
     for i, (alignfr, alignh) in enumerate(zip(alignfr_stack_list, alignh_stack_list)):
         if alignfr.shape[0] <= max_chunk:
-            chunked_alignfr_stack_list.append(alignfr)
-            chunked_alignh_stack_list.append(alignh)
+            chunked_alignfr_stack_list.append([alignfr])
+            chunked_alignh_stack_list.append([alignh])
         else:
             alignfr_chunks = _chunk_2D(alignfr, max_chunk)
             alignh_chunks = _chunk_2D(alignh, max_chunk)
@@ -417,9 +427,9 @@ def _reassemble_results(
 def _reassemble_similarity(
     calculations: list[tuple[int, int]],
     chunked_calculations: list[tuple[int, int]],
-    chunked_simliarities: list[np.ndarray],
+    chunked_similarities: list[np.ndarray],
     chunk_map: dict[int, int],
-) -> np.ndarray:
+) -> list[np.ndarray]:
     """Reassemble chunked results."""
     chunked_calculations_revmap = {c: i for i, c in enumerate(chunked_calculations)}
     results = []
@@ -428,7 +438,7 @@ def _reassemble_similarity(
         for c0_chunk in chunk_map[c0]:
             sim_block_row = []
             for c1_chunk in chunk_map[c1]:
-                sim = chunked_simliarities[
+                sim = chunked_similarities[
                     chunked_calculations_revmap[(c0_chunk, c1_chunk)]
                 ]
                 sim_block_row.append(sim)

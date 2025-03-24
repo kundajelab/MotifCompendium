@@ -24,7 +24,7 @@ def ic_scale(x: np.ndarray) -> np.ndarray:
           And if all bases are present and represented equally, the weights will for all
           bases at that position will be set to 0.
     """
-    # INPUT = (30, 4)
+    # INPUT = (L, 4)
     x_abs = np.abs(x)
     x_norm = x_abs / np.sum(x_abs, axis=1, keepdims=True)
     xlogx = x_norm * np.log2(x_norm, where=(x_norm != 0))
@@ -85,10 +85,9 @@ def validate_motif_stack(motifs: np.ndarray) -> None:
         raise TypeError("Motifs must be a np.ndarray.")
     if not (
         (len(motifs.shape) == 3)
-        and (motifs.shape[1] == 30)
         and (motifs.shape[2] in [4, 8])
     ):
-        raise ValueError("Motif stack must be of shape (N, 30, 4/8).")
+        raise ValueError("Motif stack must be of shape (N, L, 4/8).")
     if not (((motifs >= 0).all()) and (np.allclose(motifs.sum(axis=(1, 2)), 1))):
         raise ValueError("Motifs must be non-negative and sum to 1.")
 
@@ -98,7 +97,7 @@ def motif_to_df(motif: np.ndarray) -> pd.DataFrame:
     return pd.DataFrame(motif, columns=["A", "C", "G", "T"])
 
 
-def resize_motif(motif: np.ndarray, resize_to: int = 30) -> np.ndarray:
+def resize_motif(motif: np.ndarray, resize_to: int) -> np.ndarray:
     """Resize a motif (by squashing or padding) to a specified length.
 
     If the given motif is shorter than resize_to, pad with 0s until it is large enough.
@@ -153,28 +152,41 @@ def average_motifs(
         An 8 channel motif that is an average of the provided motif stack.
 
     Notes:
-        Assumes that the input is an 8 channel motif of shape (N, 30, 8).
+        Assumes that the input is an 8 channel motif of shape (N, L, 8).
     """
-    motifs_4 = motif_8_to_4(motifs_8)
+    motifs_4 = (
+        motif_8_to_4(motifs_8)
+        if motifs_8.shape[2] == 8
+        else motifs_8
+    )
     N = motifs_4.shape[0]
+    L = motifs_4.shape[1]
     if N == 1:
         return motifs_8[0, :, :]
     max_shift = np.max(alignment_h[:, 0])
     min_shift = np.min(alignment_h[:, 0])
-    width = 30 + max_shift - min_shift
+    width = L + max_shift - min_shift
     if weights is None:
         weights = np.ones(N)
 
     motif_sum = np.zeros((width, 4))
     for i in range(N):
         s = alignment_h[i, 0]
-        motif_sum[np.abs(min_shift) + s : np.abs(min_shift) + s + 30, :] += (
+        start = s - min_shift
+        end = start + L
+        motif_sum[start:end, :] += (
             motifs_4[i, :, :] if alignment_fb[i, 0] == 0 else motifs_4[i, ::-1, ::-1]
         ) * weights[i]
     motif_avg = motif_sum / np.sum(weights)
 
-    squashed_motif = resize_motif(motif_avg)
-    squashed_motif_8 = motif_4_to_8(squashed_motif)
+    squashed_motif = resize_motif(
+        motif=motif_avg, 
+        resize_to=L)
+    squashed_motif_8 = (
+        motif_4_to_8(squashed_motif)
+        if motifs_8.shape[2] == 8
+        else squashed_motif
+    )
     squashed_motif_8 /= np.sum(squashed_motif_8)
     return squashed_motif_8
 
@@ -183,11 +195,11 @@ def normalize_motifs(motifs: np.ndarray, sim_type: str) -> np.ndarray:
     """Normalize a stack of motifs, based on the similarity type.
 
     Args:
-        motifs: A np.ndarray representing a stack of motifs. (N, 30, 4)
+        motifs: A np.ndarray representing a stack of motifs. (N, L, 4)
         sim_type: The similarity type to use for normalization.
     
     Returns:
-        A np.ndarray representing the normalized motifs. (N, 30, 4)
+        A np.ndarray representing the normalized motifs. (N, L, 4)
     """
     match sim_type:
         case "sqrt":
@@ -206,8 +218,8 @@ def calculate_least_squares_scale(var_motif: np.ndarray, ref_motif: np.ndarray) 
       (i.e., min ||a * target - ref||^2).
     
     Args:
-        var_motif: A np.ndarray representing the target motif. (30, 4)
-        ref_motif: A np.ndarray representing the reference motif. (30, 4)
+        var_motif: A np.ndarray representing the target motif. (L, 4)
+        ref_motif: A np.ndarray representing the reference motif. (L, 4)
         
     Returns:
         A float representing the best scaling factor.
@@ -226,9 +238,9 @@ def subtract_motifs(
 
     Args:
         motifs_core: A np.ndarray representing a stack of 4 channel motifs,
-          to subtract from. (N, 30, 4)
+          to subtract from. (N, L, 4)
         motifs_subtract: A np.ndarray representing a stack of 4 channel motifs,
-          to be subtracted. (M, 30, 4)
+          to be subtracted. (M, L, 4)
         align_idx: A np.ndarray containing the index of the motif in motifs_sub
           to subtract per motif in motifs_core. (N,)
         align_fr: A np.ndarray containing the forward/reverse complement
@@ -237,12 +249,12 @@ def subtract_motifs(
           any two motifs. (N,)
 
     Returns:
-        A np.ndarray representing the subtracted motifs. (N, 30, 4)
+        A np.ndarray representing the subtracted motifs. (N, L, 4)
     """
     updated_motifs = np.zeros_like(motifs_core)
     for i in range(motifs_core.shape[0]):
-        motif_core = motifs_core[i, :, :] # (30, 4)
-        motif_subtract = motifs_subtract[align_idx[i], :, :] # (30, 4)
+        motif_core = motifs_core[i, :, :] # (L, 4)
+        motif_subtract = motifs_subtract[align_idx[i], :, :] # (L, 4)
         if align_fr[i] == 1:
             motif_subtract = motif_subtract[::-1, ::-1] # Align fr: Reverse complement
             motif_subtract = shift_and_fill_zero(motif_subtract, align_h[i])
@@ -257,7 +269,7 @@ def shift_and_fill_zero(motif: np.ndarray, shift: int) -> np.ndarray:
     """Shift a motif and replace with zeros.
 
     Args:
-        motif: A np.ndarray representing a 4 channel motif. (30, 4)
+        motif: A np.ndarray representing a 4 channel motif. (L, 4)
         shift: The amount to shift the motif by.
     """
     if abs(shift) >= motif.shape[0]:
@@ -515,6 +527,23 @@ def calculate_dinuc_entropy_ratio(motif: np.array) -> float:
     dinuc_entropy_ratio = dinuc_pos_entropy / dinuc_base_entropy
 
     return dinuc_entropy_ratio
+
+
+def check_negpattern_pospeak(motif: np.array) -> bool:
+    """Check negative pattern motifs with positive peaks.
+    
+    Note: Assumes input motif is a negative pattern motif."""
+    # Check if motif is valid
+    if not isinstance(motif, np.ndarray):
+        raise TypeError("Motif must be a NumPy array.")
+    if len(motif.shape) != 2:
+        raise ValueError("Motif must be a 2D array.")
+    if motif.shape[1] not in [4, 8]:
+        raise ValueError("Motif second dimension must be 4 or 8.")
+    if motif.shape[1] == 8:
+        motif = motif_8_to_4(motif)  # Convert motif to 4-channel
+
+    return np.max(motif) > 0
 
 
 #####################

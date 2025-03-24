@@ -107,7 +107,7 @@ def summary_table_html(
         max_cpus: The maximum number of CPUs to use for parallelizing plotting.
 
     Notes:
-        The motifs are expected to be of shape (N, 30, 4) where N is the number of
+        The motifs are expected to be of shape (N, L, 4) where N is the number of
           motifs to display. The metadata is expected to be a dataframe with N rows with
           the ith row corresponding to motifs[i, :, :].
     """

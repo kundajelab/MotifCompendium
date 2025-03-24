@@ -1,4 +1,8 @@
 name: motifcompendium-gpu
+channels:
+- nvidia
+- conda-forge
+- defaults
 dependencies:
 - python=3.10
 - h5py
@@ -11,6 +15,8 @@ dependencies:
 - pip
 - pip:
     - cupy-cuda11x
+    - cugraph-cu11
+    - cudf-cu11
     - igraph
     - leidenalg
     - logomaker

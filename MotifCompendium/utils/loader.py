@@ -31,7 +31,7 @@ def load_modiscos(
         For parallel loading, the number of processes used will be the minimum of
           max_cpus and multiprocessing.cpu_count().
         Assumes that all motifs are stored within "pos_patterns" or "neg_patterns".
-        Motifs are returned as an (N, 30, 8) motif stack.
+        Motifs are returned as an (N, L, 8) motif stack.
         Using ic scaling is highly recommended.
     """
     if max_cpus is None:
@@ -87,7 +87,7 @@ def load_modisco(
 
     Notes:
         Assumes that all motifs are stored within "pos_patterns" or "neg_patterns".
-        Motifs are returned as an (N, 30, 8) 8 channel motif stack.
+        Motifs are returned as an (N, L, 8) 8 channel motif stack.
         Using ic scaling is highly recommended.
     """
     sims, motif_names, seqlet_counts = [], [], []
@@ -110,7 +110,7 @@ def load_modisco(
     return sims, motif_names, seqlet_counts
 
 
-def load_pfm(pfm_file: str) -> tuple[np.ndarray, list[str]]:
+def load_pfm(pfm_file: str, motif_length: int) -> tuple[np.ndarray, list[str]]:
     """Load motifs and names from a PFM file.
     Each PFM from the PFM file is extracted. Then, the PFMs are transformed into a PWM
       using per position information content scaling.
@@ -123,7 +123,7 @@ def load_pfm(pfm_file: str) -> tuple[np.ndarray, list[str]]:
 
     Notes:
         Assumes a standard PFM file format.
-        Motifs are returned as (N, 30, 4) 4 channel motif stack.
+        Motifs are returned as (N, L, 4) 4 channel motif stack.
     """
     names = []
     pfms = []
@@ -135,7 +135,7 @@ def load_pfm(pfm_file: str) -> tuple[np.ndarray, list[str]]:
                 if x.startswith(">"):
                     # submit
                     current_pfm_np = pd.DataFrame(current_pfm).to_numpy()
-                    current_pfm_np = resize_motif(current_pfm_np)
+                    current_pfm_np = resize_motif(current_pfm_np, motif_length)
                     pfms.append(pd.DataFrame(current_pfm_np))
                     names.append(current_pfm_name)
                     # restart
@@ -160,7 +160,7 @@ def load_pfm(pfm_file: str) -> tuple[np.ndarray, list[str]]:
     return pfms_mtx, names
 
 
-def load_meme(meme_file: str) -> tuple[np.ndarray, list[str]]:
+def load_meme(meme_file: str, motif_length: int) -> tuple[np.ndarray, list[str]]:
     """Load motifs and names from a MEME file.
 
     Each PFM from the MEME file is extracted. Then, the PFMs are transformed into a PWM
@@ -174,7 +174,7 @@ def load_meme(meme_file: str) -> tuple[np.ndarray, list[str]]:
 
     Notes:
         Assumes a standard MEME file format.
-        Motifs are returned as (N, 30, 4) 4 channel motif stack.
+        Motifs are returned as (N, L, 4) 4 channel motif stack.
     """
     names = []
     pwms = []
@@ -221,7 +221,7 @@ def load_meme(meme_file: str) -> tuple[np.ndarray, list[str]]:
                         # submit
                         current_pwm_df = pd.DataFrame(current_pwm)
                         current_pwm_np = current_pwm_df.to_numpy()
-                        current_pwm_np = resize_motif(current_pwm_np)
+                        current_pwm_np = resize_motif(current_pwm_np, motif_length)
                         pwms.append(pd.DataFrame(current_pwm_np))
                         names.append(current_pwm_name)
                         # restart

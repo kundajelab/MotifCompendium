@@ -148,11 +148,8 @@ def judge_clustering(mc: MotifCompendium, clustering: str, save_loc: str) -> Non
     sns.histplot(np.diag(clustering_quality), ax=axs[0], stat="proportion", kde=True)
     axs[0].set_title("worst intra-cluster similarities")
     n_clusters = clustering_quality.shape[0]
-    triu = [
-        clustering_quality[i, j]
-        for i in range(n_clusters)
-        for j in range(i + 1, n_clusters)
-    ]
+    triu = np.triu(clustering_quality, k=1).flatten()
+    triu = triu[triu != 0]
     sns.histplot(triu, ax=axs[1], stat="proportion", kde=True)
     axs[1].set_title("best inter-cluster similarities")
     axs[1].set_xlabel("similarity")
@@ -270,7 +267,7 @@ def export_clusters_modisco(
     pos_neg = ["pos" if x > 0 else "neg" for x in pos_neg]
     mc_cluster_avg.metadata["pos_neg"] = pos_neg
     with h5py.File(save_loc, "w") as f:
-        f.attrs["window_size"] = 30
+        f.attrs["window_size"] = mc_cluster_avg.motifs.shape[1] # Length of motif
         # Positive
         if "pos" in set(mc_cluster_avg["pos_neg"]):
             pos_group = f.create_group("pos_patterns")
@@ -320,7 +317,7 @@ def export_modisco(
     pos_neg = np.sum(motifs, axis=(1, 2)) > 0
     pos_neg = ["pos" if x > 0 else "neg" for x in pos_neg]
     with h5py.File(save_loc, "w") as f:
-        f.attrs["window_size"] = 30
+        f.attrs["window_size"] = motifs.shape[1] # Length of motif
         # Positive
         if "pos" in pos_neg:
             pos_group = f.create_group("pos_patterns")
@@ -401,6 +398,7 @@ def calculate_entropy(
         "posbase_entropy_ratio",
         "copair_entropy_ratio",
         "dinuc_entropy_ratio",
+        "negpattern_pospeak",
     ]
     for entropy_metric in entropy_list:
         if entropy_metric not in valid_entropy_metrics:
@@ -413,28 +411,35 @@ def calculate_entropy(
         metrics_list = []
         match entropy_metric:
             case "motif_entropy":
-                for i in range(mc.motifs.shape[0]):
-                    metric = utils_motif.calculate_motif_entropy(mc.motifs[i])
+                for motif in mc.motifs:
+                    metric = utils_motif.calculate_motif_entropy(motif)
                     metrics_list.append(metric)
                 mc["motif_entropy"] = metrics_list
 
             case "posbase_entropy_ratio":
-                for i in range(mc.motifs.shape[0]):
-                    metric = utils_motif.calculate_posbase_entropy_ratio(mc.motifs[i])
+                for motif in mc.motifs:
+                    metric = utils_motif.calculate_posbase_entropy_ratio(motif)
                     metrics_list.append(metric)
                 mc["posbase_entropy_ratio"] = metrics_list
 
             case "copair_entropy_ratio":
-                for i in range(mc.motifs.shape[0]):
-                    metric = utils_motif.calculate_copair_entropy_ratio(mc.motifs[i])
+                for motif in mc.motifs:
+                    metric = utils_motif.calculate_copair_entropy_ratio(motif)
                     metrics_list.append(metric)
                 mc["copair_entropy_ratio"] = metrics_list
 
             case "dinuc_entropy_ratio":
-                for i in range(mc.motifs.shape[0]):
-                    metric = utils_motif.calculate_dinuc_entropy_ratio(mc.motifs[i])
+                for motif in mc.motifs:
+                    metric = utils_motif.calculate_dinuc_entropy_ratio(motif)
                     metrics_list.append(metric)
                 mc["dinuc_entropy_ratio"] = metrics_list
+            
+            case "negpattern_pospeak":
+                for i in range(len(mc)):
+                    if mc.metadata["posneg"][i] == "neg":
+                        metric = utils_motif.check_negpattern_pospeak(mc.motifs[i])
+                        metrics_list.append(metric)
+                mc["negpattern_pospeak"] = metrics_list
 
             case _:
                 raise ValueError(
@@ -476,14 +481,17 @@ def label_from_pfms(
           only CPUs by default.
         sim_type: The type of similarity metric to compute: 'l2', 'sqrt', 'jss'
     """
+    L = mc.motifs.shape[1]
+    K = mc.motifs.shape[2]
+    
     if pfm_file.endswith("_pfms.txt"):
-        pfm_motifs, names = utils_loader.load_pfm(pfm_file)
+        pfm_motifs, names = utils_loader.load_pfm(pfm_file, L)
     elif pfm_file.endswith(".meme.txt") or pfm_file.endswith(".meme"):
-        pfm_motifs, names = utils_loader.load_meme(pfm_file)
+        pfm_motifs, names = utils_loader.load_meme(pfm_file, L)
     else:
         raise ValueError("pfm_file must be a _pfm.txt, .meme, or .meme.txt file.")
     mc_motifs = mc.motifs
-    if mc_motifs.shape[2] == 8:
+    if K == 8:
         mc_motifs = utils_motif.motif_8_to_4_abs(mc_motifs)
     pfm_similarity, _, _ = utils_similarity.compute_similarities_and_alignments(
         [mc_motifs, pfm_motifs], [(0, 1)], max_chunk, max_cpus, use_gpu, sim_type=sim_type
@@ -550,16 +558,20 @@ def label_composites_from_pfms(
           it will only use a single CPU.
         use_gpu: Whether or not to use GPUs to accelerate computing similarity. Uses
           only CPUs by default.
-        sim_type: The type of similarity metric to compute: 'l2', 'sqrt', 'jss'"""
+        sim_type: The type of similarity metric to compute: 'l2', 'sqrt', 'jss'
+    """
+    L = mc.motifs.shape[1]
+    K = mc.motifs.shape[2]
+
     # Load pfm
     if pfm_file.endswith("_pfms.txt"):
-        pfm_motifs, pfm_names = utils_loader.load_pfm(pfm_file)
+        pfm_motifs, pfm_names = utils_loader.load_pfm(pfm_file, L)
     elif pfm_file.endswith(".meme.txt") or pfm_file.endswith(".meme"):
-        pfm_motifs, pfm_names = utils_loader.load_meme(pfm_file)
+        pfm_motifs, pfm_names = utils_loader.load_meme(pfm_file, L)
     else:
         raise ValueError("pfm_file must be a _pfm.txt, .meme, or .meme.txt file.")
     mc_motifs = mc.motifs
-    if mc_motifs.shape[2] == 8:
+    if K == 8:
         mc_motifs = utils_motif.motif_8_to_4_abs(mc_motifs)
 
     # Pre-normalize motifs
