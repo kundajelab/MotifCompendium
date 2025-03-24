@@ -572,6 +572,8 @@ class MotifCompendium:
 
     def get_standard_motif_stack(self) -> np.ndarray:
         """Returns the motifs in a standard (N, L, 4) shape."""
+        if self.motifs.shape[2] == 4:
+            return self.motifs
         return utils_motif.motif_8_to_4_signed(self.motifs)
 
     def get_saved_images(self) -> list[str]:
@@ -1240,9 +1242,14 @@ class MotifCompendium:
 
         Adds a "motif_string" column to the metadata that contains the motif as a string.
         """
-        motif_str_revstrs = utils_motif.motif_to_string(
-            self.motifs, specificity, importance
-        )
+        if self.motifs.shape[2] == 8:
+            motif_str_revstrs = utils_motif.motif_to_string(
+                utils_motif.motif_8_to_4_unsigned(self.motifs), specificity, importance
+            )
+        else:
+            motif_str_revstrs = utils_motif.motif_to_string(
+                self.motifs, specificity, importance
+            )
         self.metadata[name] = [f"{x[0]}\n{x[1]}" for x in motif_str_revstrs]
 
     def extend(self):
