@@ -32,14 +32,14 @@ def single_or_many_motifs(func):
 
 def validate_motif_basic(motifs: np.ndarray) -> None:
     """Validate that motifs are np.ndarrays."""
-    if not isinstance(motifs, np.ndarray):
-        raise TypeError("Motifs must be a np.ndarray.")
+    if not (isinstance(motifs, np.ndarray) and (motifs.shape[-1] in [4, 8])):
+        raise TypeError("Motifs must be a np.ndarray if 4 or 8 channels.")
 
 
 def validate_motif_stack(motifs: np.ndarray) -> None:
     """Validate that motifs are a motif stack."""
     validate_motif_basic(motifs)
-    if not (len(motifs.shape) == 3 and motifs.shape[2] in [4, 8]):
+    if not len(motifs.shape) == 3:
         raise ValueError("Motif stack must be of shape (N, L, 4/8).")
 
 
@@ -53,8 +53,15 @@ def validate_motif_stack_standard(motifs: np.ndarray) -> None:
 def validate_motif_stack_similarity(motifs: np.ndarray) -> None:
     """Validate that motifs are fit for similarity calculations."""
     validate_motif_stack(motifs)
-    if not ((motifs >= 0).all() and np.allclose(motifs.sum(axis=(1, 2)), 1)):
-        raise ValueError("Motifs must be non-negative and sum to 1.")
+    if not (motifs >= 0).all():
+        raise ValueError("Motifs must be non-negative.")
+
+
+def validate_motif_stack_compendium(motifs: np.ndarray) -> None:
+    """Validate that motifs belong in a MotifCompendium."""
+    validate_motif_stack_similarity(motifs)
+    if not np.allclose(motifs.sum(axis=(1, 2)), 1):
+        raise ValueError("Motifs must sum to 1.")
 
 
 #######################
@@ -101,7 +108,7 @@ def align_motifs(
     """Create an aligned motif stack based on the alignment matrices.
 
     Uses the alignment information to place the motifs in the motif stack in the correct
-      orientation and position. 
+      orientation and position.
 
     Args:
         motif_stack: A motif stack to be aligned. (N, L, K)
@@ -109,7 +116,7 @@ def align_motifs(
         alignment_h: A horizontal alignment vector. (N, )
 
     Returns:
-        An aligned motif stack. (N, L_new, K), 
+        An aligned motif stack. (N, L_new, K),
         where L_new = L + max(alignment_h, 0) - min(alignment_h, 0).
     """
     # Check inputs
@@ -261,15 +268,15 @@ def ic_scale(x: np.ndarray, invert: bool = False) -> np.ndarray:
 @single_or_many_motifs
 def calculate_ls_scale(var_motif: np.ndarray, ref_motif: np.ndarray) -> np.ndarray:
     """Calculate least squares scaling factor.
-    
+
     Find the best scaling factor, a, to apply to the variable motif to match the scale
       of the reference motif, by minimizing the least squares between the two motifs
       (i.e., min ||a * variable - ref||^2).
-    
+
     Args:
         var_motif: A np.ndarray representing the variable motif. (N, L, K)
         ref_motif: A np.ndarray representing the reference motif. (N, L, K)
-        
+
     Returns:
         A np.ndarray representing the best scaling factor. (N, L, K)
     """
@@ -277,20 +284,22 @@ def calculate_ls_scale(var_motif: np.ndarray, ref_motif: np.ndarray) -> np.ndarr
         raise ValueError("var_motif and ref_motif must have the same shape.")
 
     epsilon = 1e-8
-    return np.sum((var_motif * ref_motif), axis=(1, 2), keepdims=True) / (np.sum((var_motif ** 2), axis=(1, 2), keepdims=True) + epsilon)
+    return np.sum((var_motif * ref_motif), axis=(1, 2), keepdims=True) / (
+        np.sum((var_motif**2), axis=(1, 2), keepdims=True) + epsilon
+    )
 
 
 @single_or_many_motifs
 def subtract_motifs(
-    motifs_core: np.ndarray, 
+    motifs_core: np.ndarray,
     motifs_subtract: np.ndarray,
     align_rc: np.ndarray,
-    align_h: np.ndarray
+    align_h: np.ndarray,
 ) -> np.ndarray:
     """Subtract two motif stacks, based on idx, alignment, and forward/reverse complement.
 
-    Given two motif stacks, motifs_core and motifs_subtract, align motifs_subtract based on 
-    align_rc and align_h, scale motifs_subtract by least squares to match scale of motifs_core, 
+    Given two motif stacks, motifs_core and motifs_subtract, align motifs_subtract based on
+    align_rc and align_h, scale motifs_subtract by least squares to match scale of motifs_core,
     subtract motifs_core by motifs_subtract with clipping, to return the remaining components
     of motifs_core.
 
@@ -314,11 +323,17 @@ def subtract_motifs(
         raise ValueError("align_rc, align_h must have the same length as motifs_core.")
 
     # Subtract motifs
-    motifs_subtract = align_motifs(motifs_subtract, align_rc, align_h) # Align motifs
-    start = max(-np.min(align_h), 0) + min(np.max(align_h), 0) # Start index
-    motifs_subtract = motifs_subtract[:, start:start + motifs_core.shape[1], :] # Clip motifs to core length, L
-    motifs_subtract = motifs_subtract * calculate_ls_scale(motifs_subtract, motifs_core) # Least squares scale to best match core
-    updated_motifs = np.clip(motifs_core - motifs_subtract, 0, None) # Clip negative values
+    motifs_subtract = align_motifs(motifs_subtract, align_rc, align_h)  # Align motifs
+    start = max(-np.min(align_h), 0) + min(np.max(align_h), 0)  # Start index
+    motifs_subtract = motifs_subtract[
+        :, start : start + motifs_core.shape[1], :
+    ]  # Clip motifs to core length, L
+    motifs_subtract = motifs_subtract * calculate_ls_scale(
+        motifs_subtract, motifs_core
+    )  # Least squares scale to best match core
+    updated_motifs = np.clip(
+        motifs_core - motifs_subtract, 0, None
+    )  # Clip negative values
     return updated_motifs
 
 
@@ -663,7 +678,7 @@ def calculate_dinuc_entropy_ratio(motif: np.array) -> float:
 
 def check_negpattern_pospeak(motif: np.array) -> bool:
     """Check negative pattern motifs with positive peaks.
-    
+
     Note: Assumes input motif is a negative pattern motif."""
     # Check if motif is valid
     if not isinstance(motif, np.ndarray):

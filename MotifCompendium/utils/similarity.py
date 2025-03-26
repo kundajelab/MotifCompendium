@@ -43,8 +43,8 @@ def compute_similarities(
           .similarity_core_gpu.py. If False, they will be carried out by the function in
           utils file .similarity_core_cpu.py.
     """
-    # for motif_stack in motif_stack_list:
-    #     validate_motif_stack_similarity(motif_stack)
+    for motif_stack in motif_stack_list:
+        validate_motif_stack_similarity(motif_stack)
     if utils_config.get_max_chunk() != -1:
         (
             chunked_motif_stack_list,
@@ -65,6 +65,33 @@ def compute_similarities(
             motif_stack_list,
             calculations,
         )
+
+
+def find_most_similar_motif(
+    motifs_of_interest: np.ndarray, reference_motifs: np.ndarray
+) -> tuple[list[float], list[int]]:
+    """Finds the most similar motif given a set of reference motifs.
+
+    For a set of motifs of interest and a set of reference motifs, this function
+      calls compute_similarities() to compute the similarity between the two sets of
+      motifs. Then, for each motif of interest, it finds the most similar reference
+      motif.
+
+    Args:
+        motifs_of_interest: A np.ndarray representing a stack of motifs of interest.
+        reference_motifs: A np.ndarray representing a stack of reference motifs.
+
+    Returns:
+        A tuple of two lists. The first list contains the maximum similarity score
+          for each motif of interest. The second list contains the index of the most
+          similar reference motif for each motif.
+    """
+    similarity, _, _ = compute_similarities(
+        [motifs_of_interest, reference_motifs], [(0, 1)]
+    )[0]
+    max_similarity = np.max(similarity, axis=1).tolist()
+    max_similarity_idx = np.argmax(similarity, axis=1).tolist()
+    return max_similarity, max_similarity_idx
 
 
 #####################

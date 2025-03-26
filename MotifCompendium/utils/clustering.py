@@ -48,25 +48,31 @@ def cluster(
     match algorithm.lower():
         # Leiden
         case "mod_leiden" | "modularity_leiden" | "rb_leiden":
-            weighted_adjacency_matrix  = similarity_matrix * (
-                    similarity_matrix >= similarity_threshold
-                )
+            weighted_adjacency_matrix = similarity_matrix * (
+                similarity_matrix >= similarity_threshold
+            )
             if get_use_gpu():
                 print("Warning: GPU version not yet implemented. Falling back to CPU.")
-                return modularity_leiden_clustering_cpu(weighted_adjacency_matrix , **kwargs)
+                return modularity_leiden_clustering_cpu(
+                    weighted_adjacency_matrix, **kwargs
+                )
             else:
-                return modularity_leiden_clustering_cpu(weighted_adjacency_matrix , **kwargs)
+                return modularity_leiden_clustering_cpu(
+                    weighted_adjacency_matrix, **kwargs
+                )
         case "cpm" | "cpm_leiden" | "constant_potts_leiden":
-            weighted_adjacency_matrix  = similarity_matrix * (
+            weighted_adjacency_matrix = similarity_matrix * (
                 similarity_matrix >= similarity_threshold
             )
-            return cpm_leiden_clustering(weighted_adjacency_matrix , **kwargs)
+            return cpm_leiden_clustering(weighted_adjacency_matrix, **kwargs)
         case "leiden" | "leidenalg":
-            print("Warning: Falling back to default Leiden algorithm: constant Potts model")
-            weighted_adjacency_matrix  = similarity_matrix * (
+            print(
+                "Warning: Falling back to default Leiden algorithm: constant Potts model"
+            )
+            weighted_adjacency_matrix = similarity_matrix * (
                 similarity_matrix >= similarity_threshold
             )
-            return cpm_leiden_clustering(weighted_adjacency_matrix , **kwargs)
+            return cpm_leiden_clustering(weighted_adjacency_matrix, **kwargs)
         # Connected-components
         case "cc":
             adjacency_matrix = similarity_matrix >= similarity_threshold
@@ -86,7 +92,7 @@ def cluster(
 # LEIDEN CLUSTERING #
 #####################
 def modularity_leiden_clustering_cpu(
-    weighted_adjacency_matrix : np.ndarray,
+    weighted_adjacency_matrix: np.ndarray,
     resolution_parameter: float = 1.0,
     n_iterations: int = -1,
     seeds: list[int] = [1],
@@ -115,7 +121,7 @@ def modularity_leiden_clustering_cpu(
         Uses Reichardt & Bornholdt's quality function with a configuration model as a
           a null. See leidenalg.RBConfigurationVertexPartition for more details.
     """
-    g = ig.Graph.Weighted_Adjacency(weighted_adjacency_matrix , mode="undirected")
+    g = ig.Graph.Weighted_Adjacency(weighted_adjacency_matrix, mode="undirected")
     best_quality = None
     best_membership = None
     for seed in len(seeds):
@@ -134,7 +140,7 @@ def modularity_leiden_clustering_cpu(
 
 
 def cpm_leiden_clustering(
-    weighted_adjacency_matrix : np.ndarray,
+    weighted_adjacency_matrix: np.ndarray,
     resolution_parameter: float = 1.0,
     n_iterations: int = -1,
     seeds: list[int] = [1],
@@ -160,7 +166,7 @@ def cpm_leiden_clustering(
     Notes:
         Uses the constant Potts model. See leidenalg.CPMVertexPartition for more details.
     """
-    g = ig.Graph.Weighted_Adjacency(weighted_adjacency_matrix , mode="undirected")
+    g = ig.Graph.Weighted_Adjacency(weighted_adjacency_matrix, mode="undirected")
     best_quality = None
     best_membership = None
     for seed in len(seeds):
@@ -179,7 +185,7 @@ def cpm_leiden_clustering(
 
 
 def modularity_leiden_clustering_gpu(
-    weighted_adjacency_matrix : np.ndarray,
+    weighted_adjacency_matrix: np.ndarray,
     resolution_parameter: float = 1.0,
     n_iterations: int = 100,
     n_seeds: int = 2,
@@ -206,8 +212,8 @@ def modularity_leiden_clustering_gpu(
           same cluster.
 
     Notes:
-        Uses Leiden method described in: Traag, V. A., Waltman, L., & van Eck, N. J. (2019). 
-        From Louvain to Leiden: guaranteeing well-connected communities. Scientific reports, 
+        Uses Leiden method described in: Traag, V. A., Waltman, L., & van Eck, N. J. (2019).
+        From Louvain to Leiden: guaranteeing well-connected communities. Scientific reports,
         9(1), 5233. doi: 10.1038/s41598-019-41695-z. See cugraph.leiden for more details.
     """
     ValueError("GPU version not yet implemented.")

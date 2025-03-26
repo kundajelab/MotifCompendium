@@ -248,7 +248,7 @@ def export_full_compendium_modisco(
         The resultant h5py file can be fed directly into FiNeMo (hitcaller).
         Motif names cannot have slashes (/) in them!
     """
-    utils_motif.validate_motif_stack_similarity(mc.motifs)
+    utils_motif.validate_motif_stack(mc.motifs)
     size_4 = mc.motifs.shape[2] == 4
     motifs = mc.motifs if size_4 else utils_motif.motif_8_to_4_signed(mc.motifs)
     pos_neg = utils_motif.motif_posneg(motifs)
@@ -408,7 +408,7 @@ def calculate_filters(
                     metric = utils_motif.calculate_dinuc_entropy_ratio(motif)
                     metrics_list.append(metric)
                 mc["dinuc_entropy_ratio"] = metrics_list
-            
+
             case "negpattern_pospeak":
                 for i in range(len(mc)):
                     if mc.metadata["posneg"][i] == "neg":
@@ -462,7 +462,7 @@ def label_from_pfms(
     mc_motifs = mc.motifs.copy()
     if mc_motifs.shape[2] == 8:
         mc_motifs = utils_motif.motif_8_to_4_unsigned(mc_motifs)
-    
+
     # Find best match, per iteration
     match_scores = []
     match_names = []
@@ -471,20 +471,29 @@ def label_from_pfms(
     for i in range(max_submotifs):
         # Calcualte similarity
         pfm_sim, pfm_align_rc, pfm_align_h = utils_similarity.compute_similarities(
-            [mc_motifs, pfm_motifs], [(0, 1)], 
+            [mc_motifs, pfm_motifs],
+            [(0, 1)],
         )[0]
         # Unscale L2 similarity, for dot product only
-        pfm_sim = pfm_sim * (np.linalg.norm(mc_motifs, axis=(1, 2))[:, np.newaxis] 
-            * np.linalg.norm(pfm_motifs, axis=(1, 2))[np.newaxis, :]) # (N, N)
+        pfm_sim = pfm_sim * (
+            np.linalg.norm(mc_motifs, axis=(1, 2))[:, np.newaxis]
+            * np.linalg.norm(pfm_motifs, axis=(1, 2))[np.newaxis, :]
+        )  # (N, N)
         # Scale score by i
-        match_score = np.max(pfm_sim, axis=1) * np.sqrt(i) # (N,)
-        pfm_match_idx = np.argmax(pfm_sim, axis=1) # (N,)
-        pfm_align_rc = pfm_align_rc[np.arange(pfm_align_rc.shape[0]), pfm_match_idx] # (N,)
-        pfm_align_h = pfm_align_h[np.arange(pfm_align_h.shape[0]), pfm_match_idx] # (N,)
+        match_score = np.max(pfm_sim, axis=1) * np.sqrt(i)  # (N,)
+        pfm_match_idx = np.argmax(pfm_sim, axis=1)  # (N,)
+        pfm_align_rc = pfm_align_rc[
+            np.arange(pfm_align_rc.shape[0]), pfm_match_idx
+        ]  # (N,)
+        pfm_align_h = pfm_align_h[
+            np.arange(pfm_align_h.shape[0]), pfm_match_idx
+        ]  # (N,)
         match_motif = pfm_motifs[pfm_match_idx, :, :]
 
         # Subtract best match
-        mc_motifs = utils_motif.subtract_motifs(mc_motifs, match_motif, pfm_align_rc, pfm_align_h)
+        mc_motifs = utils_motif.subtract_motifs(
+            mc_motifs, match_motif, pfm_align_rc, pfm_align_h
+        )
 
         # Save match information
         match_name = [names[x] for x in pfm_match_idx]
@@ -507,7 +516,9 @@ def label_from_pfms(
         ]
         mc.__images[f"{save_col_logo}{i}"] = [
             motif_input.utf8_plot
-            for motif_input in utils_plotting.plot_many_motif_logos(motif_plotting_inputs)
+            for motif_input in utils_plotting.plot_many_motif_logos(
+                motif_plotting_inputs
+            )
         ]
 
         # Remove matches below match_score < min_score

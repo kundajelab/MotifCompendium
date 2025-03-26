@@ -107,9 +107,7 @@ def _compute_similarity(motif_set_1, motif_set_2, xp):
     # Undo transpose if needed
     if transpose:
         best_align_scores = best_align_scores.T
-        best_align_h = (
-            -best_align_h.T
-        )  # negative because transposing flips alignment
+        best_align_h = -best_align_h.T  # negative because transposing flips alignment
     assert best_align_scores.shape == (N, M)
     assert best_align_h.shape == (N, M)
     return best_align_scores, best_align_h

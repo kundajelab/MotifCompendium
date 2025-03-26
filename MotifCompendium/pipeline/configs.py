@@ -11,6 +11,7 @@ class FilterArgs:
     threshold: Union[float, bool]
     override: bool
 
+
 @dataclass
 class OutputPaths:
     mc_full: str = "motifcompendium.mc"
@@ -25,6 +26,7 @@ class OutputPaths:
     html_collection: str = "motifcompendium_collection.html"
     html_table: str = "motifcompendium_table.html"
 
+
 @dataclass
 class MetadataCols:
     match_col_name: str = "reference_name"
@@ -32,16 +34,18 @@ class MetadataCols:
     match_col_logo: str = "reference_logo"
     filter_col_flag: str = "flag_remove"
 
+
 @dataclass
 class MotifMatchArgs:
     reference_default: str = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "data",
-        "JASPAR2024-HOCOMOCOv13.meme.txt"
+        "JASPAR2024-HOCOMOCOv13.meme.txt",
     )
     max_submotifs: int = 3
     min_score: float = 0.5
     composite_threshold: float = 0.7
+
 
 @dataclass
 class ClusterArgs:
@@ -53,6 +57,7 @@ class ClusterArgs:
         ("model", "concat", "models"),
     )
 
+
 @dataclass
 class VisualizeArgs:
     html_table_cols: tuple = tuple(
@@ -63,9 +68,8 @@ class VisualizeArgs:
             f"{MetadataCols.match_col_name}{iter}",
             f"{MetadataCols.match_col_score}{iter}",
         ]
-    ) + (
-        "name", "num_motifs", "num_seqlets", "models"
-    )
+    ) + ("name", "num_motifs", "num_seqlets", "models")
+
 
 @dataclass
 class MotifFilterArgs:
@@ -122,20 +126,20 @@ class MotifFilterArgs:
     )
     # Override: filter_col_flag AND apply_filter_threshold must both be True, to keep flag True
     override_filters: tuple = (
-        (FilterArgs(
+        FilterArgs(
             name="base_match",
             metric=MetadataCols.match_col_score,
             operation=">",
             threshold=0.9,
             override=True,
-        ),)
-        + tuple(
-            FilterArgs(
-                name="composite_match",
-                metric=f"{MetadataCols.match_col_score}{iter}",
-                operation="<",
-                threshold=MotifMatchArgs.composite_threshold,
-                override=True,
-            ) for iter in range(1, MotifMatchArgs.max_submotifs)
+        ),
+    ) + tuple(
+        FilterArgs(
+            name="composite_match",
+            metric=f"{MetadataCols.match_col_score}{iter}",
+            operation="<",
+            threshold=MotifMatchArgs.composite_threshold,
+            override=True,
         )
+        for iter in range(1, MotifMatchArgs.max_submotifs)
     )
