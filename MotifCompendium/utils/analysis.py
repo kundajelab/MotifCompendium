@@ -131,7 +131,7 @@ def plot_ground_truth_mismatch(
     mc_mismatch.motif_collection_html(save_loc, mismatch_clusters, average_motif=False)
 
 
-def judge_clustering(mc: MotifCompendium, clustering: str, save_loc: str) -> None:
+def judge_clustering(mc: MotifCompendium, cluster_col: str, save_loc: str) -> None:
     """Plots histograms of inter-cluster and intra-cluster similarities.
 
     Judges a motif clustering by computing the quality of the clustering and then
@@ -140,12 +140,12 @@ def judge_clustering(mc: MotifCompendium, clustering: str, save_loc: str) -> Non
 
     Args:
         mc: The MotifCompendium to analyze.
-        clustering: The motif clustering to judge.
+        cluster_col: The motif clustering to judge.
         save_loc: The file prefix to save the clustering quality and the clustering
           quality plot to.
     """
     # Get clustering quality
-    clustering_quality = mc.clustering_quality(clustering)
+    clustering_quality = mc.clustering_quality(cluster_col)
     # Plotting
     fig, axs = plt.subplots(2, 1, sharex=True)
     sns.histplot(np.diag(clustering_quality), ax=axs[0], stat="proportion", kde=True)
@@ -159,7 +159,7 @@ def judge_clustering(mc: MotifCompendium, clustering: str, save_loc: str) -> Non
     sns.histplot(triu, ax=axs[1], stat="proportion", kde=True)
     axs[1].set_title("best inter-cluster similarities")
     axs[1].set_xlabel("similarity")
-    plt.suptitle(f"{clustering} ({n_clusters} clusters)")
+    plt.suptitle(f"{cluster_col} ({n_clusters} clusters)")
     plt.savefig(save_loc)
     plt.close(fig)
 
@@ -429,7 +429,7 @@ def label_from_pfms(
     mc: MotifCompendium,
     pfm_file: str,
     save_col_sim: str = "pfm_match_similarity",
-    save_col_match: str = "pfm_match",
+    save_col_name: str = "pfm_match_name",
     save_col_logo: str = "pfm_match_logo",
     max_submotifs: int = 1,
     min_score: float = 0.5,
@@ -438,23 +438,24 @@ def label_from_pfms(
 
     For each motif in the MotifCompendium, computes the similarity between that motif
       and all motifs in the PFM file. The highest similarity and closest motif match
-      will be saved as columns save_col_sim and save_col_match in the MotifCompendium
+      will be saved as columns save_col_sim and save_col_name in the MotifCompendium
       metadata.
 
     Args:
         mc: The MotifCompendium to analyze.
         pfm_file: The PFM file path.
         save_col_sim: The column under which the highest similarity will be stored.
-        save_col_match: The column under which the closest match will be stored.
+        save_col_name: The column under which the closest match will be stored.
         save_col_logo: The column under which the closest match logo will be stored.
         max_submotifs: The maximum number of submotifs to consider in a match.
         min_score: The minimum similarity score to consider as a match.
     """
-    # Load PFM database
+    # Load PFM database, with same length as motifs
+    L = mc.motifs.shape[1]
     if pfm_file.endswith("_pfms.txt"):
-        pfm_motifs, names = utils_loader.load_pfm(pfm_file)
+        pfm_motifs, names = utils_loader.load_pfm(pfm_file, L)
     elif pfm_file.endswith(".meme.txt") or pfm_file.endswith(".meme"):
-        pfm_motifs, names = utils_loader.load_meme(pfm_file)
+        pfm_motifs, names = utils_loader.load_meme(pfm_file, L)
     else:
         raise ValueError("pfm_file must be a _pfm.txt, .meme, or .meme.txt file.")
 
@@ -467,52 +468,48 @@ def label_from_pfms(
     match_names = []
     match_motifs = []
     match_idxs = []
-    iter = 0
-    max_match_score = 1
-    while iter < max_submotifs and max_match_score > min_score:
+    for i in range(max_submotifs):
         # Calcualte similarity
         pfm_sim, pfm_align_rc, pfm_align_h = utils_similarity.compute_similarities(
             [mc_motifs, pfm_motifs], [(0, 1)], 
         )[0]
         # Unscale L2 similarity, for dot product only
-        pfm_sim = pfm_sim * (np.linalg.norm(mc_motifs, axis=axis=(1, 2))[:, np.newaxis] 
-            * np.linalg.norm(pfm_motifs, axis=axis=(1, 2))[np.newaxis, :]) # (N, N)
-        # Scale score by iter
-        match_score = np.max(pfm_sim, axis=1) * np.sqrt(iter) # (N,)
+        pfm_sim = pfm_sim * (np.linalg.norm(mc_motifs, axis=(1, 2))[:, np.newaxis] 
+            * np.linalg.norm(pfm_motifs, axis=(1, 2))[np.newaxis, :]) # (N, N)
+        # Scale score by i
+        match_score = np.max(pfm_sim, axis=1) * np.sqrt(i) # (N,)
         pfm_match_idx = np.argmax(pfm_sim, axis=1) # (N,)
         pfm_align_rc = pfm_align_rc[np.arange(pfm_align_rc.shape[0]), pfm_match_idx] # (N,)
         pfm_align_h = pfm_align_h[np.arange(pfm_align_h.shape[0]), pfm_match_idx] # (N,)
-        match_name = []
-        match_motif = []
-        for i, x in enumerate(pfm_match_idx):
-            if match_score[i] > min_score:
-                match_name.append(names[x])
-                match_motif.append(pfm_motifs[x])
-            else:
-                match_name.append(None)
-                match_motif.append(None)
-        match_scores.append(match_score)
-        match_names.append(match_name)
-        match_motifs.append(match_motif)
-        match_idxs.append(pfm_match_idx)
+        match_motif = pfm_motifs[pfm_match_idx, :, :]
 
         # Subtract best match
-        mc_motifs = utils_motif.subtract_motifs(mc_motifs, pfm_motifs[pfm_match_idx, :, :], pfm_align_rc, pfm_align_h)
+        mc_motifs = utils_motif.subtract_motifs(mc_motifs, match_motif, pfm_align_rc, pfm_align_h)
 
-        # Iterate
-        max_match_score = np.max(match_score) # To determine whether to continue
-        iter += 1
+        # Save match information
+        match_name = [names[x] for x in pfm_match_idx]
+        match_motifs.append(match_motif)
+        match_scores.append(match_score)
+        match_names.append(match_name)
+        match_idxs.append(pfm_match_idx)
 
     # Save match information
-    for i in range(iter):
-        if iter == 1:
+    for i in range(max_submotifs):
+        if max_submotifs == 1:
             i = ""
         mc[f"{save_col_sim}{i}"] = match_scores[i]
-        mc[f"{save_col_match}{i}"] = match_names[i]
+        mc[f"{save_col_name}{i}"] = match_names[i]
+        match_motif = match_motifs[i]
+        if match_motif.shape[2] == 8:
+            match_motif = utils_motif.motif_8_to_4_signed(match_motif)
         motif_plotting_inputs = [
-            utils_plotting.LogoPlottingInput(motif) for motif in match_motifs[i]
+            utils_plotting.LogoPlottingInput(motif) for motif in match_motif
         ]
         mc.__images[f"{save_col_logo}{i}"] = [
             motif_input.utf8_plot
             for motif_input in utils_plotting.plot_many_motif_logos(motif_plotting_inputs)
         ]
+
+        # Remove matches below match_score < min_score
+        mc[f"{save_col_name}{i}"][mc[f"{save_col_sim}{i}"] < min_score] = None
+        mc.__images[f"{save_col_logo}{i}"][mc[f"{save_col_sim}{i}"] < min_score] = ""

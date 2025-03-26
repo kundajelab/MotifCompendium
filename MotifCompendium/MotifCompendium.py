@@ -143,7 +143,7 @@ def load_old_compendium(file_loc: str) -> MotifCompendium:
         with h5py.File(file_loc, "r") as f:
             motifs = f["motifs"][:]
             similarity = f["similarity"][:].astype(np.single)
-            alignment_rc = f["alignment_fr"][:].astype(np.bool)
+            alignment_rc = f["alignment_fr"][:].astype(np.bool_)
             alignment_h = f["alignment_h"][:].astype(np.byte)
         metadata = pd.read_hdf(file_loc, key="metadata")
     except:
@@ -179,7 +179,7 @@ def build(
       passes everything to the MotifCompendium constructor.
 
     Args:
-        motifs: A stack of motifs of shape (N, 30, 8/4).
+        motifs: A stack of motifs of shape (N, L, 8/4).
         metadata: The metadata for all motifs. If None, it will be set to a DataFrame
           with generic motif names.
         safe: Whether or not to construct the MotifCompendium safely.
@@ -194,7 +194,8 @@ def build(
           large objects.
     """
     # Check motifs
-    utils_motif.validate_motif_stack_similarity(motifs)
+    if safe:
+        utils_motif.validate_motif_stack_similarity(motifs)
     # Compute similarity
     similarity, alignment_rc, alignment_h = utils_similarity.compute_similarities(
         [motifs], [(0, 0)]
@@ -438,7 +439,7 @@ class MotifCompendium:
         # alignment_rc
         if not (
             isinstance(self.alignment_rc, np.ndarray)
-            and self.alignment_rc.dtype == np.bool
+            and self.alignment_rc.dtype == np.bool_
         ):
             raise TypeError("self.alignment_rc must be a np.ndarray of bools.")
         if not (
@@ -785,7 +786,6 @@ class MotifCompendium:
         else:
             if not cluster_on in self.metadata.columns:
                 raise KeyError(f"{cluster_on} not in metadata.")
-            #
             # Average
             mc_average = self.cluster_averages(cluster_name=cluster_on, safe=False)
             # Cluster
@@ -1262,7 +1262,7 @@ class MotifCompendium:
         other: MotifCompendium,
         other_col_match: str = "name",
         save_col_sim: str = "mc_match_similarity",
-        save_col_match: str = "mc_match",
+        save_col_name: str = "mc_match_name",
         save_col_logo: str = "mc_match_logo",
         max_submotifs: int = 1,
         min_score: float = 0.0,
@@ -1272,13 +1272,13 @@ class MotifCompendium:
         Given another MotifCompendium that has already been clustered and assigned
           labels, compute similarity between all the motifs in this MotifCompendium
           and other. The highest similarity and closest motif match will be saved as
-          columns save_col_sim and save_col_match in metadata.
+          columns save_col_sim and save_col_name in metadata.
 
         Args:
             other: The other MotifCompendium to compare against.
             other_col_match: The column in the other MotifCompendium to match against.
             save_col_sim: The column under which the highest similarity will be stored.
-            save_col_match: The column under which the closest matching label (from 
+            save_col_name: The column under which the closest matching label (from 
               other_col_match) will be stored.
             save_col_logo: The column under which the closest match logo will be stored.
             max_submotifs: The maximum number of submotifs to consider in a match.
@@ -1286,9 +1286,9 @@ class MotifCompendium:
 
         Notes:
             Assumes that this MotifCompendium and other have the same dimensions for
-              their motifs. (Ex: 4 and 4 or 8 and 8.)
+              their motifs. (Ex: Length: 30 and 30; Channel: 4 and 4 or 8 and 8)
         """
-        if self.motifs.shape[2] != other.motifs.shape[2]:
+        if self.motifs.shape[2] != other.motifs.shape[1] or self.motifs.shape[2] != other.motifs.shape[2]:
             raise TypeError(
                 "MotifCompendiums must have the same motif dimensionality to compare."
             )
@@ -1299,55 +1299,45 @@ class MotifCompendium:
         match_names = []
         match_motifs = []
         match_idxs = []
-        iter = 0
-        max_match_score = 1
-        while iter < max_submotifs and max_match_score > min_score:
+        for i in range(max_submotifs):
             # Compute similarity
             sim, align_rc, align_h = utils_similarity.compute_similarities(
                 [mc_motifs, other.motifs], [(0, 1)]
             )[0]
             # Unscale L2 similarity, for dot product only
-            sim = sim * (np.linalg.norm(mc_motifs, axis=axis=(1, 2))[:, np.newaxis] 
-                * np.linalg.norm(other.motifs, axis=axis=(1, 2))[np.newaxis, :]) # (N, N)
-            # Scale score by iter
-            match_score = np.max(sim, axis=1) * np.sqrt(iter) # (N,)
+            sim = sim * (np.linalg.norm(mc_motifs, axis=(1, 2))[:, np.newaxis] 
+                * np.linalg.norm(other.motifs, axis=(1, 2))[np.newaxis, :]) # (N, N)
+            # Scale score by i
+            match_score = np.max(sim, axis=1) * np.sqrt(i) # (N,)
             match_idx = np.argmax(sim, axis=1) # (N,)
             align_rc = align_rc[np.arange(align_rc.shape[0]), match_idx] # (N,)
             align_h = align_h[np.arange(align_h.shape[0]), match_idx] # (N,)
-            match_name = []
-            match_motif = []
-            for i, idx in enumerate(match_idx):
-                if match_score[i] > min_score:
-                    match_name.append(other_col_names[x])
-                    match_motif.append(other.motifs[x])
-                else:
-                    match_name.append(None)
-                    match_motif.append(None)
-            match_scores.append(match_score)
-            match_names.append(match_name)
-            match_motifs.append(match_motif)
-            match_idxs.append(match_idx)
+            match_motif = other.motifs[match_idx, :, :]
 
             # Subtract best match
-            mc_motifs = utils_motif.subtract_motifs(mc_motifs, other.motifs[match_idx, :, :], align_rc, align_h)
+            mc_motifs = utils_motif.subtract_motifs(mc_motifs, match_motif, align_rc, align_h)
 
-            # Iterate
-            max_match_score = np.max(match_score) # To determine whether to continue
-            iter += 1
+            # Save match information
+            match_name = [names[x] for x in match_idx]
+            match_motifs.append(match_motif)
+            match_scores.append(match_score)
+            match_names.append(match_name)
+            match_idxs.append(match_idx)
 
         # Save match information
-        for i in range(iter):
-            if iter == 1:
+        for i in range(max_submotifs):
+            if max_submotifs == 1:
                 i = ""
             self[f"{save_col_sim}{i}"] = match_scores[i]
-            self[f"{save_col_match}{i}"] = match_names[i]
+            self[f"{save_col_name}{i}"] = match_names[i]
             if "logo (fwd)" not in other.__images.columns:
                 # Generate forward logos if not already generated
+                match_motif = match_motifs[i]
+                if match_motif.shape[2] == 8:
+                    match_motif = utils_motif.motif_8_to_4_signed(match_motif)
                 motif_plotting_inputs = [
-                    utils_plotting.LogoPlottingInput(utils_motif.motif_8_to_4_signed(motif)) 
-                    if motif.shape[2] == 8 
-                    else utils_plotting.LogoPlottingInput(motif) 
-                    for motif in match_motifs[i]
+                    utils_plotting.LogoPlottingInput(motif) 
+                    for motif in match_motif
                 ]
                 self.__images[f"{save_col_logo}{i}"] = [
                     motif_input.utf8_plot

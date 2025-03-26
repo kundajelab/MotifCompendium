@@ -45,7 +45,7 @@ def compute_similarity_and_align(
     # Return
     if get_use_gpu():
         sim, align_rc, align_h = sim.get(), align_rc.get(), align_h.get()
-    return sim.astype(np.single), align_rc.astype(np.bool), align_h.astype(np.byte)
+    return sim.astype(np.single), align_rc.astype(np.bool_), align_h.astype(np.byte)
 
 
 ####################

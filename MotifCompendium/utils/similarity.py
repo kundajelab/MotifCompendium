@@ -43,8 +43,8 @@ def compute_similarities(
           .similarity_core_gpu.py. If False, they will be carried out by the function in
           utils file .similarity_core_cpu.py.
     """
-    for motif_stack in motif_stack_list:
-        validate_motif_stack_similarity(motif_stack)
+    # for motif_stack in motif_stack_list:
+    #     validate_motif_stack_similarity(motif_stack)
     if utils_config.get_max_chunk() != -1:
         (
             chunked_motif_stack_list,

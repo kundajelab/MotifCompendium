@@ -62,7 +62,7 @@ def cluster(
             )
             return cpm_leiden_clustering(weighted_adjacency_matrix , **kwargs)
         case "leiden" | "leidenalg":
-            print("Warning: Falling back to default Leiden algorithm: Constant Potts model")
+            print("Warning: Falling back to default Leiden algorithm: constant Potts model")
             weighted_adjacency_matrix  = similarity_matrix * (
                 similarity_matrix >= similarity_threshold
             )
@@ -139,7 +139,7 @@ def cpm_leiden_clustering(
     n_iterations: int = -1,
     seeds: list[int] = [1],
 ) -> list[int]:
-    """Perform Leiden clustering with the Constant Potts model.
+    """Perform Leiden clustering with the constant Potts model.
 
     Args:
         weighted_adjacency_matrix : A square weighted adjacency matrix.
@@ -158,7 +158,7 @@ def cpm_leiden_clustering(
           same cluster.
 
     Notes:
-        Uses the Constant Potts model. See leidenalg.CPMVertexPartition for more details.
+        Uses the constant Potts model. See leidenalg.CPMVertexPartition for more details.
     """
     g = ig.Graph.Weighted_Adjacency(weighted_adjacency_matrix , mode="undirected")
     best_quality = None

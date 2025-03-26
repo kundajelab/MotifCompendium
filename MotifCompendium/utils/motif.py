@@ -101,15 +101,16 @@ def align_motifs(
     """Create an aligned motif stack based on the alignment matrices.
 
     Uses the alignment information to place the motifs in the motif stack in the correct
-      orientation and position.
+      orientation and position. 
 
     Args:
-        motif_stack: A motif stack to be aligned.
-        alignment_rc: A (N, ) forward/reverse complement alignment vector.
-        alignment_h: A (N, ) horizontal alignment vector.
+        motif_stack: A motif stack to be aligned. (N, L, K)
+        alignment_rc: A forward/reverse complement alignment vector. (N, )
+        alignment_h: A horizontal alignment vector. (N, )
 
     Returns:
-        An aligned motif stack.
+        An aligned motif stack. (N, L_new, K), 
+        where L_new = L + max(alignment_h, 0) - min(alignment_h, 0).
     """
     # Check inputs
     validate_motif_stack(motif_stack)
@@ -135,7 +136,7 @@ def align_motifs(
     return aligned_motifs
 
 
-def resize_motif(motif: np.ndarray, resize_to: int = 30) -> np.ndarray:
+def resize_motif(motif: np.ndarray, resize_to: int) -> np.ndarray:
     """Resize a motif (by squashing or padding) to a specified length.
 
     If the given motif is shorter than resize_to, pad with 0s until it is large enough.
@@ -270,9 +271,13 @@ def calculate_ls_scale(var_motif: np.ndarray, ref_motif: np.ndarray) -> np.ndarr
         ref_motif: A np.ndarray representing the reference motif. (N, L, K)
         
     Returns:
-        A np.ndarray representing the best scaling factor. (N,)
+        A np.ndarray representing the best scaling factor. (N, L, K)
     """
-    return np.sum((var_motif * ref_motif), axis=(1,2)) / np.sum((var_motif ** 2), axis=(1,2))
+    if var_motif.shape != ref_motif.shape:
+        raise ValueError("var_motif and ref_motif must have the same shape.")
+
+    epsilon = 1e-8
+    return np.sum((var_motif * ref_motif), axis=(1, 2), keepdims=True) / (np.sum((var_motif ** 2), axis=(1, 2), keepdims=True) + epsilon)
 
 
 @single_or_many_motifs
@@ -304,13 +309,15 @@ def subtract_motifs(
     """
     # Check inputs
     validate_motif_stack(motifs_core)
-    validate_motif_stack(motifs_subtract_set)
-    if not (align_idx.shape == align_rc.shape == align_h.shape == (motifs_core.shape[0],)):
-        raise ValueError("align_idx, align_rc, and align_h must have the same length as motifs_core.")
+    validate_motif_stack(motifs_subtract)
+    if not (align_rc.shape == align_h.shape == (motifs_core.shape[0],)):
+        raise ValueError("align_rc, align_h must have the same length as motifs_core.")
 
     # Subtract motifs
     motifs_subtract = align_motifs(motifs_subtract, align_rc, align_h) # Align motifs
-    motifs_subtract = motifs_subtract * calculate_ls_scale(motifs_subtract, motifs_core) # L2 scale to best match core
+    start = max(-np.min(align_h), 0) + min(np.max(align_h), 0) # Start index
+    motifs_subtract = motifs_subtract[:, start:start + motifs_core.shape[1], :] # Clip motifs to core length, L
+    motifs_subtract = motifs_subtract * calculate_ls_scale(motifs_subtract, motifs_core) # Least squares scale to best match core
     updated_motifs = np.clip(motifs_core - motifs_subtract, 0, None) # Clip negative values
     return updated_motifs
 
@@ -652,3 +659,20 @@ def calculate_dinuc_entropy_ratio(motif: np.array) -> float:
     dinuc_entropy_ratio = dinuc_pos_entropy / dinuc_base_entropy
 
     return dinuc_entropy_ratio
+
+
+def check_negpattern_pospeak(motif: np.array) -> bool:
+    """Check negative pattern motifs with positive peaks.
+    
+    Note: Assumes input motif is a negative pattern motif."""
+    # Check if motif is valid
+    if not isinstance(motif, np.ndarray):
+        raise TypeError("Motif must be a NumPy array.")
+    if len(motif.shape) != 2:
+        raise ValueError("Motif must be a 2D array.")
+    if motif.shape[1] not in [4, 8]:
+        raise ValueError("Motif second dimension must be 4 or 8.")
+    if motif.shape[1] == 8:
+        motif = motif_8_to_4(motif)  # Convert motif to 4-channel
+
+    return np.max(motif) > 0

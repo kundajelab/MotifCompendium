@@ -110,20 +110,21 @@ def load_modisco(
     return motifs, motif_names, seqlet_counts
 
 
-def load_pfm(pfm_file: str) -> tuple[np.ndarray, list[str]]:
+def load_pfm(pfm_file: str, motif_len: int) -> tuple[np.ndarray, list[str]]:
     """Load motifs and names from a PFM file.
     Each PFM from the PFM file is extracted. Then, the PFMs are transformed into a PWM
       using per position information content scaling.
 
     Args:
         pfm_file: The PFM file path.
+        motif_len: The length of the extracted motifs (padding with zeros if necessary,
+        centered at motif peak).
 
     Returns:
         A tuple of motifs and motif names.
 
     Notes:
         Assumes a standard PFM file format.
-        Motifs are returned as (N, 30, 4) 4 channel motif stack.
     """
     names = []
     pfms = []
@@ -135,7 +136,7 @@ def load_pfm(pfm_file: str) -> tuple[np.ndarray, list[str]]:
                 if x.startswith(">"):
                     # submit
                     current_pfm_np = pd.DataFrame(current_pfm).to_numpy()
-                    current_pfm_np = resize_motif(current_pfm_np)
+                    current_pfm_np = resize_motif(current_pfm_np, motif_len)
                     pfms.append(pd.DataFrame(current_pfm_np))
                     names.append(current_pfm_name)
                     # restart
@@ -160,7 +161,7 @@ def load_pfm(pfm_file: str) -> tuple[np.ndarray, list[str]]:
     return pfms_mtx, names
 
 
-def load_meme(meme_file: str) -> tuple[np.ndarray, list[str]]:
+def load_meme(meme_file: str, motif_len: int) -> tuple[np.ndarray, list[str]]:
     """Load motifs and names from a MEME file.
 
     Each PFM from the MEME file is extracted. Then, the PFMs are transformed into a PWM
@@ -168,13 +169,14 @@ def load_meme(meme_file: str) -> tuple[np.ndarray, list[str]]:
 
     Args:
         meme_file: The MEME file path.
+        motif_len: The length of the extracted motifs (padding with zeros if necessary,
+        centered at motif peak).
 
     Returns:
         A tuple of motifs and motif names.
 
     Notes:
         Assumes a standard MEME file format.
-        Motifs are returned as (N, 30, 4) 4 channel motif stack.
     """
     names = []
     pwms = []
@@ -223,7 +225,7 @@ def load_meme(meme_file: str) -> tuple[np.ndarray, list[str]]:
                         # submit
                         current_pwm_df = pd.DataFrame(current_pwm)
                         current_pwm_np = current_pwm_df.to_numpy()
-                        current_pwm_np = resize_motif(current_pwm_np)
+                        current_pwm_np = resize_motif(current_pwm_np, motif_len)
                         pwms.append(pd.DataFrame(current_pwm_np))
                         names.append(current_pwm_name)
                         # restart
