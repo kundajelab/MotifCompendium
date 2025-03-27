@@ -1374,7 +1374,7 @@ class MotifCompendium:
                 motif_plotting_inputs = [
                     utils_plotting.LogoPlottingInput(motif) for motif in match_motif
                 ]
-                self.__images[f"{save_column_prefix}{i}"] = [
+                self.__images[f"{save_column_prefix}_logo{i}"] = [
                     motif_input.utf8_plot
                     for motif_input in utils_plotting.plot_many_motif_logos(
                         motif_plotting_inputs

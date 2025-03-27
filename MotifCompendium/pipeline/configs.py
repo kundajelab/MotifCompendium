@@ -1,6 +1,6 @@
 import os
-from dataclasses import dataclass
-from typing import Union
+from dataclasses import dataclass, field
+from typing import Union, List, Tuple
 
 
 @dataclass
@@ -49,16 +49,19 @@ class MotifMatchArgs:
 class ClusterArgs:
     algorithm: str = "cpm_leiden"
     weight_col: str = "num_seqlets"
-    aggregate_metadata: tuple = (
+    aggregate_metadata: List[Tuple[str, str, str]] = field(default_factory=lambda: [
         ("name", "count", "num_motifs"),
         ("num_seqlets", "sum", "num_seqlets"),
         ("model", "concat", "models"),
-    )
+        ("biosample", "concat", "biosamples"),
+        ("target", "concat", "targets"),
+    ])
 
 
 @dataclass
 class VisualizeArgs:
-    html_table_cols: tuple = tuple(
+    editable: bool = True
+    html_table_cols: List[str] = field(default_factory=lambda: [
         col
         for iter in range(MotifMatchArgs.max_submotifs)
         for col in [
@@ -66,8 +69,7 @@ class VisualizeArgs:
             f"{MetadataCols.match_column_prefix}_name{iter}",
             f"{MetadataCols.match_column_prefix}_score{iter}",
         ]
-    ) + ("name", "num_motifs", "num_seqlets", "models")
-    editable: bool = True
+    ] + ["name", "num_motifs", "num_seqlets", "models", "biosamples", "targets"])
 
 
 @dataclass
