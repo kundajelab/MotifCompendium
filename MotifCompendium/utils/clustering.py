@@ -1,5 +1,6 @@
 import igraph as ig
 import leidenalg as la
+
 import numpy as np
 import pandas as pd
 import scipy.sparse
@@ -121,7 +122,10 @@ def modularity_leiden_clustering_cpu(
         Uses Reichardt & Bornholdt's quality function with a configuration model as a
           a null. See leidenalg.RBConfigurationVertexPartition for more details.
     """
+    # Create igraph object
     g = ig.Graph.Weighted_Adjacency(weighted_adjacency_matrix, mode="undirected")
+    
+    # Run modularity Leiden clustering
     best_quality = None
     best_membership = None
     for seed in seeds:
@@ -166,7 +170,16 @@ def cpm_leiden_clustering(
     Notes:
         Uses the constant Potts model. See leidenalg.CPMVertexPartition for more details.
     """
-    g = ig.Graph.Weighted_Adjacency(weighted_adjacency_matrix, mode="undirected")
+    # Create igraph object
+    n_vertices = weighted_adjacency_matrix.shape[0]
+    rows, cols = np.nonzero(weighted_adjacency_matrix)
+    edges = list(zip(rows, cols))
+    weights = weighted_adjacency_matrix[rows, cols]
+
+    g = ig.Graph(n_vertices, edges=edges)
+    g.es["weight"] = weights
+
+    # Run CPM Leiden clustering
     best_quality = None
     best_membership = None
     for seed in seeds:

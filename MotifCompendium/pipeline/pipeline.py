@@ -390,25 +390,18 @@ if __name__ == "__main__":
         cluster_col_name = f"{ClusterArgs.algorithm}_{sim_threshold}"
         mc.metadata[cluster_col_name] = 0
         last_cluster = 0
+
+        if args.verbose:
+            print(f"Clustering motifs using: {ClusterArgs.algorithm} {sim_threshold}...")
+        if args.time:
+            start_time = time.time()
         for key, mc_iter in mc_dict.items():
             # Cluster motifs
-            if args.verbose:
-                print(
-                    f"Clustering {key} motifs using: {ClusterArgs.algorithm} {sim_threshold}..."
-                )
-            if args.time:
-                start_time = time.time()
             mc_iter.cluster(
                 algorithm=ClusterArgs.algorithm,
                 similarity_threshold=sim_threshold,
                 save_name=cluster_col_name,
             )
-            if args.time:
-                print(f"Time taken: {time.time() - start_time:.2f}s")
-            if args.verbose:
-                print(
-                    f"Total number of clusters ({key} {cluster_col_name}): {len(mc_iter.metadata[cluster_col_name].unique())}"
-                )
 
             # Add last_cluster, to keep membership unique
             mc_iter.metadata[cluster_col_name] = (mc_iter.metadata[cluster_col_name] + last_cluster)
@@ -416,6 +409,11 @@ if __name__ == "__main__":
             # Update cluster membership back to full MotifCompendium object
             mc.metadata.update(mc_iter.metadata[cluster_col_name])
             last_cluster = mc.metadata[cluster_col_name].max() + 1
+
+        if args.time:
+            print(f"Time taken: {time.time() - start_time:.2f}s")
+        if args.verbose:
+            print(f"Total number of clusters ({cluster_col_name}): {len(mc.metadata[cluster_col_name].unique())}")
 
         # Summarize cluster quality
         if args.quality:
@@ -474,7 +472,7 @@ if __name__ == "__main__":
         print(f"Averaging motifs per cluster...")
     if args.time:
         start_time = time.time()
-    mc_avg = mc.average_motifs(
+    mc_avg = mc.cluster_averages(
         cluster_col=cluster_col_name,
         aggregations=ClusterArgs.aggregate_metadata,
         weight_col=ClusterArgs.weight_col,
@@ -575,7 +573,7 @@ if __name__ == "__main__":
 
     # Save MotifCompendium objects
     mc_avg_path = os.path.join(args.output_dir, OutputPaths.mc_avg_filtered)
-    mc_avg_removed_path = os.path.join(args.output_dir, OutputPaths.mc_avg_remove)
+    mc_avg_removed_path = os.path.join(args.output_dir, OutputPaths.mc_avg_removed)
     if args.verbose:
         print(
             f"Saving filtered MotifCompendium objects:\n"

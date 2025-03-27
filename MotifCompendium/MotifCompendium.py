@@ -802,7 +802,7 @@ class MotifCompendium:
             if not cluster_on in self.metadata.columns:
                 raise KeyError(f"{cluster_on} not in metadata.")
             # Average
-            mc_average = self.cluster_averages(cluster_name=cluster_on, safe=False)
+            mc_average = self.cluster_averages(cluster_col=cluster_on)
             # Cluster
             mc_average.metadata["cluster"] = utils_clustering.cluster(
                 similarity_matrix=mc_average.similarity,
@@ -919,7 +919,7 @@ class MotifCompendium:
             )
         # Check weights
         if weight_col is not None:
-            if weight_col in self.metadata_columns:
+            if weight_col in self.metadata.columns:
                 weights = self.metadata[weight_col].to_numpy()
             else:
                 raise ValueError(f"{weight_col} is not a column in metadata.")
