@@ -314,12 +314,20 @@ def combine(
 
     alignment_rc = np.block(alignment_rc_block)
     alignment_h = np.block(alignment_h_block)
-    # motifs
+    # Motifs
     motifs = np.concatenate(motifs_list, axis=0)
-    # METADATA
+    # Metadata
     metadata = pd.concat([mc.metadata for mc in compendiums], ignore_index=True)
+    # Images
+    __images = pd.DataFrame()
+    for mc in compendiums:
+        for image_column in mc.get_image_columns():
+            __images = pd.concat(
+                [__images, pd.DataFrame(mc.images(image_column), columns=[image_column])], ignore_index=True
+            )
+    # Construct object
     return MotifCompendium(
-        motifs, similarity, alignment_rc, alignment_h, metadata, safe
+        motifs, similarity, alignment_rc, alignment_h, metadata, __images, safe,
     )
 
 
@@ -946,7 +954,7 @@ class MotifCompendium:
             ]  # vector of alignment
             # Average motifs
             motif_avg_c = utils_motif.average_motifs(
-                motifs_c, alignment_rc_c, alignment_h_c, weights=weights
+                motifs_c, alignment_rc_c, alignment_h_c, weights=weights[c_idxs]
             )
             cluster_motif_avgs.append(motif_avg_c)
             # Aggregations
@@ -1104,8 +1112,9 @@ class MotifCompendium:
         # Check columns
         if columns is None:
             columns = list(self.metadata.columns)
-        elif not all([c in self.metadata.columns for c in columns]):
-            raise KeyError("All columns must be metadata columns or saved images.")
+        elif not all(c in self.metadata.columns.union(self.__images.columns) for c in columns):
+            error_cols = [c for c in columns if c not in self.metadata.columns.union(self.__images.columns)]
+            raise KeyError(f"Columns not in metadata columns or saved images: {error_cols}")
         # If forward and reverse logos aren't in __images, create and add them
         if "logo (fwd)" not in self.__images.columns:
             motifs = (

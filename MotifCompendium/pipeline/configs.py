@@ -67,6 +67,7 @@ class VisualizeArgs:
             f"{MetadataCols.match_column_prefix}_score{iter}",
         ]
     ) + ("name", "num_motifs", "num_seqlets", "models")
+    editable: bool = True
 
 
 @dataclass
@@ -119,6 +120,72 @@ class MotifFilterArgs:
             metric="negpattern_pospeak",
             operation="==",
             threshold=True,
+            override=False,
+        ),
+    )
+    # Override: filter_col_flag AND apply_filter_threshold must both be True, to keep flag True
+    override_filters: tuple = (
+        FilterArgs(
+            name="base_match",
+            metric=f"{MetadataCols.match_column_prefix}_score0",
+            operation=">",
+            threshold=0.9,
+            override=True,
+        ),
+    ) + tuple(
+        FilterArgs(
+            name="composite_match",
+            metric=f"{MetadataCols.match_column_prefix}_score{iter}",
+            operation="<",
+            threshold=MotifMatchArgs.composite_threshold,
+            override=True,
+        )
+        for iter in range(1, MotifMatchArgs.max_submotifs)
+    )
+
+
+@dataclass
+class ClusterFilterArgs:
+    motif_metrics: tuple = (
+        "motif_entropy",
+        "posbase_entropy_ratio",
+        "copair_entropy_ratio",
+        "dinuc_entropy_ratio",
+    )
+    motif_filters: tuple = (
+        FilterArgs(
+            name="1_singlepeak",
+            metric="motif_entropy",
+            operation="<",
+            threshold=0.45,
+            override=False,
+        ),
+        FilterArgs(
+            name="2_noisemix",
+            metric="motif_entropy",
+            operation=">",
+            threshold=0.75,
+            override=False,
+        ),
+        FilterArgs(
+            name="3_broadsingle",
+            metric="posbase_entropy_ratio",
+            operation=">",
+            threshold=2.0,
+            override=False,
+        ),
+        FilterArgs(
+            name="4_gcbias",
+            metric="copair_entropy_ratio",
+            operation=">",
+            threshold=2.0,
+            override=False,
+        ),
+        FilterArgs(
+            name="5_dinucrepeat",
+            metric="dinuc_entropy_ratio",
+            operation=">",
+            threshold=4.0,
             override=False,
         ),
     )

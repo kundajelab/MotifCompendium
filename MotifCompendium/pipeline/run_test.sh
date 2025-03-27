@@ -18,8 +18,8 @@ mapfile -t INPUT_PATHS < <(cut -f 1 "$MODISCO_PATHS")
 mapfile -t INPUT_NAMES < <(cut -f 2 "$MODISCO_PATHS")
 REFERENCE_PATH="/oak/stanford/groups/akundaje/cmyun/software/motifcompendium/MotifCompendium/data/JASPAR2024-HOCOMOCOv13.meme.txt"
 
-SIM_THRESHOLD=0.85
-SIM_SCAN=(0.8 0.85 0.9 0.95 0.99)
+SIM_THRESHOLD=0.9
+SIM_SCAN=(0.8 0.85 0.9 0.95)
 MIN_SEQLETS=100
 
 MAX_CHUNK=1200

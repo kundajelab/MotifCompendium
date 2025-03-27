@@ -55,13 +55,17 @@ def set_default_options():
     global MetadataCols
     global MotifMatchArgs
     global ClusterArgs
+    global VisualizeArgs
     global MotifFilterArgs
+    global ClusterFilterArgs
 
     OutputPaths = configs.OutputPaths
     MetadataCols = configs.MetadataCols
     MotifMatchArgs = configs.MotifMatchArgs
     ClusterArgs = configs.ClusterArgs
+    VisualizeArgs = configs.VisualizeArgs
     MotifFilterArgs = configs.MotifFilterArgs
+    ClusterFilterArgs = configs.ClusterFilterArgs
 
 
 ## FUNCTIONS -------------------------------------------------------------------
@@ -192,7 +196,7 @@ if __name__ == "__main__":
             if args.verbose:
                 print(
                     f"Completed building MotifCompendium object:\n"
-                    f"  Total number of motifs: {len(mc.motifs)}\n"
+                    f"  Total number of motifs: {len(mc)}\n"
                     f"  Metadata columns: {mc.metadata.columns.tolist()}"
                 )
             if args.time:
@@ -252,7 +256,7 @@ if __name__ == "__main__":
         print(f"Filtering motifs with less than {args.min_seqlets} seqlets...")
     mc = mc[mc.metadata["num_seqlets"] >= args.min_seqlets]
     if args.verbose:
-        print(f"Number of motifs after filtering: {len(mc.motifs)}")
+        print(f"Number of motifs after filtering: {len(mc)}")
 
     # Filter #2: Reference matching
     if args.reference is None:
@@ -353,6 +357,9 @@ if __name__ == "__main__":
         print(f"Removing flagged motifs...")
     mc_removed = mc[mc.metadata[MetadataCols.filter_col_flag]]
     mc = mc[~mc.metadata[MetadataCols.filter_col_flag]]
+    if args.verbose:
+        print(f"Number of motifs after removing flagged motifs: {len(mc)}\n"
+                f"Number of motifs removed: {len(mc_removed)}")
 
     # Save MotifCompendium objects
     mc_path = os.path.join(args.output_dir, OutputPaths.mc_filtered)
@@ -523,7 +530,7 @@ if __name__ == "__main__":
         start_time = time.time()
     utils_analysis.calculate_filters(
         mc=mc_avg,
-        metric_list=MotifFilterArgs.motif_metrics,
+        metric_list=ClusterFilterArgs.motif_metrics,
     )
     if args.time:
         print(f"Time taken: {time.time() - start_time:.2f}s")
@@ -533,7 +540,7 @@ if __name__ == "__main__":
     mc_avg.metadata[MetadataCols.filter_col_flag] = False
     if args.time:
         start_time = time.time()
-    for filter_args in MotifFilterArgs.motif_filters:
+    for filter_args in ClusterFilterArgs.motif_filters:
         apply_filter_threshold(
             mc=mc_avg,
             flag_col=MetadataCols.filter_col_flag,
@@ -549,11 +556,11 @@ if __name__ == "__main__":
     if args.verbose:
         print(
             f"Overriding flags for matches above threshold:\n"
-            f'Base: {MotifFilterArgs.override_filters[0].threshold}, Composite: {MotifFilterArgs.override_filters[1].threshold}'
+            f'Base: {ClusterFilterArgs.override_filters[0].threshold}, Composite: {ClusterFilterArgs.override_filters[1].threshold}'
         )
     if args.time:
         start_time = time.time()
-    for override_filter_args in MotifFilterArgs.override_filters:
+    for override_filter_args in ClusterFilterArgs.override_filters:
         apply_filter_threshold(
             mc=mc_avg,
             flag_col=MetadataCols.filter_col_flag,
@@ -570,6 +577,9 @@ if __name__ == "__main__":
         print(f"Removing flagged motifs...")
     mc_avg_removed = mc_avg[mc_avg.metadata[MetadataCols.filter_col_flag]]
     mc_avg = mc_avg[~mc_avg.metadata[MetadataCols.filter_col_flag]]
+    if args.verbose:
+        print(f"Number of motifs after removing flagged motifs: {len(mc_avg)}\n"
+                f"Number of motifs removed: {len(mc_avg_removed)}")
 
     # Save MotifCompendium objects
     mc_avg_path = os.path.join(args.output_dir, OutputPaths.mc_avg_filtered)
@@ -589,33 +599,38 @@ if __name__ == "__main__":
 
     ## VISUALIZE ----------------------------------------------------------------
     # Visualize: Cluster collection
-    if args.html_collection:
-        if args.verbose:
-            print(f"Visualizing cluster collection...")
+    if args.html_collection or args.html_table:
         html_dir = os.path.join(args.output_dir, "html")
         if not os.path.exists(html_dir):
             if args.verbose:
                 print(f"Creating HTML directory: {html_dir}...")
             os.makedirs(html_dir, exist_ok=True)
 
+    if args.html_collection:
         html_collection_path = os.path.join(html_dir, OutputPaths.html_collection)
+        if args.verbose:
+            print(f"Visualizing cluster collection: {html_collection_path}...")
         if args.time:
             start_time = time.time()
-        mc.motif_collection(
+        mc.motif_collection_html(
             html_out=html_collection_path,
             group_by=cluster_col_name,
             average_motif=True,
         )
+        if args.time:
+            print(f"Time taken: {time.time() - start_time:.2f}s")
 
     # Visualize: Cluster table
     if args.html_table:
-        if args.verbose:
-            print(f"Visualizing cluster table...")
         html_table_path = os.path.join(html_dir, OutputPaths.html_table)
+        if args.verbose:
+            print(f"Visualizing cluster table: {html_table_path}...")
         if args.time:
             start_time = time.time()
-        mc.summary_table_html(
+        mc_avg.summary_table_html(
             html_out=html_table_path,
-            group_by=cluster_col_name,
-            average_motif=True,
+            columns=VisualizeArgs.html_table_cols,
+            editable=VisualizeArgs.editable,
         )
+        if args.time:
+            print(f"Time taken: {time.time() - start_time:.2f}s")
