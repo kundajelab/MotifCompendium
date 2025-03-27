@@ -95,7 +95,7 @@ def modularity_leiden_clustering_cpu(
     weighted_adjacency_matrix: np.ndarray,
     resolution_parameter: float = 1.0,
     n_iterations: int = -1,
-    seeds: list[int] = [1],
+    seeds: list[int] = [1, 2],
 ) -> list[int]:
     """Perform Leiden clustering with R&B quality and a configuration null.
 
@@ -124,7 +124,7 @@ def modularity_leiden_clustering_cpu(
     g = ig.Graph.Weighted_Adjacency(weighted_adjacency_matrix, mode="undirected")
     best_quality = None
     best_membership = None
-    for seed in len(seeds):
+    for seed in seeds:
         partition = la.find_partition(
             graph=g,
             partition_type=la.RBConfigurationVertexPartition,
@@ -143,7 +143,7 @@ def cpm_leiden_clustering(
     weighted_adjacency_matrix: np.ndarray,
     resolution_parameter: float = 1.0,
     n_iterations: int = -1,
-    seeds: list[int] = [1],
+    seeds: list[int] = [1, 2],
 ) -> list[int]:
     """Perform Leiden clustering with the constant Potts model.
 
@@ -169,7 +169,7 @@ def cpm_leiden_clustering(
     g = ig.Graph.Weighted_Adjacency(weighted_adjacency_matrix, mode="undirected")
     best_quality = None
     best_membership = None
-    for seed in len(seeds):
+    for seed in seeds:
         partition = la.find_partition(
             graph=g,
             partition_type=la.CPMVertexPartition,
@@ -188,7 +188,7 @@ def modularity_leiden_clustering_gpu(
     weighted_adjacency_matrix: np.ndarray,
     resolution_parameter: float = 1.0,
     n_iterations: int = 100,
-    n_seeds: int = 2,
+    seeds: list[int] = [1, 2],
 ) -> list[int]:
     """
     Perform Leiden clustering with R&B quality and a configuration null, on GPU.
@@ -243,11 +243,11 @@ def modularity_leiden_clustering_gpu(
     # Run Leiden clustering
     best_quality = None
     best_membership = None
-    for seed in range(1, n_seeds + 1):
+    for seed in seeds:
         partition, quality = cugraph.leiden(G, 
             resolution=resolution_parameter, 
             max_iter=n_iterations, 
-            random_state=seed * 100
+            random_state=seed
         )
         if best_quality is None or quality > best_quality:
             best_quality = quality

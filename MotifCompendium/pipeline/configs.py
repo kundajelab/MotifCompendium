@@ -29,9 +29,7 @@ class OutputPaths:
 
 @dataclass
 class MetadataCols:
-    match_col_name: str = "reference_name"
-    match_col_score: str = "reference_similarity"
-    match_col_logo: str = "reference_logo"
+    match_column_prefix: str = "reference"
     filter_col_flag: str = "flag_remove"
 
 
@@ -62,11 +60,11 @@ class ClusterArgs:
 class VisualizeArgs:
     html_table_cols: tuple = tuple(
         col
-        for iter in range(1, MotifMatchArgs.max_submotifs)
+        for iter in range(MotifMatchArgs.max_submotifs)
         for col in [
-            f"{MetadataCols.match_col_logo}{iter}",
-            f"{MetadataCols.match_col_name}{iter}",
-            f"{MetadataCols.match_col_score}{iter}",
+            f"{MetadataCols.match_column_prefix}_logo{iter}",
+            f"{MetadataCols.match_column_prefix}_name{iter}",
+            f"{MetadataCols.match_column_prefix}_score{iter}",
         ]
     ) + ("name", "num_motifs", "num_seqlets", "models")
 
@@ -74,11 +72,11 @@ class VisualizeArgs:
 @dataclass
 class MotifFilterArgs:
     motif_metrics: tuple = (
-        "negpattern_pospeak",
         "motif_entropy",
         "posbase_entropy_ratio",
         "copair_entropy_ratio",
         "dinuc_entropy_ratio",
+        "negpattern_pospeak",
     )
     motif_filters: tuple = (
         FilterArgs(
@@ -128,7 +126,7 @@ class MotifFilterArgs:
     override_filters: tuple = (
         FilterArgs(
             name="base_match",
-            metric=MetadataCols.match_col_score,
+            metric=f"{MetadataCols.match_column_prefix}_score0",
             operation=">",
             threshold=0.9,
             override=True,
@@ -136,7 +134,7 @@ class MotifFilterArgs:
     ) + tuple(
         FilterArgs(
             name="composite_match",
-            metric=f"{MetadataCols.match_col_score}{iter}",
+            metric=f"{MetadataCols.match_column_prefix}_score{iter}",
             operation="<",
             threshold=MotifMatchArgs.composite_threshold,
             override=True,

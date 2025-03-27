@@ -4,6 +4,7 @@ import argparse
 
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 import seaborn as sns
 
 import MotifCompendium
@@ -20,104 +21,26 @@ import MotifCompendium.utils.visualization as utils_visualization
 def setup_parser():
     parser = argparse.ArgumentParser(description="Run the MotifCompendium pipeline.")
 
-    parser.add_argument(
-        "-i",
-        "--input-h5s",
-        nargs="+",
-        type=str,
-        required=True,
-        help="Path to the input Modisco H5 file(s).",
-    )
-    parser.add_argument(
-        "-n",
-        "--input-names",
-        nargs="+",
-        type=str,
-        default=None,
-        help="Nickname of the input Modisco H5 file(s).",
-    )
-    parser.add_argument(
-        "-o",
-        "--output-dir",
-        type=str,
-        required=True,
-        help="Path to the output directory.",
-    )
-    parser.add_argument(
-        "-m",
-        "--metadata",
-        type=str,
-        default=None,
-        help="Path to the metadata file, by h5, h5_name, or motif: CSV, TSV format.",
-    )
-    parser.add_argument(
-        "-r",
-        "--reference",
-        type=str,
-        default=None,
-        help="Path to a reference motif file: MotifCompendium object, or PFM, MEME .txt format.",
-    )
-
-    parser.add_argument(
-        "--sim-threshold",
-        type=float,
-        default=0.9,
-        help="Similarity threshold to apply during clustering.",
-    )
-    parser.add_argument(
-        "--sim-scan",
-        type=list,
-        default=None,
-        help="List of similarity thresholds to scan during clustering. MUST INCLUDE SIM_THRESHOLD.",
-    )
-    parser.add_argument(
-        "--min-seqlets",
-        type=int,
-        default=100,
-        help="Minimum number of seqlets to consider a motif.",
-    )
-
-    parser.add_argument(
-        "--quality", action="store_true", help="Generate quality plots for clustering."
-    )
-    parser.add_argument(
-        "--html-collection",
-        action="store_true",
-        help="Generate HTML collection of motif constituents per cluster.",
-    )
-    parser.add_argument(
-        "--html-table",
-        action="store_true",
-        help="Generate HTML summary table of clustered motifs.",
-    )
-
-    parser.add_argument(
-        "-ch",
-        "--max-chunk",
-        type=int,
-        default=1000,
-        help="Maximum number of motifs to process at a time. Set to -1 to use no chunking.",
-    )
-    parser.add_argument(
-        "-cp", "--max-cpus", type=int, default=1, help="Maximum number of CPUs to use."
-    )
-    parser.add_argument(
-        "--unsafe", action="store_false", dest="safe", help="Disable safety checks."
-    )
-    parser.add_argument(
-        "--use-gpu", action="store_true", help="Use GPU for processing."
-    )
-    parser.add_argument(
-        "--no-ic",
-        action="store_false",
-        dest="ic",
-        help="Do not compute information content.",
-    )
+    parser.add_argument("-i", "--input-h5s", nargs="+", type=str, required=True, help="Path to the input Modisco H5 file(s).")
+    parser.add_argument("-n", "--input-names", nargs="+", type=str, default=None, help="Nickname of the input Modisco H5 file(s).")
+    parser.add_argument("-o", "--output-dir", type=str, required=True, help="Path to the output directory.")
+    parser.add_argument("-m", "--metadata", type=str, default=None, help="Path to the metadata file, by h5, h5_name, or motif: CSV, TSV format.")
+    parser.add_argument("-r", "--reference", type=str, default=None, help="Path to a reference motif file: MotifCompendium object, or PFM, MEME .txt format.")
+    
+    parser.add_argument("--sim-threshold", type=float, default=0.9, help="Similarity threshold to apply during clustering.")
+    parser.add_argument("--sim-scan", nargs="+", type=float, default=None, help="List of similarity thresholds to scan during clustering. MUST INCLUDE SIM_THRESHOLD.")
+    parser.add_argument("--min-seqlets", type=int, default=100, help="Minimum number of seqlets to consider a motif.")
+    parser.add_argument("--quality", action="store_true", help="Generate quality plots for clustering.")
+    parser.add_argument("--html-collection", action="store_true", help="Generate HTML collection of motif constituents per cluster.")
+    parser.add_argument("--html-table", action="store_true", help="Generate HTML summary table of clustered motifs.")
+    
+    parser.add_argument("-ch", "--max-chunk", type=int, default=1000, help="Maximum number of motifs to process at a time. Set to -1 to use no chunking.")
+    parser.add_argument("-cp", "--max-cpus", type=int, default=1, help="Maximum number of CPUs to use.")
+    parser.add_argument("--unsafe", action="store_false", dest="safe", help="Disable safety checks.")
+    parser.add_argument("--use-gpu", action="store_true", help="Use GPU for processing.")
+    parser.add_argument("--no-ic", action="store_false", dest="ic", help="Do not compute information content.")
     parser.add_argument("--fast-plot", action="store_true", help="Use fast plotting.")
-
-    parser.add_argument(
-        "--time", action="store_true", help="Print time taken for each step."
-    )
+    parser.add_argument("--time", action="store_true", help="Print time taken for each step.")
     parser.add_argument("--verbose", action="store_true", help="Print verbose output.")
 
     args = parser.parse_args()
@@ -338,29 +261,39 @@ if __name__ == "__main__":
     if args.reference.endswith(".mc"):
         if args.verbose:
             print(f"Loading reference MotifCompendium object: {args.reference}...")
+        if args.time:
+            start_time = time.time()
         ref_mc = MotifCompendium.load(args.reference, safe=args.safe)
+        if args.time:
+            print(f"Time taken: {time.time() - start_time:.2f}s")
+
         if args.verbose:
             print(f"Matching motifs to reference MotifCompendium object...")
+        if args.time:
+            start_time = time.time()
         mc.assign_label_from_other(
             other=ref_mc,
-            save_col_sim=MetadataCols.match_col_score,
-            save_col_name=MetadataCols.match_col_name,
-            save_col_logo=MetadataCols.match_col_logo,
+            save_column_prefix=MetadataCols.match_column_prefix,
             max_submotifs=MotifMatchArgs.max_submotifs,
             min_score=MotifMatchArgs.min_score,
         )
+        if args.time:
+            print(f"Time taken: {time.time() - start_time:.2f}s")
+
     elif args.reference.endswith(".txt") or args.reference.endswith(".meme"):
         if args.verbose:
             print(f"Matching motifs to reference file: {args.reference}...")
-        utils_analysis.label_from_pfms(
+        if args.time:
+            start_time = time.time()
+        utils_analysis.assign_label_from_pfm(
             mc=mc,
             pfm_file=args.reference,
-            save_col_sim=MetadataCols.match_col_score,
-            save_col_name=MetadataCols.match_col_name,
-            save_col_logo=MetadataCols.match_col_logo,
+            save_column_prefix=MetadataCols.match_column_prefix,
             max_submotifs=MotifMatchArgs.max_submotifs,
             min_score=MotifMatchArgs.min_score,
         )
+        if args.time:
+            print(f"Time taken: {time.time() - start_time:.2f}s")
     else:
         raise ValueError(
             "Reference file must be a MotifCompendium object or PFM, MEME .txt file."
@@ -399,7 +332,7 @@ if __name__ == "__main__":
     if args.verbose:
         print(
             f"Overriding flags for matches above threshold:\n"
-            f'Base: {MotifFilterArgs.overrides_list[0]["threshold"]}, Composite: {MotifFilterArgs.overrides_list[1]["threshold"]}'
+            f'Base: {MotifFilterArgs.override_filters[0].threshold}, Composite: {MotifFilterArgs.override_filters[1].threshold}'
         )
     if args.time:
         start_time = time.time()
@@ -446,9 +379,9 @@ if __name__ == "__main__":
 
     # Split by composite motifs
     mc_dict = {}
-    for iter in range(1, composite_threholds.max_submotifs):
+    for iter in range(1, MotifMatchArgs.max_submotifs):
         mc_dict[f"mc_{iter}"] = mc[
-            mc.metadata[f"{MetadataCols.match_col_name}{iter}"]
+            mc.metadata[f"{MetadataCols.match_column_prefix}_score{iter}"]
             > MotifMatchArgs.composite_threshold
         ]
 
@@ -457,43 +390,41 @@ if __name__ == "__main__":
         cluster_col_name = f"{ClusterArgs.algorithm}_{sim_threshold}"
         mc.metadata[cluster_col_name] = 0
         last_cluster = 0
-        for iter, mc_iter in mc_dict.items():
+        for key, mc_iter in mc_dict.items():
             # Cluster motifs
             if args.verbose:
                 print(
-                    f"Clustering motifs using: {ClusterArgs.algorithm} {sim_threshold}..."
+                    f"Clustering {key} motifs using: {ClusterArgs.algorithm} {sim_threshold}..."
                 )
             if args.time:
                 start_time = time.time()
             mc_iter.cluster(
                 algorithm=ClusterArgs.algorithm,
-                sim_threshold=sim_threshold,
+                similarity_threshold=sim_threshold,
                 save_name=cluster_col_name,
             )
             if args.time:
                 print(f"Time taken: {time.time() - start_time:.2f}s")
             if args.verbose:
                 print(
-                    f"Total number of clusters ({cluster_col_name}): {len(mc_iter.metadata[cluster_col_name].unique())}"
+                    f"Total number of clusters ({key} {cluster_col_name}): {len(mc_iter.metadata[cluster_col_name].unique())}"
                 )
 
             # Add last_cluster, to keep membership unique
-            mc_iter.metadata[cluster_col_name] = (
-                mc_iter.metadata[cluster_col_name] + last_cluster
-            )
+            mc_iter.metadata[cluster_col_name] = (mc_iter.metadata[cluster_col_name] + last_cluster)
 
             # Update cluster membership back to full MotifCompendium object
             mc.metadata.update(mc_iter.metadata[cluster_col_name])
             last_cluster = mc.metadata[cluster_col_name].max() + 1
 
         # Summarize cluster quality
-        if quality:
+        if args.quality:
             # Make directory
             quality_dir = os.path.join(args.output_dir, "quality")
-            if not quality_dir.exists():
+            if not os.path.exists(quality_dir):
                 if args.verbose:
                     print(f"Creating quality directory: {quality_dir}...")
-                quality_dir.mkdir(parents=True, exist_ok=True)
+                os.makedirs(quality_dir, exist_ok=True)
 
             # Quality: Histogram
             histogram_path = os.path.join(
@@ -505,7 +436,7 @@ if __name__ == "__main__":
                 start_time = time.time()
             utils_analysis.judge_clustering(
                 mc=mc,
-                clustering=cluster_col_name,
+                cluster_col=cluster_col_name,
                 save_loc=histogram_path,
             )
             if args.time:
@@ -518,9 +449,7 @@ if __name__ == "__main__":
             if args.time:
                 start_time = time.time()
             sns.heatmap(
-                mc.clustering_quality(
-                    cluster_col=cluster_col_name,
-                ),
+                mc.clustering_quality(cluster_col=cluster_col_name,),
                 cbar=True,
             )
             plt.savefig(heatmap_path)
@@ -545,7 +474,7 @@ if __name__ == "__main__":
         print(f"Averaging motifs per cluster...")
     if args.time:
         start_time = time.time()
-    mc_avg = mc.average_motif(
+    mc_avg = mc.average_motifs(
         cluster_col=cluster_col_name,
         aggregations=ClusterArgs.aggregate_metadata,
         weight_col=ClusterArgs.weight_col,
@@ -570,21 +499,17 @@ if __name__ == "__main__":
             print(f"Matching motifs to reference MotifCompendium object...")
         mc_avg.assign_label_from_other(
             other=ref_mc,
-            save_col_sim=MetadataCols.match_col_score,
-            save_col_name=MetadataCols.match_col_name,
-            save_col_logo=MetadataCols.match_col_logo,
+            save_column_prefix=MetadataCols.match_column_prefix,
             max_submotifs=MotifMatchArgs.max_submotifs,
             min_score=MotifMatchArgs.min_score,
         )
     elif args.reference.endswith(".txt") or args.reference.endswith(".meme"):
         if args.verbose:
             print(f"Matching motifs to reference file: {args.reference}...")
-        utils_analysis.label_from_pfms(
+        utils_analysis.assign_label_from_pfm(
             mc=mc_avg,
             pfm_file=args.reference,
-            save_col_sim=MetadataCols.match_col_score,
-            save_col_name=MetadataCols.match_col_name,
-            save_col_logo=MetadataCols.match_col_logo,
+            save_column_prefix=MetadataCols.match_column_prefix,
             max_submotifs=MotifMatchArgs.max_submotifs,
             min_score=MotifMatchArgs.min_score,
         )
@@ -626,7 +551,7 @@ if __name__ == "__main__":
     if args.verbose:
         print(
             f"Overriding flags for matches above threshold:\n"
-            f'Base: {MotifFilterArgs.overrides_list[0]["threshold"]}, Composite: {MotifFilterArgs.overrides_list[1]["threshold"]}'
+            f'Base: {MotifFilterArgs.override_filters[0].threshold}, Composite: {MotifFilterArgs.override_filters[1].threshold}'
         )
     if args.time:
         start_time = time.time()

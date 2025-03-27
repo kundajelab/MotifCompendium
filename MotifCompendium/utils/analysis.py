@@ -361,6 +361,9 @@ def calculate_filters(
             Calculation: Entropy across pairs of positions (L/2,) /
                 Entropy across all dinucleotide pairs (64,)
             Purpose:    (High) Dinucleotide repeats (e.g., GCGCGC, ATATAT)
+        (5) Negative pattern positive peak:
+            Calculation: Check if negative patterns with a positive peak
+            Purpose:    (High) Archetype #5: Sharp positive peak in negative pattern
 
     Args:
         metric_list: List of filter metrics to calculate.
@@ -374,6 +377,7 @@ def calculate_filters(
         "posbase_entropy_ratio",
         "copair_entropy_ratio",
         "dinuc_entropy_ratio",
+        "negpattern_pospeak",
     ]
     for filter_metric in metric_list:
         if filter_metric not in valid_filter_metrics:
@@ -410,11 +414,11 @@ def calculate_filters(
                 mc["dinuc_entropy_ratio"] = metrics_list
 
             case "negpattern_pospeak":
-                for i in range(len(mc)):
-                    if mc.metadata["posneg"][i] == "neg":
-                        metric = utils_motif.check_negpattern_pospeak(mc.motifs[i])
-                        metrics_list.append(metric)
-                mc["negpattern_pospeak"] = metrics_list
+                mc.metadata["negpattern_pospeak"] = mc.metadata.apply(
+                    lambda row: utils_motif.check_negpattern_pospeak(mc.motifs[row.name]) 
+                    if row["posneg"] == "neg" else False, 
+                    axis=1
+                )
 
             case _:
                 raise ValueError(
@@ -425,102 +429,42 @@ def calculate_filters(
 ###########################
 # EXISTING MOTIF DATABASE #
 ###########################
-def label_from_pfms(
+def assign_label_from_pfm(
     mc: MotifCompendium,
     pfm_file: str,
-    save_col_sim: str = "pfm_match_similarity",
-    save_col_name: str = "pfm_match_name",
-    save_col_logo: str = "pfm_match_logo",
+    save_column_prefix: str = "match",
     max_submotifs: int = 1,
     min_score: float = 0.5,
 ) -> None:
     """Automatic labeling of motifs from a pfm file.
 
     For each motif in the MotifCompendium, computes the similarity between that motif
-      and all motifs in the PFM file. The highest similarity and closest motif match
-      will be saved as columns save_col_sim and save_col_name in the MotifCompendium
+      and all motifs in the PFM file, for max_submotif iterations. The highest similarity 
+      and closest motif match for each iteration will be saved as columns 
+      {save_column_prefix}_score and {save_column_prefix}_name in the MotifCompendium 
       metadata.
 
     Args:
         mc: The MotifCompendium to analyze.
         pfm_file: The PFM file path.
-        save_col_sim: The column under which the highest similarity will be stored.
-        save_col_name: The column under which the closest match will be stored.
-        save_col_logo: The column under which the closest match logo will be stored.
+        save_column_prefix: The prefix to use for the saved columns.
         max_submotifs: The maximum number of submotifs to consider in a match.
         min_score: The minimum similarity score to consider as a match.
     """
     # Load PFM database, with same length as motifs
     L = mc.motifs.shape[1]
     if pfm_file.endswith("_pfms.txt"):
-        pfm_motifs, names = utils_loader.load_pfm(pfm_file, L)
+        pfm_motifs, pfm_names = utils_loader.load_pfm(pfm_file, L)
     elif pfm_file.endswith(".meme.txt") or pfm_file.endswith(".meme"):
-        pfm_motifs, names = utils_loader.load_meme(pfm_file, L)
+        pfm_motifs, pfm_names = utils_loader.load_meme(pfm_file, L)
     else:
         raise ValueError("pfm_file must be a _pfm.txt, .meme, or .meme.txt file.")
 
-    mc_motifs = mc.motifs.copy()
-    if mc_motifs.shape[2] == 8:
-        mc_motifs = utils_motif.motif_8_to_4_unsigned(mc_motifs)
-
-    # Find best match, per iteration
-    match_scores = []
-    match_names = []
-    match_motifs = []
-    match_idxs = []
-    for i in range(max_submotifs):
-        # Calcualte similarity
-        pfm_sim, pfm_align_rc, pfm_align_h = utils_similarity.compute_similarities(
-            [mc_motifs, pfm_motifs],
-            [(0, 1)],
-        )[0]
-        # Unscale L2 similarity, for dot product only
-        pfm_sim = pfm_sim * (
-            np.linalg.norm(mc_motifs, axis=(1, 2))[:, np.newaxis]
-            * np.linalg.norm(pfm_motifs, axis=(1, 2))[np.newaxis, :]
-        )  # (N, N)
-        # Scale score by i
-        match_score = np.max(pfm_sim, axis=1) * np.sqrt(i)  # (N,)
-        pfm_match_idx = np.argmax(pfm_sim, axis=1)  # (N,)
-        pfm_align_rc = pfm_align_rc[
-            np.arange(pfm_align_rc.shape[0]), pfm_match_idx
-        ]  # (N,)
-        pfm_align_h = pfm_align_h[
-            np.arange(pfm_align_h.shape[0]), pfm_match_idx
-        ]  # (N,)
-        match_motif = pfm_motifs[pfm_match_idx, :, :]
-
-        # Subtract best match
-        mc_motifs = utils_motif.subtract_motifs(
-            mc_motifs, match_motif, pfm_align_rc, pfm_align_h
-        )
-
-        # Save match information
-        match_name = [names[x] for x in pfm_match_idx]
-        match_motifs.append(match_motif)
-        match_scores.append(match_score)
-        match_names.append(match_name)
-        match_idxs.append(pfm_match_idx)
-
-    # Save match information
-    for i in range(max_submotifs):
-        if max_submotifs == 1:
-            i = ""
-        mc[f"{save_col_sim}{i}"] = match_scores[i]
-        mc[f"{save_col_name}{i}"] = match_names[i]
-        match_motif = match_motifs[i]
-        if match_motif.shape[2] == 8:
-            match_motif = utils_motif.motif_8_to_4_signed(match_motif)
-        motif_plotting_inputs = [
-            utils_plotting.LogoPlottingInput(motif) for motif in match_motif
-        ]
-        mc.__images[f"{save_col_logo}{i}"] = [
-            motif_input.utf8_plot
-            for motif_input in utils_plotting.plot_many_motif_logos(
-                motif_plotting_inputs
-            )
-        ]
-
-        # Remove matches below match_score < min_score
-        mc[f"{save_col_name}{i}"][mc[f"{save_col_sim}{i}"] < min_score] = None
-        mc.__images[f"{save_col_logo}{i}"][mc[f"{save_col_sim}{i}"] < min_score] = ""
+    # Assign labels
+    mc.assign_label_from_motifs(
+        other_motifs=pfm_motifs,
+        labels=pfm_names,
+        save_column_prefix=save_column_prefix,
+        max_submotifs=max_submotifs,
+        min_score=min_score,
+    )

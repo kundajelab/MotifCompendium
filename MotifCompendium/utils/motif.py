@@ -688,6 +688,5 @@ def check_negpattern_pospeak(motif: np.array) -> bool:
     if motif.shape[1] not in [4, 8]:
         raise ValueError("Motif second dimension must be 4 or 8.")
     if motif.shape[1] == 8:
-        motif = motif_8_to_4(motif)  # Convert motif to 4-channel
-
+        motif = motif_8_to_4_signed(motif)  # Convert motif to 4-channel
     return np.max(motif) > 0

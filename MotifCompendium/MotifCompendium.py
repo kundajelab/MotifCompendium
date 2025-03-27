@@ -578,9 +578,16 @@ class MotifCompendium:
             return self.motifs
         return utils_motif.motif_8_to_4_signed(self.motifs)
 
-    def get_saved_images(self) -> list[str]:
-        """Returns a list of saved images in the MotifCompendium."""
+    def get_image_columns(self) -> list[str]:
+        """Returns a list of saved image columns in the MotifCompendium."""
         return list(self.__images.columns)
+    
+    def get_images(self, image_column: str) -> list[str]:
+        """Returns a list of saved images as utf8 str in the MotifCompendium by column name."""
+        if image_column not in self.__images.columns:
+            raise KeyError(f"{image_column} not in __images.")
+
+        return self.__images[image_column].tolist()
 
     def delete_column(self, column: str | list[str]) -> None:
         """Deletes the specified column(s) from the metadata.
@@ -777,6 +784,13 @@ class MotifCompendium:
             Review MotifCompendium.utils.clustering.cluster() for available clustering
               algorithms and algorithm-specific arguments.
         """
+        # Check arguments
+        if isinstance(similarity_threshold, (int, float)):
+            if not (0 <= similarity_threshold <= 1):
+                raise ValueError("Similarity_threshold must be in [0, 1].")
+        else:
+            raise TypeError("Similarity_threshold must be a int or float, between [0, 1].")
+            
         if cluster_on is None:
             self.metadata[save_name] = utils_clustering.cluster(
                 similarity_matrix=self.similarity,
@@ -1073,7 +1087,7 @@ class MotifCompendium:
           MotifCompendium. Each motif has one row in the summary table. Logos for the
           forward and reverse complement of each motif will be displayed in the first
           two columns. Columns from the current metadata as well as other images saved
-          in the object (which can be viewed with MotifCompendium.get_saved_images())
+          in the object (which can be viewed with MotifCompendium.get_image_columns())
           can be displayed as columns in the summary table.
 
         Args:
@@ -1276,112 +1290,74 @@ class MotifCompendium:
           provided.
         
         Args:
-            other_motifs:
-            labels:
-            utf8_images:
-            other_is_positive:
-            save_column_prefix:
-            max_submotifs:
-            min_score:
-        
-        Notes:
-            asdf
+            other_motifs: A np.ndarray motif stack to compare against. (M, L, 4)
+            labels: A list of labels for each motif in other_motifs.
+            utf8_images: A list of utf8 images for each motif in other_motifs.
+            other_is_positive: Whether or not the other_motifs are positive motifs.
+            save_column_prefix: The prefix to use for the saved columns.
+              Will be saved as f"{save_column_prefix}_{score/name/logo}{i}"
+            max_submotifs: The maximum number of submotifs to consider in a match.
+            min_score: The minimum similarity score to consider as a match.
         """
         # Resize motifs to match other_motifs
         utils_motif.validate_motif_stack_similarity(other_motifs)
+        # Length dimensions
+        if self.motifs.shape[1] != other_motifs.shape[1]:
+            raise ValueError(f"Motif lengths do not match: {self.motifs.shape[1]} vs. {other_motifs.shape[1]}")
+        # Channel dimensions
         if self.motifs.shape[2] == other_motifs.shape[2]:
-            my_motifs = self.motifs
+            my_motifs = self.motifs.copy()
         elif self.motifs.shape[2] == 8 and other_motifs.shape[2] == 4:
             my_motifs = utils_motif.motif_8_to_4_unsigned(self.motifs)
         elif self.motifs.shape[2] == 4 and other_motifs.shape[2] == 8:
-            my_motifs = self.motifs
+            my_motifs = self.motifs.copy()
             other_motifs = utils_motif.motif_8_to_4_unsigned(other_motifs)
         else:
-            raise ValueError("Unknown error.")
-        # Do all assignment using my_motifs and other_motifs
-        # Call utils_similarity.find_most_similar_motif()
+            raise ValueError(f"Motif channel dimensions do not match: {self.motifs.shape[2]} vs. {other_motifs.shape[2]}")
+        
+        # L2 normalize once
+        my_motifs = my_motifs / np.linalg.norm(my_motifs, axis=(1, 2))[:, np.newaxis, np.newaxis]
+        other_motifs = other_motifs / np.linalg.norm(other_motifs, axis=(1, 2))[:, np.newaxis, np.newaxis]
 
-    def assign_label_from_other(
-        self,
-        other: MotifCompendium,
-        other_col_match: str = "name",
-        save_col_sim: str = "mc_match_similarity",
-        save_col_name: str = "mc_match_name",
-        save_col_logo: str = "mc_match_logo",
-        max_submotifs: int = 1,
-        min_score: float = 0.0,
-    ) -> None:
-        """Assign clusters to motifs based on an existing clustered MotifCompendium.
-
-        Given another MotifCompendium that has already been clustered and assigned
-          labels, compute similarity between all the motifs in this MotifCompendium
-          and other. The highest similarity and closest motif match will be saved as
-          columns save_col_sim and save_col_name in metadata.
-
-        Args:
-            other: The other MotifCompendium to compare against.
-            other_col_match: The column in the other MotifCompendium to match against.
-            save_col_sim: The column under which the highest similarity will be stored.
-            save_col_name: The column under which the closest matching label (from
-              other_col_match) will be stored.
-            save_col_logo: The column under which the closest match logo will be stored.
-            max_submotifs: The maximum number of submotifs to consider in a match.
-            min_score: The minimum similarity score to consider as a match.
-
-        Notes:
-            Assumes that this MotifCompendium and other have the same dimensions for
-              their motifs. (Ex: Length: 30 and 30; Channel: 4 and 4 or 8 and 8)
-        """
-        if (
-            self.motifs.shape[2] != other.motifs.shape[1]
-            or self.motifs.shape[2] != other.motifs.shape[2]
-        ):
-            raise TypeError(
-                "MotifCompendiums must have the same motif dimensionality to compare."
-            )
         # Find best match, per iteration
-        mc_motifs = self.motifs.copy()
-        other_col_names = other.metadata[other_col_match].tolist()
         match_scores = []
-        match_names = []
+        match_labels = []
         match_motifs = []
         match_idxs = []
         for i in range(max_submotifs):
             # Compute similarity
             sim, align_rc, align_h = utils_similarity.compute_similarities(
-                [mc_motifs, other.motifs], [(0, 1)]
+                [my_motifs, other_motifs], [(0, 1)]
             )[0]
             # Unscale L2 similarity, for dot product only
             sim = sim * (
-                np.linalg.norm(mc_motifs, axis=(1, 2))[:, np.newaxis]
-                * np.linalg.norm(other.motifs, axis=(1, 2))[np.newaxis, :]
-            )  # (N, N)
+                np.linalg.norm(my_motifs, axis=(1, 2))[:, np.newaxis]
+                * np.linalg.norm(other_motifs, axis=(1, 2))[np.newaxis, :]
+            )  # (N, M)
             # Scale score by i
-            match_score = np.max(sim, axis=1) * np.sqrt(i)  # (N,)
+            match_score = np.max(sim, axis=1) * np.sqrt(i+1)  # (N,)
             match_idx = np.argmax(sim, axis=1)  # (N,)
             align_rc = align_rc[np.arange(align_rc.shape[0]), match_idx]  # (N,)
             align_h = align_h[np.arange(align_h.shape[0]), match_idx]  # (N,)
-            match_motif = other.motifs[match_idx, :, :]
+            match_motif = other_motifs[match_idx, :, :]
 
             # Subtract best match
-            mc_motifs = utils_motif.subtract_motifs(
-                mc_motifs, match_motif, align_rc, align_h
+            my_motifs = utils_motif.subtract_motifs(
+                my_motifs, match_motif, align_rc, align_h
             )
 
             # Save match information
-            match_name = [names[x] for x in match_idx]
+            match_label = [labels[x] for x in match_idx]
             match_motifs.append(match_motif)
             match_scores.append(match_score)
-            match_names.append(match_name)
+            match_labels.append(match_label)
             match_idxs.append(match_idx)
 
         # Save match information
         for i in range(max_submotifs):
-            if max_submotifs == 1:
-                i = ""
-            self[f"{save_col_sim}{i}"] = match_scores[i]
-            self[f"{save_col_name}{i}"] = match_names[i]
-            if "logo (fwd)" not in other.__images.columns:
+            self[f"{save_column_prefix}_score{i}"] = match_scores[i]
+            self[f"{save_column_prefix}_name{i}"] = match_labels[i]
+            if utf8_images is None:
                 # Generate forward logos if not already generated
                 match_motif = match_motifs[i]
                 if match_motif.shape[2] == 8:
@@ -1389,15 +1365,74 @@ class MotifCompendium:
                 motif_plotting_inputs = [
                     utils_plotting.LogoPlottingInput(motif) for motif in match_motif
                 ]
-                self.__images[f"{save_col_logo}{i}"] = [
+                self.__images[f"{save_column_prefix}{i}"] = [
                     motif_input.utf8_plot
                     for motif_input in utils_plotting.plot_many_motif_logos(
                         motif_plotting_inputs
                     )
                 ]
-            else:
+            elif len(utf8_images) == len(other_motifs):
                 # Copy forward logos from other MotifCompendium
-                other_fwd_strings = other.__images["logo (fwd)"].tolist()
-                self.__images[f"{save_col_logo}{i}"] = [
-                    other_fwd_strings[x] for x in match_idxs[i]
+                self.__images[f"{save_column_prefix}_logo{i}"] = [
+                    utf8_images[x] for x in match_idxs[i]
                 ]
+            else:
+                raise ValueError("Invalid utf8_images")
+
+
+    def assign_label_from_other(
+        self,
+        other: MotifCompendium,
+        other_label_column: str = "name",
+        save_column_prefix: str = "match",
+        max_submotifs: int = 1,
+        min_score: float = 0.0,
+    ) -> None:
+        """Assign clusters to motifs based on an existing clustered MotifCompendium.
+
+        Given another MotifCompendium that has already been clustered and assigned
+          labels, compute similarity between all the motifs in this MotifCompendium
+          and other, for max_submotif iterations. The highest similarity and closest 
+          motif match for each iteration will be saved as columns 
+          {save_column_prefix}_score{i} and {save_column_prefix}_name{i}.
+
+        Args:
+            other: The other MotifCompendium to compare against.
+            other_label_column: The column in the other MotifCompendium to use as labels.
+            save_column_prefix: The name of the column in the metadata to save matches to. 
+              Will be saved as f"{save_col_sim}_{score/name/logo}{i}".
+            max_submotifs: The maximum number of submotifs to consider in a match.
+            min_score: The minimum similarity score to consider as a match.
+
+        Notes:
+            The other MotifCompendium must have motifs length less than or equal to this
+              MotifCompendium.
+        """
+        # Check motif lengths
+        if self.motifs.shape[1] < other.motifs.shape[1]:
+            raise ValueError("Motifs in other MotifCompendium are longer than this MotifCompendium.")
+        else:
+            other_pad = self.motifs.shape[1] - other.motifs.shape[1]
+            other_motifs = np.pad(other.motifs, ((0, 0), (0, other_pad), (0, 0)))
+
+        # Check if other_col_match exists in other MotifCompendium
+        if other_label_column in other.metadata.columns:
+            other_labels = other.metadata[other_label_column].tolist()
+        else:
+            raise KeyError(f"{other_label_column} not in other metadata.")
+
+        # Check if forward logos in other MotifCompendium
+        if "logo (fwd)" in other.get_image_columns():
+            other_logos = other.get_images("logo (fwd)")
+        else:
+            other_logos = None
+        
+        # Assign labels
+        self.assign_label_from_motifs(
+            other_motifs=other_motifs,
+            labels=other_labels,
+            utf8_images=other_logos,
+            save_column_prefix=save_column_prefix,
+            max_submotifs=max_submotifs,
+            min_score=min_score,
+        )
