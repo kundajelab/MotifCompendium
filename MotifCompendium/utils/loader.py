@@ -1,4 +1,6 @@
+import functools
 import multiprocessing
+import os
 
 import h5py
 import numpy as np
@@ -6,6 +8,28 @@ import pandas as pd
 
 from MotifCompendium.utils.config import get_max_cpus
 from MotifCompendium.utils.motif import ic_scale, motif_4_to_8, resize_motif
+
+
+####################
+# PUBLIC FUNCTIONS #
+####################
+def which_file_load_failed(func):
+    """Decorator to say which file failed to load.
+
+    Helps identify which file load failed. Helps in multiprocessing settings.
+    """
+
+    @functools.wraps(func)
+    def wrapper(file_loc, *args, **kwargs):
+        if not os.path.exists(file_loc):
+            raise FileNotFoundError(f"File {file_loc} not found.")
+        try:
+            result = func(file_loc, *args, **kwargs)
+            return result
+        except Exception as e:
+            raise ValueError(f"Failed to load file {file_loc}.") from e
+
+    return wrapper
 
 
 ####################
@@ -24,7 +48,8 @@ def load_modiscos(
         ic: Whether or not to apply information content scaling to Modisco motifs.
 
     Returns:
-        A tuple of motifs, motif names, number of seqlets per motifs, and model names.
+        A tuple of motifs, motif names, number of seqlets per motifs, model names, and
+          whether the motifs were positive or negative patterns.
 
     Notes:
         For parallel loading, the number of processes used will be the minimum of
@@ -34,16 +59,19 @@ def load_modiscos(
         Using ic scaling is highly recommended.
     """
     max_cpus = get_max_cpus()
-    if max_cpus == 1:
+    if max_cpus == 1 or len(modisco_dict) == 1:
         # Load serially
-        motifs, motif_names, seqlet_counts, model_names = [], [], [], []
+        motifs, motif_names, seqlet_counts, model_names, posnegs = [], [], [], [], []
         for m_name, m_loc in modisco_dict.items():
-            m_motifs, m_motif_names, m_seqlet_counts = load_modisco(m_loc, ic=ic)
+            m_motifs, m_motif_names, m_seqlet_counts, m_posneg = load_modisco(
+                m_loc, ic=ic
+            )
             m_motif_names = [f"{m_name}-{x}" for x in m_motif_names]
             motifs.append(m_motifs)
             motif_names += m_motif_names
             seqlet_counts += m_seqlet_counts
             model_names += [m_name] * len(m_motif_names)
+            posnegs += m_posneg
         motifs = np.concatenate(motifs, axis=0)
     else:
         # Load in parallel
@@ -57,18 +85,20 @@ def load_modiscos(
         payloads = [(m_loc, ic) for m_loc in m_locs]
         with multiprocessing.Pool(processes=num_processes) as p:
             results = p.starmap(load_modisco, payloads)
-        motifs, motif_names, seqlet_counts, model_names = [], [], [], []
+        motifs, motif_names, seqlet_counts, model_names, posnegs = [], [], [], [], []
         for i, r in enumerate(results):
-            m_motifs, m_motif_names, m_seqlet_counts = r
+            m_motifs, m_motif_names, m_seqlet_counts, m_posneg = r
             m_motif_names = [f"{m_names[i]}-{x}" for x in m_motif_names]
             motifs.append(m_motifs)
             motif_names += m_motif_names
             seqlet_counts += m_seqlet_counts
             model_names += [m_names[i]] * len(m_motif_names)
+            posnegs += m_posneg
         motifs = np.concatenate(motifs, axis=0)
-    return motifs, motif_names, seqlet_counts, model_names
+    return motifs, motif_names, seqlet_counts, model_names, posnegs
 
 
+@which_file_load_failed
 def load_modisco(
     modisco_file: str, ic: bool = True
 ) -> tuple[np.ndarray, list[str], list[int]]:
@@ -83,14 +113,15 @@ def load_modisco(
         ic: Whether or not to apply information content scaling to Modisco motifs.
 
     Returns:
-        A tuple of motifs, motif names, and number of seqlets per motifs.
+        A tuple of motifs, motif names, number of seqlets per motifs, and whether the
+          motifs were positive or negative patterns.
 
     Notes:
         Assumes that all motifs are stored within "pos_patterns" or "neg_patterns".
         Motifs are returned as an (N, 30, 8) 8 channel motif stack.
         Using ic scaling is highly recommended.
     """
-    motifs, motif_names, seqlet_counts = [], [], []
+    motifs, motif_names, seqlet_counts, posneg = [], [], [], []
     with h5py.File(modisco_file, "r") as f:
         if "pos_patterns" in f:
             for pattern in list(f["pos_patterns"]):
@@ -99,6 +130,7 @@ def load_modisco(
                 motifs.append(motif_sim)
                 motif_names.append(f"pos.{pattern}")
                 seqlet_counts.append(seqlets.shape[0])
+                posneg.append("pos")
         if "neg_patterns" in f:
             for pattern in list(f["neg_patterns"]):
                 seqlets = f["neg_patterns"][pattern]["seqlets"]["contrib_scores"][()]
@@ -106,11 +138,15 @@ def load_modisco(
                 motifs.append(motif_sim)
                 motif_names.append(f"neg.{pattern}")
                 seqlet_counts.append(seqlets.shape[0])
+                posneg.append("neg")
     motifs = np.stack(motifs, axis=0)
-    return motifs, motif_names, seqlet_counts
+    return motifs, motif_names, seqlet_counts, posneg
 
 
-def load_pfm(pfm_file: str, motif_len: int) -> tuple[np.ndarray, list[str]]:
+@which_file_load_failed
+def load_pfm(
+    pfm_file: str, motif_len: int | None = None
+) -> tuple[np.ndarray, list[str]]:
     """Load motifs and names from a PFM file.
     Each PFM from the PFM file is extracted. Then, the PFMs are transformed into a PWM
       using per position information content scaling.
@@ -118,7 +154,7 @@ def load_pfm(pfm_file: str, motif_len: int) -> tuple[np.ndarray, list[str]]:
     Args:
         pfm_file: The PFM file path.
         motif_len: The length of the extracted motifs (padding with zeros if necessary,
-        centered at motif peak).
+        centered at motif peak). If None, resizes to the largest motif in the file.
 
     Returns:
         A tuple of motifs and motif names.
@@ -129,6 +165,7 @@ def load_pfm(pfm_file: str, motif_len: int) -> tuple[np.ndarray, list[str]]:
     names = []
     pfms = []
     active_pfm = False
+    longest_motif_length = -1
     with open(pfm_file, "r") as f:
         for line in f:
             x = line.strip()
@@ -136,7 +173,9 @@ def load_pfm(pfm_file: str, motif_len: int) -> tuple[np.ndarray, list[str]]:
                 if x.startswith(">"):
                     # submit
                     current_pfm_np = pd.DataFrame(current_pfm).to_numpy()
-                    current_pfm_np = resize_motif(current_pfm_np, motif_len)
+                    longest_motif_length = max(
+                        longest_motif_length, current_pfm_np.shape[0]
+                    )
                     pfms.append(pd.DataFrame(current_pfm_np))
                     names.append(current_pfm_name)
                     # restart
@@ -156,12 +195,17 @@ def load_pfm(pfm_file: str, motif_len: int) -> tuple[np.ndarray, list[str]]:
                 active_pfm = True
                 current_pfm_name = x[1:]
                 current_pfm = {"A": [], "C": [], "G": [], "T": []}
+    resize_to = longest_motif_length if motif_len is None else motif_len
+    pfms = [resize_motif(x, resize_to) for x in pfms]
     pfms_mtx = np.stack(pfms, axis=0)
     pfms_mtx /= np.sum(pfms_mtx, axis=(1, 2), keepdims=True)
     return pfms_mtx, names
 
 
-def load_meme(meme_file: str, motif_len: int) -> tuple[np.ndarray, list[str]]:
+@which_file_load_failed
+def load_meme(
+    meme_file: str, motif_len: int | None = None
+) -> tuple[np.ndarray, list[str]]:
     """Load motifs and names from a MEME file.
 
     Each PFM from the MEME file is extracted. Then, the PFMs are transformed into a PWM
@@ -170,7 +214,7 @@ def load_meme(meme_file: str, motif_len: int) -> tuple[np.ndarray, list[str]]:
     Args:
         meme_file: The MEME file path.
         motif_len: The length of the extracted motifs (padding with zeros if necessary,
-        centered at motif peak).
+        centered at motif peak). If None, resizes to the largest motif in the file.
 
     Returns:
         A tuple of motifs and motif names.
@@ -181,6 +225,7 @@ def load_meme(meme_file: str, motif_len: int) -> tuple[np.ndarray, list[str]]:
     names = []
     pwms = []
     active_pwm = False
+    longest_motif_length = -1
     with open(meme_file, "r") as f:
         for line in f:
             x = line.strip()
@@ -225,11 +270,15 @@ def load_meme(meme_file: str, motif_len: int) -> tuple[np.ndarray, list[str]]:
                         # submit
                         current_pwm_df = pd.DataFrame(current_pwm)
                         current_pwm_np = current_pwm_df.to_numpy()
-                        current_pwm_np = resize_motif(current_pwm_np, motif_len)
+                        longest_motif_length = max(
+                            longest_motif_length, current_pwm_np.shape[0]
+                        )
                         pwms.append(pd.DataFrame(current_pwm_np))
                         names.append(current_pwm_name)
                         # restart
                         active_pwm = False
+    resize_to = longest_motif_length if motif_len is None else motif_len
+    pfms = [resize_motif(x, resize_to) for x in pfms]
     pwms_mtx = np.stack([x.to_numpy() for x in pwms], axis=0)
     pwms_mtx /= np.sum(pwms_mtx, axis=(1, 2), keepdims=True)
 
