@@ -54,13 +54,9 @@ def cluster(
             )
             if get_use_gpu():
                 print("Warning: GPU version not yet implemented. Falling back to CPU.")
-                return modularity_leiden_clustering_cpu(
-                    weighted_adjacency_matrix, **kwargs
-                )
+                return rb_leiden_clustering_cpu(weighted_adjacency_matrix, **kwargs)
             else:
-                return modularity_leiden_clustering_cpu(
-                    weighted_adjacency_matrix, **kwargs
-                )
+                return rb_leiden_clustering_cpu(weighted_adjacency_matrix, **kwargs)
         case "cpm" | "cpm_leiden" | "constant_potts_leiden":
             weighted_adjacency_matrix = similarity_matrix * (
                 similarity_matrix >= similarity_threshold
@@ -92,7 +88,7 @@ def cluster(
 #####################
 # LEIDEN CLUSTERING #
 #####################
-def modularity_leiden_clustering_cpu(
+def rb_leiden_clustering_cpu(
     weighted_adjacency_matrix: np.ndarray,
     resolution_parameter: float = 1.0,
     n_iterations: int = -1,
@@ -123,9 +119,16 @@ def modularity_leiden_clustering_cpu(
           a null. See leidenalg.RBConfigurationVertexPartition for more details.
     """
     # Create igraph object
-    g = ig.Graph.Weighted_Adjacency(weighted_adjacency_matrix, mode="undirected")
-    
-    # Run modularity Leiden clustering
+    # g = ig.Graph.Weighted_Adjacency(weighted_adjacency_matrix, mode="undirected")
+    n_vertices = weighted_adjacency_matrix.shape[0]
+    rows, cols = np.nonzero(weighted_adjacency_matrix)
+    edges = list(zip(rows, cols))
+    weights = weighted_adjacency_matrix[rows, cols]
+
+    g = ig.Graph(n_vertices, edges=edges)
+    g.es["weight"] = weights
+
+    # Run RB Leiden clustering
     best_quality = None
     best_membership = None
     for seed in seeds:

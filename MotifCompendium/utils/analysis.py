@@ -7,18 +7,16 @@ import pandas as pd
 import seaborn as sns
 import upsetplot
 
-import MotifCompendium
+from MotifCompendium import MotifCompendium as MotifCompendiumClass
 import MotifCompendium.utils.loader as utils_loader
 import MotifCompendium.utils.motif as utils_motif
-import MotifCompendium.utils.plotting as utils_plotting
-import MotifCompendium.utils.similarity as utils_similarity
 
 
 #######################
 # SIMILARITY ANALYSES #
 #######################
 def plot_similarity_distribution(
-    mc: MotifCompendium,
+    mc: MotifCompendiumClass,
     save_loc: str,
     vals: list[float] = [0.99, 0.98, 0.97, 0.96, 0.95, 0.9, 0.85, 0.8, 0.75, 0.7],
     tolerance: float = 0.001,
@@ -61,7 +59,7 @@ def plot_similarity_distribution(
 
 
 def plot_ground_truth_mismatch(
-    mc: MotifCompendium,
+    mc: MotifCompendiumClass,
     ground_truth: str,
     save_loc: str,
     similarity_threshold: float = 0.95,
@@ -131,7 +129,7 @@ def plot_ground_truth_mismatch(
     mc_mismatch.motif_collection_html(save_loc, mismatch_clusters, average_motif=False)
 
 
-def judge_clustering(mc: MotifCompendium, cluster_col: str, save_loc: str) -> None:
+def judge_clustering(mc: MotifCompendiumClass, clustering: str, save_loc: str) -> None:
     """Plots histograms of inter-cluster and intra-cluster similarities.
 
     Judges a motif clustering by computing the quality of the clustering and then
@@ -140,26 +138,30 @@ def judge_clustering(mc: MotifCompendium, cluster_col: str, save_loc: str) -> No
 
     Args:
         mc: The MotifCompendium to analyze.
-        cluster_col: The motif clustering to judge.
+        clustering: The motif clustering to judge.
         save_loc: The file prefix to save the clustering quality and the clustering
           quality plot to.
     """
     # Get clustering quality
-    clustering_quality = mc.clustering_quality(cluster_col)
+    clustering_quality = mc.clustering_quality(clustering)
     # Plotting
     fig, axs = plt.subplots(2, 1, sharex=True)
-    sns.histplot(np.diag(clustering_quality), ax=axs[0], stat="proportion", kde=True)
+    bins = np.linspace(0, 1, 20)
+    # Plot intra-cluster similarities
+    diag = np.diag(clustering_quality)
+    diag = np.sort(diag)
+    sns.histplot(diag, ax=axs[0], stat="proportion", kde=True, bins=bins)
     axs[0].set_title("worst intra-cluster similarities")
-    n_clusters = clustering_quality.shape[0]
-    triu = [
-        clustering_quality[i, j]
-        for i in range(n_clusters)
-        for j in range(i + 1, n_clusters)
-    ]
-    sns.histplot(triu, ax=axs[1], stat="proportion", kde=True)
+    axs[0].set_xlim(0, 1)  # Shared
+    # Plot inter-cluster similarities
+    triu = np.triu(clustering_quality, k=1)
+    triu = triu[triu != 0]
+    triu = np.sort(triu)
+    sns.histplot(triu, ax=axs[1], stat="proportion", kde=True, bins=bins)
     axs[1].set_title("best inter-cluster similarities")
     axs[1].set_xlabel("similarity")
-    plt.suptitle(f"{cluster_col} ({n_clusters} clusters)")
+    # Titles and save
+    plt.suptitle(f"{clustering} ({clustering_quality.shape[0]} clusters)")
     plt.savefig(save_loc)
     plt.close(fig)
 
@@ -167,7 +169,9 @@ def judge_clustering(mc: MotifCompendium, cluster_col: str, save_loc: str) -> No
 #######################
 # DOWNSTREAM ANALYSES #
 #######################
-def plot_unique_per_cluster(mc: MotifCompendium, group_by: str, save_loc: str) -> None:
+def plot_unique_per_cluster(
+    mc: MotifCompendiumClass, group_by: str, save_loc: str
+) -> None:
     """Identifies and plots the most unique in each cluster.
 
     For each cluster, identifies the most unique motif (motif with the minimum maximal
@@ -199,7 +203,7 @@ def plot_unique_per_cluster(mc: MotifCompendium, group_by: str, save_loc: str) -
 
 
 def cluster_grouping_upset_plot(
-    mc: MotifCompendium, clustering: str, grouping: str, save_loc: str, **kwargs
+    mc: MotifCompendiumClass, clustering: str, grouping: str, save_loc: str, **kwargs
 ) -> None:
     """Creates an upset plot of how many motif clusters span across different groups.
 
@@ -230,7 +234,7 @@ def cluster_grouping_upset_plot(
 
 
 def export_full_compendium_modisco(
-    mc: MotifCompendium,
+    mc: MotifCompendiumClass,
     name_col: str,
     save_loc: str,
     inverse_ic: bool = False,
@@ -251,7 +255,7 @@ def export_full_compendium_modisco(
     utils_motif.validate_motif_stack(mc.motifs)
     size_4 = mc.motifs.shape[2] == 4
     motifs = mc.motifs if size_4 else utils_motif.motif_8_to_4_signed(mc.motifs)
-    pos_neg = utils_motif.motif_posneg(motifs)
+    pos_neg = utils_motif.motif_posneg_sum(motifs)
     with h5py.File(save_loc, "w") as f:
         f.attrs["window_size"] = motifs.shape[1]
         # Positive
@@ -293,7 +297,7 @@ def export_full_compendium_modisco(
 
 
 def export_clusters_modisco(
-    mc: MotifCompendium,
+    mc: MotifCompendiumClass,
     cluster_name: str,
     save_loc: str,
     inverse_ic: bool = False,
@@ -334,7 +338,7 @@ def export_clusters_modisco(
 # ENTROPY ANALYSES #
 ####################
 def calculate_filters(
-    mc: MotifCompendium,
+    mc: MotifCompendiumClass,
     metric_list: list[str] = [
         "motif_entropy",
         "posbase_entropy_ratio",
@@ -414,10 +418,9 @@ def calculate_filters(
                 mc["dinuc_entropy_ratio"] = metrics_list
 
             case "negpattern_pospeak":
-                mc.metadata["negpattern_pospeak"] = mc.metadata.apply(
-                    lambda row: utils_motif.check_negpattern_pospeak(mc.motifs[row.name]) 
-                    if row["posneg"] == "neg" else False, 
-                    axis=1
+                mc["negpattern_pospeak"] = (
+                    utils_motif.motif_posneg_max(mc.get_standard_motif_stack())
+                    == mc["posneg"]
                 )
 
             case _:
@@ -430,7 +433,7 @@ def calculate_filters(
 # EXISTING MOTIF DATABASE #
 ###########################
 def assign_label_from_pfm(
-    mc: MotifCompendium,
+    mc: MotifCompendiumClass,
     pfm_file: str,
     save_column_prefix: str = "match",
     max_submotifs: int = 1,
@@ -439,9 +442,9 @@ def assign_label_from_pfm(
     """Automatic labeling of motifs from a pfm file.
 
     For each motif in the MotifCompendium, computes the similarity between that motif
-      and all motifs in the PFM file, for max_submotif iterations. The highest similarity 
-      and closest motif match for each iteration will be saved as columns 
-      {save_column_prefix}_score and {save_column_prefix}_name in the MotifCompendium 
+      and all motifs in the PFM file, for max_submotif iterations. The highest similarity
+      and closest motif match for each iteration will be saved as columns
+      {save_column_prefix}_score and {save_column_prefix}_name in the MotifCompendium
       metadata.
 
     Args:

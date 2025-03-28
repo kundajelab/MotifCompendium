@@ -33,7 +33,7 @@ def single_or_many_motifs(func):
 def validate_motif_basic(motifs: np.ndarray) -> None:
     """Validate that motifs are np.ndarrays."""
     if not (isinstance(motifs, np.ndarray) and (motifs.shape[-1] in [4, 8])):
-        raise TypeError("Motifs must be a np.ndarray if 4 or 8 channels.")
+        raise TypeError("Motifs must be a np.ndarray of 4 or 8 channels.")
 
 
 def validate_motif_stack(motifs: np.ndarray) -> None:
@@ -111,13 +111,13 @@ def align_motifs(
       orientation and position.
 
     Args:
-        motif_stack: A motif stack to be aligned. (N, L, K)
-        alignment_rc: A forward/reverse complement alignment vector. (N, )
-        alignment_h: A horizontal alignment vector. (N, )
+        motif_stack: A (N, L, K) motif stack to be aligned.
+        alignment_rc: A (N, ) forward/reverse complement alignment vector.
+        alignment_h: A (N, ) horizontal alignment vector.
 
     Returns:
-        An aligned motif stack. (N, L_new, K),
-        where L_new = L + max(alignment_h, 0) - min(alignment_h, 0).
+        An aligned motif stack of shape (N, L', K), where
+          L' = L + max(alignment_h, 0) - min(alignment_h, 0).
     """
     # Check inputs
     validate_motif_stack(motif_stack)
@@ -180,12 +180,57 @@ def resize_motif(motif: np.ndarray, resize_to: int) -> np.ndarray:
         return motif
 
 
+@single_or_many_motifs
+def view_motif_from_position_range(
+    motif: np.ndarray,
+    current_min_pos: int,
+    current_max_pos: int,
+    new_min_pos: int,
+    new_max_pos: int,
+) -> np.ndarray:
+    """Gets the view of the motif at a specified position range.
+
+    Given a motif or motif stack and current position bounds, get the motif as viewed
+      from a new position bound. If the new bounds are outside the current bounds, the
+      view will be padded with zeros. If the new bounds are inside the current bounds,
+      the view will be cropped.
+
+    Args:
+        motif: A motif or motif stack of length L.
+        current_min_pos: The position of the 0th index in the length axis.
+        current_max_pos: The position of the (L-1)st index in the length axis.
+        new_min_pos: The new minimum position from which to view the motif.
+        new_max_pos: The new maximum position from which to view the motif.
+
+    Returns:
+        The motif as viewed from a new position range.
+    """
+    validate_motif_stack(motif)
+    if not (current_max_pos - current_min_pos) == (motif.shape[1] - 1):
+        raise ValueError("Current position range must match motif length.")
+    if not (new_min_pos < new_max_pos):
+        raise ValueError("New position range must have a positive length.")
+    # Pad if needed
+    if new_min_pos < current_min_pos:
+        pad_left = current_min_pos - new_min_pos
+        motif = np.pad(motif, ((0, 0), (pad_left, 0), (0, 0)))
+        current_min_pos = new_min_pos
+    if new_max_pos > current_max_pos:
+        pad_right = new_max_pos - current_max_pos
+        motif = np.pad(motif, ((0, 0), (0, pad_right), (0, 0)))
+        current_max_pos = new_max_pos
+    # Crop out new view
+    new_min_idx = new_min_pos - current_min_pos
+    new_max_idx = new_max_pos - current_min_pos
+    return motif[:, new_min_idx : new_max_idx + 1, :]
+
+
 def average_motifs(
     motif_stack: np.ndarray,
     alignment_rc: np.ndarray,
     alignment_h: np.ndarray,
     match_original_length: bool = True,
-    l1_norm: bool = True,
+    l1_normalize: bool = True,
     weights: np.ndarray | None = None,
 ) -> np.ndarray:
     """Compute the average motif of a stack of motifs.
@@ -201,7 +246,7 @@ def average_motifs(
           True, the average motif will be made to be the same length as the original
           motifs. If False, the average motif will have the length of the aligned motif
           stack.
-        l1_norm: Whether or not to L1 normalize the average motif before returning.
+        l1_normalize: Whether or not to L1 normalize the average motif before returning.
         weights: A (N, ) vector of weights for each motif. If None, all motifs are
           weighed equally.
 
@@ -222,7 +267,7 @@ def average_motifs(
     average_motif = np.average(aligned_motifs, axis=0, weights=weights)
     if match_original_length:
         average_motif = resize_motif(average_motif, resize_to=motif_stack.shape[1])
-    if l1_norm:
+    if l1_normalize:
         average_motif = average_motif / np.sum(np.abs(average_motif))
     return average_motif
 
@@ -263,85 +308,6 @@ def ic_scale(x: np.ndarray, invert: bool = False) -> np.ndarray:
     else:
         scaled = x * ic
     return scaled
-
-
-@single_or_many_motifs
-def calculate_ls_scale(var_motif: np.ndarray, ref_motif: np.ndarray) -> np.ndarray:
-    """Calculate least squares scaling factor.
-
-    Find the best scaling factor, a, to apply to the variable motif to match the scale
-      of the reference motif, by minimizing the least squares between the two motifs
-      (i.e., min ||a * variable - ref||^2).
-
-    Args:
-        var_motif: A np.ndarray representing the variable motif. (N, L, K)
-        ref_motif: A np.ndarray representing the reference motif. (N, L, K)
-
-    Returns:
-        A np.ndarray representing the best scaling factor. (N, L, K)
-    """
-    if var_motif.shape != ref_motif.shape:
-        raise ValueError("var_motif and ref_motif must have the same shape.")
-
-    epsilon = 1e-8
-    return np.sum((var_motif * ref_motif), axis=(1, 2), keepdims=True) / (
-        np.sum((var_motif**2), axis=(1, 2), keepdims=True) + epsilon
-    )
-
-
-@single_or_many_motifs
-def subtract_motifs(
-    motifs_core: np.ndarray,
-    motifs_subtract: np.ndarray,
-    align_rc: np.ndarray,
-    align_h: np.ndarray,
-) -> np.ndarray:
-    """Subtract two motif stacks, based on idx, alignment, and forward/reverse complement.
-
-    Given two motif stacks, motifs_core and motifs_subtract, align motifs_subtract based on
-    align_rc and align_h, scale motifs_subtract by least squares to match scale of motifs_core,
-    subtract motifs_core by motifs_subtract with clipping, to return the remaining components
-    of motifs_core.
-
-    Args:
-        motifs_core: A np.ndarray representing a stack of K channel motifs,
-          to subtract from. (N, L, K)
-        motifs_subtract: A np.ndarray representing a stack of K channel motifs,
-          to be subtracted by, following order of motifs_core. (N, L, K)
-        align_rc: A np.ndarray containing the forward/reverse complement
-          relationship between any two motifs. (N,)
-        align_h: A np.ndarray containing the horizontal shift information between
-          any two motifs. (N,)
-
-    Returns:
-        A np.ndarray representing the subtracted motifs. (N, L, K)
-    """
-    # Check inputs
-    validate_motif_stack(motifs_core)
-    validate_motif_stack(motifs_subtract)
-    if not (align_rc.shape == align_h.shape == (motifs_core.shape[0],)):
-        raise ValueError("align_rc, align_h must have the same length as motifs_core.")
-
-    # Subtract motifs:
-    align_h = align_h * (2 * align_rc - 1) # Convert align_h to perspective of core
-    motifs_subtract = align_motifs(motifs_subtract, align_rc, align_h)  # Align motifs
-    if np.min(align_h) > 0:
-        motifs_subtract = np.pad(
-            motifs_subtract, ((0, 0), (np.min(align_h), 0), (0, 0))
-        ) # Pad motifs to start at zero
-        start = 0
-    else:
-        start = -np.min(align_h)
-    motifs_subtract = motifs_subtract[
-        :, start : start + motifs_core.shape[1], :
-    ]  # Clip motifs to core length, L
-    motifs_subtract = motifs_subtract * calculate_ls_scale(
-        motifs_subtract, motifs_core
-    )  # Least squares scale to best match core
-    updated_motifs = np.clip(
-        motifs_core - motifs_subtract, 0, None
-    )  # Clip negative values
-    return updated_motifs
 
 
 _MOTIF_4_TO_8_POS = np.zeros((4, 8))
@@ -432,10 +398,106 @@ def motif_to_string(
 
 
 @single_or_many_motifs
-def motif_posneg(x: np.ndarray) -> str | list[str]:
-    """Classifies each motif as being positive or negative."""
+def motif_posneg_sum(x: np.ndarray) -> str | list[str]:
+    """Classifies each motif as being positive or negative based on sum."""
     validate_motif_stack_standard(x)
     return ["pos" if np.sum(m) > 0 else "neg" for m in np.sum(x, axis=(1, 2)) > 0]
+
+
+@single_or_many_motifs
+def motif_posneg_max(x: np.ndarray) -> str | list[str]:
+    """Classifies each motif as being positive or negative based on max value."""
+    validate_motif_stack_standard(x)
+    return ["pos" if np.max(m) > 0 else "neg" for m in np.sum(x, axis=(1, 2)) > 0]
+
+
+def compute_motif_scalar_projection(
+    project_motifs: np.ndarray, onto_motifs: np.ndarray, keepdims: bool = True
+) -> np.ndarray:
+    """Compute the scalar projection of one set of motifs onto another set of motifs.
+
+    Compute the scalar projection of project_motifs onto onto_motifs. project_motifs and
+      onto_motifs are expected to be motif stacks with the same number of motifs. The
+      scalar projection of each pair is returned. Scalar projections are computed by
+      treating each motif as a vector.
+
+    Args:
+        project_motifs: A motif stack of shape (N, L, K) to project onto onto_motifs.
+        onto_motifs: A motif stack of shape (N, L, K) that project_motifs will be
+          projected onto.
+        keepdims: Whether or not to keep the dimensions of the scalar projection.
+
+    Returns:
+        A np.ndarray of scalar projections. If keepdims is True, the shape will be
+          (N, L, K). If keepdims is False, the shape will be (N,).
+
+    Notes:
+        The scalar projection of u onto v is uTv/vTv. Motifs are treated as vectors for
+          the purposes of this calculation, so the dot product between motif1 and motif2
+          would be computed as np.sum(motif1*motif2).
+    """
+    # Check inputs
+    validate_motif_stack(project_motifs)
+    validate_motif_stack(onto_motifs)
+    if project_motifs.shape != onto_motifs.shape:
+        raise ValueError("project_motifs and onto_motifs must have the same shape.")
+    uTv = np.sum(project_motifs * onto_motifs, axis=(1, 2), keepdims=keepdims)
+    vTv = np.sum(onto_motifs**2, axis=(1, 2), keepdims=keepdims)
+    return uTv / vTv
+
+
+def remove_motif_component(
+    component_motifs: np.ndarray,
+    from_motifs: np.ndarray,
+    alignment_rc: np.ndarray,
+    alignment_h: np.ndarray,
+) -> np.ndarray:
+    """Remove the component of one set of motifs from another set of motifs.
+
+    Given a set of motifs of interest, from_motifs, and another set of motifs,
+      component_motifs, whose component you want to remove from from_motifs, remove the
+      component of component_motifs from from_motifs. Removal is done by subtracting the
+      projection of component_motifs onto from_motifs from from_motifs. Alignment
+      information of how to shift and reverse complement the component_motifs to align
+      with from_motifs is also required.
+
+    Args:
+        component_motifs: A (N, L, K) motif stack representing the motifs to remove from
+          from_motifs.
+        from_motifs: A (N, L, K) motif stack representing the motifs from which to
+          remove the effects of component_motifs.
+        alignment_rc: A (N, ) forward/reverse complement alignment vector for how the
+          component_motifs align with from_motifs. If alignment_rc[i] = 0/1, then
+          component_motifs[i] must not/must be reverse complemented to align with
+          from_motifs[i].
+        alignment_h: A (N, ) horizontal alignment vector for how the component_motifs
+          align with from_motifs. alignment_h[i] represents how many positions to the
+          right component_motifs[i] must be shifted to align with from_motifs[i].
+
+    Returns:
+        A (N, L, K) motif stack representing the subtracted motifs after
+          component_motifs has been removed from from_motifs.
+    """
+    # Check inputs
+    validate_motif_stack(from_motifs)
+    validate_motif_stack(component_motifs)
+    if not from_motifs.shape == component_motifs.shape:
+        raise ValueError("component_motifs and from_motifs must have the same shape.")
+    # Align component_motifs to from_motifs
+    component_motifs_aligned = align_motifs(component_motifs, alignment_rc, alignment_h)
+    min_h = np.min(alignment_h)
+    max_h = np.max(alignment_h)
+    # Get the portion of component_motifs that is aligned with from_motifs
+    component_motifs_aligned = view_motif_from_position_range(
+        component_motifs_aligned, min_h, max_h, 0, from_motifs.shape[1]
+    )
+    # Project and subtract projected component
+    scalar_projection = compute_motif_scalar_projection(
+        from_motifs, component_motifs_aligned, keepdims=True
+    )  # Project vector onto the component you want removed
+    updated_motifs = from_motifs - scalar_projection * component_motifs_aligned
+    updated_motifs = np.clip(updated_motifs, 0, None)  # Clip negative values
+    return updated_motifs
 
 
 ###########
@@ -681,19 +743,3 @@ def calculate_dinuc_entropy_ratio(motif: np.array) -> float:
     dinuc_entropy_ratio = dinuc_pos_entropy / dinuc_base_entropy
 
     return dinuc_entropy_ratio
-
-
-def check_negpattern_pospeak(motif: np.array) -> bool:
-    """Check negative pattern motifs with positive peaks.
-
-    Note: Assumes input motif is a negative pattern motif."""
-    # Check if motif is valid
-    if not isinstance(motif, np.ndarray):
-        raise TypeError("Motif must be a NumPy array.")
-    if len(motif.shape) != 2:
-        raise ValueError("Motif must be a 2D array.")
-    if motif.shape[1] not in [4, 8]:
-        raise ValueError("Motif second dimension must be 4 or 8.")
-    if motif.shape[1] == 8:
-        motif = motif_8_to_4_signed(motif)  # Convert motif to 4-channel
-    return np.max(motif) > 0

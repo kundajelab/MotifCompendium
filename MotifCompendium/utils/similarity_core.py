@@ -23,29 +23,35 @@ def compute_similarity_and_align(
     )
     del motifsA_xp, motifsB_xp  # Free up memory
     # Forward similarity
-    sim_1, sim_1_aligns = _compute_similarity(
+    sim_1, sim_1_alignment = _compute_similarity(
         motifsA_normalized, motifsB_normalized, xp
     )  # skew-symmetric alignment
     # Reverse complement
-    motifsA_normalized_revcomp = _reverse_complement(motifsA_normalized)
-    del motifsA_normalized  # Free up memory
+    motifsB_normalized_revcomp = _reverse_complement(motifsB_normalized)
+    del motifsB_normalized  # Free up memory
     # Backward similarity
-    sim_2, sim_2_aligns = _compute_similarity(
-        motifsA_normalized_revcomp, motifsB_normalized, xp
+    sim_2, sim_2_alignment = _compute_similarity(
+        motifsA_normalized, motifsB_normalized_revcomp, xp
     )  # symmetric alignment
     # Pick best similarity
     sim_12 = xp.stack([sim_1, sim_2])
     sim = xp.max(sim_12, axis=0)
-    align_rc = xp.argmax(sim_12, axis=0)
-    align_h = xp.where(align_rc == 0, sim_1_aligns, sim_2_aligns)
+    alignment_rc = xp.argmax(sim_12, axis=0)
+    alignment_h = xp.where(alignment_rc == 0, sim_1_alignment, sim_2_alignment)
     # Guarantee similarity properties
-    align_h[sim == 0] = (
+    alignment_h[sim == 0] = (
         0  # When 0 similarity, set alignment to 0 for alignment symmetry properties
     )
     # Return
     if get_use_gpu():
-        sim, align_rc, align_h = sim.get(), align_rc.get(), align_h.get()
-    return sim.astype(np.single), align_rc.astype(np.bool_), align_h.astype(np.byte)
+        sim = sim.get()
+        alignment_rc = alignment_rc.get()
+        alignment_h = alignment_h.get()
+    return (
+        sim.astype(np.single),
+        alignment_rc.astype(np.bool_),
+        alignment_h.astype(np.byte),
+    )
 
 
 ####################
@@ -83,64 +89,66 @@ def _compute_similarity(motif_set_1, motif_set_2, xp):
     assert L == L2
     assert K == K2
     # Transpose for efficiency
-    transpose = N > M
+    transpose = N < M
     if transpose:
         temp = motif_set_1
         motif_set_1 = motif_set_2
         motif_set_2 = temp
         del temp  # Free up memory
     # Compute right side matrices
-    right_side_matrices = _compute_similarity_right_side(motif_set_2, xp)
+    right_side_matrices = _compute_similarity_right_side(
+        motif_set_1, xp
+    )  # (3L-2, N) K times
     # Compute similarity per base
     sims = []
     for i in range(K):
-        left_side_matrix_i = _compute_similarity_left_side_i(motif_set_1[:, :, i], xp)
-        sims.append(left_side_matrix_i @ right_side_matrices[i])
+        left_side_matrix_i = _compute_similarity_left_side_i(
+            motif_set_2[:, :, i], xp
+        )  # (M, 2L-1, 3L-2)
+        sims.append(left_side_matrix_i @ right_side_matrices[i])  # (M, 2L-1, N)
         del left_side_matrix_i  # Free up memory
     # Sum across ATCG
-    total_sum = xp.sum(xp.stack(sims), axis=0)
+    total_sum = xp.zeros_like(sims[0])
+    for sim in sims:
+        total_sum += sim
     del sims  # Free up memory
     # Compute alignment
-    best_align_scores = xp.max(total_sum, axis=1)
-    best_align_h = xp.argmax(total_sum, axis=1) - (L - 1)
+    best_similarity = xp.max(total_sum, axis=1)
+    best_alignments = xp.argmax(total_sum, axis=1) - (L - 1)
     del total_sum  # Free up memory
     # Undo transpose if needed
     if transpose:
-        best_align_scores = best_align_scores.T
-        best_align_h = -best_align_h.T  # negative because transposing flips alignment
-    assert best_align_scores.shape == (N, M)
-    assert best_align_h.shape == (N, M)
-    return best_align_scores, best_align_h
-
-
-def _compute_similarity_right_side(motifs, xp):
-    """Prepares the right side of the similarity calculation."""
-    M, L, K = motifs.shape  # (M, L, K)
-    motifs_pivot = xp.transpose(motifs, axes=(0, 2, 1))  # (M, K, L)
-    right_side_prepivot = motifs_pivot @ _RIGHTTENSOR(L, xp)  # (M, K, 3L-2)
-    del motifs_pivot  # Free up memory
-    right_side_matrix = xp.transpose(
-        right_side_prepivot, axes=(2, 0, 1)
-    )  # (3L-2, M, K)
-    del right_side_prepivot  # Free up memory
-    right_side_matrices = [right_side_matrix[:, :, i] for i in range(K)]  # (3L-2, M)
-    del right_side_matrix  # Free up memory
-    for x in right_side_matrices:
-        assert x.shape[1] == M
-        assert x.shape[0] == 3 * L - 2
-    return right_side_matrices
+        best_similarity = best_similarity.T
+        best_alignments = (
+            -best_alignments.T
+        )  # negative because transposing flips alignment
+    assert best_similarity.shape == (M, N)
+    assert best_alignments.shape == (M, N)
+    return best_similarity.T, best_alignments.T  # (N, M), (N, M)
 
 
 def _compute_similarity_left_side_i(motifs, xp):
     """Prepares the left side of the similarity calculation."""
-    N, L = motifs.shape
-    left_side_matrix = _LEFTTENSOR(L, xp) @ motifs.T  # (2L-1, 3L-2, N)
-    left_side_matrix = xp.transpose(left_side_matrix, axes=(2, 0, 1))  # (N, 2L-1, 3L-2)
-    assert left_side_matrix.shape[0] == N
-    assert (left_side_matrix.shape[1] == 2 * L - 1) and (
-        left_side_matrix.shape[2] == 3 * L - 2
-    )
-    return left_side_matrix
+    M, L = motifs.shape
+    left_side_matrix = _LEFTTENSOR(L, xp) @ motifs.T  # (2L-1, 3L-2, M)
+    left_side_matrix = xp.transpose(left_side_matrix, axes=(2, 0, 1))  # (M, 2L-1, 3L-2)
+    assert left_side_matrix.shape == (M, 2 * L - 1, 3 * L - 2)
+    return left_side_matrix  # (M, 2L-1, 3L-2)
+
+
+def _compute_similarity_right_side(motifs, xp):
+    """Prepares the right side of the similarity calculation."""
+    N, L, K = motifs.shape  # (N, L, K)
+    motifs_pivot = xp.transpose(motifs, axes=(0, 2, 1))  # (N, K, L)
+    right_side_prepivot = motifs_pivot @ _RIGHTTENSOR(L, xp)  # (N, K, 3L-2)
+    del motifs_pivot  # Free up memory
+    right_side_matrix = xp.transpose(
+        right_side_prepivot, axes=(2, 0, 1)
+    )  # (3L-2, N, K)
+    del right_side_prepivot  # Free up memory
+    right_side_matrices = [right_side_matrix[:, :, i] for i in range(K)]  # (3L-2, N)
+    assert all(x.shape == (3 * L - 2, N) for x in right_side_matrices)
+    return right_side_matrices  # (3L-2, N) K times
 
 
 def _LEFTTENSOR(L, xp):
@@ -150,13 +158,13 @@ def _LEFTTENSOR(L, xp):
         _LEFT_TENSOR = xp.zeros((2 * L - 1, 3 * L - 2, L))  # default (59, 88, 30)
         for i in range(2 * L - 1):  # default 59
             _LEFT_TENSOR[i, i : i + L, :] = xp.eye(L)  # default 30
-    return _LEFT_TENSOR
+    return _LEFT_TENSOR  # (2L-1, 3L-2, L)
 
 
 def _RIGHTTENSOR(L, xp):
     """Produces the RIGHTTENSOR needed for the right side of the similarity calculation."""
     global _RIGHT_TENSOR
-    if (_RIGHT_TENSOR is None) or (_RIGHT_TENSOR.shape[1] != 3 * L - 2):
+    if (_RIGHT_TENSOR is None) or (_RIGHT_TENSOR.shape[0] != L):
         _RIGHT_TENSOR = xp.zeros((L, 3 * L - 2))  # default (30, 88)
         _RIGHT_TENSOR[:, L - 1 : 2 * L - 1] = xp.eye(L)  # default 29:59
-    return _RIGHT_TENSOR
+    return _RIGHT_TENSOR  # (L, 3L-2)
