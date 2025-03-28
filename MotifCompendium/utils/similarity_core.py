@@ -96,12 +96,16 @@ def _compute_similarity(motif_set_1, motif_set_2, xp):
         motif_set_2 = temp
         del temp  # Free up memory
     # Compute right side matrices
-    right_side_matrices = _compute_similarity_right_side(motif_set_1, xp) # (3L-2, N) K times
+    right_side_matrices = _compute_similarity_right_side(
+        motif_set_1, xp
+    )  # (3L-2, N) K times
     # Compute similarity per base
     sims = []
     for i in range(K):
-        left_side_matrix_i = _compute_similarity_left_side_i(motif_set_2[:, :, i], xp) # (M, 2L-1, 3L-2)
-        sims.append(left_side_matrix_i @ right_side_matrices[i]) # (M, 2L-1, N)
+        left_side_matrix_i = _compute_similarity_left_side_i(
+            motif_set_2[:, :, i], xp
+        )  # (M, 2L-1, 3L-2)
+        sims.append(left_side_matrix_i @ right_side_matrices[i])  # (M, 2L-1, N)
         del left_side_matrix_i  # Free up memory
     # Sum across ATCG
     total_sum = xp.zeros_like(sims[0])
@@ -120,7 +124,7 @@ def _compute_similarity(motif_set_1, motif_set_2, xp):
         )  # negative because transposing flips alignment
     assert best_similarity.shape == (M, N)
     assert best_alignments.shape == (M, N)
-    return best_similarity.T, best_alignments.T # (N, M), (N, M)
+    return best_similarity.T, best_alignments.T  # (N, M), (N, M)
 
 
 def _compute_similarity_left_side_i(motifs, xp):
@@ -129,7 +133,7 @@ def _compute_similarity_left_side_i(motifs, xp):
     left_side_matrix = _LEFTTENSOR(L, xp) @ motifs.T  # (2L-1, 3L-2, M)
     left_side_matrix = xp.transpose(left_side_matrix, axes=(2, 0, 1))  # (M, 2L-1, 3L-2)
     assert left_side_matrix.shape == (M, 2 * L - 1, 3 * L - 2)
-    return left_side_matrix # (M, 2L-1, 3L-2)
+    return left_side_matrix  # (M, 2L-1, 3L-2)
 
 
 def _compute_similarity_right_side(motifs, xp):
@@ -144,7 +148,7 @@ def _compute_similarity_right_side(motifs, xp):
     del right_side_prepivot  # Free up memory
     right_side_matrices = [right_side_matrix[:, :, i] for i in range(K)]  # (3L-2, N)
     assert all(x.shape == (3 * L - 2, N) for x in right_side_matrices)
-    return right_side_matrices # (3L-2, N) K times
+    return right_side_matrices  # (3L-2, N) K times
 
 
 def _LEFTTENSOR(L, xp):
@@ -154,7 +158,7 @@ def _LEFTTENSOR(L, xp):
         _LEFT_TENSOR = xp.zeros((2 * L - 1, 3 * L - 2, L))  # default (59, 88, 30)
         for i in range(2 * L - 1):  # default 59
             _LEFT_TENSOR[i, i : i + L, :] = xp.eye(L)  # default 30
-    return _LEFT_TENSOR # (2L-1, 3L-2, L)
+    return _LEFT_TENSOR  # (2L-1, 3L-2, L)
 
 
 def _RIGHTTENSOR(L, xp):
@@ -163,4 +167,4 @@ def _RIGHTTENSOR(L, xp):
     if (_RIGHT_TENSOR is None) or (_RIGHT_TENSOR.shape[0] != L):
         _RIGHT_TENSOR = xp.zeros((L, 3 * L - 2))  # default (30, 88)
         _RIGHT_TENSOR[:, L - 1 : 2 * L - 1] = xp.eye(L)  # default 29:59
-    return _RIGHT_TENSOR # (L, 3L-2)
+    return _RIGHT_TENSOR  # (L, 3L-2)
