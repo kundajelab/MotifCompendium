@@ -363,7 +363,9 @@ class MotifCompendium:
           if motif i should be reverse complemented to best align with motif j.
         alignment_h: A np.ndarray of ints containing the horizontal shift information
           between two motifs. Of shape (N, N). alignment_h[i, j] represents how many
-          bases to the right motif i should be shifted to best align with motif j.
+          bases to the right motif j should be shifted (after being reverse complemented
+          if needed) to best align with motif i. alignment_h[i] gives a vector of how
+          motifs should be shifted to align with motif i.
         metadata: A pd.DataFrame containing metadata for each motif. Of length N.
           metadata.iloc[i, :] contains metadata about motif i.
         __images: A pd.DataFrame containing UTF-8 embedded images related to each motif.
@@ -593,7 +595,7 @@ class MotifCompendium:
             raise TypeError("MotifCompendium column names must be strings.")
 
     def get_standard_motif_stack(self) -> np.ndarray:
-        """Returns the motifs in a standard (N, L, 4) shape."""
+        """Returns motifs in a standard (N, L, 4) shape."""
         if self.motifs.shape[2] == 4:
             return self.motifs
         return utils_motif.motif_8_to_4_signed(self.motifs)
@@ -985,10 +987,10 @@ class MotifCompendium:
             c_idxs = cluster_idxs[c]
             motifs_c = self.motifs[c_idxs, :, :]
             alignment_rc_c = self.alignment_rc[c_idxs, :][:, c_idxs][
-                :, 0
+                0, :
             ]  # vector of alignment
             alignment_h_c = self.alignment_h[c_idxs, :][:, c_idxs][
-                :, 0
+                0, :
             ]  # vector of alignment
             weights_c = (
                 None if weights is None else weights[c_idxs]
@@ -1101,17 +1103,19 @@ class MotifCompendium:
         for i, x in enumerate(groups):
             if x in motif_groups:
                 cluster_x_seed = group_seeds[x]
+                x_rc = self.alignment_rc[cluster_x_seed, i]
+                x_h = self.alignment_h[cluster_x_seed, i]
                 motif_info_i = utils_plotting.LogoPlottingInput(
                     motifs[i],
-                    revcomp=(self.alignment_rc[i, cluster_x_seed]),
-                    pos=self.alignment_h[i, cluster_x_seed],
+                    revcomp=x_rc,
+                    pos=x_h,
                     name=names[i],
                 )
                 group_xmin_xmax[x] = (
-                    min(group_xmin_xmax[x][0], self.alignment_h[i, cluster_x_seed]),
+                    min(group_xmin_xmax[x][0], x_h),
                     max(
                         group_xmin_xmax[x][1],
-                        self.alignment_h[i, cluster_x_seed] + motifs.shape[1],
+                        x_h + motifs.shape[1],
                     ),
                 )
                 motif_groups[x].append(motif_info_i)
