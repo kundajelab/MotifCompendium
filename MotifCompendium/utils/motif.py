@@ -483,27 +483,20 @@ def remove_motif_component(
     validate_motif_stack(component_motifs)
     if not from_motifs.shape == component_motifs.shape:
         raise ValueError("component_motifs and from_motifs must have the same shape.")
-    if from_motifs.shape[2] != 8:
-        raise ValueError("remove_motif_component() only works with 8 channel motifs.")
     # Align component_motifs to from_motifs
     component_motifs_aligned = align_motifs(component_motifs, alignment_rc, alignment_h)
     min_h = np.min(alignment_h)
     max_h = np.max(alignment_h)
-    # Clip the component_motifs to be centered around from_motifs
+    # Get the portion of component_motifs that is aligned with from_motifs
     component_motifs_aligned = view_motif_from_position_range(
         component_motifs_aligned, min_h, max_h, 0, from_motifs.shape[1]
     )
-    # Convert to 4 channel motifs
-    component_motifs_aligned_4 = motif_8_to_4_signed(component_motifs_aligned)
-    from_motifs_4 = motif_8_to_4_signed(from_motifs)
-    # Compute the scalar projection of component_motifs onto from_motifs
+    # Project and subtract projected component
     scalar_projection = compute_motif_scalar_projection(
-        component_motifs_aligned_4, from_motifs_4, keepdims=True
-    )
-    # Subtract the component of component_motifs from from_motifs
-    updated_motifs = from_motifs_4 - scalar_projection * component_motifs_aligned_4
-    # Convert back to 8 channel motifs
-    updated_motifs = motif_4_to_8(updated_motifs)
+        from_motifs, component_motifs_aligned, keepdims=True
+    )  # Project vector onto the component you want removed
+    updated_motifs = from_motifs - scalar_projection * component_motifs_aligned
+    updated_motifs = np.clip(updated_motifs, 0, None)  # Clip negative values
     return updated_motifs
 
 
