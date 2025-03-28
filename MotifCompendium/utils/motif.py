@@ -322,9 +322,16 @@ def subtract_motifs(
     if not (align_rc.shape == align_h.shape == (motifs_core.shape[0],)):
         raise ValueError("align_rc, align_h must have the same length as motifs_core.")
 
-    # Subtract motifs
+    # Subtract motifs:
+    align_h = align_h * (2 * align_rc - 1) # Convert align_h to perspective of core
     motifs_subtract = align_motifs(motifs_subtract, align_rc, align_h)  # Align motifs
-    start = max(-np.min(align_h), 0) + min(np.max(align_h), 0)  # Start index
+    if np.min(align_h) > 0:
+        motifs_subtract = np.pad(
+            motifs_subtract, ((0, 0), (np.min(align_h), 0), (0, 0))
+        ) # Pad motifs to start at zero
+        start = 0
+    else:
+        start = -np.min(align_h)
     motifs_subtract = motifs_subtract[
         :, start : start + motifs_core.shape[1], :
     ]  # Clip motifs to core length, L

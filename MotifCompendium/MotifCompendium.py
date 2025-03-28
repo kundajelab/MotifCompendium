@@ -1325,8 +1325,8 @@ class MotifCompendium:
             raise ValueError(f"Motif channel dimensions do not match: {self.motifs.shape[2]} vs. {other_motifs.shape[2]}")
         
         # L2 normalize once
-        my_motifs = my_motifs / np.linalg.norm(my_motifs, axis=(1, 2))[:, np.newaxis, np.newaxis]
-        other_motifs = other_motifs / np.linalg.norm(other_motifs, axis=(1, 2))[:, np.newaxis, np.newaxis]
+        my_motifs = my_motifs / np.linalg.norm(my_motifs, axis=(1, 2), keepdims=True)
+        other_motifs = other_motifs / np.linalg.norm(other_motifs, axis=(1, 2), keepdims=True)
 
         # Find best match, per iteration
         match_scores = []
@@ -1338,12 +1338,14 @@ class MotifCompendium:
             sim, align_rc, align_h = utils_similarity.compute_similarities(
                 [my_motifs, other_motifs], [(0, 1)]
             )[0]
+            
             # Unscale L2 similarity, for dot product only
             sim = sim * (
                 np.linalg.norm(my_motifs, axis=(1, 2))[:, np.newaxis]
                 * np.linalg.norm(other_motifs, axis=(1, 2))[np.newaxis, :]
             )  # (N, M)
-            # Scale score by i
+
+            # Identify matches, Scale score by i
             match_score = np.max(sim, axis=1) * np.sqrt(i+1)  # (N,)
             match_idx = np.argmax(sim, axis=1)  # (N,)
             align_rc = align_rc[np.arange(align_rc.shape[0]), match_idx]  # (N,)
@@ -1355,8 +1357,15 @@ class MotifCompendium:
                 my_motifs, match_motif, align_rc, align_h
             )
 
+            # Remove matches below threshold
+            match_score[match_score < min_score] = 0
+            match_idx[match_score < min_score] = -1
+            match_motif[match_score < min_score] = 0
+            if match_motif.shape[2] == 8:
+                    match_motif = utils_motif.motif_8_to_4_signed(match_motif)
+
             # Save match information
-            match_label = [labels[x] for x in match_idx]
+            match_label = [labels[x] if x >= 0 else '' for x in match_idx]
             match_motifs.append(match_motif)
             match_scores.append(match_score)
             match_labels.append(match_label)
@@ -1364,26 +1373,28 @@ class MotifCompendium:
 
         # Save match information
         for i in range(max_submotifs):
-            self[f"{save_column_prefix}_score{i}"] = match_scores[i]
-            self[f"{save_column_prefix}_name{i}"] = match_labels[i]
+            self[f"{save_column_prefix}_score{i}"] = match_scores[i] # Save scores
+            self[f"{save_column_prefix}_name{i}"] = match_labels[i] # Save labels
+            # Save logos, matches only
+            self.__images[f"{save_column_prefix}_logo{i}"] = ""
+            match_idx = np.where(match_idxs[i] >= 0)[0]
+            
+            # Generate forward logos if not provided
             if utf8_images is None:
-                # Generate forward logos if not already generated
-                match_motif = match_motifs[i]
-                if match_motif.shape[2] == 8:
-                    match_motif = utils_motif.motif_8_to_4_signed(match_motif)
+                match_motif = match_motifs[i][match_idx, :, :]
                 motif_plotting_inputs = [
                     utils_plotting.LogoPlottingInput(motif) for motif in match_motif
                 ]
-                self.__images[f"{save_column_prefix}_logo{i}"] = [
+                self.__images.loc[match_idx, f"{save_column_prefix}_logo{i}"] = [
                     motif_input.utf8_plot
                     for motif_input in utils_plotting.plot_many_motif_logos(
-                        motif_plotting_inputs
-                    )
+                        motif_plotting_inputs)
                 ]
+
+            # Copy forward logos if provided
             elif len(utf8_images) == len(other_motifs):
-                # Copy forward logos from other MotifCompendium
-                self.__images[f"{save_column_prefix}_logo{i}"] = [
-                    utf8_images[x] for x in match_idxs[i]
+                self.__images.loc[match_idx, f"{save_column_prefix}_logo{i}"] = [
+                    utf8_images[x] for x in match_idx
                 ]
             else:
                 raise ValueError("Invalid utf8_images")

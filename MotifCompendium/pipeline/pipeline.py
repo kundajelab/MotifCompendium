@@ -29,16 +29,19 @@ def setup_parser():
     parser.add_argument("-nh", "--input-names", nargs="+", type=str, default=None, help="Nickname of the input Modisco H5 file(s).")
 
     parser.add_argument("-o", "--output-dir", type=str, required=True, help="Path to the output directory.")
-    parser.add_argument("-m", "--metadata", type=str, default=None, help="Path to the metadata file, by h5, h5_name, or motif: CSV, TSV format.")
+    parser.add_argument("-m", "--metadata", type=str, default=None, help="Path to the metadata file, per h5 or motif: CSV, TSV format.")
     parser.add_argument("-r", "--reference", type=str, default=None, help="Path to a reference motif file: MotifCompendium object, or PFM, MEME .txt format.")
     
+    parser.add_argument("--min-seqlets", type=int, default=100, help="Minimum number of seqlets to consider a motif.")
+    parser.add_argument("--rm-singletons", action="store_true", help="Remove singleton clusters.")
+
     parser.add_argument("--sim-threshold", type=float, default=0.9, help="Similarity threshold to apply during clustering.")
     parser.add_argument("--sim-scan", nargs="+", type=float, default=None, help="List of similarity thresholds to scan during clustering. MUST INCLUDE SIM_THRESHOLD.")
-    parser.add_argument("--min-seqlets", type=int, default=100, help="Minimum number of seqlets to consider a motif.")
     parser.add_argument("--cluster-by-composite", action="store_true", help="Cluster by composite motifs")
     parser.add_argument("--quality", action="store_true", help="Generate quality plots for clustering.")
     parser.add_argument("--html-collection", action="store_true", help="Generate HTML collection of motif constituents per cluster.")
     parser.add_argument("--html-table", action="store_true", help="Generate HTML summary table of clustered motifs.")
+    parser.add_argument("--html-removed", action="store_true", help="Generate HTML summary table of removed motifs.")
     
     parser.add_argument("-ch", "--max-chunk", type=int, default=1000, help="Maximum number of motifs to process at a time. Set to -1 to use no chunking.")
     parser.add_argument("-cp", "--max-cpus", type=int, default=1, help="Maximum number of CPUs to use.")
@@ -64,13 +67,13 @@ def set_default_options():
     global MotifFilterArgs
     global ClusterFilterArgs
 
-    OutputPaths = configs.OutputPaths
-    MetadataCols = configs.MetadataCols
-    MotifMatchArgs = configs.MotifMatchArgs
-    ClusterArgs = configs.ClusterArgs
-    VisualizeArgs = configs.VisualizeArgs
-    MotifFilterArgs = configs.MotifFilterArgs
-    ClusterFilterArgs = configs.ClusterFilterArgs
+    OutputPaths = configs.OutputPaths()
+    MetadataCols = configs.MetadataCols()
+    MotifMatchArgs = configs.MotifMatchArgs()
+    ClusterArgs = configs.ClusterArgs()
+    VisualizeArgs = configs.VisualizeArgs()
+    MotifFilterArgs = configs.MotifFilterArgs()
+    ClusterFilterArgs = configs.ClusterFilterArgs()
 
 
 ## FUNCTIONS -------------------------------------------------------------------
@@ -79,7 +82,6 @@ def build_modisco_dict(h5_list: list, name_list: list | None) -> dict:
         name_list = [os.path.basename(h5) for h5 in h5_list]
     modisco_dict = dict(zip(name_list, h5_list))
     return modisco_dict
-
 
 def apply_filter_threshold(
     mc: MotifCompendium,
@@ -289,22 +291,38 @@ if __name__ == "__main__":
             raise ValueError("Metadata file must be a CSV or TSV file.")
 
         # Merge metadata
-        mc.metadata = mc.metadata.merge(
-            metadata_df,
-            left_on="model",
-            right_on=metadata_df.columns[0],
-            how="left",
-        )
+        if len(metadata_df) == len(mc):
+            # Metadata per motif
+            mc.metadata = mc.metadata.merge(
+                metadata_df,
+                left_index=True,
+                right_index=True,
+                how="left",
+                suffixes=("", "_drop"),
+            )
+        else:
+            # Metadata per model
+            mc.metadata = mc.metadata.merge(
+                metadata_df,
+                left_on="model",
+                right_on=metadata_df.columns[0],
+                how="left",
+                suffixes=("", "_drop"),
+            )
+
+        # Drop duplicate columns
+        mc.metadata = mc.metadata.loc[:, ~mc.metadata.columns.str.endswith("_drop")]
+        mc.metadata = mc.metadata.loc[:, ~mc.metadata.columns.duplicated()]
 
         # Update metadata aggregation
         new_aggregate_metadata = []
         for col in metadata_df.columns:
             if col not in mc.metadata.columns:
-                new_aggregate_metadata.append((col, "concat", f"{col}s"))
+                new_aggregate_metadata.append((col, "concat", f"{col}"))
         ClusterArgs.aggregate_metadata.extend(new_aggregate_metadata)
 
         # Update HTML table columns
-        VisualizeArgs.html_table_cols.extend([f"{col}s" for col in metadata_df.columns])
+        VisualizeArgs.html_table_cols.extend([f"{col}" for col in metadata_df.columns])
 
     # Save MotifCompendium object
     mc_path = os.path.join(args.output_dir, OutputPaths.mc_full)
@@ -455,12 +473,19 @@ if __name__ == "__main__":
     
     if args.cluster_by_composite:
         # Split by # composite motifs, with best score
-        score_columns = [f"{MetadataCols.match_column_prefix}_score{i}" for i in range(MotifMatchArgs.max_submotifs)]
-        mc.metadata["num_composites"] = mc.metadata[score_columns].values.argmax(axis=1)
-        
+        mc.metadata["num_composites"] = 0
+        mc.metadata["num_composites"] = mc.metadata[
+            [f"{MetadataCols.match_column_prefix}_score{i}" 
+             for i in range(MotifMatchArgs.max_submotifs)]].apply(
+                 lambda row: max(
+                     [i for i, val in enumerate(row) 
+                      if val > MotifMatchArgs.composite_threshold], default=0), axis=1)
+            
         mc_list = []
         for i in range(MotifMatchArgs.max_submotifs):
-            mc_list.append(mc[mc.metadata["num_composites"] == i])
+            mc_iter = mc[mc.metadata["num_composites"] == i]
+            if len(mc_iter) > 0:
+                mc_list.append(mc_iter)
 
     # Cluster motifs
     for sim_threshold in sim_thresholds:
@@ -485,7 +510,16 @@ if __name__ == "__main__":
                 mc_iter.metadata[cluster_col_name] += last_cluster
 
                 # Update cluster membership back to full MotifCompendium object
-                mc.metadata.update(mc_iter.metadata[cluster_col_name])
+                mc.metadata = mc.metadata.merge(
+                    mc_iter.metadata[["name", cluster_col_name]],
+                    on="name",
+                    how="left",
+                    suffixes=("", "_drop"),
+                )
+                mc.metadata[f"{cluster_col_name}_drop"] = mc.metadata[f"{cluster_col_name}_drop"].fillna(0)
+                mc.metadata[cluster_col_name] += mc.metadata[f"{cluster_col_name}_drop"]
+                mc.metadata = mc.metadata.drop(columns=[f"{cluster_col_name}_drop"])
+
                 last_cluster = mc.metadata[cluster_col_name].max() + 1
         
         else:
@@ -554,24 +588,45 @@ if __name__ == "__main__":
     ## AVERAGE ------------------------------------------------------------------
     cluster_col_name = f"{ClusterArgs.algorithm}_{args.sim_threshold}"
 
-    # Average: Cluster motifs
+    # Check aggregation metadata columns
+    ClusterArgs.aggregate_metadata = [
+        (col, agg, new_col)
+        for col, agg, new_col in ClusterArgs.aggregate_metadata
+        if col in mc.metadata.columns
+    ]
+    if args.verbose:
+        logging.info(f"Aggregating the following metadata columns: {ClusterArgs.aggregate_metadata}")
+
+    # Average: Cluster motifs    
     if args.verbose:
         logging.info(f"Averaging motifs per cluster...")
-    if args.time:
-        start_time = time.time()
-
-    # Check aggregation metadata columns
-    for col, agg, new_col in ClusterArgs.aggregate_metadata:
-        if col not in mc.metadata.columns:
-            ClusterArgs.aggregate_metadata.remove((col, agg, new_col))
-    
-    mc_avg = mc.cluster_averages(
-        cluster_col=cluster_col_name,
-        aggregations=list(ClusterArgs.aggregate_metadata),
-        weight_col=ClusterArgs.weight_col,
-    )
-    if args.time:
-        logging.info(f"Time taken: {time.time() - start_time:.2f}s")
+    while True:
+        try:
+            if args.time:
+                start_time = time.time()
+            mc_avg = mc.cluster_averages(
+                cluster_col=cluster_col_name,
+                aggregations=ClusterArgs.aggregate_metadata,
+                weight_col=ClusterArgs.weight_col,
+            )
+            if args.verbose:
+                logging.info(
+                    f"Completed averaging motifs per cluster:\n"
+                    f"  Total number of clusters: {len(mc_avg)}\n"
+                    f"  Metadata columns: {mc_avg.metadata.columns.tolist()}"
+                )
+            if args.time:
+                logging.info(f"Time taken: {time.time() - start_time:.2f}s")
+            break
+        
+        except Exception as e:
+            logging.error(f"Error: {e}")
+            args.max_chunk = args.max_chunk - 100
+            MotifCompendium.set_compute_options(max_chunk=args.max_chunk)
+            logging.info(f"Retrying with max_chunk={args.max_chunk}...")
+            if args.max_chunk <= 0:
+                logging.critical("Error averaging motifs per cluster. max_chunk has reached 0.")
+                raise ValueError("Error averaging motifs per cluster.")
 
     # Save Average MotifCompendium object
     mc_avg_path = os.path.join(args.output_dir, OutputPaths.mc_avg)
@@ -611,7 +666,7 @@ if __name__ == "__main__":
             "Reference file must be a MotifCompendium object or PFM, MEME .txt file."
         )
 
-    # Filter #2: Calculate and apply filter metrics
+    # Filter #2: Calculate and flag filters
     if args.verbose:
         logging.info(f"Calculating filter metrics...")
     if args.time:
@@ -637,8 +692,18 @@ if __name__ == "__main__":
             threshold=filter_args.threshold,
             override=filter_args.override,
         )
+    if args.verbose:
+        logging.info(f"Number of flagged motifs: {len(mc_avg.metadata[mc_avg.metadata[MetadataCols.filter_col_flag]])}")
     if args.time:
         logging.info(f"Time taken: {time.time() - start_time:.2f}s")
+    
+    # Filter #3: Flag singleton clusters
+    if args.rm_singletons:
+        if args.verbose:
+            logging.info(f"Flagging singleton clusters...")
+        mc_avg.metadata[MetadataCols.filter_col_flag] = mc_avg.metadata["num_motifs"] == 1
+        if args.verbose:
+            logging.info(f"Number of singleton clusters: {len(mc_avg.metadata[mc_avg.metadata['num_motifs'] == 1])}")
 
     # Filter #4: Override flags, for good matches
     if args.verbose:
@@ -687,14 +752,15 @@ if __name__ == "__main__":
 
 
     ## VISUALIZE ----------------------------------------------------------------
-    # Visualize: Cluster collection
+    # Create HTML directory
     if args.html_collection or args.html_table:
         html_dir = os.path.join(args.output_dir, "html")
         if not os.path.exists(html_dir):
             if args.verbose:
                 logging.info(f"Creating HTML directory: {html_dir}...")
             os.makedirs(html_dir, exist_ok=True)
-
+    
+    # Visualize: Cluster collection
     if args.html_collection:
         html_collection_path = os.path.join(html_dir, OutputPaths.html_collection)
         if args.verbose:
@@ -711,19 +777,46 @@ if __name__ == "__main__":
 
     # Visualize: Cluster table
     if args.html_table:
+        # Check html table columns
+        VisualizeArgs.html_table_cols = [
+            col for col in VisualizeArgs.html_table_cols
+            if col in mc_avg.metadata.columns or col in mc_avg.get_image_columns()
+        ]
+        if args.verbose:
+            logging.info(f"Visualizing the following columns for HTML table: {VisualizeArgs.html_table_cols}")
+
+        # Create HTML table
         html_table_path = os.path.join(html_dir, OutputPaths.html_table)
         if args.verbose:
             logging.info(f"Visualizing cluster table: {html_table_path}...")
         if args.time:
-            start_time = time.time()
-
-        # Check html table columns
-        for col in VisualizeArgs.html_table_cols:
-            if col not in mc_avg.metadata.columns or col not in mc_avg.get_image_columns():
-                VisualizeArgs.html_table_cols.remove(col)
-        
+            start_time = time.time()        
         mc_avg.summary_table_html(
             html_out=html_table_path,
+            columns=VisualizeArgs.html_table_cols,
+            editable=VisualizeArgs.editable,
+        )
+        if args.time:
+            logging.info(f"Time taken: {time.time() - start_time:.2f}s")
+    
+    # Visualize: Removed motifs
+    if args.html_removed:
+        # Check html table columns
+        VisualizeArgs.html_table_cols = [
+            col for col in VisualizeArgs.html_table_cols
+            if col in mc_removed.metadata.columns or col in mc_removed.get_image_columns()
+        ]
+        if args.verbose:
+            logging.info(f"Visualizing the following columns for HTML table: {VisualizeArgs.html_table_cols}")
+
+        # Create HTML table
+        html_removed_path = os.path.join(html_dir, OutputPaths.html_removed)
+        if args.verbose:
+            logging.info(f"Visualizing removed motifs: {html_removed_path}...")
+        if args.time:
+            start_time = time.time()        
+        mc_removed.summary_table_html(
+            html_out=html_removed_path,
             columns=VisualizeArgs.html_table_cols,
             editable=VisualizeArgs.editable,
         )

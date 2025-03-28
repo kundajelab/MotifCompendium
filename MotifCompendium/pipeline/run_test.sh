@@ -12,10 +12,11 @@ conda activate motifcompendium-gpu
 
 # Variables
 NAME="fetal-pipeline"
-OUTPUT_DIR="/oak/stanford/groups/akundaje/cmyun/motifcompendium/fetal/pipeline"
+OUTPUT_DIR="/oak/stanford/groups/akundaje/cmyun/motifcompendium/fetal/pipeline_composite"
 MODISCO_PATHS="${OUTPUT_DIR}/raw/modisco_paths.tsv"
 mapfile -t INPUT_NAMES < <(cut -f 1 "$MODISCO_PATHS")
 mapfile -t INPUT_PATHS < <(cut -f 2 "$MODISCO_PATHS")
+MC_PATH="${OUTPUT_DIR}/motifcompendium.mc"
 REFERENCE_PATH="/oak/stanford/groups/akundaje/cmyun/software/motifcompendium/MotifCompendium/data/JASPAR2024-HOCOMOCOv13.meme.txt"
 
 SIM_THRESHOLD=0.9
@@ -26,8 +27,8 @@ MAX_CHUNK=1200
 MAX_CPUS=32
 
 SCRIPT_PATH="/oak/stanford/groups/akundaje/cmyun/software/motifcompendium/MotifCompendium/pipeline/pipeline.py"
-LOG_PATH="${OUTPUT_DIR}/logs/log_pipeline_v1_$(date +'%Y%m%d').o"
-ERROR_PATH="${OUTPUT_DIR}/logs/log_pipeline_v1_$(date +'%Y%m%d').e"
+LOG_PATH="${OUTPUT_DIR}/logs/log_pipeline_v1_$(date +'%Y%m%d_%H%M%S').o"
+ERROR_PATH="${OUTPUT_DIR}/logs/log_pipeline_v1_$(date +'%Y%m%d_%H%M%S').e"
 
 # Run script
 mkdir -p "$OUTPUT_DIR"
@@ -35,8 +36,7 @@ mkdir -p "$(dirname "$LOG_PATH")"
 mkdir -p "$(dirname "$ERROR_PATH")"
 
 python3 -u "$SCRIPT_PATH" \
-    -ih "${INPUT_PATHS[@]}" \
-    -nh "${INPUT_NAMES[@]}" \
+    -im "$MC_PATH" \
     -o "$OUTPUT_DIR" \
     -r "$REFERENCE_PATH" \
     --sim-threshold "$SIM_THRESHOLD" \
@@ -45,11 +45,15 @@ python3 -u "$SCRIPT_PATH" \
     --quality \
     --html-collection \
     --html-table \
+    --html-removed \
+    --cluster-by-composite \
     -ch "$MAX_CHUNK" \
     -cp "$MAX_CPUS" \
     --use-gpu \
     --fast-plot \
     --time \
     --verbose > >(tee -a "$LOG_PATH") 2> >(tee -a "$ERROR_PATH" >&2)
+    # -ih "${INPUT_PATHS[@]}" \
+    # -nh "${INPUT_NAMES[@]}" \
 
 echo "Completed run."

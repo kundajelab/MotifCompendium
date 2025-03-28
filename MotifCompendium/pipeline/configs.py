@@ -25,6 +25,7 @@ class OutputPaths:
 
     html_collection: str = "motifcompendium_collection.html"
     html_table: str = "motifcompendium_table.html"
+    html_removed: str = "motifcompendium_removed.html"
 
 
 @dataclass
