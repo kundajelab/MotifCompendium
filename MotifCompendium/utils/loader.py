@@ -163,43 +163,43 @@ def load_pfm(
         Assumes a standard PFM file format.
     """
     names = []
-    pfms = []
-    active_pfm = False
+    pwms = []
+    active_pwm = False
     longest_motif_length = -1
     with open(pfm_file, "r") as f:
         for line in f:
             x = line.strip()
-            if active_pfm:
+            if active_pwm:
                 if x.startswith(">"):
                     # submit
-                    current_pfm_np = pd.DataFrame(current_pfm).to_numpy()
+                    current_pwm_np = pd.DataFrame(current_pwm).to_numpy()
                     longest_motif_length = max(
-                        longest_motif_length, current_pfm_np.shape[0]
+                        longest_motif_length, current_pwm_np.shape[0]
                     )
-                    pfms.append(pd.DataFrame(current_pfm_np))
-                    names.append(current_pfm_name)
+                    pwms.append(current_pwm_np)
+                    names.append(current_pwm_name)
                     # restart
-                    current_pfm_name = x[1:]
-                    current_pfm = {"A": [], "C": [], "G": [], "T": []}
+                    current_pwm_name = x[1:]
+                    current_pwm = {"A": [], "C": [], "G": [], "T": []}
                 else:
                     a, c, g, t = x.split()
                     a, c, g, t = float(a), float(c), float(g), float(t)
                     acgt = np.asarray([[a, c, g, t]])  # (1, 4)
                     acgt_ic = ic_scale(acgt)
-                    current_pfm["A"].append(acgt_ic[0, 0])
-                    current_pfm["C"].append(acgt_ic[0, 1])
-                    current_pfm["G"].append(acgt_ic[0, 2])
-                    current_pfm["T"].append(acgt_ic[0, 3])
+                    current_pwm["A"].append(acgt_ic[0, 0])
+                    current_pwm["C"].append(acgt_ic[0, 1])
+                    current_pwm["G"].append(acgt_ic[0, 2])
+                    current_pwm["T"].append(acgt_ic[0, 3])
             else:
                 assert x.startswith(">")
-                active_pfm = True
-                current_pfm_name = x[1:]
-                current_pfm = {"A": [], "C": [], "G": [], "T": []}
+                active_pwm = True
+                current_pwm_name = x[1:]
+                current_pwm = {"A": [], "C": [], "G": [], "T": []}
     resize_to = longest_motif_length if motif_len is None else motif_len
-    pfms = [resize_motif(x, resize_to) for x in pfms]
-    pfms_mtx = np.stack(pfms, axis=0)
-    pfms_mtx /= np.sum(pfms_mtx, axis=(1, 2), keepdims=True)
-    return pfms_mtx, names
+    pwms = [resize_motif(x, resize_to) for x in pwms]
+    pwms = np.stack(pwms, axis=0)
+    pwms /= np.sum(pwms, axis=(1, 2), keepdims=True)
+    return pwms, names
 
 
 @which_file_load_failed
@@ -268,21 +268,19 @@ def load_meme(
                     # if motif over --> submit and restart
                     if num_bases_remaining == 0:
                         # submit
-                        current_pwm_df = pd.DataFrame(current_pwm)
-                        current_pwm_np = current_pwm_df.to_numpy()
+                        current_pwm_np = pd.DataFrame(current_pwm).to_numpy()
                         longest_motif_length = max(
                             longest_motif_length, current_pwm_np.shape[0]
                         )
-                        pwms.append(pd.DataFrame(current_pwm_np))
+                        pwms.append(current_pwm_np)
                         names.append(current_pwm_name)
                         # restart
                         active_pwm = False
     resize_to = longest_motif_length if motif_len is None else motif_len
-    pfms = [resize_motif(x, resize_to) for x in pfms]
-    pwms_mtx = np.stack([x.to_numpy() for x in pwms], axis=0)
-    pwms_mtx /= np.sum(pwms_mtx, axis=(1, 2), keepdims=True)
-
-    return pwms_mtx, names
+    pwms = [resize_motif(x, resize_to) for x in pwms]
+    pwms = np.stack(pwms, axis=0)
+    pwms /= np.sum(pwms, axis=(1, 2), keepdims=True)
+    return pwms, names
 
 
 #####################

@@ -92,7 +92,7 @@ def rb_leiden_clustering_cpu(
     weighted_adjacency_matrix: np.ndarray,
     resolution_parameter: float = 1.0,
     n_iterations: int = -1,
-    seeds: list[int] = [1, 2],
+    seeds: list[int] = [100, 200],
 ) -> list[int]:
     """Perform Leiden clustering with R&B quality and a configuration null.
 
@@ -150,7 +150,7 @@ def cpm_leiden_clustering(
     weighted_adjacency_matrix: np.ndarray,
     resolution_parameter: float = 1.0,
     n_iterations: int = -1,
-    seeds: list[int] = [1, 2],
+    seeds: list[int] = [100, 200],
 ) -> list[int]:
     """Perform Leiden clustering with the constant Potts model.
 
@@ -204,7 +204,7 @@ def modularity_leiden_clustering_gpu(
     weighted_adjacency_matrix: np.ndarray,
     resolution_parameter: float = 1.0,
     n_iterations: int = 100,
-    seeds: list[int] = [1, 2],
+    seeds: list[int] = [100, 200],
 ) -> list[int]:
     """
     Perform Leiden clustering with R&B quality and a configuration null, on GPU.

@@ -183,6 +183,7 @@ def resize_motif(motif: np.ndarray, resize_to: int) -> np.ndarray:
 @single_or_many_motifs
 def view_motif_from_position_range(
     motif: np.ndarray,
+    motif_len: int,
     current_min_pos: int,
     current_max_pos: int,
     new_min_pos: int,
@@ -197,6 +198,7 @@ def view_motif_from_position_range(
 
     Args:
         motif: A motif or motif stack of length L.
+        motif_len: The length of the motif.
         current_min_pos: The position of the 0th index in the length axis.
         current_max_pos: The position of the (L-1)st index in the length axis.
         new_min_pos: The new minimum position from which to view the motif.
@@ -206,10 +208,21 @@ def view_motif_from_position_range(
         The motif as viewed from a new position range.
     """
     validate_motif_stack(motif)
-    if not (current_max_pos - current_min_pos) == (motif.shape[1] - 1):
-        raise ValueError("Current position range must match motif length.")
-    if not (new_min_pos < new_max_pos):
-        raise ValueError("New position range must have a positive length.")
+    if not (current_max_pos - current_min_pos + motif_len) == (motif.shape[1]):
+        raise ValueError(
+            f"Current position range must match motif length."
+            f"  current_max_pos: {current_max_pos}, "
+            f"  current_min_pos: {current_min_pos}, "
+            f"  current_len: {motif_len}, "
+            f"  motif.shape[1]: {motif.shape[1]}"
+        )
+    if not (new_max_pos - new_min_pos + motif_len) > 0:
+        raise ValueError(
+            f"New position range must have a positive length."
+            f"  new_max_pos: {new_max_pos}, "
+            f"  new_min_pos: {new_min_pos}, "
+            f"  motif_len: {motif_len}"
+        )
     # Pad if needed
     if new_min_pos < current_min_pos:
         pad_left = current_min_pos - new_min_pos
@@ -222,7 +235,7 @@ def view_motif_from_position_range(
     # Crop out new view
     new_min_idx = new_min_pos - current_min_pos
     new_max_idx = new_max_pos - current_min_pos
-    return motif[:, new_min_idx : new_max_idx + 1, :]
+    return motif[:, new_min_idx : motif_len + new_max_idx, :]
 
 
 def average_motifs(
@@ -440,64 +453,68 @@ def compute_motif_scalar_projection(
     validate_motif_stack(project_motifs)
     validate_motif_stack(onto_motifs)
     if project_motifs.shape != onto_motifs.shape:
-        raise ValueError("project_motifs and onto_motifs must have the same shape.")
+        raise ValueError(
+            f"project_motifs and onto_motifs must have the same shape."
+            f"  project_motifs.shape: {project_motifs.shape}, "
+            f"  onto_motifs.shape: {onto_motifs.shape}"
+        )
     uTv = np.sum(project_motifs * onto_motifs, axis=(1, 2), keepdims=keepdims)
     vTv = np.sum(onto_motifs**2, axis=(1, 2), keepdims=keepdims)
-    return uTv / vTv
+    return np.divide(uTv, vTv, where=(vTv != 0), out=np.zeros_like(uTv))  # Avoid divide by zero
 
 
 def remove_motif_component(
-    component_motifs: np.ndarray,
-    from_motifs: np.ndarray,
+    main_motifs: np.ndarray,
+    remove_motifs: np.ndarray,
     alignment_rc: np.ndarray,
     alignment_h: np.ndarray,
 ) -> np.ndarray:
     """Remove the component of one set of motifs from another set of motifs.
 
-    Given a set of motifs of interest, from_motifs, and another set of motifs,
-      component_motifs, whose component you want to remove from from_motifs, remove the
-      component of component_motifs from from_motifs. Removal is done by subtracting the
-      projection of component_motifs onto from_motifs from from_motifs. Alignment
-      information of how to shift and reverse complement the component_motifs to align
-      with from_motifs is also required.
+    Given a set of motifs of interest, remove_motifs, and another set of motifs,
+      main_motifs, whose component you want to remove from remove_motifs, remove the
+      component of main_motifs from remove_motifs. Removal is done by subtracting the
+      projection of main_motifs onto remove_motifs from remove_motifs. Alignment
+      information of how to shift and reverse complement the main_motifs to align
+      with remove_motifs is also required.
 
     Args:
-        component_motifs: A (N, L, K) motif stack representing the motifs to remove from
-          from_motifs.
-        from_motifs: A (N, L, K) motif stack representing the motifs from which to
-          remove the effects of component_motifs.
+        main_motifs: A (N, L, K) motif stack representing the motifs to remove from
+          remove_motifs.
+        remove_motifs: A (N, L, K) motif stack representing the motifs from which to
+          remove the effects of main_motifs.
         alignment_rc: A (N, ) forward/reverse complement alignment vector for how the
-          component_motifs align with from_motifs. If alignment_rc[i] = 0/1, then
-          component_motifs[i] must not/must be reverse complemented to align with
-          from_motifs[i].
-        alignment_h: A (N, ) horizontal alignment vector for how the component_motifs
-          align with from_motifs. alignment_h[i] represents how many positions to the
-          right component_motifs[i] must be shifted to align with from_motifs[i].
+          main_motifs align with remove_motifs. If alignment_rc[i] = 0/1, then
+          main_motifs[i] must not/must be reverse complemented to align with
+          remove_motifs[i].
+        alignment_h: A (N, ) horizontal alignment vector for how the main_motifs
+          align with remove_motifs. alignment_h[i] represents how many positions to the
+          right main_motifs[i] must be shifted to align with remove_motifs[i].
 
     Returns:
         A (N, L, K) motif stack representing the subtracted motifs after
-          component_motifs has been removed from from_motifs.
+          main_motifs has been removed from remove_motifs.
     """
     # Check inputs
-    validate_motif_stack(from_motifs)
-    validate_motif_stack(component_motifs)
-    if not from_motifs.shape == component_motifs.shape:
-        raise ValueError("component_motifs and from_motifs must have the same shape.")
-    # Align component_motifs to from_motifs
-    component_motifs_aligned = align_motifs(component_motifs, alignment_rc, alignment_h)
+    validate_motif_stack(remove_motifs)
+    validate_motif_stack(main_motifs)
+    if not remove_motifs.shape == main_motifs.shape:
+        raise ValueError("main_motifs and remove_motifs must have the same shape.")
+    # Align remove_motifs to main_motifs
+    remove_motifs_aligned = align_motifs(remove_motifs, alignment_rc, alignment_h)
     min_h = np.min(alignment_h)
     max_h = np.max(alignment_h)
-    # Get the portion of component_motifs that is aligned with from_motifs
-    component_motifs_aligned = view_motif_from_position_range(
-        component_motifs_aligned, min_h, max_h, 0, from_motifs.shape[1]
+    # View the aligned remove_motifs from the perspective of main_motifs
+    remove_motifs_aligned = view_motif_from_position_range(
+        remove_motifs_aligned, main_motifs.shape[1], min_h, max_h, 0, 0,
     )
-    # Project and subtract projected component
+    # Scale and subtract aligned remove_motifs
     scalar_projection = compute_motif_scalar_projection(
-        from_motifs, component_motifs_aligned, keepdims=True
-    )  # Project vector onto the component you want removed
-    updated_motifs = from_motifs - scalar_projection * component_motifs_aligned
-    updated_motifs = np.clip(updated_motifs, 0, None)  # Clip negative values
-    return updated_motifs
+        main_motifs, remove_motifs_aligned, keepdims=True,
+    )  # Project vector onto the main motif to match scale
+    main_motifs_updated = main_motifs - scalar_projection * remove_motifs_aligned
+    main_motifs_updated = np.clip(main_motifs_updated, a_min=0, a_max=None)  # Clip negative values
+    return main_motifs_updated
 
 
 ###########

@@ -10,6 +10,8 @@ class FilterArgs:
     operation: str
     threshold: Union[float, bool]
     override: bool
+    apply_motif: bool
+    apply_cluster: bool
 
 
 @dataclass
@@ -80,7 +82,9 @@ class MotifFilterArgs:
         "posbase_entropy_ratio",
         "copair_entropy_ratio",
         "dinuc_entropy_ratio",
-        "negpattern_pospeak",
+    )
+    motif_only_metrics: tuple = (
+        "posneg_inverted",
     )
     motif_filters: tuple = (
         FilterArgs(
@@ -89,6 +93,8 @@ class MotifFilterArgs:
             operation="<",
             threshold=0.45,
             override=False,
+            apply_motif=True,
+            apply_cluster=True,
         ),
         FilterArgs(
             name="2_noisemix",
@@ -96,6 +102,8 @@ class MotifFilterArgs:
             operation=">",
             threshold=0.75,
             override=False,
+            apply_motif=True,
+            apply_cluster=True,
         ),
         FilterArgs(
             name="3_broadsingle",
@@ -103,6 +111,8 @@ class MotifFilterArgs:
             operation=">",
             threshold=2.0,
             override=False,
+            apply_motif=True,
+            apply_cluster=True,
         ),
         FilterArgs(
             name="4_gcbias",
@@ -110,6 +120,8 @@ class MotifFilterArgs:
             operation=">",
             threshold=2.0,
             override=False,
+            apply_motif=True,
+            apply_cluster=True,
         ),
         FilterArgs(
             name="5_dinucrepeat",
@@ -117,23 +129,29 @@ class MotifFilterArgs:
             operation=">",
             threshold=4.0,
             override=False,
+            apply_motif=True,
+            apply_cluster=True,
         ),
         FilterArgs(
-            name="6_negpattern_pospeak",
-            metric="negpattern_pospeak",
+            name="6_posneg_inverted",
+            metric="posneg_inverted",
             operation="==",
             threshold=True,
             override=False,
+            apply_motif=True,
+            apply_cluster=False,
         ),
     )
-    # Override: filter_col_flag AND apply_filter_threshold must both be True, to keep flag True
-    override_filters: tuple = (
+    # Add back: filter_col_flag AND apply_filter_threshold must both be True, to keep flag True
+    addback_filters: tuple = (
         FilterArgs(
             name="base_match",
             metric=f"{MetadataCols.match_column_prefix}_score0",
-            operation=">",
+            operation="<",
             threshold=0.9,
             override=True,
+            apply_motif=True,
+            apply_cluster=True,
         ),
     ) + tuple(
         FilterArgs(
@@ -142,72 +160,47 @@ class MotifFilterArgs:
             operation="<",
             threshold=MotifMatchArgs.composite_threshold,
             override=True,
+            apply_motif=True,
+            apply_cluster=True,
         )
         for iter in range(1, MotifMatchArgs.max_submotifs)
     )
-
-
-@dataclass
-class ClusterFilterArgs:
-    motif_metrics: tuple = (
-        "motif_entropy",
-        "posbase_entropy_ratio",
-        "copair_entropy_ratio",
-        "dinuc_entropy_ratio",
-    )
-    motif_filters: tuple = (
-        FilterArgs(
-            name="1_singlepeak",
-            metric="motif_entropy",
-            operation="<",
-            threshold=0.45,
-            override=False,
-        ),
+    # Repeat strict filters
+    strict_filters: tuple = (
         FilterArgs(
             name="2_noisemix",
             metric="motif_entropy",
             operation=">",
-            threshold=0.75,
+            threshold=0.8,
             override=False,
+            apply_motif=True,
+            apply_cluster=True,
         ),
         FilterArgs(
             name="3_broadsingle",
             metric="posbase_entropy_ratio",
             operation=">",
-            threshold=2.0,
+            threshold=5.0,
             override=False,
-        ),
-        FilterArgs(
-            name="4_gcbias",
-            metric="copair_entropy_ratio",
-            operation=">",
-            threshold=2.0,
-            override=False,
+            apply_motif=True,
+            apply_cluster=True,
         ),
         FilterArgs(
             name="5_dinucrepeat",
             metric="dinuc_entropy_ratio",
             operation=">",
-            threshold=4.0,
+            threshold=10.0,
             override=False,
+            apply_motif=True,
+            apply_cluster=True,
         ),
-    )
-    # Override: filter_col_flag AND apply_filter_threshold must both be True, to keep flag True
-    override_filters: tuple = (
         FilterArgs(
-            name="base_match",
-            metric=f"{MetadataCols.match_column_prefix}_score0",
-            operation=">",
-            threshold=0.9,
-            override=True,
+            name="7_singletons",
+            metric="num_motifs",
+            operation="<=",
+            threshold=1,
+            override=False,
+            apply_motif=True,
+            apply_cluster=True,
         ),
-    ) + tuple(
-        FilterArgs(
-            name="composite_match",
-            metric=f"{MetadataCols.match_column_prefix}_score{iter}",
-            operation="<",
-            threshold=MotifMatchArgs.composite_threshold,
-            override=True,
-        )
-        for iter in range(1, MotifMatchArgs.max_submotifs)
     )

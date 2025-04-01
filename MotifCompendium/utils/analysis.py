@@ -129,7 +129,7 @@ def plot_ground_truth_mismatch(
     mc_mismatch.motif_collection_html(save_loc, mismatch_clusters, average_motif=False)
 
 
-def judge_clustering(mc: MotifCompendiumClass, clustering: str, save_loc: str) -> None:
+def judge_clustering(mc: MotifCompendiumClass, cluster_col: str, save_loc: str) -> None:
     """Plots histograms of inter-cluster and intra-cluster similarities.
 
     Judges a motif clustering by computing the quality of the clustering and then
@@ -143,7 +143,7 @@ def judge_clustering(mc: MotifCompendiumClass, clustering: str, save_loc: str) -
           quality plot to.
     """
     # Get clustering quality
-    clustering_quality = mc.clustering_quality(clustering)
+    clustering_quality = mc.clustering_quality(cluster_col)
     # Plotting
     fig, axs = plt.subplots(2, 1, sharex=True)
     bins = np.linspace(0, 1, 20)
@@ -161,7 +161,7 @@ def judge_clustering(mc: MotifCompendiumClass, clustering: str, save_loc: str) -
     axs[1].set_title("best inter-cluster similarities")
     axs[1].set_xlabel("similarity")
     # Titles and save
-    plt.suptitle(f"{clustering} ({clustering_quality.shape[0]} clusters)")
+    plt.suptitle(f"{cluster_col} ({clustering_quality.shape[0]} clusters)")
     plt.savefig(save_loc)
     plt.close(fig)
 
@@ -381,7 +381,7 @@ def calculate_filters(
         "posbase_entropy_ratio",
         "copair_entropy_ratio",
         "dinuc_entropy_ratio",
-        "negpattern_pospeak",
+        "posneg_inverted",
     ]
     for filter_metric in metric_list:
         if filter_metric not in valid_filter_metrics:
@@ -417,10 +417,10 @@ def calculate_filters(
                     metrics_list.append(metric)
                 mc["dinuc_entropy_ratio"] = metrics_list
 
-            case "negpattern_pospeak":
-                mc["negpattern_pospeak"] = (
+            case "posneg_inverted":
+                mc["posneg_inverted"] = (
                     utils_motif.motif_posneg_max(mc.get_standard_motif_stack())
-                    == mc["posneg"]
+                    != mc["posneg"]
                 )
 
             case _:

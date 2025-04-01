@@ -122,7 +122,7 @@ def inspect(file_loc: str) -> pd.DataFrame:
     return metadata
 
 
-def load_old_compendium(file_loc: str) -> MotifCompendium:
+def load_old_compendium(file_loc: str, safe: bool = True) -> MotifCompendium:
     """Loads an old MotifCompendium object from file.
 
     Args:
@@ -164,7 +164,7 @@ def load_old_compendium(file_loc: str) -> MotifCompendium:
         alignment_h,
         metadata_nonimage,
         __images,
-        safe=True,
+        safe=safe,
     )
 
 
@@ -604,7 +604,7 @@ class MotifCompendium:
         """Returns the columns of the metadata."""
         return list(self.metadata.columns)
 
-    def get_saved_images(self) -> list[str]:
+    def get_images_columns(self) -> list[str]:
         """Returns a list of saved image columns in the MotifCompendium."""
         return list(self.__images.columns)
 
@@ -798,7 +798,7 @@ class MotifCompendium:
         algorithm: str = "cpm_leiden",
         similarity_threshold: float = 0.9,
         save_name: str = "cluster",
-        cluster_on: str | None = None,
+        cluster_col: str | None = None,
         **kwargs,
     ) -> None:
         """Cluster motifs.
@@ -813,6 +813,10 @@ class MotifCompendium:
               considered similar.
             save_name: The name of the column in the metadata to save motif clustering
                 results into.
+            cluster_col: The name of the column in metadata containing cluster
+              annotations to group motifs by. If None, the clustering will be done on
+              the entire MotifCompendium. If not None, the clustering will be done on
+              the average motifs of the clusters in this column.
             **kwargs: Additional named arguments specific to the clustering algorithm of
                 choice.
 
@@ -825,7 +829,7 @@ class MotifCompendium:
             isinstance(similarity_threshold, float) and (0 <= similarity_threshold <= 1)
         ):
             raise ValueError("similarity_threshold must be a float between [0, 1].")
-        if cluster_on is None:
+        if cluster_col is None:
             self.metadata[save_name] = utils_clustering.cluster(
                 similarity_matrix=self.similarity,
                 algorithm=algorithm,
@@ -833,10 +837,10 @@ class MotifCompendium:
                 **kwargs,
             )
         else:
-            if not cluster_on in self.metadata.columns:
-                raise KeyError(f"{cluster_on} not in metadata.")
+            if not cluster_col in self.metadata.columns:
+                raise KeyError(f"{cluster_col} not in metadata.")
             # Average
-            mc_average = self.cluster_averages(clustering=cluster_on)
+            mc_average = self.cluster_averages(cluster_col=cluster_col)
             # Cluster
             mc_average.metadata["cluster"] = utils_clustering.cluster(
                 similarity_matrix=mc_average.similarity,
@@ -850,11 +854,11 @@ class MotifCompendium:
                 for _, row in mc_average.metadata.iterrows()
             }
             self.metadata[save_name] = [
-                cluster_map[c] for c in self.metadata[cluster_on]
+                cluster_map[c] for c in self.metadata[cluster_col]
             ]
 
     def clustering_quality(
-        self, clustering: str, with_names: bool = False
+        self, cluster_col: str, with_names: bool = False
     ) -> np.ndarray | pd.DataFrame:
         """Produces a matrix that summarizes the quality of a particular clustering.
 
@@ -863,7 +867,7 @@ class MotifCompendium:
           similarities.
 
         Args:
-            clustering: The name of the column in metadata containing clustering
+            cluster_col: The name of the column in metadata containing cluster
               annotations to group motifs by.
             with_names: Whether or not to return a raw quality matrix or a quality
               matrix with row/column labels in the form or a pd.DataFrame.
@@ -876,7 +880,7 @@ class MotifCompendium:
         """
         # Cache cluster --> idxs dictionary
         ci_idxs = defaultdict(list)
-        for i, c in enumerate(self.metadata[clustering]):
+        for i, c in enumerate(self.metadata[cluster_col]):
             ci_idxs[c].append(i)
         # Iterate through pairs of clusters
         clusters = sorted(ci_idxs.keys())
@@ -901,7 +905,7 @@ class MotifCompendium:
 
     def cluster_averages(
         self,
-        clustering: str,
+        cluster_col: str,
         aggregations: list[tuple[str]] = [("name", "count", "num_constituents")],
         weight_col: str | None = None,
         compute_quality_stats: bool = True,
@@ -915,7 +919,7 @@ class MotifCompendium:
           MotifCompendium is returned.
 
         Args:
-            clustering: The name of the column in metadata containing clustering
+            cluster_col: The name of the column in metadata containing cluster
               annotations to group motifs by. Each row in the new MotifCompendium will
               correspond to a value in this column.
             aggregations: A list of tuples of strings: (source, method, save).
@@ -975,14 +979,14 @@ class MotifCompendium:
             weights = None
         # Cache cluster --> idxs dictionary
         cluster_idxs = defaultdict(list)
-        for i, c in enumerate(self.metadata[clustering]):
+        for i, c in enumerate(self.metadata[cluster_col]):
             cluster_idxs[c].append(i)
         # Perform averaging per cluster
         clusters = sorted(cluster_idxs.keys())
         cluster_motif_avgs, cluster_names = [], []
         for c in clusters:
             # Cluster name
-            cluster_names.append(f"{clustering}#{c}")
+            cluster_names.append(f"{cluster_col}#{c}")
             # Cluster average motif
             c_idxs = cluster_idxs[c]
             motifs_c = self.motifs[c_idxs, :, :]
@@ -1035,7 +1039,7 @@ class MotifCompendium:
             metadata[agg_dict["save"]] = agg_dict["values"]
         # Compute quality statistics
         if compute_quality_stats:
-            quality = self.clustering_quality(clustering, with_names=True)
+            quality = self.clustering_quality(cluster_col, with_names=True)
             quality_np = quality.to_numpy()
             metadata["lowest_internal_similarity"] = [
                 quality.loc[c, c] for c in clusters
@@ -1401,9 +1405,10 @@ class MotifCompendium:
         match_labels = []
         match_motifs = []
         match_idxs = []
+        match_mask = np.ones(my_motifs.shape[0], dtype=bool)  # (N,)
         for i in range(max_submotifs):
             # Compute similarity
-            sim, align_rc, align_h = utils_similarity.compute_similarities(
+            sim, alignment_rc, alignment_h = utils_similarity.compute_similarities(
                 [my_motifs, other_motifs], [(0, 1)]
             )[0]
             
@@ -1416,24 +1421,25 @@ class MotifCompendium:
             # Identify matches, Scale score by i
             match_score = np.max(sim, axis=1) * np.sqrt(i+1)  # (N,)
             match_idx = np.argmax(sim, axis=1)  # (N,)
-            align_rc = align_rc[np.arange(align_rc.shape[0]), match_idx]  # (N,)
-            align_h = align_h[np.arange(align_h.shape[0]), match_idx]  # (N,)
+            alignment_rc = alignment_rc[np.arange(alignment_rc.shape[0]), match_idx]  # (N,)
+            alignment_h = alignment_h[np.arange(alignment_h.shape[0]), match_idx]  # (N,)
             match_motif = other_motifs[match_idx, :, :]
+
+            # Remove matches below threshold
+            match_mask = match_mask & (match_score >= min_score) # (N,)
+            match_score[~match_mask] = 0
+            match_idx[~match_mask] = -1
+            match_motif[~match_mask] = 0
 
             # Subtract best match
             my_motifs = utils_motif.remove_motif_component(
-                my_motifs, match_motif, align_rc, align_h
+                my_motifs, match_motif, alignment_rc, alignment_h,
             )
-
-            # Remove matches below threshold
-            match_score[match_score < min_score] = 0
-            match_idx[match_score < min_score] = -1
-            match_motif[match_score < min_score] = 0
-            if match_motif.shape[2] == 8:
-                    match_motif = utils_motif.motif_8_to_4_signed(match_motif)
 
             # Save match information
             match_label = [labels[x] if x >= 0 else '' for x in match_idx]
+            if match_motif.shape[2] == 8:
+                match_motif = utils_motif.motif_8_to_4_signed(match_motif)
             match_motifs.append(match_motif)
             match_scores.append(match_score)
             match_labels.append(match_label)
