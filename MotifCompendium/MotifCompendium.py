@@ -122,7 +122,7 @@ def inspect(file_loc: str) -> pd.DataFrame:
     return metadata
 
 
-def load_old_compendium(file_loc: str, safe: bool = True) -> MotifCompendium:
+def load_old_compendium(file_loc: str) -> MotifCompendium:
     """Loads an old MotifCompendium object from file.
 
     Args:
@@ -142,14 +142,18 @@ def load_old_compendium(file_loc: str, safe: bool = True) -> MotifCompendium:
     try:
         with h5py.File(file_loc, "r") as f:
             motifs = f["motifs"][:]
-            similarity = f["similarity"][:].astype(np.single)
-            alignment_rc = f["alignment_fr"][:].astype(np.bool_)
-            alignment_h = f["alignment_h"][:].astype(np.byte)
         metadata = pd.read_hdf(file_loc, key="metadata")
     except:
         raise ValueError(
             "File does not contain the necessary datasets to load a MotifCompendium."
         )
+    # Recompute similarity on motifs
+    similarity, alignment_rc, alignment_h = utils_similarity.compute_similarities(
+        [motifs], [(0, 0)]
+    )[0]
+    np.fill_diagonal(similarity, 1)  # Sometimes diagonal is 0.999... but should be 1
+    similarity = (similarity + similarity.T) / 2  # Ensure symmetric
+    # Split metadata into images if needed
     metadata_columns = list(metadata.columns)
     image_columns = [x for x in metadata_columns if x.startswith("LOGOIMAGEDATA__")]
     nonimage_columns = [x for x in metadata_columns if x not in image_columns]
@@ -164,7 +168,7 @@ def load_old_compendium(file_loc: str, safe: bool = True) -> MotifCompendium:
         alignment_h,
         metadata_nonimage,
         __images,
-        safe=safe,
+        safe=True,
     )
 
 
