@@ -1,18 +1,23 @@
 name: motifcompendium-gpu
+channels:
+- conda-forge
+- defaults
 dependencies:
 - python=3.10
 - h5py
-- jinja2
+- leidenalg
 - numpy
 - pandas
 - pytables
 - seaborn
 - scikit-learn
+- tqdm
 - pip
 - pip:
     - beautifulsoup4
     - cupy-cuda11x
     - igraph
+    - Jinja2
     - leidenalg
     - logomaker
     - upsetplot

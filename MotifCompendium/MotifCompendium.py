@@ -20,39 +20,44 @@ import MotifCompendium.utils.visualization as utils_visualization
 # SETTINGS #
 ############
 def set_compute_options(
-    max_chunk: int | None = None,
     max_cpus: int | None = None,
     use_gpu: bool | None = None,
+    max_chunk: int | None = None,
     fast_plotting: bool | None = None,
+    progress_bar: bool | None = None
 ):
     """Set default values for max_chunk, max_cpus, and use_gpu.
 
     Args:
-        max_chunk: The maximum number of motifs to compute similarity on at a time. SET
-          TO -1 TO USE NO CHUNKING.
         max_cpus: The maximum number of CPUs to use. Used while loading multiple Modisco
           files, generating plots, and, when use_gpu is False, computing similarity.
         use_gpu: Whether or not to GPU accelerate similarity computations.
+        max_chunk: The maximum number of motifs to compute similarity on at a time. SET
+          TO -1 TO USE NO CHUNKING.
         fast_plotting: Whether or not to use fast plotting instead of logomaker when
           generating motif plots.
+        progress_bar: Whether or not to show progress bars. (Currently only used when
+          computing similarity).
 
     Notes:
         Use GPU if possible to accelerate calculation (CuPy required.) Otherwise,
           parallelize across CPUs by setting max_cpus to the number of available
           CPUs.
         Currently, multi-GPU calculation is not supported.
-        If memory constraints are not an issue, set as None for faster
-          performance. Otherwise, decrease max_chunk until calculations fit in memory.
-          For a GPU with ~12GB of memory, use max_chunk=1000.
+        If memory constraints are not an issue, set max_chunk to -1 for faster
+          performance. Otherwise, set max_chunk so that calculations fit in memory. For
+          a GPU with ~12GB of memory, use max_chunk=1152.
     """
-    if max_chunk is not None:
-        utils_config.set_max_chunk(max_chunk)
     if max_cpus is not None:
         utils_config.set_max_cpus(max_cpus)
     if use_gpu is not None:
         utils_config.set_use_gpu(use_gpu)
-    if fast_plotting:
+    if max_chunk is not None:
+        utils_config.set_max_chunk(max_chunk)
+    if fast_plotting is not None:
         utils_config.set_fast_plotting(fast_plotting)
+    if progress_bar is not None:
+        utils_config.set_progress_bar(progress_bar)
 
 
 ######################################
@@ -608,7 +613,7 @@ class MotifCompendium:
         """Returns the columns of the metadata."""
         return list(self.metadata.columns)
 
-    def get_images_columns(self) -> list[str]:
+    def get_saved_images(self) -> list[str]:
         """Returns a list of saved image columns in the MotifCompendium."""
         return list(self.__images.columns)
 
@@ -912,7 +917,7 @@ class MotifCompendium:
         cluster_col: str,
         aggregations: list[tuple[str]] = [("name", "count", "num_constituents")],
         weight_col: str | None = None,
-        compute_quality_stats: bool = True,
+        compute_quality_stats: bool = False,
     ) -> MotifCompendium:
         """Creates a MotifCompendium where each motif represents a cluster of motifs.
 

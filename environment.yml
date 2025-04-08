@@ -1,17 +1,22 @@
 name: motifcompendium
+channels:
+- conda-forge
+- defaults
 dependencies:
 - python=3.10
 - h5py
-- jinja2
+- leidenalg
 - numpy
 - pandas
 - pytables
 - seaborn
 - scikit-learn
+- tqdm
 - pip
 - pip:
     - beautifulsoup4
     - igraph
+    - Jinja2
     - leidenalg
     - logomaker
     - upsetplot
