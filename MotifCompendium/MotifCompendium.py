@@ -876,14 +876,18 @@ class MotifCompendium:
         elif cluster_on is None and cluster_within is not None:
             # Cluster within
             self.metadata[save_name] = None
+            num_clusters_so_far = 0
             for c in set(self.metadata[cluster_within]):
                 self_c = self[self[cluster_within] == c]
-                self.metadata.loc[self_c.metadata.index, save_name] = utils_clustering.cluster(
+                clusters_c = utils_clustering.cluster(
                     similarity_matrix=self_c.similarity,
                     algorithm=algorithm,
                     similarity_threshold=similarity_threshold,
                     **kwargs,
                 )
+                clusters_c = [c + num_clusters_so_far for c in clusters_c]
+                self.metadata.loc[self_c.metadata.index, save_name] = clusters_c
+                num_clusters_so_far += len(set(clusters_c))
         else:
             raise ValueError("cluster_on and cluster_within cannot be both set.")
 
