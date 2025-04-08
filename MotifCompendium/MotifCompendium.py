@@ -807,7 +807,8 @@ class MotifCompendium:
         algorithm: str = "cpm_leiden",
         similarity_threshold: float = 0.9,
         save_name: str = "cluster",
-        cluster_col: str | None = None,
+        cluster_on: str | None = None,
+        cluster_within: str | None = None,
         **kwargs,
     ) -> None:
         """Cluster motifs.
@@ -822,10 +823,15 @@ class MotifCompendium:
               considered similar.
             save_name: The name of the column in the metadata to save motif clustering
                 results into.
-            cluster_col: The name of the column in metadata containing cluster
+            cluster_on: The name of the column in metadata containing cluster
               annotations to group motifs by. If None, the clustering will be done on
               the entire MotifCompendium. If not None, the clustering will be done on
               the average motifs of the clusters in this column.
+            cluster_within: The name of the column in metadata containing cluster
+              annotations to perform clustering within. If None, the clustering will be
+              done on the entire MotifCompendium. If not None, the clustering will be
+              done per cluster in the cluster_within column. This will identify
+              subclusters of the cluster_within_column.
             **kwargs: Additional named arguments specific to the clustering algorithm of
                 choice.
 
@@ -838,18 +844,20 @@ class MotifCompendium:
             isinstance(similarity_threshold, float) and (0 <= similarity_threshold <= 1)
         ):
             raise ValueError("similarity_threshold must be a float between [0, 1].")
-        if cluster_col is None:
+        if cluster_on is None and cluster_within is None:
+            # Cluster entire MotifCompendium
             self.metadata[save_name] = utils_clustering.cluster(
                 similarity_matrix=self.similarity,
                 algorithm=algorithm,
                 similarity_threshold=similarity_threshold,
                 **kwargs,
             )
-        else:
-            if not cluster_col in self.metadata.columns:
-                raise KeyError(f"{cluster_col} not in metadata.")
+        elif cluster_on is not None and cluster_within is None:
+            # Cluster on
+            if not cluster_on in self.metadata.columns:
+                raise KeyError(f"{cluster_on} not in metadata.")
             # Average
-            mc_average = self.cluster_averages(cluster_col=cluster_col)
+            mc_average = self.cluster_averages(cluster_on=cluster_on)
             # Cluster
             mc_average.metadata["cluster"] = utils_clustering.cluster(
                 similarity_matrix=mc_average.similarity,
@@ -863,8 +871,21 @@ class MotifCompendium:
                 for _, row in mc_average.metadata.iterrows()
             }
             self.metadata[save_name] = [
-                cluster_map[c] for c in self.metadata[cluster_col]
+                cluster_map[c] for c in self.metadata[cluster_on]
             ]
+        elif cluster_on is None and cluster_within is not None:
+            # Cluster within
+            self.metadata[save_name] = None
+            for c in set(self.metadata[cluster_within]):
+                self_c = self[self[cluster_within] == c]
+                self.metadata.loc[self_c.metadata.index, save_name] = utils_clustering.cluster(
+                    similarity_matrix=self_c.similarity,
+                    algorithm=algorithm,
+                    similarity_threshold=similarity_threshold,
+                    **kwargs,
+                )
+        else:
+            raise ValueError("cluster_on and cluster_within cannot be both set.")
 
     def clustering_quality(
         self, cluster_col: str, with_names: bool = False
