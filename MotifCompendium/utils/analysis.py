@@ -439,7 +439,7 @@ def calculate_filters(
 ###########################
 # EXISTING MOTIF DATABASE #
 ###########################
-def label_from_pfms(
+def assign_label_from_pfm(
     mc: MotifCompendiumClass,
     pfm_file: str,
     save_column_prefix: str = "match",

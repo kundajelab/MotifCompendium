@@ -25,11 +25,17 @@ class OutputPaths:
     mc_avg_filtered: str = "motifcompendium_avg_filtered.mc"
     mc_avg_removed: str = "motifcompendium_avg_removed.mc"
 
+    mc_subavg: str = "motifcompendium_subavg.mc"
+    mc_subavg_filtered: str = "motifcompendium_subavg_filtered.mc"
+    mc_subavg_removed: str = "motifcompendium_subavg_removed.mc"
+
     html_motif_collection: str = "motifcompendium_motif_collection.html"
     html_motif_table: str = "motifcompendium_motif_table.html"
     html_motif_removed: str = "motifcompendium_motif_removed.html"
     html_cluster_table: str = "motifcompendium_cluster_table.html"
     html_cluster_removed: str = "motifcompendium_cluster_removed.html"
+    html_subcluster_table: str = "motifcompendium_subcluster_table.html"
+    html_subcluster_removed: str = "motifcompendium_subcluster_removed.html"
 
 
 @dataclass

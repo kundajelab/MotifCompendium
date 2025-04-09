@@ -46,6 +46,18 @@ def cluster(
     Notes:
         Please look through the possible clustering algorithm options in this function.
     """
+    # Check arguments
+    if similarity_matrix.shape[0] == 1:
+        return [0]
+    if similarity_matrix.ndim != 2:
+        raise ValueError(
+            f"Similarity matrix must be 2D; Similarity matrix shape: {similarity_matrix.shape}"
+        )
+    if similarity_matrix.shape[0] != similarity_matrix.shape[1]:
+        raise ValueError(
+            f"Similarity matrix must be square; Similarity matrix shape: {similarity_matrix.shape}"
+        )
+    
     match algorithm.lower():
         # Leiden
         case "mod_leiden" | "modularity_leiden" | "rb_leiden":

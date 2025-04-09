@@ -40,6 +40,7 @@ def setup_parser():
 
     parser.add_argument("--sim-scan", nargs="+", type=float, default=None, help="List of similarity thresholds to scan during clustering. MUST INCLUDE SIM_THRESHOLD.")
     parser.add_argument("--sim-threshold", type=float, default=0.9, help="Similarity threshold to apply during clustering.")
+    parser.add_argument("--sim-threshold2", type=float, default=None, help="Second similarity threshold to apply during sub-clustering. If not provided, will not create sub-clusters.")
     parser.add_argument("--cluster-by-composite", action="store_true", help="Cluster base motifs and composite motifs separately.")
     parser.add_argument("--quality", action="store_true", help="Calculate quality metrics and plots for clustering.")
     
@@ -48,6 +49,8 @@ def setup_parser():
     parser.add_argument("--html-motif-removed", action="store_true", help="Generate HTML summary table of removed motifs.")
     parser.add_argument("--html-cluster-table", action="store_true", help="Generate HTML summary table of clusters.")
     parser.add_argument("--html-cluster-removed", action="store_true", help="Generate HTML summary table of removed clusters.")
+    parser.add_argument("--html-subcluster-table", action="store_true", help="Generate HTML summary table of sub-clusters.")
+    parser.add_argument("--html-subcluster-removed", action="store_true", help="Generate HTML summary table of removed sub-clusters.")
     
     parser.add_argument("-ch", "--max-chunk", type=int, default=1000, help="Maximum number of motifs to process at a time. Set to -1 to use no chunking.")
     parser.add_argument("-cp", "--max-cpus", type=int, default=1, help="Maximum number of CPUs to use.")
@@ -567,11 +570,31 @@ if __name__ == "__main__":
                 similarity_threshold=sim_threshold,
                 save_name=cluster_col_name,
             )
-
+        
         if args.time:
             logging.info(f"Time taken: {time.time() - start_time:.2f}s")
         if args.verbose:
             logging.info(f"Total number of clusters ({cluster_col_name}): {len(mc[cluster_col_name].unique())}")
+
+        # Sub-cluster motifs
+        if args.sim_threshold2:
+            subcluster_col_name = f"{ClusterArgs.algorithm}_{sim_threshold}_{args.sim_threshold2}"
+            if args.verbose:
+                logging.info(f"Sub-clustering motifs within {cluster_col_name} clusters using: {ClusterArgs.algorithm} {args.sim_threshold2}...")
+            if args.time:
+                start_time = time.time()
+            mc.cluster(
+                algorithm=ClusterArgs.algorithm,
+                similarity_threshold=args.sim_threshold2,
+                cluster_within=cluster_col_name,
+                save_name=subcluster_col_name,
+            )
+            if args.time:
+                logging.info(f"Time taken: {time.time() - start_time:.2f}s")
+            
+            if args.verbose:
+                logging.info(f"Total number of sub-clusters ({subcluster_col_name}): {len(mc[subcluster_col_name].unique())}")
+
 
         # Summarize cluster quality
         if args.quality:
@@ -583,9 +606,7 @@ if __name__ == "__main__":
                 os.makedirs(quality_dir, exist_ok=True)
 
             # Quality: Histogram
-            histogram_path = os.path.join(
-                quality_dir, f"histogram_{cluster_col_name}.png"
-            )
+            histogram_path = os.path.join(quality_dir, f"histogram_{cluster_col_name}.png")
             if args.verbose:
                 logging.info(f"Summarizing cluster quality (Histogram): {histogram_path}...")
             if args.time:
@@ -612,6 +633,36 @@ if __name__ == "__main__":
             if args.time:
                 logging.info(f"Time taken: {time.time() - start_time:.2f}s")
             
+            # Repeat for sub-clusters
+            if args.sim_threshold2:
+                # Quality: Histogram (sub-cluster)
+                histogram_path = os.path.join(quality_dir, f"histogram_{subcluster_col_name}.png")
+                if args.verbose:
+                    logging.info(f"Summarizing sub-cluster quality (Histogram): {histogram_path}...")
+                if args.time:
+                    start_time = time.time()
+                utils_analysis.judge_clustering(
+                    mc=mc,
+                    cluster_col=subcluster_col_name,
+                    save_loc=histogram_path,
+                )
+                if args.time:
+                    logging.info(f"Time taken: {time.time() - start_time:.2f}s")
+
+                # Quality: Heatmap (sub-cluster)
+                heatmap_path = os.path.join(quality_dir, f"heatmap_{subcluster_col_name}.png")
+                if args.verbose:
+                    logging.info(f"Summarizing sub-cluster quality (Heatmap): {heatmap_path}...")
+                if args.time:
+                    start_time = time.time()
+                mc.heatmap(
+                    sort_by=subcluster_col_name,
+                    save_loc=heatmap_path,
+                )
+                plt.savefig(heatmap_path)
+                if args.time:
+                    logging.info(f"Time taken: {time.time() - start_time:.2f}s")
+
             # Quality: Add HTML columns
             if args.verbose:
                 logging.info(f"Adding HTML columns for cluster quality...")
@@ -619,6 +670,7 @@ if __name__ == "__main__":
                 "max_external_similarity", "max_external_sim_logo",
                 "min_internal_similarity", "min_internal_sim_logo1",
                 "min_internal_sim_logo2"] + VisualizeArgs.html_motif_table_cols
+
 
     # Save MotifCompendium object
     mc_path = os.path.join(args.output_dir, OutputPaths.mc_clustered)
@@ -690,6 +742,36 @@ if __name__ == "__main__":
     mc_avg.save(mc_avg_path)
     if args.time:
         logging.info(f"Time taken: {time.time() - start_time:.2f}s")
+    
+    # Repeat for sub-clusters
+    if args.sim_threshold2:
+        # Average: Cluster motifs (sub-cluster)
+        subcluster_col_name = f"{ClusterArgs.algorithm}_{args.sim_threshold}_{args.sim_threshold2}"
+        if args.verbose:
+            logging.info(f"Averaging motifs per sub-cluster...")
+        mc_subavg = mc.cluster_averages(
+            cluster_col=subcluster_col_name,
+            aggregations=ClusterArgs.aggregate_metadata,
+            weight_col=ClusterArgs.weight_col,
+            compute_quality_stats=args.quality,
+        )
+        if args.verbose:
+            logging.info(
+                f"Completed averaging motifs per sub-cluster:\n"
+                f"  Total number of clusters: {len(mc_subavg)}\n"
+                f"  Metadata columns: {mc_subavg.metadata.columns.tolist()}"
+            )
+        if args.time:
+            start_time = time.time()
+
+        # Add positive/negative column
+        mc_subavg["posneg"] = utils_motif.motif_posneg_sum(mc_subavg.get_standard_motif_stack())
+        
+        # Save Average MotifCompendium object (sub-cluster)
+        mc_subavg_path = os.path.join(args.output_dir, OutputPaths.mc_subavg)
+        if args.verbose:
+            logging.info(f"Saving average MotifCompendium object (sub-cluster): {mc_subavg_path}...")
+        mc_subavg.save(mc_subavg_path)
 
 
     ## FILTER: CLUSTERS --------------------------------------------------------------------
@@ -739,7 +821,6 @@ if __name__ == "__main__":
         logging.info(f"Applying filters as flag:\n"
             f"  {MotifFilterArgs.motif_filters}"
         )
-    mc_avg[MetadataCols.filter_col_flag] = False
     if args.time:
         start_time = time.time()
     for filter_args in MotifFilterArgs.motif_filters:
@@ -833,9 +914,150 @@ if __name__ == "__main__":
     if args.time:
         logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
+    ## FILTER: SUB-CLUSTERS ---------------------------------------------------------------
+    if args.sim_threshold2:
+        mc_subavg[MetadataCols.filter_col_flag] = False
+        
+        # Filter #1: Reference matching
+        if args.reference.endswith(".mc"):
+            if args.verbose:
+                logging.info(f"Matching motifs to reference MotifCompendium object: {args.reference}...")
+            mc_subavg.assign_label_from_other(
+                other=ref_mc,
+                save_column_prefix=MetadataCols.match_column_prefix,
+                max_submotifs=MotifMatchArgs.max_submotifs,
+                min_score=MotifMatchArgs.min_score,
+            )
+        elif args.reference.endswith("pfm.txt") or args.reference.endswith("meme.txt") or args.reference.endswith(".meme"):
+            if args.verbose:
+                logging.info(f"Matching motifs to reference file: {args.reference}...")
+            utils_analysis.assign_label_from_pfm(
+                mc=mc_subavg,
+                pfm_file=args.reference,
+                save_column_prefix=MetadataCols.match_column_prefix,
+                max_submotifs=MotifMatchArgs.max_submotifs,
+                min_score=MotifMatchArgs.min_score,
+            )
+        else:
+            logging.error("Reference file must be a MotifCompendium object or PFM, MEME .txt file.")
+            raise ValueError(
+                "Reference file must be a MotifCompendium object or PFM, MEME .txt file."
+            )
+        
+        # Filter #2: Calculate and flag filters
+        if args.verbose:
+            logging.info(f"Calculating filter metrics:\n"
+                f"  {MotifFilterArgs.motif_metrics}"
+            )
+        if args.time:
+            start_time = time.time()
+        utils_analysis.calculate_filters(
+            mc=mc_subavg,
+            metric_list=MotifFilterArgs.motif_metrics,
+        )
+        if args.time:
+            logging.info(f"Time taken: {time.time() - start_time:.2f}s")
+        if args.verbose:
+            logging.info(f"Applying filters as flag:\n"
+                f"  {MotifFilterArgs.motif_filters}"
+            )
+        if args.time:
+            start_time = time.time()
+        for filter_args in MotifFilterArgs.motif_filters:
+            if filter_args.apply_cluster:
+                apply_filter_threshold(
+                    mc=mc_subavg,
+                    flag_col=MetadataCols.filter_col_flag,
+                    metric=filter_args.metric,
+                    operation=filter_args.operation,
+                    threshold=filter_args.threshold,
+                    override=filter_args.override,
+                )
+        if args.time:
+            logging.info(f"Time taken: {time.time() - start_time:.2f}s")
+        if args.verbose:
+            logging.info(f"Number of flagged motifs: {len(mc_subavg[mc_subavg[MetadataCols.filter_col_flag]])}")
+
+        # Filter #3: Flag singleton clusters
+        if args.rm_singletons:
+            if args.verbose:
+                logging.info(f"Flagging singleton clusters...")
+            mc_subavg[MetadataCols.filter_col_flag] = mc_subavg["num_motifs"] == 1
+            if args.verbose:
+                logging.info(f"Number of singleton clusters: {len(mc_subavg[mc_subavg['num_motifs'] == 1])}")
+        
+        # Filter #4: Override flags, for good matches
+        if args.verbose:
+            logging.info(
+                f"Overriding flags for matches above threshold:\n"
+                f'Base: {MotifFilterArgs.override_filters[0].threshold}, Composite: {MotifFilterArgs.override_filters[1].threshold}'
+            )
+        if args.time:
+            start_time = time.time()
+        for addback_filter_args in MotifFilterArgs.override_filters:
+            if addback_filter_args.apply_cluster:
+                apply_filter_threshold(
+                    mc=mc_subavg,
+                    flag_col=MetadataCols.filter_col_flag,
+                    metric=addback_filter_args.metric,
+                    operation=addback_filter_args.operation,
+                    threshold=addback_filter_args.threshold,
+                    override=addback_filter_args.override,
+                )
+        if args.time:
+            logging.info(f"Time taken: {time.time() - start_time:.2f}s")
+        
+        # Filter #5: Apply strict filters
+        if args.strict_filter:
+            if args.verbose:
+                logging.info(
+                    f"Applying strict filters:\n"
+                    f"  {MotifFilterArgs.strict_filters}"
+                )
+            if args.time:
+                start_time = time.time()
+            for strict_filter_args in MotifFilterArgs.strict_filters:
+                if strict_filter_args.apply_cluster:
+                    apply_filter_threshold(
+                        mc=mc_subavg,
+                        flag_col=MetadataCols.filter_col_flag,
+                        metric=strict_filter_args.metric,
+                        operation=strict_filter_args.operation,
+                        threshold=strict_filter_args.threshold,
+                        override=strict_filter_args.override,
+                    )
+            if args.time:
+                logging.info(f"Time taken: {time.time() - start_time:.2f}s")
+        
+        # Remove flagged motifs
+        if args.verbose:
+            logging.info(f"Removing flagged motifs...")
+        mc_subavg_removed = mc_subavg[mc_subavg[MetadataCols.filter_col_flag]]
+        mc_subavg = mc_subavg[~mc_subavg[MetadataCols.filter_col_flag]]
+        if args.verbose:
+            logging.info(f"Number of motifs after removing flagged motifs: {len(mc_subavg)}\n"
+                        f"Number of motifs removed: {len(mc_subavg_removed)}")
+            
+        # Save MotifCompendium objects
+        mc_subavg_path = os.path.join(args.output_dir, OutputPaths.mc_subavg_filtered)
+        mc_subavg_removed_path = os.path.join(args.output_dir, OutputPaths.mc_subavg_removed)
+        if args.verbose:
+            logging.info(
+                f"Saving filtered MotifCompendium objects:\n"
+                f"  Filtered: {mc_subavg_path}\n"
+                f"  Removed: {mc_subavg_removed_path}"
+            )
+        if args.time:
+            start_time = time.time()
+        mc_subavg.save(mc_subavg_path)
+        mc_subavg_removed.save(mc_subavg_removed_path)
+        if args.time:
+            logging.info(f"Time taken: {time.time() - start_time:.2f}s")
+
 
     ## LABEL -------------------------------------------------------------------
     if args.add_reference:
+        # Label: Average 
         if args.verbose:
             logging.info(f"Adding labels from additional reference files: {args.add_reference}...")
         html_label_cols = []
@@ -881,11 +1103,55 @@ if __name__ == "__main__":
             
             # Add label column to list
             html_label_cols.extend([f"{label_col}_logo0", f"{label_col}_name0", f"{label_col}_score0"])
-
+        
         # Update HTML table columns
         if args.verbose:
             logging.info(f"Adding the following columns to HTML table: {html_label_cols}")
         VisualizeArgs.html_cluster_table_cols = html_label_cols + VisualizeArgs.html_cluster_table_cols
+        
+        # Label: Sub-average
+        if args.sim_threshold2:
+            if args.verbose:
+                logging.info(f"Adding labels from additional reference files: {args.add_reference}...")
+            for reference in args.add_reference:
+                label_col = os.path.splitext(os.path.basename(reference))[0]
+                if reference.endswith(".mc"):
+                    if args.verbose:
+                        logging.info(f"Matching motifs to reference MotifCompendium object: {reference}...")
+                        logging.info(f"Label column: {label_col}")
+                    if args.time:
+                        start_time = time.time()
+                    ref_mc = MotifCompendium.load(reference, safe=args.safe)
+                    mc_subavg.assign_label_from_other(
+                        other=ref_mc,
+                        save_column_prefix=label_col,
+                        max_submotifs=1,
+                        min_score=MotifMatchArgs.min_score,
+                    )
+                    if args.time:
+                        logging.info(f"Time taken: {time.time() - start_time:.2f}s")
+
+                elif reference.endswith("pfm.txt") or reference.endswith("meme.txt") or reference.endswith(".meme"):
+                    if args.verbose:
+                        logging.info(f"Matching motifs to reference file: {reference}...")
+                        logging.info(f"Label column: {label_col}")
+                    if args.time:
+                        start_time = time.time()
+                    utils_analysis.assign_label_from_pfm(
+                        mc=mc_subavg,
+                        pfm_file=reference,
+                        save_column_prefix=label_col,
+                        max_submotifs=1,
+                        min_score=MotifMatchArgs.min_score,
+                    )
+                    if args.time:
+                        logging.info(f"Time taken: {time.time() - start_time:.2f}s")
+
+                else:
+                    logging.error("Reference file must be a MotifCompendium object or PFM, MEME .txt file.")
+                    raise ValueError(
+                        "Reference file must be a MotifCompendium object or PFM, MEME .txt file."
+                    )
 
 
     ## VISUALIZE ----------------------------------------------------------------
@@ -1005,3 +1271,53 @@ if __name__ == "__main__":
         )
         if args.time:
             logging.info(f"Time taken: {time.time() - start_time:.2f}s")
+    
+    ## SUB-CLUSTERS
+    # Visualize: Sub-cluster table
+    if args.html_subcluster_table:
+        # Check html table columns
+        VisualizeArgs.html_cluster_table_cols = [
+            col for col in VisualizeArgs.html_cluster_table_cols
+            if col in mc_subavg.metadata.columns or col in mc_subavg.get_images_columns()
+        ]
+        if args.verbose:
+            logging.info(f"Visualizing the following columns for sub-cluster table: {VisualizeArgs.html_cluster_table_cols}")
+
+        # Create HTML table
+        html_subcluster_table_path = os.path.join(html_dir, OutputPaths.html_subcluster_table)
+        if args.verbose:
+            logging.info(f"Visualizing sub-cluster table: {html_subcluster_table_path}...")
+        if args.time:
+            start_time = time.time()        
+        mc_subavg.summary_table_html(
+            html_out=html_subcluster_table_path,
+            columns=VisualizeArgs.html_cluster_table_cols,
+            editable=VisualizeArgs.editable,
+        )
+        if args.time:
+            logging.info(f"Time taken: {time.time() - start_time:.2f}s")
+    
+    # Visualize: Sub-clusters removed
+    if args.html_subcluster_removed:
+        # Visualize all metadata columns
+        html_subcluster_removed_cols = mc_subavg_removed.metadata.columns.tolist() + mc_subavg_removed.get_images_columns()
+        if args.verbose:
+            logging.info(f"Visualizing the following columns for removed sub-cluster table: {html_subcluster_removed_cols}")
+
+        # Create HTML table
+        html_subcluster_removed_path = os.path.join(html_dir, OutputPaths.html_subcluster_removed)
+        if args.verbose:
+            logging.info(f"Visualizing removed sub-clusters: {html_subcluster_removed_path}...")
+        if args.time:
+            start_time = time.time()        
+        mc_subavg_removed.summary_table_html(
+            html_out=html_subcluster_removed_path,
+            columns=html_subcluster_removed_cols,
+            editable=VisualizeArgs.editable,
+        )
+        if args.time:
+            logging.info(f"Time taken: {time.time() - start_time:.2f}s")
+    
+
+    ## END ----------------------------------------------------------------
+    print(f"MotifCompendium pipeline completed successfully. Output saved to {args.output_dir}.")

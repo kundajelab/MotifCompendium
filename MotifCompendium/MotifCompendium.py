@@ -613,7 +613,7 @@ class MotifCompendium:
         """Returns the columns of the metadata."""
         return list(self.metadata.columns)
 
-    def get_saved_images(self) -> list[str]:
+    def get_images_columns(self) -> list[str]:
         """Returns a list of saved image columns in the MotifCompendium."""
         return list(self.__images.columns)
 
@@ -895,7 +895,7 @@ class MotifCompendium:
             if not cluster_on in self.metadata.columns:
                 raise KeyError(f"{cluster_on} not in metadata.")
             # Average
-            mc_average = self.cluster_averages(cluster_on=cluster_on)
+            mc_average = self.cluster_averages(cluster_col=cluster_on)
             # Cluster
             mc_average.metadata["cluster"] = utils_clustering.cluster(
                 similarity_matrix=mc_average.similarity,
@@ -917,6 +917,7 @@ class MotifCompendium:
             num_clusters_so_far = 0
             for c in set(self.metadata[cluster_within]):
                 self_c = self[self[cluster_within] == c]
+                self_c_idxs = self.metadata[self[cluster_within] == c].index.tolist()
                 clusters_c = utils_clustering.cluster(
                     similarity_matrix=self_c.similarity,
                     algorithm=algorithm,
@@ -924,7 +925,7 @@ class MotifCompendium:
                     **kwargs,
                 )
                 clusters_c = [c + num_clusters_so_far for c in clusters_c]
-                self.metadata.loc[self_c.metadata.index, save_name] = clusters_c
+                self.metadata.loc[self_c_idxs, save_name] = clusters_c
                 num_clusters_so_far += len(set(clusters_c))
         else:
             raise ValueError("cluster_on and cluster_within cannot be both set.")
