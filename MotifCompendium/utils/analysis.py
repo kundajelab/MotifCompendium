@@ -25,8 +25,8 @@ def plot_similarity_distribution(
     """Plots examples of various similarities in a MotifCompendium.
 
     For a set of similarities, create an html file displaying multiple examples of pairs
-      of motifs that have a similarity within +-tolerance of the specified similarity
-      values.
+      of motifs that have a similarity within [val, val+tolerance) for each similarity
+      value.
 
     Args:
         mc: The MotifCompendium to analyze.
@@ -36,10 +36,9 @@ def plot_similarity_distribution(
         n_per: The number of examples of each similarity score to display.
     """
     clustering = [False for _ in range(len(mc))]
-    similarity = mc.similarity
     for val in vals:
-        # Find all locations where similarity is val-tolerance < similarity < val+tolerance
-        indices = np.where(np.abs(similarity - val) < tolerance)
+        # Find all locations where similarity is val <= similarity < val+tolerance
+        indices = np.where((mc.similarity >= val) & (mc.similarity < val + tolerance))
         indices = list(zip(indices[0], indices[1]))
         p = 1
         for i, j in indices:
@@ -440,7 +439,7 @@ def calculate_filters(
 ###########################
 # EXISTING MOTIF DATABASE #
 ###########################
-def assign_label_from_pfm(
+def label_from_pfms(
     mc: MotifCompendiumClass,
     pfm_file: str,
     save_column_prefix: str = "match",
@@ -473,8 +472,8 @@ def assign_label_from_pfm(
 
     # Assign labels
     mc.assign_label_from_motifs(
-        other_motifs=pfm_motifs,
-        labels=pfm_names,
+        pfm_motifs,
+        pfm_names,
         save_column_prefix=save_column_prefix,
         max_submotifs=max_submotifs,
         min_score=min_score,

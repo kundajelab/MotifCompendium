@@ -20,39 +20,44 @@ import MotifCompendium.utils.visualization as utils_visualization
 # SETTINGS #
 ############
 def set_compute_options(
-    max_chunk: int | None = None,
     max_cpus: int | None = None,
     use_gpu: bool | None = None,
+    max_chunk: int | None = None,
     fast_plotting: bool | None = None,
+    progress_bar: bool | None = None
 ):
     """Set default values for max_chunk, max_cpus, and use_gpu.
 
     Args:
-        max_chunk: The maximum number of motifs to compute similarity on at a time. SET
-          TO -1 TO USE NO CHUNKING.
         max_cpus: The maximum number of CPUs to use. Used while loading multiple Modisco
           files, generating plots, and, when use_gpu is False, computing similarity.
         use_gpu: Whether or not to GPU accelerate similarity computations.
+        max_chunk: The maximum number of motifs to compute similarity on at a time. SET
+          TO -1 TO USE NO CHUNKING.
         fast_plotting: Whether or not to use fast plotting instead of logomaker when
           generating motif plots.
+        progress_bar: Whether or not to show progress bars. (Currently only used when
+          computing similarity).
 
     Notes:
         Use GPU if possible to accelerate calculation (CuPy required.) Otherwise,
           parallelize across CPUs by setting max_cpus to the number of available
           CPUs.
         Currently, multi-GPU calculation is not supported.
-        If memory constraints are not an issue, set as None for faster
-          performance. Otherwise, decrease max_chunk until calculations fit in memory.
-          For a GPU with ~12GB of memory, use max_chunk=1000.
+        If memory constraints are not an issue, set max_chunk to -1 for faster
+          performance. Otherwise, set max_chunk so that calculations fit in memory. For
+          a GPU with ~12GB of memory, use max_chunk=1152.
     """
-    if max_chunk is not None:
-        utils_config.set_max_chunk(max_chunk)
     if max_cpus is not None:
         utils_config.set_max_cpus(max_cpus)
     if use_gpu is not None:
         utils_config.set_use_gpu(use_gpu)
-    if fast_plotting:
+    if max_chunk is not None:
+        utils_config.set_max_chunk(max_chunk)
+    if fast_plotting is not None:
         utils_config.set_fast_plotting(fast_plotting)
+    if progress_bar is not None:
+        utils_config.set_progress_bar(progress_bar)
 
 
 ######################################
@@ -608,7 +613,7 @@ class MotifCompendium:
         """Returns the columns of the metadata."""
         return list(self.metadata.columns)
 
-    def get_images_columns(self) -> list[str]:
+    def get_saved_images(self) -> list[str]:
         """Returns a list of saved image columns in the MotifCompendium."""
         return list(self.__images.columns)
 
@@ -840,7 +845,8 @@ class MotifCompendium:
         algorithm: str = "cpm_leiden",
         similarity_threshold: float = 0.9,
         save_name: str = "cluster",
-        cluster_col: str | None = None,
+        cluster_on: str | None = None,
+        cluster_within: str | None = None,
         **kwargs,
     ) -> None:
         """Cluster motifs.
@@ -855,10 +861,15 @@ class MotifCompendium:
               considered similar.
             save_name: The name of the column in the metadata to save motif clustering
                 results into.
-            cluster_col: The name of the column in metadata containing cluster
+            cluster_on: The name of the column in metadata containing cluster
               annotations to group motifs by. If None, the clustering will be done on
               the entire MotifCompendium. If not None, the clustering will be done on
               the average motifs of the clusters in this column.
+            cluster_within: The name of the column in metadata containing cluster
+              annotations to perform clustering within. If None, the clustering will be
+              done on the entire MotifCompendium. If not None, the clustering will be
+              done per cluster in the cluster_within column. This will identify
+              subclusters of the cluster_within_column.
             **kwargs: Additional named arguments specific to the clustering algorithm of
                 choice.
 
@@ -871,18 +882,20 @@ class MotifCompendium:
             isinstance(similarity_threshold, float) and (0 <= similarity_threshold <= 1)
         ):
             raise ValueError("similarity_threshold must be a float between [0, 1].")
-        if cluster_col is None:
+        if cluster_on is None and cluster_within is None:
+            # Cluster entire MotifCompendium
             self.metadata[save_name] = utils_clustering.cluster(
                 similarity_matrix=self.similarity,
                 algorithm=algorithm,
                 similarity_threshold=similarity_threshold,
                 **kwargs,
             )
-        else:
-            if not cluster_col in self.metadata.columns:
-                raise KeyError(f"{cluster_col} not in metadata.")
+        elif cluster_on is not None and cluster_within is None:
+            # Cluster on
+            if not cluster_on in self.metadata.columns:
+                raise KeyError(f"{cluster_on} not in metadata.")
             # Average
-            mc_average = self.cluster_averages(cluster_col=cluster_col)
+            mc_average = self.cluster_averages(cluster_on=cluster_on)
             # Cluster
             mc_average.metadata["cluster"] = utils_clustering.cluster(
                 similarity_matrix=mc_average.similarity,
@@ -896,8 +909,25 @@ class MotifCompendium:
                 for _, row in mc_average.metadata.iterrows()
             }
             self.metadata[save_name] = [
-                cluster_map[c] for c in self.metadata[cluster_col]
+                cluster_map[c] for c in self.metadata[cluster_on]
             ]
+        elif cluster_on is None and cluster_within is not None:
+            # Cluster within
+            self.metadata[save_name] = None
+            num_clusters_so_far = 0
+            for c in set(self.metadata[cluster_within]):
+                self_c = self[self[cluster_within] == c]
+                clusters_c = utils_clustering.cluster(
+                    similarity_matrix=self_c.similarity,
+                    algorithm=algorithm,
+                    similarity_threshold=similarity_threshold,
+                    **kwargs,
+                )
+                clusters_c = [c + num_clusters_so_far for c in clusters_c]
+                self.metadata.loc[self_c.metadata.index, save_name] = clusters_c
+                num_clusters_so_far += len(set(clusters_c))
+        else:
+            raise ValueError("cluster_on and cluster_within cannot be both set.")
 
     def clustering_quality(
         self, cluster_col: str, with_names: bool = False

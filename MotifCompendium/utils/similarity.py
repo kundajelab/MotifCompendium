@@ -1,6 +1,7 @@
 import multiprocessing
 
 import numpy as np
+from tqdm import tqdm
 
 import MotifCompendium.utils.config as utils_config
 from MotifCompendium.utils.motif import validate_motif_stack_similarity
@@ -148,10 +149,20 @@ def _compute_similarity_and_align_parallel(
     """Compute similarities and alignments."""
     if utils_config.get_use_gpu():
         # SINGLE GPU CALCULATIONS
-        return [
-            compute_similarity_and_align(motif_stack_list[c[0]], motif_stack_list[c[1]])
-            for c in calculations
-        ]
+        if utils_config.get_progress_bar():
+            results = []
+            for c in tqdm(calculations, desc="computing similarities on GPU..."):
+                results.append(
+                    compute_similarity_and_align(
+                        motif_stack_list[c[0]], motif_stack_list[c[1]]
+                    )
+                )
+            return results
+        else:
+            return [
+                compute_similarity_and_align(motif_stack_list[c[0]], motif_stack_list[c[1]])
+                for c in calculations
+            ]
     else:
         if utils_config.get_max_cpus() == 1 or len(calculations) == 1:
             # SINGLE CPU CALCULATIONS

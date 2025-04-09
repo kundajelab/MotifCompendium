@@ -5,6 +5,7 @@ _MAX_CHUNK = -1
 _MAX_CPUS = 1
 _USE_GPU = False
 _FAST_PLOTTING = False
+_PROGRESS_BAR = False
 
 
 def get_max_chunk() -> int:
@@ -21,6 +22,10 @@ def get_use_gpu() -> bool:
 
 def get_fast_plotting() -> bool:
     return _FAST_PLOTTING
+
+
+def get_progress_bar() -> bool:
+    return _PROGRESS_BAR
 
 
 def set_max_chunk(max_chunk: int) -> None:
@@ -53,3 +58,10 @@ def set_fast_plotting(fast_plotting: bool) -> None:
         raise TypeError("Fast plotting must be a boolean.")
     global _FAST_PLOTTING
     _FAST_PLOTTING = fast_plotting
+
+
+def set_progress_bar(progress_bar: bool) -> None:
+    if not isinstance(progress_bar, bool):
+        raise TypeError("Progress bar must be a boolean.")
+    global _PROGRESS_BAR
+    _PROGRESS_BAR = progress_bar
