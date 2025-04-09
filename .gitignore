@@ -6,7 +6,7 @@
 *.txt
 *.html
 *.pyc
+*.sh
 */__pycache__/*
 */.ipynb_checkpoints
 MotifCompendium.egg-info/*
-*.sh

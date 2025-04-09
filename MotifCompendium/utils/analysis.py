@@ -365,9 +365,12 @@ def calculate_filters(
             Calculation: Entropy across pairs of positions (L/2,) /
                 Entropy across all dinucleotide pairs (64,)
             Purpose:    (High) Dinucleotide repeats (e.g., GCGCGC, ATATAT)
-        (5) Negative pattern positive peak:
-            Calculation: Check if negative patterns with a positive peak
-            Purpose:    (High) Archetype #5: Sharp positive peak in negative pattern
+        (5) Positive-negative inverted:
+            Calculation: Check if positive pattern with a negative peak, and vice versa
+            Purpose:    (True) Archetype #5: Sharp positive peak in negative pattern
+        (6) Truncated:
+            Calculation: Check if max position is at the end of the motif
+            Purpose:    (True) Archetype #6: Truncated motifs
 
     Args:
         metric_list: List of filter metrics to calculate.
@@ -382,6 +385,7 @@ def calculate_filters(
         "copair_entropy_ratio",
         "dinuc_entropy_ratio",
         "posneg_inverted",
+        "truncated"
     ]
     for filter_metric in metric_list:
         if filter_metric not in valid_filter_metrics:
@@ -422,6 +426,10 @@ def calculate_filters(
                     utils_motif.motif_posneg_max(mc.get_standard_motif_stack())
                     != mc["posneg"]
                 )
+            
+            case "truncated":
+                max_pos = mc.motifs.sum(axis=-1).argmax(axis=-1) # (N, )
+                mc["truncated"] = (max_pos == 0) | (max_pos == mc.motifs.shape[1] - 1)
 
             case _:
                 raise ValueError(
@@ -456,7 +464,7 @@ def assign_label_from_pfm(
     """
     # Load PFM database, with same length as motifs
     L = mc.motifs.shape[1]
-    if pfm_file.endswith("_pfms.txt"):
+    if pfm_file.endswith("pfms.txt"):
         pfm_motifs, pfm_names = utils_loader.load_pfm(pfm_file, L)
     elif pfm_file.endswith(".meme.txt") or pfm_file.endswith(".meme"):
         pfm_motifs, pfm_names = utils_loader.load_meme(pfm_file, L)

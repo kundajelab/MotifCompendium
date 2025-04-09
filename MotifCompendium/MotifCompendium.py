@@ -325,11 +325,11 @@ def combine(
     # Images
     __images = pd.DataFrame()
     for mc in compendiums:
-        for image_column in mc.get_saved_images():
+        for image_column in mc.get_images_columns():
             __images = pd.concat(
                 [
                     __images,
-                    pd.DataFrame(mc.__images(image_column), columns=[image_column]),
+                    pd.DataFrame(mc.get_images(image_column), columns=[image_column]),
                 ],
                 ignore_index=True,
             )
@@ -528,7 +528,7 @@ class MotifCompendium:
                 and (self.alignment_rc == other.alignment_rc).all()
                 and (self.alignment_h == other.alignment_h).all()
                 and self.metadata.equals(other.metadata)
-                and self.__images.equals(other.__images)
+                and self.__images.equals(other.get_images())
             )
         return False
 
@@ -618,6 +618,44 @@ class MotifCompendium:
             raise KeyError(f"{image_column} is not a saved image.")
 
         return self.__images[image_column].tolist()
+    
+    def generate_images(self, motifs: np.ndarray, alignment_rc: np.ndarray, alignment_h: np.ndarray, image_column: str) -> None:
+        """Generate images for select motifs in the MotifCompendium.
+
+        Generate images for select motifs in the MotifCompendium and saves them 
+          to thespecified column in self.__images.
+
+        Args:
+            motifs: The motifs to generate images for. Of shape (N, L, 8/4).
+            alignment_rc: The reverse complement alignment for the motifs. Of shape (N,).
+            alignment_h: The horizontal alignment for the motifs. Of shape (N,).
+            image_column: The name of the column to save the images to.
+
+        Notes:
+            This function is private and not meant to be called directly.
+        """
+        if not (motifs.shape[0] == alignment_rc.shape[0] == alignment_h.shape[0]):
+            raise ValueError(
+                "motifs, alignment_rc, and alignment_h must have the same number of motifs."
+            )
+        if len(motifs.shape) == 2:
+            motifs = np.expand_dims(motifs, axis=0)
+
+        motif_plotting_inputs = []
+        for i in range(motifs.shape[0]):
+            motif_plotting_inputs.append(
+                utils_plotting.LogoPlottingInput(
+                    motif=motifs[i],
+                    revcomp=alignment_rc[i],
+                    pos=alignment_h[i],
+                )
+            )
+        self.__images[image_column] = [
+            motif_input.utf8_plot
+            for motif_input in utils_plotting.plot_many_motif_logos(
+                motif_plotting_inputs,
+            )
+        ]
 
     def delete_column(self, column: str | list[str]) -> None:
         """Deletes the specified column(s) from the metadata.
@@ -632,7 +670,7 @@ class MotifCompendium:
             raise TypeError("column must be a string or a list of strings.")
         self.metadata.drop(column, axis=1, inplace=True)
 
-    def delete_image(self, image_column: str | list[str]) -> None:
+    def delete_images(self, image_column: str | list[str]) -> None:
         """Deletes the specified column(s) from the saved images.
 
         Args:
@@ -912,7 +950,7 @@ class MotifCompendium:
         cluster_col: str,
         aggregations: list[tuple[str]] = [("name", "count", "num_constituents")],
         weight_col: str | None = None,
-        compute_quality_stats: bool = True,
+        compute_quality_stats: bool = False,
     ) -> MotifCompendium:
         """Creates a MotifCompendium where each motif represents a cluster of motifs.
 
@@ -966,8 +1004,8 @@ class MotifCompendium:
             if x[2] in [
                 "name",
                 "source_cluster",
-                "lowest_internal_similarity",
-                "highest_external_similarity",
+                "min_internal_similarity",
+                "max_external_similarity",
             ]:
                 raise ValueError(f"{x[2]} is a reserved column name.")
             aggregations_dicts.append(
@@ -1041,25 +1079,82 @@ class MotifCompendium:
         metadata["source_cluster"] = clusters
         for agg_dict in aggregations_dicts:
             metadata[agg_dict["save"]] = agg_dict["values"]
+        mc_avg = build(cluster_motif_avgs, metadata, safe=False)
+
         # Compute quality statistics
         if compute_quality_stats:
+            # Statistics
             quality = self.clustering_quality(cluster_col, with_names=True)
-            quality_np = quality.to_numpy()
-            metadata["lowest_internal_similarity"] = [
-                quality.loc[c, c] for c in clusters
-            ]
-            external_sim = quality_np * (1 - np.eye(quality_np.shape[0]))
-            highest_external_sim = external_sim.max(axis=0)
-            highest_external_sim_which = [
-                quality.index[i] for i in external_sim.argmax(axis=0)
-            ]
-            quality["highest_external_sim"] = highest_external_sim
-            quality["highest_external_sim_which"] = highest_external_sim_which
-            metadata["highest_external_similarity"] = [
-                f"{quality.loc[c, 'highest_external_sim']} ({quality.loc[c, 'highest_external_sim_which']})"
-                for c in clusters
-            ]
-        return build(cluster_motif_avgs, metadata, safe=False)
+            mc_avg["min_internal_similarity"] = [quality.loc[c, c] for c in clusters]
+            external_sim = mc_avg.similarity - np.eye(mc_avg.similarity.shape[0])
+            max_external_sim = external_sim.max(axis=1)
+            mc_avg["max_external_similarity"] = max_external_sim
+            # quality_np = quality.to_numpy()
+            # external_sim = quality_np * (1 - np.eye(quality_np.shape[0]))
+            # max_external_sim = external_sim.max(axis=0)
+            # max_external_sim_which = [
+            #     quality.index[i] for i in external_sim.argmax(axis=0)
+            # ]
+            # quality["max_external_similarity"] = max_external_sim
+            # quality["max_external_sim_which"] = max_external_sim_which
+            # mc_avg["max_external_similarity"] = [
+            #     f"{quality.loc[c, 'max_external_sim']} ({quality.loc[c, 'max_external_sim_which']})"
+            #     for c in clusters
+            # ]
+
+            # Logos
+            motifs = (
+                utils_motif.motif_8_to_4_signed(self.motifs)
+                if self.motifs.shape[2] == 8
+                else self.motifs
+            )
+            avg_motifs = (
+                utils_motif.motif_8_to_4_signed(mc_avg.motifs)
+                if mc_avg.motifs.shape[2] == 8
+                else mc_avg.motifs
+            )
+            
+            max_external_sim_idxs = external_sim.argmax(axis=0)
+            max_external_sim_motifs = avg_motifs[max_external_sim_idxs]
+            max_external_sim_rc = mc_avg.alignment_rc[np.arange(len(max_external_sim_idxs)), max_external_sim_idxs]
+            max_external_sim_h = mc_avg.alignment_h[np.arange(len(max_external_sim_idxs)), max_external_sim_idxs]
+
+            min_internal_sim_motifs_1 = []
+            min_internal_sim_motifs_2 = []
+            min_internal_sim_rc_1 = []
+            min_internal_sim_rc_2 = []
+            min_internal_sim_h_1 = []
+            min_internal_sim_h_2 = []
+            for c in clusters:
+                cluster_sim = self.similarity[cluster_idxs[c], :][:, cluster_idxs[c]]
+                min_idx1 = cluster_idxs[c][np.unravel_index(np.argmin(cluster_sim), cluster_sim.shape)[0]]
+                min_idx2 = cluster_idxs[c][np.unravel_index(np.argmin(cluster_sim), cluster_sim.shape)[1]]
+                min_internal_sim_motifs_1.append(motifs[min_idx1])
+                min_internal_sim_motifs_2.append(motifs[min_idx2])
+                min_internal_sim_rc_1.append(self.alignment_rc[cluster_idxs[c][0], min_idx1])
+                min_internal_sim_rc_2.append(self.alignment_rc[cluster_idxs[c][0], min_idx2])
+                min_internal_sim_h_1.append(self.alignment_h[cluster_idxs[c][0], min_idx1])
+                min_internal_sim_h_2.append(self.alignment_h[cluster_idxs[c][0], min_idx2])
+            mc_avg.generate_images(
+                np.stack(max_external_sim_motifs, axis=0),
+                np.stack(max_external_sim_rc, axis=0),
+                np.stack(max_external_sim_h, axis=0),
+                "max_external_sim_logo",
+            )
+            mc_avg.generate_images(
+                np.stack(min_internal_sim_motifs_1, axis=0),
+                np.stack(min_internal_sim_rc_1, axis=0),
+                np.stack(min_internal_sim_h_1, axis=0),
+                "min_internal_sim_logo1",
+            )
+            mc_avg.generate_images(
+                np.stack(min_internal_sim_motifs_2, axis=0),
+                np.stack(min_internal_sim_rc_2, axis=0),
+                np.stack(min_internal_sim_h_2, axis=0),
+                "min_internal_sim_logo2",
+            )
+
+        return mc_avg
 
     ###########################
     # VIZUALIZATION FUNCTIONS #
@@ -1166,7 +1261,7 @@ class MotifCompendium:
           MotifCompendium. Each motif has one row in the summary table. Logos for the
           forward and reverse complement of each motif will be displayed in the first
           two columns. Columns from the current metadata as well as other images saved
-          in the object (which can be viewed with MotifCompendium.get_saved_images())
+          in the object (which can be viewed with MotifCompendium.get_images_columns())
           can be displayed as columns in the summary table.
 
         Args:
@@ -1291,6 +1386,7 @@ class MotifCompendium:
 
     def heatmap(
         self,
+        sort_by: str | None = None,
         annot: bool = False,
         label: bool = False,
         show: bool = False,
@@ -1302,6 +1398,8 @@ class MotifCompendium:
           formatting, display, and save options.
 
         Args:
+            sort_by: The column in the metadata to sort the heatmap by. If None, no
+                sorting is done.
             annot: Whether or not to display the similarity score value in each cell in
               the heatmap.
             label: Whether or not to label rows and columns with motif names.
@@ -1317,7 +1415,9 @@ class MotifCompendium:
             if "name" not in self.metadata.columns:
                 raise KeyError("metadata must have a 'name' column.")
             utils_plotting.plot_heatmap(
-                self.similarity,
+                self.sort(
+                    by=sort_by,
+                ).similarity,
                 annot=annot,
                 labels=list(self.metadata["name"]),
                 show=show,
@@ -1380,24 +1480,24 @@ class MotifCompendium:
             max_submotifs: The maximum number of submotifs to consider in a match.
             min_score: The minimum similarity score to consider as a match.
         """
-        # Resize motifs to match other_motifs
+        # Check arguments
         utils_motif.validate_motif_stack_similarity(other_motifs)
-        # Length dimensions
-        if self.motifs.shape[1] != other_motifs.shape[1]:
-            raise ValueError(
-                f"Motif lengths do not match: {self.motifs.shape[1]} vs. {other_motifs.shape[1]}"
-            )
+        my_motifs = self.motifs.copy()
+        # Length dimensions: Resize motifs to match length
+        if my_motifs.shape[1] > other_motifs.shape[1]:
+            other_pad = self.motifs.shape[1] - other_motifs.shape[1]
+            other_motifs = np.pad(other_motifs, ((0, 0), (0, other_pad), (0, 0)))
+        elif my_motifs.shape[1] < other_motifs.shape[1]:
+            my_pad = other_motifs.shape[1] - my_motifs.shape[1]
+            my_motifs = np.pad(my_motifs, ((0, 0), (0, my_pad), (0, 0)))
         # Channel dimensions
-        if self.motifs.shape[2] == other_motifs.shape[2]:
-            my_motifs = self.motifs.copy()
-        elif self.motifs.shape[2] == 8 and other_motifs.shape[2] == 4:
-            my_motifs = utils_motif.motif_8_to_4_unsigned(self.motifs)
+        if my_motifs.shape[2] == 8 and other_motifs.shape[2] == 4:
+            my_motifs = utils_motif.motif_8_to_4_unsigned(my_motifs)
         elif self.motifs.shape[2] == 4 and other_motifs.shape[2] == 8:
-            my_motifs = self.motifs.copy()
             other_motifs = utils_motif.motif_8_to_4_unsigned(other_motifs)
         else:
             raise ValueError(
-                f"Motif channel dimensions do not match: {self.motifs.shape[2]} vs. {other_motifs.shape[2]}"
+                f"Motif channel dimensions do not match: {my_motifs.shape[2]} vs. {other_motifs.shape[2]}"
             )
 
         # L2 normalize once
@@ -1466,7 +1566,7 @@ class MotifCompendium:
                 self.__images.loc[match_idx, f"{save_column_prefix}_logo{i}"] = [
                     motif_input.utf8_plot
                     for motif_input in utils_plotting.plot_many_motif_logos(
-                        motif_plotting_inputs)
+                        motif_plotting_inputs,)
                 ]
 
             # Copy forward logos if provided
@@ -1505,15 +1605,6 @@ class MotifCompendium:
             The other MotifCompendium must have motifs length less than or equal to this
               MotifCompendium.
         """
-        # Check motif lengths
-        if self.motifs.shape[1] < other.motifs.shape[1]:
-            raise ValueError(
-                "Motifs in other MotifCompendium are longer than this MotifCompendium."
-            )
-        else:
-            other_pad = self.motifs.shape[1] - other.motifs.shape[1]
-            other_motifs = np.pad(other.motifs, ((0, 0), (0, other_pad), (0, 0)))
-
         # Check if other_col_match exists in other MotifCompendium
         if other_label_column in other.metadata.columns:
             other_labels = other.metadata[other_label_column].tolist()
@@ -1521,14 +1612,14 @@ class MotifCompendium:
             raise KeyError(f"{other_label_column} not in other metadata.")
 
         # Check if forward logos in other MotifCompendium
-        if "logo (fwd)" in other.get_saved_images():
+        if "logo (fwd)" in other.get_images_columns():
             other_logos = other.get_images("logo (fwd)")
         else:
             other_logos = None
 
         # Assign labels
         self.assign_label_from_motifs(
-            other_motifs=other_motifs,
+            other_motifs=other.motifs,
             labels=other_labels,
             utf8_images=other_logos,
             save_column_prefix=save_column_prefix,
