@@ -24,7 +24,7 @@ def set_compute_options(
     use_gpu: bool | None = None,
     max_chunk: int | None = None,
     fast_plotting: bool | None = None,
-    progress_bar: bool | None = None
+    progress_bar: bool | None = None,
 ):
     """Set default values for max_chunk, max_cpus, and use_gpu.
 
@@ -114,6 +114,8 @@ def inspect(file_loc: str) -> pd.DataFrame:
     if not os.path.exists(file_loc):
         raise FileNotFoundError(f"File {file_loc} does not exist.")
     try:
+        with h5py.File(file_loc, "r") as f:
+            motifs_shape = f["motifs"][:].shape
         metadata = pd.read_hdf(file_loc, key="metadata")
     except:
         raise KeyError("File does not contain metadata.")
@@ -122,7 +124,10 @@ def inspect(file_loc: str) -> pd.DataFrame:
     except:
         raise KeyError("File does not contain __images.")
     print(
-        f"Motif Compendium with {len(metadata)} motifs.\n--- Metadata ---\n{metadata}\n--- Images ---\n{list(__images.columns)}"
+        f"MotifCompendium with {len(metadata)} motifs."
+        + f"\n--- Motifs = {motifs_shape} ---\n"
+        + f"\n--- Metadata ---\n{metadata}"
+        + f"\n--- Images ---\n{list(__images.columns)}"
     )
     return metadata
 
@@ -516,10 +521,6 @@ class MotifCompendium:
         ):
             raise TypeError("Attribute shapes do not align.")
 
-    def __str__(self) -> str:
-        """String representation of the MotifCompendium."""
-        return f"Motif Compendium with {len(self.metadata)} motifs.\n--- Metadata ---\n{self.metadata}\n--- Images ---\n{list(self.__images.columns)}"
-
     def __len__(self) -> int:
         """Length of the MotifCompendium."""
         return len(self.metadata)
@@ -536,6 +537,35 @@ class MotifCompendium:
                 and self.__images.equals(other.get_images())
             )
         return False
+
+    def __str__(self) -> str:
+        """String representation of the MotifCompendium."""
+        return (
+            f"MotifCompendium with {len(self.metadata)} motifs."
+            + f"\n--- Motifs = {self.motifs.shape} ---\n"
+            + f"\n--- Metadata ---\n{self.metadata}"
+            + f"\n--- Images ---\n{list(self.__images.columns)}"
+        )
+
+    def _repr_html_(self) -> str:
+        """HTML representation of the MotifCompendium for display in notebooks."""
+        html = f"<h2>MotifCompendium with {len(self.metadata)} motifs</h2>"
+        # Motifs
+        html += f"<h3>Motifs = {self.motifs.shape}</h3>"
+        # Metadata
+        html += "<h3>Metadata</h3>"
+        html += self.metadata._repr_html_()
+        # Images section
+        html += "<h3>Images</h3>"
+        if self.__images.columns.empty:
+            html += "<p>No images available</p>"
+        else:
+            html += "<ul>"
+            for col in self.__images.columns:
+                html += f"<li>{col}</li>"
+            html += "</ul>"
+
+        return html
 
     ########################
     # OBJECT MANIPULATIONS #
@@ -1533,7 +1563,9 @@ class MotifCompendium:
 
         # L2 normalize once
         my_motifs = my_motifs / np.linalg.norm(my_motifs, axis=(1, 2), keepdims=True)
-        other_motifs = other_motifs / np.linalg.norm(other_motifs, axis=(1, 2), keepdims=True)
+        other_motifs = other_motifs / np.linalg.norm(
+            other_motifs, axis=(1, 2), keepdims=True
+        )
 
         # Find best match, per iteration
         match_scores = []
@@ -1546,7 +1578,7 @@ class MotifCompendium:
             sim, alignment_rc, alignment_h = utils_similarity.compute_similarities(
                 [my_motifs, other_motifs], [(0, 1)]
             )[0]
-            
+
             # Unscale L2 similarity, for dot product only
             sim = sim * (
                 np.linalg.norm(my_motifs, axis=(1, 2))[:, np.newaxis]
@@ -1554,25 +1586,32 @@ class MotifCompendium:
             )  # (N, M)
 
             # Identify matches, Scale score by i
-            match_score = np.max(sim, axis=1) * np.sqrt(i+1)  # (N,)
+            match_score = np.max(sim, axis=1) * np.sqrt(i + 1)  # (N,)
             match_idx = np.argmax(sim, axis=1)  # (N,)
-            alignment_rc = alignment_rc[np.arange(alignment_rc.shape[0]), match_idx]  # (N,)
-            alignment_h = alignment_h[np.arange(alignment_h.shape[0]), match_idx]  # (N,)
+            alignment_rc = alignment_rc[
+                np.arange(alignment_rc.shape[0]), match_idx
+            ]  # (N,)
+            alignment_h = alignment_h[
+                np.arange(alignment_h.shape[0]), match_idx
+            ]  # (N,)
             match_motif = other_motifs[match_idx, :, :]
 
             # Remove matches below threshold
-            match_mask = match_mask & (match_score >= min_score) # (N,)
+            match_mask = match_mask & (match_score >= min_score)  # (N,)
             match_score[~match_mask] = 0
             match_idx[~match_mask] = -1
             match_motif[~match_mask] = 0
 
             # Subtract best match
             my_motifs = utils_motif.remove_motif_component(
-                my_motifs, match_motif, alignment_rc, alignment_h,
+                my_motifs,
+                match_motif,
+                alignment_rc,
+                alignment_h,
             )
 
             # Save match information
-            match_label = [labels[x] if x >= 0 else '' for x in match_idx]
+            match_label = [labels[x] if x >= 0 else "" for x in match_idx]
             if match_motif.shape[2] == 8:
                 match_motif = utils_motif.motif_8_to_4_signed(match_motif)
             match_motifs.append(match_motif)
@@ -1582,12 +1621,12 @@ class MotifCompendium:
 
         # Save match information
         for i in range(max_submotifs):
-            self[f"{save_column_prefix}_score{i}"] = match_scores[i] # Save scores
-            self[f"{save_column_prefix}_name{i}"] = match_labels[i] # Save labels
+            self[f"{save_column_prefix}_score{i}"] = match_scores[i]  # Save scores
+            self[f"{save_column_prefix}_name{i}"] = match_labels[i]  # Save labels
             # Save logos, matches only
             self.__images[f"{save_column_prefix}_logo{i}"] = ""
             match_idx = np.where(match_idxs[i] >= 0)[0]
-            
+
             # Generate forward logos if not provided
             if utf8_images is None:
                 match_motif = match_motifs[i][match_idx, :, :]

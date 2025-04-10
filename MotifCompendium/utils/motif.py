@@ -460,7 +460,9 @@ def compute_motif_scalar_projection(
         )
     uTv = np.sum(project_motifs * onto_motifs, axis=(1, 2), keepdims=keepdims)
     vTv = np.sum(onto_motifs**2, axis=(1, 2), keepdims=keepdims)
-    return np.divide(uTv, vTv, where=(vTv != 0), out=np.zeros_like(uTv))  # Avoid divide by zero
+    return np.divide(
+        uTv, vTv, where=(vTv != 0), out=np.zeros_like(uTv)
+    )  # Avoid divide by zero
 
 
 def remove_motif_component(
@@ -506,14 +508,23 @@ def remove_motif_component(
     max_h = np.max(alignment_h)
     # View the aligned remove_motifs from the perspective of main_motifs
     remove_motifs_aligned = view_motif_from_position_range(
-        remove_motifs_aligned, main_motifs.shape[1], min_h, max_h, 0, 0,
+        remove_motifs_aligned,
+        main_motifs.shape[1],
+        min_h,
+        max_h,
+        0,
+        0,
     )
     # Scale and subtract aligned remove_motifs
     scalar_projection = compute_motif_scalar_projection(
-        main_motifs, remove_motifs_aligned, keepdims=True,
+        main_motifs,
+        remove_motifs_aligned,
+        keepdims=True,
     )  # Project vector onto the main motif to match scale
     main_motifs_updated = main_motifs - scalar_projection * remove_motifs_aligned
-    main_motifs_updated = np.clip(main_motifs_updated, a_min=0, a_max=None)  # Clip negative values
+    main_motifs_updated = np.clip(
+        main_motifs_updated, a_min=0, a_max=None
+    )  # Clip negative values
     return main_motifs_updated
 
 
