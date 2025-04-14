@@ -47,17 +47,15 @@ def cluster(
         Please look through the possible clustering algorithm options in this function.
     """
     # Check arguments
+    if not (
+        isinstance(similarity_matrix, np.ndarray)
+        and (similarity_matrix.ndim == 2)
+        and (similarity_matrix.shape[0] == similarity_matrix.shape[1])
+    ):
+        raise ValueError(f"The similarity matrix must be a square matrix.")
     if similarity_matrix.shape[0] == 1:
         return [0]
-    if similarity_matrix.ndim != 2:
-        raise ValueError(
-            f"Similarity matrix must be 2D; Similarity matrix shape: {similarity_matrix.shape}"
-        )
-    if similarity_matrix.shape[0] != similarity_matrix.shape[1]:
-        raise ValueError(
-            f"Similarity matrix must be square; Similarity matrix shape: {similarity_matrix.shape}"
-        )
-    
+
     match algorithm.lower():
         # Leiden
         case "mod_leiden" | "modularity_leiden" | "rb_leiden":
@@ -86,7 +84,7 @@ def cluster(
         case "cc":
             adjacency_matrix = similarity_matrix >= similarity_threshold
             return cc_clustering(adjacency_matrix)
-        case "dense_cc":
+        case "dcc" | "dense_cc":
             adjacency_matrix = similarity_matrix >= similarity_threshold
             return densely_cc_clustering(adjacency_matrix, **kwargs)
         # Spectral
@@ -290,43 +288,63 @@ def modularity_leiden_clustering_gpu(
 def cc_clustering(adjacency_matrix: np.ndarray) -> list[int]:
     """Find connected components in an adjacency matrix."""
     N = adjacency_matrix.shape[0]
-    clustering = [False] * N
+    clustering = np.zeros((N,), dtype=int)
     current_cluster = 1
+    # Iterate through all nodes
     for current_node in range(N):
-        if not clustering[current_node]:
-            # create new cluster
-            clustering[current_node] = current_cluster
-            new_cluster_idxs = [current_node]
-            for consider_node in range(current_node + 1, N):
-                if adjacency_matrix[consider_node, new_cluster_idxs].any():
-                    clustering[consider_node] = current_cluster
-                    new_cluster_idxs.append(consider_node)
-            current_cluster += 1
-    print(f"found {current_cluster} clusters in {N} nodes")
-    for i in range(N):
-        assert clustering[i]
-    return [x - 1 for x in clustering]
+        # If already clustered, continue
+        if clustering[current_node] != 0:
+            continue
+        # Otherwise, create new cluster
+        considering = np.zeros((N,))
+        considering[current_node] = 1
+        found_cc = False
+        # Keep expanding component until it no longer changes
+        while not found_cc:
+            new_considering = (adjacency_matrix @ considering) > 0
+            found_cc = (new_considering == considering).all()
+            considering = new_considering
+        # Assign cluster values
+        clustering += current_cluster * considering
+        # Move to next cluster
+        current_cluster += 1
+    # Return
+    assert (clustering > 0).all()
+    return (clustering - 1).tolist()
 
 
-def densely_cc_clustering(adjacency_matrix: np.ndarray) -> list[int]:
+def densely_cc_clustering(
+    adjacency_matrix: np.ndarray, density: float = 1, seed: int = 1
+) -> list[int]:
     """Find densely connected components in a greedy fashion in an adjacency matrix."""
+    if not (isinstance(density, float) and (0 <= density <= 1)):
+        raise ValueError("Density must be a float between 0 and 1.")
     N = adjacency_matrix.shape[0]
-    clustering = [False] * N
+    clustering = np.zeros((N, ), dtype=int)
     current_cluster = 1
-    for current_node in range(N):
-        if not clustering[current_node]:
-            # create new cluster
-            clustering[current_node] = current_cluster
-            new_cluster_idxs = [current_node]
-            for consider_node in range(current_node + 1, N):
-                if adjacency_matrix[consider_node, new_cluster_idxs].all():
-                    clustering[consider_node] = current_cluster
-                    new_cluster_idxs.append(consider_node)
-            current_cluster += 1
-    print(f"found {current_cluster} clusters in {N} nodes")
-    for i in range(N):
-        assert clustering[i]
-    return [x - 1 for x in clustering]
+    # Set random order of nodes
+    node_order = (
+        np.arange(N) if seed == 0 else np.random.default_rng(seed).permutation(N)
+    )  # Don't shuffle ordering on seed of 0
+    for i, current_node in enumerate(node_order):
+        # If already clustered, continue
+        if clustering[current_node] != 0:
+            continue
+        # Otherwise, create new cluster
+        clustering[current_node] = current_cluster
+        new_cluster_idxs = [current_node]
+        # Check all remaining nodes in a single pass for clustering
+        for consider_node in node_order[i + 1 :]:
+            num_edges = np.sum(adjacency_matrix[consider_node, new_cluster_idxs])
+            # If sufficient edge density, add to cluster
+            if num_edges / len(new_cluster_idxs) >= density:
+                clustering[consider_node] = current_cluster
+                new_cluster_idxs.append(consider_node)
+        # Move to next cluster
+        current_cluster += 1
+    # Return
+    assert (clustering > 0).all()
+    return (clustering - 1).tolist()
 
 
 #######################
