@@ -1,8 +1,6 @@
 import igraph as ig
 import leidenalg as la
-
 import numpy as np
-import pandas as pd
 import scipy.sparse
 import sklearn.cluster
 
@@ -320,7 +318,7 @@ def densely_cc_clustering(
     if not (isinstance(density, float) and (0 <= density <= 1)):
         raise ValueError("Density must be a float between 0 and 1.")
     N = adjacency_matrix.shape[0]
-    clustering = np.zeros((N, ), dtype=int)
+    clustering = np.zeros((N,), dtype=int)
     current_cluster = 1
     # Set random order of nodes
     node_order = (
