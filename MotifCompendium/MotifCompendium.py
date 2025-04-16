@@ -75,7 +75,8 @@ def load(file_loc: str, safe: bool = True) -> MotifCompendium:
 
     Notes:
         Assumes the file is an h5py file with datasets 'motifs', 'similarity',
-          'alignment_rc', and 'alignment_h', as well as a DataFrame called 'metadata'.
+          'alignment_rc', and 'alignment_h', as well as a DataFrame called 'metadata'
+          and another DataFrame called '__images'.
         Old objects may be incompatable with the newest version of the load function.
         Safe loading validates object integrity but may take significantly longer for
           large objects.
@@ -91,9 +92,7 @@ def load(file_loc: str, safe: bool = True) -> MotifCompendium:
         metadata = pd.read_hdf(file_loc, key="metadata")
         __images = pd.read_hdf(file_loc, key="__images")
     except:
-        raise ValueError(
-            "File does not contain the necessary datasets to load a MotifCompendium."
-        )
+        raise ValueError("File does not specify a MotifCompendium.")
     return MotifCompendium(
         motifs, similarity, alignment_rc, alignment_h, metadata, __images, safe
     )
@@ -117,12 +116,9 @@ def inspect(file_loc: str) -> pd.DataFrame:
         with h5py.File(file_loc, "r") as f:
             motifs_shape = f["motifs"][:].shape
         metadata = pd.read_hdf(file_loc, key="metadata")
-    except:
-        raise KeyError("File does not contain metadata.")
-    try:
         __images = pd.read_hdf(file_loc, key="__images")
     except:
-        raise KeyError("File does not contain __images.")
+        raise ValueError("File does not specify a MotifCompendium.")
     print(
         f"MotifCompendium with {len(metadata)} motifs."
         + f"\n--- Motifs = {motifs_shape} ---\n"
@@ -136,15 +132,16 @@ def load_old_compendium(file_loc: str) -> MotifCompendium:
     """Loads an old MotifCompendium object from file.
 
     Args:
-        file_loc: The MotifCompendium file path.
+        file_loc: The file path of the out of data MotifCompendium object.
 
     Returns:
-        The corresponding MotifCompendium object.
+        A MotifCompendium object that is up to date.
 
     Notes:
-        Assumes the file is an h5py file with datasets 'motifs', 'similarity',
-          'alignment_fr', and 'alignment_h', as well as a DataFrame called 'metadata'.
-        This is meant for loading MotifCompendium objects saved before the 1.0 release.
+        Assumes the file is an h5py file with a 'motifs' dataset and a DataFrame called
+          'metadata'.
+        This function is meant to be used for loading MotifCompendium objects saved
+          before the 1.0 release.
         Objects will forcibly be loaded safely.
     """
     if not os.path.exists(file_loc):
@@ -154,9 +151,7 @@ def load_old_compendium(file_loc: str) -> MotifCompendium:
             motifs = f["motifs"][:]
         metadata = pd.read_hdf(file_loc, key="metadata")
     except:
-        raise ValueError(
-            "File does not contain the necessary datasets to load a MotifCompendium."
-        )
+        raise ValueError("File does not specify a MotifCompendium.")
     # Recompute similarity on motifs
     similarity, alignment_rc, alignment_h = utils_similarity.compute_similarities(
         [motifs], [(0, 0)]
@@ -277,8 +272,10 @@ def combine(
     """Combines multiple MotifCompendium into one MotifCompendium.
 
     Computes similarity between each MotifCompendium's motifs to construct a single
-      large similarity matrix. Then, passes the concatenated set of motifs and overall
-      similarity matrix to the MotifCompendium constructor.
+      large similarity matrix. The metadata and images from each MotifCompendium are
+      combined, as well, but an error will be thrown if the metadata and images of each
+      MotifCompendium do not have the same columns. Then, the motifs, similarity and
+      alignment matrices, and metadata are passed to the MotifCompendium constructor.
 
     Args:
         compendiums: A list of MotifCompendium objects.
@@ -289,11 +286,44 @@ def combine(
           MotifCompendium.
 
     Notes:
+        The metadata and __images of each MotifCompendium must contain the same columns.
         Safe building validates object integrity but may take significantly longer for
           large objects.
     """
+    # Check inputs
+    if not (
+        isinstance(compendiums, list)
+        and all([isinstance(x, MotifCompendium) for x in compendiums])
+    ):
+        raise TypeError("The input must be a list of MotifCompendium objects.")
+    if len(compendiums) == 0:
+        raise ValueError("The input list must contain at least one MotifCompendium.")
+    # Confirm that the motifs from each MotifCompendium are compatible
+    motifs_length = compendiums[0].motifs.shape[1]
+    if not all([x.motifs.shape[1] == motifs_length for x in compendiums]):
+        raise ValueError(
+            "The motifs of the MotifCompendium objects must have the same length."
+        )
+    motifs_channels = compendiums[0].motifs.shape[2]
+    if not all([x.motifs.shape[2] == motifs_channels for x in compendiums]):
+        raise ValueError(
+            "The motifs of the MotifCompendium objects must have the same channels."
+        )
+    # Confirm that the metadata and __images of each MotifCompendium has the same columns
+    metadata_columns = compendiums[0].columns()
+    if not all([x.columns() == metadata_columns] for x in compendiums):
+        raise ValueError(
+            "The metadata of each MotifCompendium must have the same columns."
+            + "\n(Check mc.columns() for each MotifCompendium.)"
+        )
+    image_columns = compendiums[0].get_saved_images()
+    if not all([x.get_saved_images() == image_columns] for x in compendiums):
+        raise ValueError(
+            "Each MotifCompendium must have the same saved images."
+            + "\n(Check mc.get_saved_images() for each MotifCompendium.)"
+        )
     n = len(compendiums)
-    # SIMILARITIES
+    # Combine similarities
     motifs_list = [mc.motifs for mc in compendiums]
     calculations = []
     for i in range(n):
@@ -322,10 +352,6 @@ def combine(
                 alignment_rc_block[i][j] = alignment_rc_block[j][i].T
                 alignment_h_block[i][j] = alignment_h_block[j][i].T
     similarity = np.block(similarity_block)
-    # Guarantee diagonal symmetry
-    np.fill_diagonal(similarity, 1)
-    similarity = (similarity + similarity.T) / 2
-
     alignment_rc = np.block(alignment_rc_block)
     alignment_h = np.block(alignment_h_block)
     # Motifs
@@ -334,15 +360,10 @@ def combine(
     metadata = pd.concat([mc.metadata for mc in compendiums], ignore_index=True)
     # Images
     __images = pd.DataFrame()
-    for mc in compendiums:
-        for image_column in mc.get_images_columns():
-            __images = pd.concat(
-                [
-                    __images,
-                    pd.DataFrame(mc.get_images(image_column), columns=[image_column]),
-                ],
-                ignore_index=True,
-            )
+    for images in compendiums[0].get_saved_images():
+        __images[images] = pd.concat(
+            [mc.get_images(images) for mc in compendiums], ignore_index=True
+        )
     # Construct object
     return MotifCompendium(
         motifs,
@@ -521,20 +542,29 @@ class MotifCompendium:
         ):
             raise TypeError("Attribute shapes do not align.")
 
-    def __len__(self) -> int:
-        """Length of the MotifCompendium."""
-        return len(self.metadata)
-
     def __eq__(self, other: MotifCompendium) -> bool:
         """Checks object equality between MotifCompendium."""
         if isinstance(other, MotifCompendium):
             return (
-                (self.motifs == other.motifs).all()
-                and (self.similarity == other.similarity).all()
-                and (self.alignment_rc == other.alignment_rc).all()
-                and (self.alignment_h == other.alignment_h).all()
-                and self.metadata.equals(other.metadata)
-                and self.__images.equals(other.get_images())
+                (self.motifs == other.motifs).all()  # motifs equal
+                and (self.similarity == other.similarity).all()  # similarity equal
+                and (
+                    self.alignment_rc == other.alignment_rc
+                ).all()  # alignment_rc equal
+                and (self.alignment_h == other.alignment_h).all()  # alignment_h equal
+                and self.metadata.equals(other.metadata)  # metadata equal
+                and (
+                    (
+                        sorted(self.get_saved_images())
+                        == sorted(other.get_saved_images())
+                    )
+                    and all(
+                        [
+                            self.get_images(x) == other.get_images(x)
+                            for x in self.get_saved_images()
+                        ]
+                    )
+                )  # images equal (columns equal and each column value equal)
             )
         return False
 
@@ -564,12 +594,105 @@ class MotifCompendium:
             for col in self.__images.columns:
                 html += f"<li>{col}</li>"
             html += "</ul>"
-
         return html
+
+    def __len__(self) -> int:
+        """Length of the MotifCompendium."""
+        return self.motifs.shape[0]
 
     ########################
     # OBJECT MANIPULATIONS #
     ########################
+    # MOTIFS
+    def get_standard_motif_stack(self) -> np.ndarray:
+        """Returns motifs in a standard (N, L, 4) shape."""
+        if self.motifs.shape[2] == 4:
+            return self.motifs
+        return utils_motif.motif_8_to_4_signed(self.motifs)
+
+    # METADATA
+    def columns(self) -> list[str]:
+        """Returns the columns of the metadata."""
+        return list(self.metadata.columns)
+
+    def rename_columns(self, mapper: dict[str, str]) -> None:
+        """Renames the columns of the metadata in a Pandas-like syntax."""
+        if not isinstance(mapper, dict):
+            raise TypeError("Renaming must be done with a dictionary.")
+        if not all([x in self.columns() for x in mapper.keys()]):
+            raise KeyError("All keys in the mapper must be columns in the metadata.")
+        self.metadata.rename(columns=mapper, inplace=True)
+
+    def delete_column(self, column: str | list[str]) -> None:
+        """Deletes the specified column(s) from the metadata."""
+        if not (
+            isinstance(column, str)
+            or (isinstance(column, list) and all([isinstance(x, str) for x in column]))
+        ):
+            raise TypeError("column must be a string or a list of strings.")
+        self.metadata.drop(column, axis=1, inplace=True)
+
+    # IMAGES
+    def get_saved_images(self) -> list[str]:
+        """Returns a list of saved images in the MotifCompendium."""
+        return list(self.__images.columns)
+
+    def get_images(self, image_name: str) -> list[str]:
+        """Returns a list of saved images as utf8 str in the MotifCompendium by column name."""
+        if image_name not in self.__images.columns:
+            raise KeyError(f"{image_name} is not a saved image.")
+        return self.__images[image_name].tolist()
+
+    def add_logos(self, motifs: np.ndarray, image_name: str) -> None:
+        """Saves logos of the provided motifs as saved images.
+
+        Args:
+            motifs: The motifs to save logos for. Of shape (N, L, 4).
+            image_name: The name of the images to save the logos as.
+        """
+        # Check inputs
+        utils_motif.validate_motif_stack_standard(motifs)
+        if not isinstance(image_name, str):
+            raise TypeError("image_name must be a string.")
+        if image_name in self.columns():
+            raise ValueError(
+                f"{image_name} is already a metadata column. Names may not overlap."
+            )
+        # Prepare plotting
+        logo_plotting_inputs = [
+            utils_plotting.LogoPlottingInput(motif=m) for m in motifs
+        ]
+        # Plot and save
+        self.__images[image_name] = [
+            motif_input.utf8_plot
+            for motif_input in utils_plotting.plot_many_motif_logos(
+                logo_plotting_inputs
+            )
+        ]
+
+    def rename_images(self, mapper: dict[str, str]) -> None:
+        """Renames the saved images in the MotifCompendium in a Pandas-like syntax."""
+        if not isinstance(mapper, dict):
+            raise TypeError("Renaming must be done with a dictionary.")
+        if not all([x in self.get_saved_images() for x in mapper.keys()]):
+            raise KeyError(
+                "All keys in the mapper must an existing set of saved images."
+            )
+        self.__images.rename(columns=mapper, inplace=True)
+
+    def delete_images(self, image_name: str | list[str]) -> None:
+        """Deletes the specified saved images."""
+        if not (
+            isinstance(image_name, str)
+            or (
+                isinstance(image_name, list)
+                and all([isinstance(x, str) for x in image_name])
+            )
+        ):
+            raise TypeError("image_name must be a string or a list of strings.")
+        self.__images.drop(image_name, axis=1, inplace=True)
+
+    # SLICING AND SORTING
     def __getitem__(self, key: str | pd.Series) -> pd.Series | MotifCompendium:
         """Get columns or subsets of the MotifCompendium.
 
@@ -632,94 +755,6 @@ class MotifCompendium:
             self.metadata[key] = value
         else:
             raise TypeError("MotifCompendium column names must be strings.")
-
-    def get_standard_motif_stack(self) -> np.ndarray:
-        """Returns motifs in a standard (N, L, 4) shape."""
-        if self.motifs.shape[2] == 4:
-            return self.motifs
-        return utils_motif.motif_8_to_4_signed(self.motifs)
-
-    def columns(self) -> list[str]:
-        """Returns the columns of the metadata."""
-        return list(self.metadata.columns)
-
-    def get_images_columns(self) -> list[str]:
-        """Returns a list of saved image columns in the MotifCompendium."""
-        return list(self.__images.columns)
-
-    def get_images(self, image_column: str) -> list[str]:
-        """Returns a list of saved images as utf8 str in the MotifCompendium by column name."""
-        if image_column not in self.__images.columns:
-            raise KeyError(f"{image_column} is not a saved image.")
-
-        return self.__images[image_column].tolist()
-    
-    def generate_images(self, motifs: np.ndarray, alignment_rc: np.ndarray, alignment_h: np.ndarray, image_column: str) -> None:
-        """Generate images for select motifs in the MotifCompendium.
-
-        Generate images for select motifs in the MotifCompendium and saves them 
-          to thespecified column in self.__images.
-
-        Args:
-            motifs: The motifs to generate images for. Of shape (N, L, 8/4).
-            alignment_rc: The reverse complement alignment for the motifs. Of shape (N,).
-            alignment_h: The horizontal alignment for the motifs. Of shape (N,).
-            image_column: The name of the column to save the images to.
-
-        Notes:
-            This function is private and not meant to be called directly.
-        """
-        if not (motifs.shape[0] == alignment_rc.shape[0] == alignment_h.shape[0]):
-            raise ValueError(
-                "motifs, alignment_rc, and alignment_h must have the same number of motifs."
-            )
-        if len(motifs.shape) == 2:
-            motifs = np.expand_dims(motifs, axis=0)
-
-        motif_plotting_inputs = []
-        for i in range(motifs.shape[0]):
-            motif_plotting_inputs.append(
-                utils_plotting.LogoPlottingInput(
-                    motif=motifs[i],
-                    revcomp=alignment_rc[i],
-                    pos=alignment_h[i],
-                )
-            )
-        self.__images[image_column] = [
-            motif_input.utf8_plot
-            for motif_input in utils_plotting.plot_many_motif_logos(
-                motif_plotting_inputs,
-            )
-        ]
-
-    def delete_column(self, column: str | list[str]) -> None:
-        """Deletes the specified column(s) from the metadata.
-
-        Args:
-            column: The column or columns to delete from self.metadata.
-        """
-        if not (
-            isinstance(column, str)
-            or (isinstance(column, list) and all([isinstance(x, str) for x in column]))
-        ):
-            raise TypeError("column must be a string or a list of strings.")
-        self.metadata.drop(column, axis=1, inplace=True)
-
-    def delete_images(self, image_column: str | list[str]) -> None:
-        """Deletes the specified column(s) from the saved images.
-
-        Args:
-            image_column: The column or columns to delete from self.__images.
-        """
-        if not (
-            isinstance(image_column, str)
-            or (
-                isinstance(image_column, list)
-                and all([isinstance(x, str) for x in image_column])
-            )
-        ):
-            raise TypeError("image_column must be a string or a list of strings.")
-        self.__images.drop(image_column, axis=1, inplace=True)
 
     def sort(
         self,
@@ -925,7 +960,7 @@ class MotifCompendium:
             if not cluster_on in self.metadata.columns:
                 raise KeyError(f"{cluster_on} not in metadata.")
             # Average
-            mc_average = self.cluster_averages(cluster_col=cluster_on)
+            mc_average = self.cluster_averages(clustering=cluster_on)
             # Cluster
             mc_average.metadata["cluster"] = utils_clustering.cluster(
                 similarity_matrix=mc_average.similarity,
@@ -946,69 +981,172 @@ class MotifCompendium:
             self.metadata[save_name] = None
             num_clusters_so_far = 0
             for c in set(self.metadata[cluster_within]):
-                self_c = self[self[cluster_within] == c]
-                self_c_idxs = self.metadata[self[cluster_within] == c].index.tolist()
+                c_condition = self.metadata[cluster_within] == c
+                c_idxs = list(self.metadata[c_condition].index)
+                c_similarity = self[self[c_condition]].similarity
                 clusters_c = utils_clustering.cluster(
-                    similarity_matrix=self_c.similarity,
+                    similarity_matrix=c_similarity,
                     algorithm=algorithm,
                     similarity_threshold=similarity_threshold,
                     **kwargs,
                 )
                 clusters_c = [c + num_clusters_so_far for c in clusters_c]
-                self.metadata.loc[self_c_idxs, save_name] = clusters_c
+                self.metadata.loc[c_idxs, save_name] = clusters_c
                 num_clusters_so_far += len(set(clusters_c))
         else:
             raise ValueError("cluster_on and cluster_within cannot be both set.")
 
     def clustering_quality(
-        self, cluster_col: str, with_names: bool = False
-    ) -> np.ndarray | pd.DataFrame:
-        """Produces a matrix that summarizes the quality of a particular clustering.
+        self, clustering: str, with_stats: bool = False
+    ) -> pd.DataFrame:
+        """Produces a pd.DataFrame that summarizes the quality of particular clustering.
 
-        Produce a matrix where diagonal entries represent lowest intra-cluster
-          similarity and off-diagonal entries represent highest inter-cluster
-          similarities.
+        Produces a matrix where diagonal entries represent lowest intra-cluster
+          similarities and off-diagonal entries represent highest inter-cluster
+          similarities. This is useful for evaluating the quality of a clustering
+          algorithm. Having high diagonal values and low off-diagonal values is better.
+          The matrix is returned as a pd.DataFrame(). To access the original matrix, do
+          .clustering_quality().to_numpy(). If with_stats is True, additional columns
+          explicitly identifying the motifs driving low intra-cluster and high inter-
+          cluster similarities will be added.
 
         Args:
-            cluster_col: The name of the column in metadata containing cluster
+            clustering: The name of the column in metadata containing cluster
               annotations to group motifs by.
-            with_names: Whether or not to return a raw quality matrix or a quality
-              matrix with row/column labels in the form or a pd.DataFrame.
+            with_stats: Whether or not to compute and store extra quality statistics
+              columns. If True, it adds the following columns, which have per-cluster
+              information to the returned pd.DataFrame:
+                - "lowest_internal_similarity": The lowest internal similarity.
+                - "lowest_internal_similarity_motif1_name": The name of the first motif
+                  contributing to the lowest internal similarity.
+                - "lowest_internal_similarity_motif1_motif": The motif of the first
+                  motif contributing to the lowest internal similarity.
+                - "lowest_internal_similarity_motif2_name": The name of the second motif
+                  contributing to the lowest internal similarity.
+                - "lowest_internal_similarity_motif2_motif": The motif of the second
+                  motif contributing to the lowest internal similarity.
+                - "highest_external_similarity": The highest external similarity.
+                - "highest_external_similarity_cluster": The cluster with which there is
+                  a high external similarity.
+                - "highest_external_similarity_motif_name": The name of the motif in the
+                  external cluster that is driving high external similarity.
+                - "highest_external_similarity_motif_motif": The motif of the motif in
+                  the external cluster that is driving high external similarity.
 
         Returns:
-            A square np.ndarray or pd.DataFrame where diagonal entries represent lowest
-              intra-cluster similarity and off-diagonal entries represent highest
-              inter-cluster similarities. Returns an np.ndarray if with_names is False
-              and a pd.DataFrame otherwise
+            A pd.DataFrame containing information about the lowest intra-cluster
+              similarities and the highest inter-cluster similarities per cluster. Each
+              cluster has a row (index) and column corresponding to it. If with_stats is
+              True, then additional columns summarizing the quality information per
+              cluster are added as extra columns.
+
+        Notes:
+            If with_stats is True, it is assumed that "name" is a column in the
+              MotifCompendium.
         """
         # Cache cluster --> idxs dictionary
         ci_idxs = defaultdict(list)
-        for i, c in enumerate(self.metadata[cluster_col]):
+        for i, c in enumerate(self.metadata[clustering]):
             ci_idxs[c].append(i)
         # Iterate through pairs of clusters
         clusters = sorted(ci_idxs.keys())
         quality = np.zeros((len(clusters), len(clusters)))
+        if with_stats:
+            stats = pd.DataFrame(
+                index=clusters,
+                columns=[
+                    "lowest_internal_similarity",
+                    "lowest_internal_similarity_motif1_name",
+                    "lowest_internal_similarity_motif1_motif",
+                    "lowest_internal_similarity_motif2_name",
+                    "lowest_internal_similarity_motif2_motif",
+                    "highest_external_similarity",
+                    "highest_external_similarity_cluster",
+                    "highest_external_similarity_motif_name",
+                    "highest_external_similarity_motif_motif",
+                ],
+            )
+            motif_names = list(self["name"])
+            motifs_standard = self.get_standard_motif_stack()
+            external_similarity_culprit_idxs = np.zeros(
+                (len(clusters), len(clusters)), dtype=np.int32
+            )  # [i, j] --> in cluster i, which motif (in j) drove similarity
         for i, c1 in enumerate(clusters):
             c1_idxs = ci_idxs[c1]
             c1_similarity_slice = self.similarity[c1_idxs, :]
             for j, c2 in enumerate(clusters):
+                # Lower triangle --> fill in during upper triangle calculation
                 if j < i:
                     continue
+                # Upper triangle + main diagonal
                 c2_idxs = ci_idxs[c2]
                 similarity_slice_ij = c1_similarity_slice[:, c2_idxs]
+                # Main diagonal
                 if i == j:
-                    quality[i, j] = np.min(similarity_slice_ij)
+                    # Lowest internal similarity
+                    min_idxs = np.unravel_index(
+                        np.argmin(similarity_slice_ij), similarity_slice_ij.shape
+                    )
+                    quality[i, i] = similarity_slice_ij[min_idxs]
+                    if with_stats:
+                        culprit_idx_1 = c1_idxs[min_idxs[0]]
+                        culprit_idx_2 = c1_idxs[min_idxs[1]]
+                        stats.loc[c1, "lowest_internal_similarity"] = quality[i, i]
+                        stats.loc[c1, "lowest_internal_similarity_motif1_name"] = (
+                            motif_names[culprit_idx_1]
+                        )
+                        stats.loc[c1, "lowest_internal_similarity_motif1_motif"] = (
+                            motifs_standard[culprit_idx_1]
+                        )
+                        stats.loc[c1, "lowest_internal_similarity_motif2_name"] = (
+                            motif_names[culprit_idx_2]
+                        )
+                        stats.loc[c1, "lowest_internal_similarity_motif2_motif"] = (
+                            motifs_standard[culprit_idx_2]
+                        )
+                # Upper triangle
                 else:
-                    quality[i, j] = np.max(similarity_slice_ij)
+                    # Highest external similarity
+                    max_idxs = np.unravel_index(
+                        np.argmax(similarity_slice_ij), similarity_slice_ij.shape
+                    )
+                    quality[i, j] = similarity_slice_ij[max_idxs]
                     quality[j, i] = quality[i, j]
-        if with_names:
-            return pd.DataFrame(quality, index=clusters, columns=clusters)
-        else:
-            return quality
+                    if with_stats:
+                        culprit_idx_c1 = c1_idxs[max_idxs[0]]
+                        external_similarity_culprit_idxs[j, i] = culprit_idx_c1
+                        culprit_idx_c2 = c2_idxs[max_idxs[1]]
+                        external_similarity_culprit_idxs[i, j] = culprit_idx_c2
+        quality_df = pd.DataFrame(quality, index=clusters, columns=clusters)
+        # Add stats if needed
+        if with_stats:
+            # Look at highest external similarities
+            external_sim = quality * (1 - np.eye(quality.shape[0]))
+            highest_external_sim_idx = external_sim.argmax(axis=0)
+            stats["highest_external_similarity"] = [
+                quality[i, highest_external_sim_idx[i]] for i in range(len(clusters))
+            ]
+            stats["highest_external_similarity_cluster"] = [
+                clusters[x] for x in highest_external_sim_idx
+            ]
+            highest_external_similarity_motif_idxs = [
+                external_similarity_culprit_idxs[i, highest_external_sim_idx[i]]
+                for i in range(len(clusters))
+            ]
+            stats["highest_external_similarity_motif_name"] = [
+                motif_names[x] for x in highest_external_similarity_motif_idxs
+            ]
+            stats["highest_external_similarity_motif_motif"] = [
+                motifs_standard[x] for x in highest_external_similarity_motif_idxs
+            ]
+            # Concatenate columns
+            quality_df = pd.concat([quality_df, stats], axis=1)
+        # Return
+        return quality_df
 
     def cluster_averages(
         self,
-        cluster_col: str,
+        clustering: str,
         aggregations: list[tuple[str]] = [("name", "count", "num_constituents")],
         weight_col: str | None = None,
         compute_quality_stats: bool = False,
@@ -1022,7 +1160,7 @@ class MotifCompendium:
           MotifCompendium is returned.
 
         Args:
-            cluster_col: The name of the column in metadata containing cluster
+            clustering: The name of the column in metadata containing cluster
               annotations to group motifs by. Each row in the new MotifCompendium will
               correspond to a value in this column.
             aggregations: A list of tuples of strings: (source, method, save).
@@ -1082,14 +1220,14 @@ class MotifCompendium:
             weights = None
         # Cache cluster --> idxs dictionary
         cluster_idxs = defaultdict(list)
-        for i, c in enumerate(self.metadata[cluster_col]):
+        for i, c in enumerate(self.metadata[clustering]):
             cluster_idxs[c].append(i)
         # Perform averaging per cluster
         clusters = sorted(cluster_idxs.keys())
         cluster_motif_avgs, cluster_names = [], []
         for c in clusters:
             # Cluster name
-            cluster_names.append(f"{cluster_col}#{c}")
+            cluster_names.append(f"{clustering}#{c}")
             # Cluster average motif
             c_idxs = cluster_idxs[c]
             motifs_c = self.motifs[c_idxs, :, :]
@@ -1141,80 +1279,42 @@ class MotifCompendium:
         for agg_dict in aggregations_dicts:
             metadata[agg_dict["save"]] = agg_dict["values"]
         mc_avg = build(cluster_motif_avgs, metadata, safe=False)
-
         # Compute quality statistics
         if compute_quality_stats:
-            # Statistics
-            quality = self.clustering_quality(cluster_col, with_names=True)
-            mc_avg["min_internal_similarity"] = [quality.loc[c, c] for c in clusters]
-            external_sim = mc_avg.similarity - np.eye(mc_avg.similarity.shape[0])
-            max_external_sim = external_sim.max(axis=1)
-            mc_avg["max_external_similarity"] = max_external_sim
-            # quality_np = quality.to_numpy()
-            # external_sim = quality_np * (1 - np.eye(quality_np.shape[0]))
-            # max_external_sim = external_sim.max(axis=0)
-            # max_external_sim_which = [
-            #     quality.index[i] for i in external_sim.argmax(axis=0)
-            # ]
-            # quality["max_external_similarity"] = max_external_sim
-            # quality["max_external_sim_which"] = max_external_sim_which
-            # mc_avg["max_external_similarity"] = [
-            #     f"{quality.loc[c, 'max_external_sim']} ({quality.loc[c, 'max_external_sim_which']})"
-            #     for c in clusters
-            # ]
-
-            # Logos
-            motifs = (
-                utils_motif.motif_8_to_4_signed(self.motifs)
-                if self.motifs.shape[2] == 8
-                else self.motifs
+            quality_df = self.clustering_quality(clustering, with_stats=True)
+            mc_avg["lowest_internal_similarity"] = [
+                f"{x:.3} ({y} vs {z})"
+                for x, y, z in zip(
+                    quality_df["lowest_internal_similarity"],
+                    quality_df["lowest_internal_similarity_motif1_name"],
+                    quality_df["lowest_internal_similarity_motif2_name"],
+                )
+            ]
+            mc_avg.add_logos(
+                np.stack(quality_df["lowest_internal_similarity_motif1_motif"]),
+                "lowest_internal_similarity_motif1",
             )
-            avg_motifs = (
-                utils_motif.motif_8_to_4_signed(mc_avg.motifs)
-                if mc_avg.motifs.shape[2] == 8
-                else mc_avg.motifs
+            mc_avg.add_logos(
+                np.stack(quality_df["lowest_internal_similarity_motif2_motif"]),
+                "lowest_internal_similarity_motif2",
             )
-            
-            max_external_sim_idxs = external_sim.argmax(axis=0)
-            max_external_sim_motifs = avg_motifs[max_external_sim_idxs]
-            max_external_sim_rc = mc_avg.alignment_rc[np.arange(len(max_external_sim_idxs)), max_external_sim_idxs]
-            max_external_sim_h = mc_avg.alignment_h[np.arange(len(max_external_sim_idxs)), max_external_sim_idxs]
-
-            min_internal_sim_motifs_1 = []
-            min_internal_sim_motifs_2 = []
-            min_internal_sim_rc_1 = []
-            min_internal_sim_rc_2 = []
-            min_internal_sim_h_1 = []
-            min_internal_sim_h_2 = []
-            for c in clusters:
-                cluster_sim = self.similarity[cluster_idxs[c], :][:, cluster_idxs[c]]
-                min_idx1 = cluster_idxs[c][np.unravel_index(np.argmin(cluster_sim), cluster_sim.shape)[0]]
-                min_idx2 = cluster_idxs[c][np.unravel_index(np.argmin(cluster_sim), cluster_sim.shape)[1]]
-                min_internal_sim_motifs_1.append(motifs[min_idx1])
-                min_internal_sim_motifs_2.append(motifs[min_idx2])
-                min_internal_sim_rc_1.append(self.alignment_rc[cluster_idxs[c][0], min_idx1])
-                min_internal_sim_rc_2.append(self.alignment_rc[cluster_idxs[c][0], min_idx2])
-                min_internal_sim_h_1.append(self.alignment_h[cluster_idxs[c][0], min_idx1])
-                min_internal_sim_h_2.append(self.alignment_h[cluster_idxs[c][0], min_idx2])
-            mc_avg.generate_images(
-                np.stack(max_external_sim_motifs, axis=0),
-                np.stack(max_external_sim_rc, axis=0),
-                np.stack(max_external_sim_h, axis=0),
-                "max_external_sim_logo",
+            mc_avg["highest_external_similarity"] = [
+                f"{x:.3} ({y}: {z})"
+                for x, y, z in zip(
+                    quality_df["highest_external_similarity"],
+                    quality_df["highest_external_similarity_cluster"],
+                    quality_df["highest_external_similarity_motif_name"],
+                )
+            ]
+            cluster_revcomp = {c: i for i, c in enumerate(clusters)}
+            mc_avg.add_logos(
+                mc_avg.get_standard_motif_stack()[[cluster_revcomp[c] for c in quality_df["highest_external_similarity_cluster"]]],
+                "highest_external_similarity_cluster",
             )
-            mc_avg.generate_images(
-                np.stack(min_internal_sim_motifs_1, axis=0),
-                np.stack(min_internal_sim_rc_1, axis=0),
-                np.stack(min_internal_sim_h_1, axis=0),
-                "min_internal_sim_logo1",
+            mc_avg.add_logos(
+                np.stack(quality_df["highest_external_similarity_motif_motif"]),
+                "highest_external_similarity_motif",
             )
-            mc_avg.generate_images(
-                np.stack(min_internal_sim_motifs_2, axis=0),
-                np.stack(min_internal_sim_rc_2, axis=0),
-                np.stack(min_internal_sim_h_2, axis=0),
-                "min_internal_sim_logo2",
-            )
-
         return mc_avg
 
     ###########################
@@ -1322,7 +1422,7 @@ class MotifCompendium:
           MotifCompendium. Each motif has one row in the summary table. Logos for the
           forward and reverse complement of each motif will be displayed in the first
           two columns. Columns from the current metadata as well as other images saved
-          in the object (which can be viewed with MotifCompendium.get_images_columns())
+          in the object (which can be viewed with MotifCompendium.get_saved_images())
           can be displayed as columns in the summary table.
 
         Args:
@@ -1344,37 +1444,10 @@ class MotifCompendium:
             missing_columns = [c for c in columns if c not in all_columns]
             raise KeyError(f"{missing_columns} not in metadata or saved images.")
         # If forward and reverse logos aren't in __images, create and add them
-        if "logo (fwd)" not in self.__images.columns:
-            motifs = (
-                utils_motif.motif_8_to_4_signed(self.motifs)
-                if self.motifs.shape[2] == 8
-                else self.motifs
-            )
-            motif_plotting_inputs = [
-                utils_plotting.LogoPlottingInput(motif) for motif in motifs
-            ]
-            self.__images["logo (fwd)"] = [
-                motif_input.utf8_plot
-                for motif_input in utils_plotting.plot_many_motif_logos(
-                    motif_plotting_inputs
-                )
-            ]
-        if "logo (rev)" not in self.__images.columns:
-            motifs = (
-                utils_motif.motif_8_to_4_signed(self.motifs)
-                if self.motifs.shape[2] == 8
-                else self.motifs
-            )
-            motif_plotting_inputs = [
-                utils_plotting.LogoPlottingInput(motif, revcomp=True)
-                for motif in motifs
-            ]
-            self.__images["logo (rev)"] = [
-                motif_input.utf8_plot
-                for motif_input in utils_plotting.plot_many_motif_logos(
-                    motif_plotting_inputs
-                )
-            ]
+        if "logo (fwd)" not in self.get_saved_images():
+            self.add_logos(self.get_standard_motif_stack(), "logo (fwd)")
+        if "logo (rev)" not in self.get_saved_images():
+            self.add_logos(self.get_standard_motif_stack()[:, ::-1, ::-1], "logo (rev)")
         # Build table
         columns = ["logo (fwd)", "logo (rev)"] + columns
         table_columns = []
@@ -1411,6 +1484,11 @@ class MotifCompendium:
         headers = []
         image_columns = []
         for i, th in enumerate(table.find_all("th")):
+            # If index column, skip
+            if i == 0:
+                headers.append("index")
+                image_columns.append(True) # Index acts as an image column
+                continue
             # Check if column has sort buttons (non-image column)
             if th.find("button"):
                 # Non-image columns have buttons that need to be removed
@@ -1420,12 +1498,18 @@ class MotifCompendium:
             else:
                 headers.append(th.text.strip())
                 image_columns.append(True)
+                    
         # Get data rows (ignore first and second row)
         rows = []
+        index = []
         for tr in table.find_all("tr")[2:]:  # Skip header and filter rows
             row_data = []
             for i, td in enumerate(tr.find_all("td")):
-                if not image_columns[i]:  # Skip image columns
+                if i == 0:
+                    # First column is index
+                    index.append(td.text.strip())
+                elif not image_columns[i]:
+                    # Skip image columns
                     val = td.text.strip()
                     try:
                         val = int(val)
@@ -1440,14 +1524,15 @@ class MotifCompendium:
         non_image_headers = [
             h for h, is_img in zip(headers, image_columns) if not is_img
         ]
-        df = pd.DataFrame(rows, columns=non_image_headers)
+        index = pd.Index(index, dtype=int)
+        df = pd.DataFrame(rows, index=index, columns=non_image_headers)
+        df.sort_index(inplace=True)
         # Update metadata
         for col in df.columns:
             self.metadata[col] = df[col]
 
     def heatmap(
         self,
-        sort_by: str | None = None,
         annot: bool = False,
         label: bool = False,
         show: bool = False,
@@ -1459,8 +1544,6 @@ class MotifCompendium:
           formatting, display, and save options.
 
         Args:
-            sort_by: The column in the metadata to sort the heatmap by. If None, no
-                sorting is done.
             annot: Whether or not to display the similarity score value in each cell in
               the heatmap.
             label: Whether or not to label rows and columns with motif names.
@@ -1476,9 +1559,7 @@ class MotifCompendium:
             if "name" not in self.metadata.columns:
                 raise KeyError("metadata must have a 'name' column.")
             utils_plotting.plot_heatmap(
-                self.sort(
-                    by=sort_by,
-                ).similarity,
+                self.similarity,
                 annot=annot,
                 labels=list(self.metadata["name"]),
                 show=show,
@@ -1511,8 +1592,7 @@ class MotifCompendium:
 
     def extend(self):
         """Add new motifs to the current MotifCompendium."""
-        print("not yet implemented")
-        assert False
+        raise NotImplementedError("extend() has not been implemented yet.")
 
     def assign_label_from_motifs(
         self,
@@ -1543,6 +1623,13 @@ class MotifCompendium:
         """
         # Check arguments
         utils_motif.validate_motif_stack_similarity(other_motifs)
+        if (utf8_images is not None) and not (
+            (isinstance(utf8_images, list))
+            and len(utf8_images) == other_motifs.shape[0]
+        ):
+            raise ValueError(
+                "utf8_images must be a list of the same length as other_motifs."
+            )
         my_motifs = self.motifs.copy()
         # Length dimensions: Resize motifs to match length
         if my_motifs.shape[1] > other_motifs.shape[1]:
@@ -1556,23 +1643,17 @@ class MotifCompendium:
             my_motifs = utils_motif.motif_8_to_4_unsigned(my_motifs)
         elif self.motifs.shape[2] == 4 and other_motifs.shape[2] == 8:
             other_motifs = utils_motif.motif_8_to_4_unsigned(other_motifs)
-        else:
-            raise ValueError(
-                f"Motif channel dimensions do not match: {my_motifs.shape[2]} vs. {other_motifs.shape[2]}"
-            )
 
         # L2 normalize once
-        my_motifs = my_motifs / np.linalg.norm(my_motifs, axis=(1, 2), keepdims=True)
-        other_motifs = other_motifs / np.linalg.norm(
-            other_motifs, axis=(1, 2), keepdims=True
-        )
+        my_motifs /= np.linalg.norm(my_motifs, axis=(1, 2), keepdims=True)
+        other_motifs /= np.linalg.norm(other_motifs, axis=(1, 2), keepdims=True)
 
         # Find best match, per iteration
         match_scores = []
         match_labels = []
         match_motifs = []
         match_idxs = []
-        match_mask = np.ones(my_motifs.shape[0], dtype=bool)  # (N,)
+        match_mask = np.ones((my_motifs.shape[0],), dtype=bool)  # (N,)
         for i in range(max_submotifs):
             # Compute similarity
             sim, alignment_rc, alignment_h = utils_similarity.compute_similarities(
@@ -1626,26 +1707,15 @@ class MotifCompendium:
             # Save logos, matches only
             self.__images[f"{save_column_prefix}_logo{i}"] = ""
             match_idx = np.where(match_idxs[i] >= 0)[0]
-
-            # Generate forward logos if not provided
             if utf8_images is None:
-                match_motif = match_motifs[i][match_idx, :, :]
-                motif_plotting_inputs = [
-                    utils_plotting.LogoPlottingInput(motif) for motif in match_motif
-                ]
-                self.__images.loc[match_idx, f"{save_column_prefix}_logo{i}"] = [
-                    motif_input.utf8_plot
-                    for motif_input in utils_plotting.plot_many_motif_logos(
-                        motif_plotting_inputs,)
-                ]
-
-            # Copy forward logos if provided
-            elif len(utf8_images) == len(other_motifs):
+                # Generate forward logos if not provided
+                match_motif = match_motifs[i][match_idx]
+                self.add_logos(match_motif, f"{save_column_prefix}_logo{i}")
+            else:
+                # Copy forward logos if provided
                 self.__images.loc[match_idx, f"{save_column_prefix}_logo{i}"] = [
                     utf8_images[x] for x in match_idx
                 ]
-            else:
-                raise ValueError("Invalid utf8_images")
 
     def assign_label_from_other(
         self,
@@ -1655,7 +1725,7 @@ class MotifCompendium:
         max_submotifs: int = 1,
         min_score: float = 0.0,
     ) -> None:
-        """Assign clusters to motifs based on an existing clustered MotifCompendium.
+        """Assign clusters to motifs based on an already clustered MotifCompendium.
 
         Given another MotifCompendium that has already been clustered and assigned
           labels, compute similarity between all the motifs in this MotifCompendium
@@ -1682,7 +1752,7 @@ class MotifCompendium:
             raise KeyError(f"{other_label_column} not in other metadata.")
 
         # Check if forward logos in other MotifCompendium
-        if "logo (fwd)" in other.get_images_columns():
+        if "logo (fwd)" in other.get_saved_images():
             other_logos = other.get_images("logo (fwd)")
         else:
             other_logos = None

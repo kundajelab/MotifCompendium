@@ -1,5 +1,3 @@
-import os
-
 import h5py
 import matplotlib.pyplot as plt
 import numpy as np
@@ -81,7 +79,7 @@ def plot_ground_truth_mismatch(
         similarity_threshold: The similarity value to threshold at.
         max_examples: The maximum number of mismatch examples to plot.
     """
-    quality = mc.clustering_quality(ground_truth, with_names=True)
+    quality = mc.clustering_quality(ground_truth)
     clustering = [False for _ in range(len(mc))]
     # Low internal similarity
     n_examples = 0
@@ -142,7 +140,7 @@ def judge_clustering(mc: MotifCompendiumClass, cluster_col: str, save_loc: str) 
           quality plot to.
     """
     # Get clustering quality
-    clustering_quality = mc.clustering_quality(cluster_col)
+    clustering_quality = mc.clustering_quality(cluster_col).to_numpy()
     # Plotting
     fig, axs = plt.subplots(2, 1, sharex=True)
     bins = np.linspace(0, 1, 20)
@@ -384,7 +382,7 @@ def calculate_filters(
         "copair_entropy_ratio",
         "dinuc_entropy_ratio",
         "posneg_inverted",
-        "truncated"
+        "truncated",
     ]
     for filter_metric in metric_list:
         if filter_metric not in valid_filter_metrics:
@@ -425,9 +423,9 @@ def calculate_filters(
                     utils_motif.motif_posneg_max(mc.get_standard_motif_stack())
                     != mc["posneg"]
                 )
-            
+
             case "truncated":
-                max_pos = mc.motifs.sum(axis=-1).argmax(axis=-1) # (N, )
+                max_pos = mc.motifs.sum(axis=-1).argmax(axis=-1)  # (N, )
                 mc["truncated"] = (max_pos == 0) | (max_pos == mc.motifs.shape[1] - 1)
 
             case _:
@@ -439,7 +437,7 @@ def calculate_filters(
 ###########################
 # EXISTING MOTIF DATABASE #
 ###########################
-def assign_label_from_pfm(
+def label_from_pfms(
     mc: MotifCompendiumClass,
     pfm_file: str,
     save_column_prefix: str = "match",
