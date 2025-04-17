@@ -203,7 +203,7 @@ def build(
           large objects.
     """
     # Check motifs
-    utils_motif.validate_motif_stack(motifs)
+    utils_motif.validate_motif_stack_compendium(motifs)
     # Metadata
     if metadata is None:
         metadata = pd.DataFrame()
@@ -251,6 +251,9 @@ def build_from_modisco(
     motifs, motif_names, seqlet_counts, model_names, posneg = (
         utils_loader.load_modiscos(modisco_dict, ic)
     )
+    # Convert motifs to normalized 8-channel motifs
+    motifs = utils_motif.motif_4_to_8(motifs)
+    motifs /= np.sum(motifs, axis=(1, 2), keepdims=True)
     # Build metadata
     metadata = pd.DataFrame()
     metadata["name"] = motif_names
