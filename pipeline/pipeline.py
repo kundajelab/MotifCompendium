@@ -1308,7 +1308,7 @@ if __name__ == "__main__":
         # Check html table columns
         html_table_cols_motif = [
             col for col in VisualizeArgs.html_table_cols
-            if col in mc.metadata.columns or col in mc.get_images_columns()
+            if col in mc.metadata.columns or col in mc.get_saved_images()
         ]
         if args.verbose:
             logging.info(f"Visualizing the following columns for motif table: {html_table_cols_motif}")
@@ -1331,7 +1331,7 @@ if __name__ == "__main__":
     # Visualize: Motifs removed
     if args.html_motif_removed:
         # Visualize all metadata columns
-        html_motif_removed_cols = mc_removed.metadata.columns.tolist() + mc_removed.get_images_columns()
+        html_motif_removed_cols = mc_removed.metadata.columns.tolist() + mc_removed.get_saved_images()
         if args.verbose:
             logging.info(f"Visualizing the following columns for removed motif table: {html_motif_removed_cols}")
 
@@ -1354,9 +1354,9 @@ if __name__ == "__main__":
     # Visualize: Cluster table
     if args.html_cluster_table:
         # Check html table columns
-        html_table_cols_cluster = [
-            col for col in VisualizeArgs.html_table_cols
-            if col in mc_avg.metadata.columns or col in mc_avg.get_images_columns()
+        VisualizeArgs.html_cluster_table_cols = [
+            col for col in VisualizeArgs.html_cluster_table_cols
+            if col in mc_avg.metadata.columns or col in mc_avg.get_saved_images()
         ]
         if args.verbose:
             logging.info(f"Visualizing the following columns for cluster table: {html_table_cols_cluster}")
@@ -1411,7 +1411,7 @@ if __name__ == "__main__":
     # Visualize: Clusters removed
     if args.html_cluster_removed:
         # Visualize all metadata columns
-        html_cluster_removed_cols = mc_avg_removed.metadata.columns.tolist() + mc_avg_removed.get_images_columns()
+        html_cluster_removed_cols = mc_avg_removed.metadata.columns.tolist() + mc_avg_removed.get_saved_images()
         if args.verbose:
             logging.info(f"Visualizing the following columns for removed cluster table: {html_cluster_removed_cols}")
 

@@ -160,7 +160,9 @@ def _compute_similarity_and_align_parallel(
             return results
         else:
             return [
-                compute_similarity_and_align(motif_stack_list[c[0]], motif_stack_list[c[1]])
+                compute_similarity_and_align(
+                    motif_stack_list[c[0]], motif_stack_list[c[1]]
+                )
                 for c in calculations
             ]
     else:

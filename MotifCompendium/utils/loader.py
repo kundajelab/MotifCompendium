@@ -310,7 +310,6 @@ def _sequence_importance_from_seqlets(seqlets: np.ndarray, ic: bool) -> np.ndarr
     # Information content scaling
     if ic:
         seqlets_avg = ic_scale(seqlets_avg)
-    # Convert to 8 channel
-    motif = motif_4_to_8(seqlets_avg)
-    # Final normalize
-    return motif / np.sum(motif)
+    # Normalize
+    seqlets_avg = seqlets_avg / np.sum(np.abs(seqlets_avg))
+    return seqlets_avg

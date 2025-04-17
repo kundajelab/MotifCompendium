@@ -8,7 +8,7 @@ The following tutorials are designed to help you learn how to make the most out 
 
 ## Core Functionality
 
-1) [Tutorial 2 - MotifCompendium Object Manipulations](2_motifcompendium_object_manipulations.ipynb): Describes how to interact with and manipulate MotifCompendium objects.
+1) [Tutorial 2 - The MotifCompendium Object](2_motifcompendium_object.ipynb): Describes how to interact with and manipulate MotifCompendium objects.
 2) [Tutorial 3 - Motif Clustering](3_motif_clustering.ipynb): Describes options and best practices for clustering motifs.
 3) [Tutorial 4 - Visualization](4_visualization.ipynb): Describes options and best practices for visualizing motifs and motif clusters.
 4) [Tutorial 5 - Motif Annotation](5_motif_annotation.ipynb): Describes options and best practices for automatically annotating motifs with MotifCompendium.

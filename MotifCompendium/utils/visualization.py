@@ -67,8 +67,15 @@ def table_html(
         html_out: The path to save he html file.
         editable: A boolean of whether or not the text values in the table can be edited.
     """
+    # Check inputs
+    if not isinstance(table, pd.DataFrame):
+        raise TypeError("table must be a pd.DataFrame")
     if not html_out.endswith(".html"):
         html_out += ".html"
+    # Add index column
+    table.insert(0, "index", table.index)
+    image_column.insert(0, False)
+    # Prepare data for rendering
     columns = table.columns.tolist()
     rows = table.to_dict(orient="records")
     # Create Jinja2 environment
