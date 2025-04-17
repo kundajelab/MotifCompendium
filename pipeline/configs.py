@@ -24,6 +24,10 @@ class OutputPaths:
     mc_avg: str = "motifcompendium_avg.mc"
     mc_avg_filtered: str = "motifcompendium_avg_filtered.mc"
     mc_avg_removed: str = "motifcompendium_avg_removed.mc"
+    
+    mc_metaavg: str = "motifcompendium_metaavg.mc"
+    mc_metaavg_filtered: str = "motifcompendium_metaavg_filtered.mc"
+    mc_metaavg_removed: str = "motifcompendium_metaavg_removed.mc"
 
     mc_subavg: str = "motifcompendium_subavg.mc"
     mc_subavg_filtered: str = "motifcompendium_subavg_filtered.mc"
@@ -32,8 +36,11 @@ class OutputPaths:
     html_motif_collection: str = "motifcompendium_motif_collection.html"
     html_motif_table: str = "motifcompendium_motif_table.html"
     html_motif_removed: str = "motifcompendium_motif_removed.html"
+    
     html_cluster_table: str = "motifcompendium_cluster_table.html"
     html_cluster_removed: str = "motifcompendium_cluster_removed.html"
+    html_metacluster_table: str = "motifcompendium_metacluster_table.html"
+    html_metacluster_removed: str = "motifcompendium_metacluster_removed.html"
     html_subcluster_table: str = "motifcompendium_subcluster_table.html"
     html_subcluster_removed: str = "motifcompendium_subcluster_removed.html"
 
@@ -59,6 +66,9 @@ class MotifMatchArgs:
 @dataclass
 class ClusterArgs:
     algorithm: str = "cpm_leiden"
+    algorithm_meta: str = "cpm_leiden"
+    algorithm_sub: str = "cpm_leiden"
+    algorithm_force: str = "cc"
     weight_col: str = "num_seqlets"
     aggregate_metadata: List[Tuple[str, str, str]] = field(default_factory=lambda: [
         ("name", "count", "num_motifs"),
@@ -66,30 +76,26 @@ class ClusterArgs:
         ("model", "concat", "model"),
         ("biosample", "concat", "biosample"),
         ("target", "concat", "target"),
+        ("tissue", "concat", "tissue"),
+        ("organ", "concat", "organ"),
     ])
 
 
 @dataclass
 class VisualizeArgs:
     editable: bool = True
-    html_motif_table_cols: List[str] = field(default_factory=lambda: [
-        col
+    html_table_cols: List[str] = field(default_factory=lambda: ["name", 
+        "max_external_similarity", "max_external_sim_name", "max_external_sim_logo", 
+        "min_internal_similarity", "min_internal_sim_logo1", "min_internal_sim_logo2"] + 
+        [col
         for iter in range(MotifMatchArgs.max_submotifs)
         for col in [
             f"{MetadataCols.match_column_prefix}_logo{iter}",
             f"{MetadataCols.match_column_prefix}_name{iter}",
             f"{MetadataCols.match_column_prefix}_score{iter}",
-        ]
-    ] + ["name", "posneg", "num_seqlets", "biosample", "target",])
-    html_cluster_table_cols: List[str] = field(default_factory=lambda: [
-        col
-        for iter in range(MotifMatchArgs.max_submotifs)
-        for col in [
-            f"{MetadataCols.match_column_prefix}_logo{iter}",
-            f"{MetadataCols.match_column_prefix}_name{iter}",
-            f"{MetadataCols.match_column_prefix}_score{iter}",
-        ]
-    ] + ["name", "posneg", "num_motifs", "num_seqlets", "biosample", "target",])
+            ]
+        ] +
+        ["posneg", "num_motifs", "num_seqlets", "biosample", "target", "tissue", "organ", "system",])
 
 
 @dataclass
@@ -116,7 +122,7 @@ class MotifFilterArgs:
             name="2_noisemix",
             metric="motif_entropy",
             operation=">",
-            threshold=0.7,
+            threshold=0.7, #0.65, 0.7
             override=False,
             apply_motif=True,
             apply_cluster=True,
@@ -125,7 +131,7 @@ class MotifFilterArgs:
             name="3_broadsingle",
             metric="posbase_entropy_ratio",
             operation=">",
-            threshold=1.9,
+            threshold=1.9, #1.75, 1.9
             override=False,
             apply_motif=True,
             apply_cluster=True,
@@ -134,7 +140,7 @@ class MotifFilterArgs:
             name="4_gcbias",
             metric="copair_entropy_ratio",
             operation=">",
-            threshold=1.9,
+            threshold=1.9, #1.75, 1.9
             override=False,
             apply_motif=True,
             apply_cluster=True,
@@ -143,7 +149,7 @@ class MotifFilterArgs:
             name="5_dinucrepeat",
             metric="dinuc_entropy_ratio",
             operation=">",
-            threshold=3.0,
+            threshold=2.9, #1.9 2.9
             override=False,
             apply_motif=True,
             apply_cluster=True,
@@ -196,7 +202,7 @@ class MotifFilterArgs:
             name="2_noisemix",
             metric="motif_entropy",
             operation=">",
-            threshold=0.8,
+            threshold=0.8, #0.7, 0.8
             override=False,
             apply_motif=True,
             apply_cluster=True,
@@ -205,7 +211,16 @@ class MotifFilterArgs:
             name="3_broadsingle",
             metric="posbase_entropy_ratio",
             operation=">",
-            threshold=5.0,
+            threshold=5.0, #1.9, 5.0
+            override=False,
+            apply_motif=True,
+            apply_cluster=True,
+        ),
+        FilterArgs(
+            name="4_gcbias",
+            metric="copair_entropy_ratio",
+            operation=">",
+            threshold=5.0, #1.9, 5.0
             override=False,
             apply_motif=True,
             apply_cluster=True,
@@ -214,7 +229,7 @@ class MotifFilterArgs:
             name="5_dinucrepeat",
             metric="dinuc_entropy_ratio",
             operation=">",
-            threshold=10.0,
+            threshold=10.0, #2.9, 10.0
             override=False,
             apply_motif=True,
             apply_cluster=True,

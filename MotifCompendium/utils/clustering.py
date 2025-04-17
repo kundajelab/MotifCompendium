@@ -83,10 +83,10 @@ def cluster(
             )
             return cpm_leiden_clustering(weighted_adjacency_matrix, **kwargs)
         # Connected-components
-        case "cc":
+        case "cc" | "connected_components":
             adjacency_matrix = similarity_matrix >= similarity_threshold
             return cc_clustering(adjacency_matrix)
-        case "dense_cc":
+        case "dense_cc" | "dense_connected_components":
             adjacency_matrix = similarity_matrix >= similarity_threshold
             return densely_cc_clustering(adjacency_matrix, **kwargs)
         # Spectral
@@ -290,22 +290,27 @@ def modularity_leiden_clustering_gpu(
 def cc_clustering(adjacency_matrix: np.ndarray) -> list[int]:
     """Find connected components in an adjacency matrix."""
     N = adjacency_matrix.shape[0]
-    clustering = [False] * N
+    # Prepare clustering
+    clustering = np.zeros((N, ), dtype=int)
     current_cluster = 1
+    # Iterate through nodes
     for current_node in range(N):
-        if not clustering[current_node]:
-            # create new cluster
-            clustering[current_node] = current_cluster
-            new_cluster_idxs = [current_node]
-            for consider_node in range(current_node + 1, N):
-                if adjacency_matrix[consider_node, new_cluster_idxs].any():
-                    clustering[consider_node] = current_cluster
-                    new_cluster_idxs.append(consider_node)
-            current_cluster += 1
-    print(f"found {current_cluster} clusters in {N} nodes")
-    for i in range(N):
-        assert clustering[i]
-    return [x - 1 for x in clustering]
+        # If already clustered, continue
+        if clustering[current_node] != 0:
+            continue
+        # Otherwise, create new cluster
+        considering = np.zeros((N, ))
+        considering[current_node] = 1
+        found_cc = False
+        # Depth iteration through connected component
+        while not found_cc:
+            new_considering = (adjacency_matrix@considering) > 0
+            found_cc = (new_considering == considering).all()
+            considering = new_considering
+        clustering += current_cluster*considering
+        current_cluster += 1
+    # Return
+    return (clustering - 1).tolist()
 
 
 def densely_cc_clustering(adjacency_matrix: np.ndarray) -> list[int]:

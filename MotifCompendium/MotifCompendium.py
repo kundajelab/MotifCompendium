@@ -847,6 +847,8 @@ class MotifCompendium:
         save_name: str = "cluster",
         cluster_on: str | None = None,
         cluster_within: str | None = None,
+        cluster_within_on: tuple[str, str] | None = None,
+        cluster_on_weight: str | None = None,
         **kwargs,
     ) -> None:
         """Cluster motifs.
@@ -870,6 +872,9 @@ class MotifCompendium:
               done on the entire MotifCompendium. If not None, the clustering will be
               done per cluster in the cluster_within column. This will identify
               subclusters of the cluster_within_column.
+            weight_col: The name of the column in metadata containing weights to use
+              when averaging (for cluster_on). If None, all motifs are equally weighted.
+            recursive: Whether or not to cluster recursively. If True, the clustering
             **kwargs: Additional named arguments specific to the clustering algorithm of
                 choice.
 
@@ -882,53 +887,75 @@ class MotifCompendium:
             isinstance(similarity_threshold, float) and (0 <= similarity_threshold <= 1)
         ):
             raise ValueError("similarity_threshold must be a float between [0, 1].")
-        if cluster_on is None and cluster_within is None:
-            # Cluster entire MotifCompendium
-            self.metadata[save_name] = utils_clustering.cluster(
-                similarity_matrix=self.similarity,
-                algorithm=algorithm,
-                similarity_threshold=similarity_threshold,
-                **kwargs,
-            )
-        elif cluster_on is not None and cluster_within is None:
-            # Cluster on
+        
+        # Cluster on
+        if cluster_on:
             if not cluster_on in self.metadata.columns:
                 raise KeyError(f"{cluster_on} not in metadata.")
-            # Average
-            mc_average = self.cluster_averages(cluster_col=cluster_on)
-            # Cluster
-            mc_average.metadata["cluster"] = utils_clustering.cluster(
-                similarity_matrix=mc_average.similarity,
-                algorithm=algorithm,
-                similarity_threshold=similarity_threshold,
-                **kwargs,
+            # Average, keeping cluster_within
+            mc = self.cluster_averages(
+                cluster_col=cluster_on,
+                aggregations=[(cluster_within, "concat", cluster_within)],
+                weight_col=weight_col,
+            ) if cluster_within else self.cluster_averages(
+                cluster_col=cluster_on,
+                weight_col=weight_col,
             )
-            # Map back
-            cluster_map = {
-                row["source_cluster"]: row["cluster"]
-                for _, row in mc_average.metadata.iterrows()
-            }
-            self.metadata[save_name] = [
-                cluster_map[c] for c in self.metadata[cluster_on]
-            ]
-        elif cluster_on is None and cluster_within is not None:
-            # Cluster within
-            self.metadata[save_name] = None
-            num_clusters_so_far = 0
-            for c in set(self.metadata[cluster_within]):
-                self_c = self[self[cluster_within] == c]
-                self_c_idxs = self.metadata[self[cluster_within] == c].index.tolist()
+        else:
+            mc = self
+        
+        # Cluster within
+        if cluster_within:
+            if not cluster_within in self.metadata.columns:
+                raise KeyError(f"{cluster_within} not in metadata.")
+            for c in set(mc[cluster_within]):
+                mc_c = mc[mc[cluster_within] == c]
+                c_idxs = mc.metadata[mc[cluster_within] == c].index.tolist()
                 clusters_c = utils_clustering.cluster(
-                    similarity_matrix=self_c.similarity,
+                    similarity_matrix=mc_c.similarity,
                     algorithm=algorithm,
                     similarity_threshold=similarity_threshold,
                     **kwargs,
                 )
-                clusters_c = [c + num_clusters_so_far for c in clusters_c]
-                self.metadata.loc[self_c_idxs, save_name] = clusters_c
-                num_clusters_so_far += len(set(clusters_c))
+                clusters_c = [f"{c}-{c_sub}" for c_sub in clusters_c]
+                mc.metadata.loc[c_idxs, save_name] = clusters_c
         else:
-            raise ValueError("cluster_on and cluster_within cannot be both set.")
+            # Cluster standard
+            mc.metadata[save_name] = utils_clustering.cluster(
+                similarity_matrix=mc.similarity,
+                algorithm=algorithm,
+                similarity_threshold=similarity_threshold,
+                **kwargs,
+            )
+        
+        # Cluster on: Map back to self
+        if cluster_on:
+            cluster_map = {
+                row["source_cluster"]: row[save_name]
+                for _, row in mc.metadata.iterrows()
+            }
+            self.metadata[save_name] = [cluster_map[c] for c in self.metadata[cluster_on]]
+
+        # Recursive
+        min_len = len(self)
+        while recursive:
+            cur_len = len(self.metadata[save_name].unique())
+            # Check if clustering is done
+            if cur_len == min_len:
+                break
+            else:
+                min_len = cur_len
+                self.cluster(
+                    algorithm=algorithm,
+                    similarity_threshold=similarity_threshold,
+                    save_name=save_name,
+                    cluster_on=save_name,
+                    cluster_within=cluster_within,
+                    weight_col=weight_col,
+                    recursive=False,
+                    **kwargs,
+                )
+
 
     def clustering_quality(
         self, cluster_col: str, with_names: bool = False
@@ -1025,7 +1052,7 @@ class MotifCompendium:
 
         Notes:
             Any non-supported aggregations types must be added manually to the cluster
-              average MotifCompendium manually after it has been created.
+              average MotifCompendium after it has been created.
             Turning compute_quality_stats off can save time but the quality statistics
               it generates are useful to have.
         """
@@ -1090,7 +1117,7 @@ class MotifCompendium:
                     case "average" | "avg":
                         agg_dict["values"].append(np.mean(agg_c_data))
                     case "concatenate" | "concat":
-                        agg_dict["values"].append(",".join(sorted(set(agg_c_data))))
+                        agg_dict["values"].append(",".join(sorted(set(map(str,agg_c_data)))))
                     case "concat_counted":
                         val_counts = defaultdict(int)
                         for x in agg_c_data:
@@ -1119,7 +1146,12 @@ class MotifCompendium:
             mc_avg["min_internal_similarity"] = [quality.loc[c, c] for c in clusters]
             external_sim = mc_avg.similarity - np.eye(mc_avg.similarity.shape[0])
             max_external_sim = external_sim.max(axis=1)
+            max_external_sim_arg = external_sim.argmax(axis=1)
             mc_avg["max_external_similarity"] = max_external_sim
+            mc_avg["max_external_sim_name"] = pd.Series(
+                mc_avg["name"].values[max_external_sim_arg],
+                index=mc_avg.metadata.index
+            )
             # quality_np = quality.to_numpy()
             # external_sim = quality_np * (1 - np.eye(quality_np.shape[0]))
             # max_external_sim = external_sim.max(axis=0)
