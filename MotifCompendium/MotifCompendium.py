@@ -1308,7 +1308,12 @@ class MotifCompendium:
             ]
             cluster_revcomp = {c: i for i, c in enumerate(clusters)}
             mc_avg.add_logos(
-                mc_avg.get_standard_motif_stack()[[cluster_revcomp[c] for c in quality_df["highest_external_similarity_cluster"]]],
+                mc_avg.get_standard_motif_stack()[
+                    [
+                        cluster_revcomp[c]
+                        for c in quality_df["highest_external_similarity_cluster"]
+                    ]
+                ],
                 "highest_external_similarity_cluster",
             )
             mc_avg.add_logos(
@@ -1487,7 +1492,7 @@ class MotifCompendium:
             # If index column, skip
             if i == 0:
                 headers.append("index")
-                image_columns.append(True) # Index acts as an image column
+                image_columns.append(True)  # Index acts as an image column
                 continue
             # Check if column has sort buttons (non-image column)
             if th.find("button"):
@@ -1498,7 +1503,6 @@ class MotifCompendium:
             else:
                 headers.append(th.text.strip())
                 image_columns.append(True)
-                    
         # Get data rows (ignore first and second row)
         rows = []
         index = []
@@ -1643,11 +1647,9 @@ class MotifCompendium:
             my_motifs = utils_motif.motif_8_to_4_unsigned(my_motifs)
         elif self.motifs.shape[2] == 4 and other_motifs.shape[2] == 8:
             other_motifs = utils_motif.motif_8_to_4_unsigned(other_motifs)
-
         # L2 normalize once
         my_motifs /= np.linalg.norm(my_motifs, axis=(1, 2), keepdims=True)
         other_motifs /= np.linalg.norm(other_motifs, axis=(1, 2), keepdims=True)
-
         # Find best match, per iteration
         match_scores = []
         match_labels = []
@@ -1665,7 +1667,6 @@ class MotifCompendium:
                 np.linalg.norm(my_motifs, axis=(1, 2))[:, np.newaxis]
                 * np.linalg.norm(other_motifs, axis=(1, 2))[np.newaxis, :]
             )  # (N, M)
-
             # Identify matches, Scale score by i
             match_score = np.max(sim, axis=1) * np.sqrt(i + 1)  # (N,)
             match_idx = np.argmax(sim, axis=1)  # (N,)
@@ -1676,13 +1677,11 @@ class MotifCompendium:
                 np.arange(alignment_h.shape[0]), match_idx
             ]  # (N,)
             match_motif = other_motifs[match_idx, :, :]
-
             # Remove matches below threshold
             match_mask = match_mask & (match_score >= min_score)  # (N,)
             match_score[~match_mask] = 0
             match_idx[~match_mask] = -1
             match_motif[~match_mask] = 0
-
             # Subtract best match
             my_motifs = utils_motif.remove_motif_component(
                 my_motifs,
@@ -1690,7 +1689,6 @@ class MotifCompendium:
                 alignment_rc,
                 alignment_h,
             )
-
             # Save match information
             match_label = [labels[x] if x >= 0 else "" for x in match_idx]
             if match_motif.shape[2] == 8:
@@ -1699,7 +1697,6 @@ class MotifCompendium:
             match_scores.append(match_score)
             match_labels.append(match_label)
             match_idxs.append(match_idx)
-
         # Save match information
         for i in range(max_submotifs):
             self[f"{save_column_prefix}_score{i}"] = match_scores[i]  # Save scores
@@ -1750,13 +1747,11 @@ class MotifCompendium:
             other_labels = other.metadata[other_label_column].tolist()
         else:
             raise KeyError(f"{other_label_column} not in other metadata.")
-
         # Check if forward logos in other MotifCompendium
         if "logo (fwd)" in other.get_saved_images():
             other_logos = other.get_images("logo (fwd)")
         else:
             other_logos = None
-
         # Assign labels
         self.assign_label_from_motifs(
             other_motifs=other.motifs,
