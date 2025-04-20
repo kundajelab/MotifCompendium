@@ -191,7 +191,7 @@ def label_motifs(
         )
 
     elif reference.endswith("pfm.txt") or reference.endswith("meme.txt") or reference.endswith(".meme"):
-        utils_analysis.assign_label_from_pfm(
+        utils_analysis.assign_label_from_pfms(
             mc=mc,
             pfm_file=reference,
             save_column_prefix=label_col,
@@ -816,25 +816,51 @@ if __name__ == "__main__":
                     mc.cluster(
                         algorithm=ClusterArgs.algorithm,
                         similarity_threshold=sim_threshold,
-                        cluster_on=args.cluster_on,
                         cluster_within=args.cluster_within,
-                        weight_col=ClusterArgs.weight_col,
-                        recursive=args.cluster_recursive,
+                        cluster_on=args.cluster_on,
+                        cluster_on_weight=ClusterArgs.weight_col,
                         save_name=cluster_col_name,
                     )
+                    if args.cluster_recursive:
+                        min_len = len(mc[cluster_col_name].unique())
+                        for i in range(ClusterArgs.max_iter):
+                            if args.verbose:
+                                logging.info(f"Recursively clustering motifs: {i+1}...")
+                            mc.cluster(
+                                algorithm=ClusterArgs.algorithm,
+                                similarity_threshold=sim_threshold,
+                                cluster_within=args.cluster_within,
+                                cluster_on=cluster_col_name,
+                                cluster_on_weight=ClusterArgs.weight_col,
+                                save_name=cluster_col_name,
+                            )
+                            new_min_len = len(mc[cluster_col_name].unique())
+                            if min_len == new_min_len:
+                                break
+                            else:
+                                min_len = new_min_len
                     # Force-cluster
                     if args.sim_threshold_force:
                         if args.verbose:
                             logging.info(f"Force-clustering motifs using: {ClusterArgs.algorithm_force}_{args.sim_threshold_force}{recursive_name or ''}{force_name or ''}...")
-                        mc.cluster(
-                            algorithm=ClusterArgs.algorithm_force,
-                            similarity_threshold=args.sim_threshold_force,
-                            cluster_on=cluster_col_name,
-                            cluster_within=args.cluster_within,
-                            weight_col=ClusterArgs.weight_col,
-                            recursive=True,
-                            save_name=cluster_col_name,
-                        )
+                        for i in range(ClusterArgs.max_iter):
+                            mc.cluster(
+                                algorithm=ClusterArgs.algorithm_force,
+                                similarity_threshold=args.sim_threshold_force,
+                                cluster_within=args.cluster_within,
+                                cluster_on=cluster_col_name,
+                                cluster_on_weight=ClusterArgs.weight_col,
+                                save_name=cluster_col_name,
+                            )
+                            new_min_len = len(mc[cluster_col_name].unique())
+                            if not args.cluster_recursive:
+                                break
+                            if args.verbose:
+                                logging.info(f"Recursively clustering motifs: {i+1}...")
+                            if min_len == new_min_len:
+                                break
+                            else:
+                                min_len = new_min_len
                     if args.verbose:
                         logging.info(f"Total number of clusters ({cluster_col_name}): {len(mc[cluster_col_name].unique())}")
                     if args.time:
@@ -852,22 +878,47 @@ if __name__ == "__main__":
                             algorithm=ClusterArgs.algorithm_meta,
                             similarity_threshold=args.sim_threshold_meta,
                             cluster_on=cluster_col_name,
-                            weight_col=ClusterArgs.weight_col,
-                            recursive=args.cluster_recursive,
+                            cluster_on_weight=ClusterArgs.weight_col,
                             save_name=metacluster_col_name,
                         )
+                        if args.cluster_recursive:
+                            min_len = len(mc[metacluster_col_name].unique())
+                            for i in range(ClusterArgs.max_iter):
+                                if args.verbose:
+                                    logging.info(f"Recursively clustering motifs: {i+1}...")
+                                mc.cluster(
+                                    algorithm=ClusterArgs.algorithm_meta,
+                                    similarity_threshold=args.sim_threshold_meta,
+                                    cluster_on=metacluster_col_name,
+                                    cluster_on_weight=ClusterArgs.weight_col,
+                                    save_name=metacluster_col_name,
+                                )
+                                new_min_len = len(mc[metacluster_col_name].unique())
+                                if min_len == new_min_len:
+                                    break
+                                else:
+                                    min_len = new_min_len
                         # Force-cluster:
                         if args.sim_threshold_force:
                             if args.verbose:
                                 logging.info(f"Force-clustering motifs using: {ClusterArgs.algorithm_force}_{args.sim_threshold_force}{recursive_name or ''}{force_name or ''}...")
-                            mc.cluster(
-                                algorithm=ClusterArgs.algorithm_force,
-                                similarity_threshold=args.sim_threshold_force,
-                                cluster_on=metacluster_col_name,
-                                weight_col=ClusterArgs.weight_col,
-                                recursive=True,
-                                save_name=metacluster_col_name,
-                            )
+                            for i in range(ClusterArgs.max_iter):
+                                mc.cluster(
+                                    algorithm=ClusterArgs.algorithm_force,
+                                    similarity_threshold=args.sim_threshold_force,
+                                    cluster_on=metacluster_col_name,
+                                    cluster_on_weight=ClusterArgs.weight_col,
+                                    save_name=metacluster_col_name,
+                                )
+                                new_min_len = len(mc[metacluster_col_name].unique())
+                                if not args.cluster_recursive:
+                                    break
+                                if args.verbose:
+                                    logging.info(f"Recursively clustering motifs: {i+1}...")
+                                if min_len == new_min_len:
+                                    break
+                                else:
+                                    min_len = new_min_len
                         if args.verbose:
                             logging.info(f"Total number of meta-clusters ({metacluster_col_name}): {len(mc[metacluster_col_name].unique())}")
                         if args.time:
@@ -885,22 +936,48 @@ if __name__ == "__main__":
                             algorithm=ClusterArgs.algorithm_sub,
                             similarity_threshold=args.sim_threshold_sub,
                             cluster_within=cluster_col_name,
-                            recursive=args.cluster_recursive,
                             save_name=subcluster_col_name,
                         )
+                        if args.cluster_recursive:
+                            min_len = len(mc[subcluster_col_name].unique())
+                            for i in range(ClusterArgs.max_iter):
+                                if args.verbose:
+                                    logging.info(f"Recursively clustering motifs: {i+1}...")
+                                mc.cluster(
+                                    algorithm=ClusterArgs.algorithm_sub,
+                                    similarity_threshold=args.sim_threshold_sub,
+                                    cluster_within=cluster_col_name,
+                                    cluster_on=subcluster_col_name,
+                                    cluster_on_weight=ClusterArgs.weight_col,
+                                    save_name=subcluster_col_name,
+                                )
+                                new_min_len = len(mc[subcluster_col_name].unique())
+                                if min_len == new_min_len:
+                                    break
+                                else:
+                                    min_len = new_min_len
                         # Force-cluster
                         if args.sim_threshold_force:
                             if args.verbose:
                                 logging.info(f"Force-clustering motifs using: {ClusterArgs.algorithm_force}_{args.sim_threshold_force}{recursive_name or ''}{force_name or ''}...")
-                            mc.cluster(
-                                algorithm=ClusterArgs.algorithm_force,
-                                similarity_threshold=args.sim_threshold_force,
-                                cluster_on=subcluster_col_name,
-                                cluster_within=cluster_col_name,
-                                weight_col=ClusterArgs.weight_col,
-                                recursive=True,
-                                save_name=subcluster_col_name,
-                            )
+                            for i in range(ClusterArgs.max_iter):
+                                mc.cluster(
+                                    algorithm=ClusterArgs.algorithm_force,
+                                    similarity_threshold=args.sim_threshold_force,
+                                    cluster_within=cluster_col_name,
+                                    cluster_on=subcluster_col_name,
+                                    cluster_on_weight=ClusterArgs.weight_col,
+                                    save_name=subcluster_col_name,
+                                )
+                                new_min_len = len(mc[subcluster_col_name].unique())
+                                if not args.cluster_recursive:
+                                    break
+                                if args.verbose:
+                                    logging.info(f"Recursively clustering motifs: {i+1}...")
+                                if min_len == new_min_len:
+                                    break
+                                else:
+                                    min_len = new_min_len
                         if args.verbose:
                             logging.info(f"Total number of sub-clusters ({subcluster_col_name}): {len(mc[subcluster_col_name].unique())}")
                         if args.time:
@@ -988,7 +1065,7 @@ if __name__ == "__main__":
             if args.time:
                 start_time = time.time()
             mc_avg = mc.cluster_averages(
-                cluster_col=cluster_col_name,
+                clustering=cluster_col_name,
                 aggregations=ClusterArgs.aggregate_metadata,
                 weight_col=ClusterArgs.weight_col,
                 compute_quality_stats=args.quality,
@@ -1034,7 +1111,7 @@ if __name__ == "__main__":
         if args.verbose:
             logging.info(f"Averaging motifs per meta-cluster: {metacluster_col_name}...")
         mc_metaavg = mc.cluster_averages(
-            cluster_col=metacluster_col_name,
+            clustering=metacluster_col_name,
             aggregations=ClusterArgs.aggregate_metadata,
             weight_col=ClusterArgs.weight_col,
             compute_quality_stats=args.quality,
@@ -1070,7 +1147,7 @@ if __name__ == "__main__":
         if args.verbose:
             logging.info(f"Averaging motifs per sub-cluster: {subcluster_col_name}...")
         mc_subavg = mc.cluster_averages(
-            cluster_col=subcluster_col_name,
+            clustering=subcluster_col_name,
             aggregations=ClusterArgs.aggregate_metadata,
             weight_col=ClusterArgs.weight_col,
             compute_quality_stats=args.quality,
@@ -1354,8 +1431,8 @@ if __name__ == "__main__":
     # Visualize: Cluster table
     if args.html_cluster_table:
         # Check html table columns
-        VisualizeArgs.html_cluster_table_cols = [
-            col for col in VisualizeArgs.html_cluster_table_cols
+        html_table_cols_cluster = [
+            col for col in VisualizeArgs.html_table_cols
             if col in mc_avg.metadata.columns or col in mc_avg.get_saved_images()
         ]
         if args.verbose:

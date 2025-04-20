@@ -70,6 +70,7 @@ class ClusterArgs:
     algorithm_sub: str = "cpm_leiden"
     algorithm_force: str = "cc"
     weight_col: str = "num_seqlets"
+    max_iter: int = 100
     aggregate_metadata: List[Tuple[str, str, str]] = field(default_factory=lambda: [
         ("name", "count", "num_motifs"),
         ("num_seqlets", "sum", "num_seqlets"),
@@ -84,9 +85,10 @@ class ClusterArgs:
 @dataclass
 class VisualizeArgs:
     editable: bool = True
-    html_table_cols: List[str] = field(default_factory=lambda: ["name", 
-        "max_external_similarity", "max_external_sim_name", "max_external_sim_logo", 
-        "min_internal_similarity", "min_internal_sim_logo1", "min_internal_sim_logo2"] + 
+    html_table_cols: List[str] = field(default_factory=lambda: ["name",
+        "best_match_similarity", "best_match_cluster"
+        "highest_external_similarity", "highest_external_similarity_cluster", "highest_external_similarity_motif", 
+        "lowest_internal_similarity", "lowest_internal_similarity_motif1", "lowest_internal_similarity_motif2"] + 
         [col
         for iter in range(MotifMatchArgs.max_submotifs)
         for col in [
