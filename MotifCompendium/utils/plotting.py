@@ -305,10 +305,11 @@ def _plot_motif_logo(motif_info: LogoPlottingInput) -> LogoPlottingInput:
     else:
         plot_ax = motif_info.ax
     # Plot
-    if get_fast_plotting():
-        _plot_logo_on_axis_fast(motif_info.get_motif_df(), plot_ax)
-    else:
-        logomaker.Logo(motif_info.get_motif_df(), ax=plot_ax)
+    if not (motif_info.motif == 0).all():  # Only plot if motif is not all zeros
+        if get_fast_plotting():
+            _plot_logo_on_axis_fast(motif_info.get_motif_df(), plot_ax)
+        else:
+            logomaker.Logo(motif_info.get_motif_df(), ax=plot_ax)
     plot_ax.spines[["top", "right", "bottom", "left"]].set_visible(False)
     plot_ax.set_axis_off()
     # Encode image in UTF-8
