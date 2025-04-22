@@ -226,7 +226,6 @@ def build(
 
 def build_from_modisco(
     modisco_dict: dict[str, str],
-    modisco_region_width: int = 400,
     ic: bool = True,
     safe: bool = True,
 ) -> MotifCompendium:
@@ -236,8 +235,6 @@ def build_from_modisco(
 
     Args:
         modisco_dict: A dictionary from model name to modisco file path.
-        modisco_region_width: The region width (across the summit) used during modisco.
-          (Default: 400 bp)
         ic: Whether or not to apply information content scaling to Modisco motifs.
         safe: Whether or not to construct the MotifCompendium safely.
 
@@ -251,9 +248,8 @@ def build_from_modisco(
           large objects.
     """
     # Load from Modisco
-    motifs, motif_names, seqlet_counts, model_names, posneg, avgdist_summits = (
-        utils_loader.load_modiscos(modisco_dict,
-                                    modisco_region_width=modisco_region_width, ic=ic)
+    motifs, motif_names, seqlet_counts, model_names, posneg = (
+        utils_loader.load_modiscos(modisco_dict, ic)
     )
     # Convert motifs to normalized 8-channel motifs
     motifs = utils_motif.motif_4_to_8(motifs)
@@ -264,7 +260,6 @@ def build_from_modisco(
     metadata["num_seqlets"] = seqlet_counts
     metadata["model"] = model_names
     metadata["posneg"] = posneg
-    metadata["avg_dist_summit"] = avgdist_summits
     # Construct object
     return build(
         motifs,
@@ -1182,7 +1177,7 @@ class MotifCompendium:
             stats["highest_external_similarity_motif_motif"] = [
                 (
                     motifs_standard[y]
-                    if ci_idxs[x] and not self.alignment_rc[ci_idxs[x][0], y]
+                    if not self.alignment_rc[ci_idxs[x][0], y]
                     else motifs_standard[y][::-1, ::-1]
                 )
                 for x, y in zip(
@@ -1222,8 +1217,8 @@ class MotifCompendium:
                         source column for each cluster.
                     - "sum": This option sums the values in the source column for each
                         cluster.
-                    - "average" or "avg" or "mean": This option averages the values in the 
-                        source column for each cluster.
+                    - "average" or "avg": This option averages the values in the source
+                        column for each cluster.
                     - "concatenate" or "concat": This option lists all the unique values
                         in the source column for each cluster.
                     - "concat_counted": This option lists all the unique values and
@@ -1305,7 +1300,7 @@ class MotifCompendium:
                         agg_dict["values"].append(len(set(agg_c_data)))
                     case "sum":
                         agg_dict["values"].append(np.sum(agg_c_data))
-                    case "average" | "avg" | "mean":
+                    case "average" | "avg":
                         agg_dict["values"].append(np.mean(agg_c_data))
                     case "concatenate" | "concat":
                         agg_dict["values"].append(
@@ -1787,7 +1782,8 @@ class MotifCompendium:
             match_idx = np.where(match_idxs[i] >= 0)[0] # match_idx excluding -1's; REMOVE
             if utf8_images is None:
                 # Generate forward logos if not provided
-                self.add_logos(match_motifs[i], f"{save_column_prefix}_logo{i}")
+                match_motif = match_motifs[i]
+                self.add_logos(match_motif, f"{save_column_prefix}_logo{i}")
             else:
                 # Copy forward logos if provided
                 self.__images.loc[match_idx, f"{save_column_prefix}_logo{i}"] = [

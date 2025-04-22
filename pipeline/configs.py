@@ -75,7 +75,6 @@ class ClusterArgs:
         ("name", "count", "num_motifs"),
         ("num_seqlets", "sum", "num_seqlets"),
         ("model", "concat", "model"),
-        ("avg_dist_summit", "average", "avg_dist_summit"),
         ("biosample", "concat", "biosample"),
         ("target", "concat", "target"),
         ("tissue", "concat", "tissue"),
@@ -111,7 +110,7 @@ class VisualizeArgs:
             f"{MetadataCols.match_column_prefix}_score{iter}",
             ]
         ] +
-        ["posneg", "num_motifs", "num_seqlets", "avg_dist_summit", "biosample", "target", "tissue", "organ", "system",])
+        ["posneg", "num_motifs", "num_seqlets", "biosample", "target", "tissue", "organ", "system",])
 
 
 @dataclass

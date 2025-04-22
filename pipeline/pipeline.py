@@ -28,12 +28,11 @@ def setup_parser():
     parser.add_argument("-io", "--input-old-mc", type=str, default=None, help="Path to the input old MotifCompendium object.")
     parser.add_argument("-ih", "--input-h5s", nargs="+", type=str, default=None, help="Path to the input Modisco H5 file(s).")
     parser.add_argument("-nh", "--input-names", nargs="+", type=str, default=None, help="Nickname of the input Modisco H5 file(s).")
-    
+
     parser.add_argument("-o", "--output-dir", type=str, required=True, help="Path to the output directory.")
     parser.add_argument("-m", "--metadata", type=str, default=None, help="Path to the metadata file, per h5 or motif: CSV, TSV format.")
     parser.add_argument("-r", "--reference", type=str, default=None, help="Path to the main reference motif file: MotifCompendium object, or PFM, MEME .txt format.")
     parser.add_argument("--add-reference", nargs="+", type=str, default=None, help="Path to additional reference motif files for final labeling: MotifCompendium object, or PFM, MEME .txt format.")
-    parser.add_argument("--modisco-region-width", type=int, default=400, help="Width of region used during TF-Modisco run. (Default: 400 bp)")
     
     parser.add_argument("--min-seqlets", type=int, default=100, help="Minimum number of seqlets to consider a motif.")
     parser.add_argument("--first-posmotif-only", action="store_true", help="Only include the first positive motif in the MotifCompendium object.")
@@ -653,7 +652,6 @@ if __name__ == "__main__":
                     start_time = time.time()
                 mc = MotifCompendium.build_from_modisco(
                     modisco_dict=modisco_dict,
-                    # modisco_region_width=args.modisco_region_width,
                     ic=args.ic,
                     safe=args.safe,
                 )
@@ -845,6 +843,8 @@ if __name__ == "__main__":
                                 min_len = new_min_len
                     # Force-cluster
                     if args.sim_threshold_force:
+                        if args.verbose:
+                            logging.info(f"Force-clustering motifs using: {ClusterArgs.algorithm_force}_{args.sim_threshold_force}{recursive_name or ''}{force_name or ''}...")
                         for i in range(ClusterArgs.max_iter):
                             mc.cluster(
                                 algorithm=ClusterArgs.algorithm_force,
@@ -858,6 +858,8 @@ if __name__ == "__main__":
                             new_min_len = len(mc[cluster_col_name].unique())
                             if not args.cluster_recursive:
                                 break
+                            if args.verbose:
+                                logging.info(f"Recursively clustering motifs: {i+1}...")
                             if min_len == new_min_len:
                                 break
                             else:
@@ -903,6 +905,8 @@ if __name__ == "__main__":
                                     min_len = new_min_len
                         # Force-cluster:
                         if args.sim_threshold_force:
+                            if args.verbose:
+                                logging.info(f"Force-clustering motifs using: {ClusterArgs.algorithm_force}_{args.sim_threshold_force}{recursive_name or ''}{force_name or ''}...")
                             for i in range(ClusterArgs.max_iter):
                                 mc.cluster(
                                     algorithm=ClusterArgs.algorithm_force,
@@ -915,6 +919,8 @@ if __name__ == "__main__":
                                 new_min_len = len(mc[metacluster_col_name].unique())
                                 if not args.cluster_recursive:
                                     break
+                                if args.verbose:
+                                    logging.info(f"Recursively clustering motifs: {i+1}...")
                                 if min_len == new_min_len:
                                     break
                                 else:
@@ -960,6 +966,8 @@ if __name__ == "__main__":
                                     min_len = new_min_len
                         # Force-cluster
                         if args.sim_threshold_force:
+                            if args.verbose:
+                                logging.info(f"Force-clustering motifs using: {ClusterArgs.algorithm_force}_{args.sim_threshold_force}{recursive_name or ''}{force_name or ''}...")
                             for i in range(ClusterArgs.max_iter):
                                 mc.cluster(
                                     algorithm=ClusterArgs.algorithm_force,
@@ -973,6 +981,8 @@ if __name__ == "__main__":
                                 new_min_len = len(mc[subcluster_col_name].unique())
                                 if not args.cluster_recursive:
                                     break
+                                if args.verbose:
+                                    logging.info(f"Recursively clustering motifs: {i+1}...")
                                 if min_len == new_min_len:
                                     break
                                 else:
