@@ -1879,8 +1879,8 @@ class MotifCompendium:
             self[f"{save_column_prefix}_score{i}"] = match_scores[i]  # Save scores
             self[f"{save_column_prefix}_name{i}"] = match_labels[i]  # Save labels
             # Save logos, matches only
-            self.__images[f"{save_column_prefix}_logo{i}"] = ""
-            match_idx = np.where(match_idxs[i] >= 0)[0]
+            # self.__images[f"{save_column_prefix}_logo{i}"] = ""
+            match_idx = np.where(match_idxs[i] >= 0)[0] # match_idx excluding -1's; REMOVE
             if utf8_images is None:
                 # Generate forward logos if not provided
                 match_motif = match_motifs[i]

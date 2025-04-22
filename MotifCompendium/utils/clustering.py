@@ -82,7 +82,7 @@ def cluster(
         case "cc" | "connected_components":
             adjacency_matrix = similarity_matrix >= similarity_threshold
             return cc_clustering(adjacency_matrix)
-        case "dcc" | "dense_cc":
+        case "dcc" | "dense_cc" | "densely_connected_components":
             adjacency_matrix = similarity_matrix >= similarity_threshold
             return densely_cc_clustering(adjacency_matrix, **kwargs)
         # Spectral
