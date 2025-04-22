@@ -915,6 +915,7 @@ class MotifCompendium:
         save_name: str = "cluster",
         cluster_within: str | None = None,
         cluster_on: str | None = None,
+        cluster_within_on: tuple[str, str] | None = None,
         cluster_on_weight: str | None = None,
         **kwargs,
     ) -> None:
@@ -930,94 +931,180 @@ class MotifCompendium:
               considered similar.
             save_name: The name of the column in the metadata to save motif clustering
                 results into.
-            cluster_on: The name of the column in metadata containing cluster
-              annotations to group motifs by. If None, the clustering will be done on
-              the entire MotifCompendium. If not None, the clustering will be done on
-              the average motifs of the clusters in this column.
             cluster_within: The name of the column in metadata containing cluster
-              annotations to perform clustering within. If None, the clustering will be
-              done on the entire MotifCompendium. If not None, the clustering will be
-              done per cluster in the cluster_within column. This will identify
-              subclusters of the cluster_within_column.
-            cluster_within_on: A tuple of two strings. The first string is the column
-              in metadata containing cluster annotations to group motifs by. The second
-              string is the column in metadata containing cluster annotations to perform
-              clustering within. If None, the clustering will be done on the entire
-              MotifCompendium. If not None, the clustering will be done per cluster in
-              the cluster_within column. This will identify subclusters of the
-              cluster_within_column.
-            cluster_on_weight: The name of the column in metadata containing weights to use
-              when averaging (for cluster_on). If None, all motifs are equally weighted.
-            recursive: Whether or not to cluster recursively. If True, the clustering
+              annotations to perform clustering within. If not None, the clustering will
+              be done per cluster in the cluster_within column. This will identify
+              subclusters of the cluster_within column. It is guaranteed that if
+              self.metadata.loc[i, cluster_within] != self.metadata.loc[j,
+              cluster_within], then self.metadata.loc[i, save_name] !=
+              self.metadata.loc[j, save_name].
+            cluster_on: The name of the column in metadata containing cluster
+              annotations to group motifs by. If not None, the clustering will be done
+              on the average motifs of the clusters in this column. This will identify
+              superclusters of the cluster_on column. It is guaranteed that if
+              self.metadata.loc[i, cluster_on] == self.metadata.loc[j, cluster_on],
+              then self.metadata.loc[i, save_name] == self.metadata.loc[j, save_name].
+            cluster_within_on: A tuple of two strings both of which are columns in the
+              metdata. The tuple, (cluster_within, cluster_on) will cluster within the
+              cluster_within column and cluster on top of the cluster_on column.
+            cluster_on_weight: The name of the column in metadata containing weights to
+              use when averaging motifs while doing a cluster_on. If None, all motifs
+              are equally weighted. cluster_on_weight can only be set when cluster_on or
+              cluster_within_on is set.
             **kwargs: Additional named arguments specific to the clustering algorithm of
                 choice.
 
         Notes:
             Review MotifCompendium.utils.clustering.cluster() for available clustering
               algorithms and algorithm-specific arguments.
+            Only one of cluster_within, cluster_on, or cluster_within_on can be used at
+              once.
         """
         # Check arguments
-        if not (isinstance(similarity_threshold, float) and (0 <= similarity_threshold <= 1)):
+        if not (
+            isinstance(similarity_threshold, float) and (0 <= similarity_threshold <= 1)
+        ):
             raise ValueError("similarity_threshold must be a float between [0, 1].")
-        if cluster_on and cluster_within:
-            # Check if only one cluster_within per cluster_on
-            for c in set(self[cluster_on]):
-                mc_c = self[self[cluster_on] == c]
-                if len(set(mc_c[cluster_within])) > 1:
-                    raise ValueError(f"To use both cluster_on and cluster_within, cluster_within must be unique for each cluster in cluster_on.")
-        if not cluster_on and cluster_on_weight:
-            print("Warning: Ignoring cluster_on_weight as cluster_on is not set.")
-        
-        # Average: If Cluster on
-        if cluster_on:
-            if not cluster_on in self.metadata.columns:
-                raise KeyError(f"{cluster_on} not in metadata.")
-            # Average, keeping cluster_within
-            if cluster_within:
-                mc = self.cluster_averages(
-                    clustering=cluster_on,
-                    weight_col=cluster_on_weight,
-                    aggregations=[(cluster_within, "concat", cluster_within)],
-                )
-            else:
-                mc = self.cluster_averages(
-                    clustering=cluster_on,
-                    weight_col=cluster_on_weight,
-                )
-        else:
-            mc = self
-        
-        # Cluster: Within / All
-        if cluster_within:
+        # Cluster within
+        if (
+            (cluster_within is not None)
+            and (cluster_on is None)
+            and (cluster_within_on is None)
+        ):
+            # Check inputs
             if not cluster_within in self.metadata.columns:
-                raise KeyError(f"{cluster_within} not in metadata.")
-            for c in set(mc[cluster_within]):
-                mc_c = mc[mc[cluster_within] == c]
-                c_idxs = mc.metadata[mc[cluster_within] == c].index.tolist()
-                clusters_c = utils_clustering.cluster(
-                    similarity_matrix=mc_c.similarity,
+                raise KeyError(f"cluster_within {cluster_within} not in metadata.")
+            if cluster_on_weight is not None:
+                raise ValueError(
+                    "cluster_on_weight can only be set when cluster_on or cluster_within_on is set."
+                )
+            # Prepare clustering
+            clusters = pd.Series(-1, index=self.metadata.index)  # -1 for int
+            num_clusters_so_far = 0
+            # Cluster within each cluster_within cluster
+            for c in set(self[cluster_within]):
+                c_condition = self[cluster_within] == c
+                c_idxs = list(c_condition[c_condition].index)
+                c_similarity = self.similarity[c_idxs, :][:, c_idxs]
+                c_clusters = utils_clustering.cluster(
+                    similarity_matrix=c_similarity,
                     algorithm=algorithm,
                     similarity_threshold=similarity_threshold,
                     **kwargs,
                 )
-                clusters_c = [f"{c}-{c_sub}" for c_sub in clusters_c]
-                mc.metadata.loc[c_idxs, save_name] = clusters_c
-        else:
-            mc.metadata[save_name] = utils_clustering.cluster(
-                similarity_matrix=mc.similarity,
+                c_clusters = [c + num_clusters_so_far for c in c_clusters]
+                clusters[c_idxs] = c_clusters
+                num_clusters_so_far += len(set(c_clusters))
+            self[save_name] = clusters
+        # Cluster on
+        elif (
+            (cluster_within is None)
+            and (cluster_on is not None)
+            and (cluster_within_on is None)
+        ):
+            # Check inputs
+            if not cluster_on in self.metadata.columns:
+                raise KeyError(f"cluster_on {cluster_on} not in metadata.")
+            if (cluster_on_weight is not None) and (
+                cluster_on_weight not in self.metadata.columns
+            ):
+                raise KeyError(
+                    f"cluster_on_weight {cluster_on_weight} not in metadata."
+                )
+            # Average
+            mc_average = self.cluster_averages(
+                clustering=cluster_on, weight_col=cluster_on_weight
+            )
+            # Cluster
+            mc_average.metadata["cluster"] = utils_clustering.cluster(
+                similarity_matrix=mc_average.similarity,
                 algorithm=algorithm,
                 similarity_threshold=similarity_threshold,
                 **kwargs,
             )
-        
-        # Map back to self: If cluster_on
-        if cluster_on:
+            # Map back to self
             cluster_map = {
-                row["source_cluster"]: row[save_name]
-                for _, row in mc.metadata.iterrows()
+                row["source_cluster"]: row["cluster"]
+                for _, row in mc_average.metadata.iterrows()
             }
-            self.metadata[save_name] = [cluster_map[c] for c in self.metadata[cluster_on]]
-
+            self[save_name] = [cluster_map[c] for c in self[cluster_on]]
+        # Cluster within+on
+        elif (
+            (cluster_within is None)
+            and (cluster_on is None)
+            and (cluster_within_on is not None)
+        ):
+            # Check inputs
+            if not (
+                (type(cluster_within_on) == tuple)
+                and (len(cluster_within_on) == 2)
+                and (type(cluster_within_on[0]) == str)
+                and (type(cluster_within_on[1]) == str)
+            ):
+                raise TypeError("cluster_within_on must be a tuple of two strings.")
+            if not cluster_within_on[0] in self.metadata.columns:
+                raise KeyError(
+                    f"cluster_within_on-->cluster_within {cluster_within_on[0]} not in metadata."
+                )
+            if not cluster_within_on[1] in self.metadata.columns:
+                raise KeyError(
+                    f"cluster_within_on-->cluster_on {cluster_within_on[1]} not in metadata."
+                )
+            if (cluster_on_weight is not None) and (
+                cluster_on_weight not in self.metadata.columns
+            ):
+                raise KeyError(
+                    f"cluster_on_weight {cluster_on_weight} not in metadata."
+                )
+            # Prepare clustering
+            clusters = pd.Series(-1, index=self.metadata.index)  # -1 for int
+            num_clusters_so_far = 0
+            cluster_within, cluster_on = cluster_within_on
+            # Cluster within each cluster_within cluster
+            for c in set(self[cluster_within]):
+                # Identify motifs corresponding to cluster_within
+                c_condition = self[cluster_within] == c
+                c_idxs = list(c_condition[c_condition].index)
+                c_mc = self[c_condition]
+                # Average for cluster_on
+                c_mc_average = c_mc.cluster_averages(
+                    clustering=cluster_on, weight_col=cluster_on_weight
+                )
+                # Cluster
+                c_mc_average.metadata["cluster"] = utils_clustering.cluster(
+                    similarity_matrix=c_mc_average.similarity,
+                    algorithm=algorithm,
+                    similarity_threshold=similarity_threshold,
+                    **kwargs,
+                )
+                # Map back to c_mc
+                c_cluster_map = {
+                    row["source_cluster"]: row["cluster"]
+                    for _, row in c_mc_average.metadata.iterrows()
+                }
+                c_clusters = [c_cluster_map[c] for c in c_mc[cluster_on]]
+                c_clusters = [c + num_clusters_so_far for c in c_clusters]
+                num_clusters_so_far += len(set(c_clusters))
+                # Map back to self
+                clusters[c_idxs] = c_clusters
+            self[save_name] = clusters
+        # If all are None, cluster on entire MotifCompendium
+        elif (
+            (cluster_within is None)
+            and (cluster_on is None)
+            and (cluster_within_on is None)
+        ):
+            self.metadata[save_name] = utils_clustering.cluster(
+                similarity_matrix=self.similarity,
+                algorithm=algorithm,
+                similarity_threshold=similarity_threshold,
+                **kwargs,
+            )
+        # Otherwise, throw error
+        else:
+            raise ValueError(
+                "Only one of cluster_within, cluster_on, or cluster_within_on can be used at once."
+            )
 
     def clustering_quality(
         self, clustering: str, with_stats: bool = False
@@ -1328,15 +1415,29 @@ class MotifCompendium:
         mc_avg = build(cluster_motif_avgs, metadata, safe=False)
         # Compute quality statistics
         if compute_quality_stats:
-            best_match_idx = np.argmax(mc_avg.similarity, axis=0)
+            # Most similar cluster
+            best_match_idx = np.argmax(
+                mc_avg.similarity - np.diag(np.diag(mc_avg.similarity)), axis=1
+            )
             mc_avg["best_match_similarity"] = [
                 f"{mc_avg.similarity[i, idx]:.3} ({mc_avg.metadata['name'][idx]})"
                 for i, idx in enumerate(best_match_idx)
             ]
+            mc_avg_standard_motifs = mc_avg.get_standard_motif_stack()
             mc_avg.add_logos(
-                mc_avg.motifs[best_match_idx, :, :],
+                np.stack(
+                    [
+                        (
+                            mc_avg_standard_motifs[x]
+                            if not mc_avg.alignment_rc[i, x]
+                            else mc_avg_standard_motifs[x][::-1, ::-1]
+                        )
+                        for i, x in enumerate(best_match_idx)
+                    ]
+                ),
                 "best_match_cluster",
             )
+            # Actual quality
             quality_df = self.clustering_quality(clustering, with_stats=True)
             mc_avg["lowest_internal_similarity"] = [
                 f"{x:.3} ({y} vs {z})"
