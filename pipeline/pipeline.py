@@ -825,7 +825,7 @@ if __name__ == "__main__":
                         **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
                     )
                     if args.cluster_recursive:
-                        min_len = len(mc[cluster_col_name].unique())
+                        min_len = mc[cluster_col_name].nunique()
                         for i in range(ClusterArgs.max_iter):
                             if args.verbose:
                                 logging.info(f"Recursively clustering motifs: {i+1}...")
@@ -838,7 +838,7 @@ if __name__ == "__main__":
                                 save_name=cluster_col_name,
                                 **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
                             )
-                            new_min_len = len(mc[cluster_col_name].unique())
+                            new_min_len = mc[cluster_col_name].nunique()
                             if min_len == new_min_len:
                                 break
                             else:
@@ -855,7 +855,7 @@ if __name__ == "__main__":
                                 save_name=cluster_col_name,
                                 **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_force],
                             )
-                            new_min_len = len(mc[cluster_col_name].unique())
+                            new_min_len = mc[cluster_col_name].nunique()
                             if not args.cluster_recursive:
                                 break
                             if min_len == new_min_len:
@@ -863,7 +863,7 @@ if __name__ == "__main__":
                             else:
                                 min_len = new_min_len
                     if args.verbose:
-                        logging.info(f"Total number of clusters ({cluster_col_name}): {len(mc[cluster_col_name].unique())}")
+                        logging.info(f"Total number of clusters ({cluster_col_name}): {mc[cluster_col_name].nunique()}")
                     if args.time:
                         logging.info(f"Time taken: {time.time() - start_time:.2f}s")
                     
@@ -884,7 +884,7 @@ if __name__ == "__main__":
                             **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_meta],
                         )
                         if args.cluster_recursive:
-                            min_len = len(mc[metacluster_col_name].unique())
+                            min_len = mc[metacluster_col_name].nunique()
                             for i in range(ClusterArgs.max_iter):
                                 if args.verbose:
                                     logging.info(f"Recursively clustering motifs: {i+1}...")
@@ -896,7 +896,7 @@ if __name__ == "__main__":
                                     save_name=metacluster_col_name,
                                     **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_meta],
                                 )
-                                new_min_len = len(mc[metacluster_col_name].unique())
+                                new_min_len = mc[metacluster_col_name].nunique()
                                 if min_len == new_min_len:
                                     break
                                 else:
@@ -912,7 +912,7 @@ if __name__ == "__main__":
                                     save_name=metacluster_col_name,
                                     **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_force],
                                 )
-                                new_min_len = len(mc[metacluster_col_name].unique())
+                                new_min_len = mc[metacluster_col_name].nunique()
                                 if not args.cluster_recursive:
                                     break
                                 if min_len == new_min_len:
@@ -920,7 +920,7 @@ if __name__ == "__main__":
                                 else:
                                     min_len = new_min_len
                         if args.verbose:
-                            logging.info(f"Total number of meta-clusters ({metacluster_col_name}): {len(mc[metacluster_col_name].unique())}")
+                            logging.info(f"Total number of meta-clusters ({metacluster_col_name}): {mc[metacluster_col_name].nunique()}")
                         if args.time:
                             logging.info(f"Time taken: {time.time() - start_time:.2f}s")
                         
@@ -940,7 +940,7 @@ if __name__ == "__main__":
                             **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_sub],
                         )
                         if args.cluster_recursive:
-                            min_len = len(mc[subcluster_col_name].unique())
+                            min_len = mc[subcluster_col_name].nunique()
                             for i in range(ClusterArgs.max_iter):
                                 if args.verbose:
                                     logging.info(f"Recursively clustering motifs: {i+1}...")
@@ -953,7 +953,7 @@ if __name__ == "__main__":
                                     save_name=subcluster_col_name,
                                     **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_sub],
                                 )
-                                new_min_len = len(mc[subcluster_col_name].unique())
+                                new_min_len = mc[subcluster_col_name].nunique()
                                 if min_len == new_min_len:
                                     break
                                 else:
@@ -970,7 +970,7 @@ if __name__ == "__main__":
                                     save_name=subcluster_col_name,
                                     **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_force],
                                 )
-                                new_min_len = len(mc[subcluster_col_name].unique())
+                                new_min_len = mc[subcluster_col_name].nunique()
                                 if not args.cluster_recursive:
                                     break
                                 if min_len == new_min_len:
@@ -978,7 +978,7 @@ if __name__ == "__main__":
                                 else:
                                     min_len = new_min_len
                         if args.verbose:
-                            logging.info(f"Total number of sub-clusters ({subcluster_col_name}): {len(mc[subcluster_col_name].unique())}")
+                            logging.info(f"Total number of sub-clusters ({subcluster_col_name}): {mc[subcluster_col_name].nunique()}")
                         if args.time:
                             logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
