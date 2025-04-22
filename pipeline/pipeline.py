@@ -820,6 +820,7 @@ if __name__ == "__main__":
                         cluster_on=args.cluster_on,
                         cluster_on_weight=ClusterArgs.weight_col,
                         save_name=cluster_col_name,
+                        **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
                     )
                     if args.cluster_recursive:
                         min_len = len(mc[cluster_col_name].unique())
@@ -833,6 +834,7 @@ if __name__ == "__main__":
                                 cluster_on=cluster_col_name,
                                 cluster_on_weight=ClusterArgs.weight_col,
                                 save_name=cluster_col_name,
+                                **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
                             )
                             new_min_len = len(mc[cluster_col_name].unique())
                             if min_len == new_min_len:
@@ -851,6 +853,7 @@ if __name__ == "__main__":
                                 cluster_on=cluster_col_name,
                                 cluster_on_weight=ClusterArgs.weight_col,
                                 save_name=cluster_col_name,
+                                **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_force],
                             )
                             new_min_len = len(mc[cluster_col_name].unique())
                             if not args.cluster_recursive:
@@ -880,6 +883,7 @@ if __name__ == "__main__":
                             cluster_on=cluster_col_name,
                             cluster_on_weight=ClusterArgs.weight_col,
                             save_name=metacluster_col_name,
+                            **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_meta],
                         )
                         if args.cluster_recursive:
                             min_len = len(mc[metacluster_col_name].unique())
@@ -892,6 +896,7 @@ if __name__ == "__main__":
                                     cluster_on=metacluster_col_name,
                                     cluster_on_weight=ClusterArgs.weight_col,
                                     save_name=metacluster_col_name,
+                                    **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_meta],
                                 )
                                 new_min_len = len(mc[metacluster_col_name].unique())
                                 if min_len == new_min_len:
@@ -909,6 +914,7 @@ if __name__ == "__main__":
                                     cluster_on=metacluster_col_name,
                                     cluster_on_weight=ClusterArgs.weight_col,
                                     save_name=metacluster_col_name,
+                                    **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_force],
                                 )
                                 new_min_len = len(mc[metacluster_col_name].unique())
                                 if not args.cluster_recursive:
@@ -937,6 +943,7 @@ if __name__ == "__main__":
                             similarity_threshold=args.sim_threshold_sub,
                             cluster_within=cluster_col_name,
                             save_name=subcluster_col_name,
+                            **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_sub],
                         )
                         if args.cluster_recursive:
                             min_len = len(mc[subcluster_col_name].unique())
@@ -950,6 +957,7 @@ if __name__ == "__main__":
                                     cluster_on=subcluster_col_name,
                                     cluster_on_weight=ClusterArgs.weight_col,
                                     save_name=subcluster_col_name,
+                                    **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_sub],
                                 )
                                 new_min_len = len(mc[subcluster_col_name].unique())
                                 if min_len == new_min_len:
@@ -968,6 +976,7 @@ if __name__ == "__main__":
                                     cluster_on=subcluster_col_name,
                                     cluster_on_weight=ClusterArgs.weight_col,
                                     save_name=subcluster_col_name,
+                                    **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_force],
                                 )
                                 new_min_len = len(mc[subcluster_col_name].unique())
                                 if not args.cluster_recursive:

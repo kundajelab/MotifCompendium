@@ -1304,13 +1304,13 @@ class MotifCompendium:
         mc_avg = build(cluster_motif_avgs, metadata, safe=False)
         # Compute quality statistics
         if compute_quality_stats:
-            best_match_idx = np.argmax(mc_avg.similarity, axis=0)
+            best_match_idx = np.argmax(mc_avg.similarity - np.eye(mc_avg.similarity.shape[0]), axis=1)
             mc_avg["best_match_similarity"] = [
                 f"{mc_avg.similarity[i, idx]:.3} ({mc_avg.metadata['name'][idx]})" 
                 for i, idx in enumerate(best_match_idx)
             ]
             mc_avg.add_logos(
-                mc_avg.motifs[best_match_idx, :, :],
+                mc_avg.get_standard_motif_stack()[best_match_idx, :, :],
                 "best_match_cluster",
             )
 
@@ -1735,11 +1735,11 @@ class MotifCompendium:
             self[f"{save_column_prefix}_score{i}"] = match_scores[i]  # Save scores
             self[f"{save_column_prefix}_name{i}"] = match_labels[i]  # Save labels
             # Save logos, matches only
-            self.__images[f"{save_column_prefix}_logo{i}"] = ""
-            match_idx = np.where(match_idxs[i] >= 0)[0]
+            # self.__images[f"{save_column_prefix}_logo{i}"] = ""
+            match_idx = np.where(match_idxs[i] >= 0)[0] # match_idx excluding -1's; REMOVE
             if utf8_images is None:
                 # Generate forward logos if not provided
-                match_motif = match_motifs[i][match_idx]
+                match_motif = match_motifs[i]
                 self.add_logos(match_motif, f"{save_column_prefix}_logo{i}")
             else:
                 # Copy forward logos if provided

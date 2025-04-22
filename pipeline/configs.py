@@ -68,7 +68,7 @@ class ClusterArgs:
     algorithm: str = "cpm_leiden"
     algorithm_meta: str = "cpm_leiden"
     algorithm_sub: str = "cpm_leiden"
-    algorithm_force: str = "cc"
+    algorithm_force: str = "dcc"
     weight_col: str = "num_seqlets"
     max_iter: int = 100
     aggregate_metadata: List[Tuple[str, str, str]] = field(default_factory=lambda: [
@@ -80,13 +80,26 @@ class ClusterArgs:
         ("tissue", "concat", "tissue"),
         ("organ", "concat", "organ"),
     ])
-
+    algorithm_kwargs: dict = field(default_factory=lambda: {
+        "leiden": {},
+        "leidenalg": {},
+        "rb_leiden": {},
+        "mod_leiden": {},
+        "modularity_leiden": {},
+        "cpm": {},
+        "cpm_leiden": {},
+        "cc": {},
+        "connected_components": {},
+        "dcc": {"density": 1.0,},
+        "dense_cc": {"density": 1.0,},
+        "spectral": {"k": 100},
+    })
 
 @dataclass
 class VisualizeArgs:
     editable: bool = True
     html_table_cols: List[str] = field(default_factory=lambda: ["name",
-        "best_match_similarity", "best_match_cluster"
+        "best_match_similarity", "best_match_cluster",
         "highest_external_similarity", "highest_external_similarity_cluster", "highest_external_similarity_motif", 
         "lowest_internal_similarity", "lowest_internal_similarity_motif1", "lowest_internal_similarity_motif2"] + 
         [col
