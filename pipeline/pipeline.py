@@ -33,6 +33,7 @@ def setup_parser():
     parser.add_argument("-m", "--metadata", type=str, default=None, help="Path to the metadata file, per h5 or motif: CSV, TSV format.")
     parser.add_argument("-r", "--reference", type=str, default=None, help="Path to the main reference motif file: MotifCompendium object, or PFM, MEME .txt format.")
     parser.add_argument("--add-reference", nargs="+", type=str, default=None, help="Path to additional reference motif files for final labeling: MotifCompendium object, or PFM, MEME .txt format.")
+    parser.add_argument("--modisco-region-width", type=int, default=400, help="Width of region used during TF-Modisco run. (Default: 400 bp)")
     
     parser.add_argument("--min-seqlets", type=int, default=100, help="Minimum number of seqlets to consider a motif.")
     parser.add_argument("--first-posmotif-only", action="store_true", help="Only include the first positive motif in the MotifCompendium object.")
@@ -652,6 +653,7 @@ if __name__ == "__main__":
                     start_time = time.time()
                 mc = MotifCompendium.build_from_modisco(
                     modisco_dict=modisco_dict,
+                    modisco_region_width=args.modisco_region_width,
                     ic=args.ic,
                     safe=args.safe,
                 )
@@ -813,29 +815,55 @@ if __name__ == "__main__":
                         logging.info(f"Clustering motifs using: {cluster_col_name}...")
                     if args.time:
                         start_time = time.time()
-                    mc.cluster(
-                        algorithm=ClusterArgs.algorithm,
-                        similarity_threshold=sim_threshold,
-                        cluster_within=args.cluster_within,
-                        cluster_on=args.cluster_on,
-                        cluster_on_weight=ClusterArgs.weight_col,
-                        save_name=cluster_col_name,
-                        **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
-                    )
+                    if args.cluster_on and args.cluster_within:
+                        mc.cluster(
+                            algorithm=ClusterArgs.algorithm,
+                            similarity_threshold=sim_threshold,
+                            cluster_within_on=(args.cluster_within, args.cluster_on),
+                            cluster_on_weight=ClusterArgs.weight_col,
+                            save_name=cluster_col_name,
+                            **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
+                        )
+                    elif args.cluster_on and not args.cluster_within:
+                        mc.cluster(
+                            algorithm=ClusterArgs.algorithm,
+                            similarity_threshold=sim_threshold,
+                            cluster_on=args.cluster_on,
+                            cluster_on_weight=ClusterArgs.weight_col,
+                            save_name=cluster_col_name,
+                            **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
+                        )
+                    elif not args.cluster_on and args.cluster_within:
+                        mc.cluster(
+                            algorithm=ClusterArgs.algorithm,
+                            similarity_threshold=sim_threshold,
+                            cluster_within=args.cluster_within,
+                            save_name=cluster_col_name,
+                            **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
+                        )
                     if args.cluster_recursive:
                         min_len = mc[cluster_col_name].nunique()
                         for i in range(ClusterArgs.max_iter):
                             if args.verbose:
                                 logging.info(f"Recursively clustering motifs: {i+1}...")
-                            mc.cluster(
-                                algorithm=ClusterArgs.algorithm,
-                                similarity_threshold=sim_threshold,
-                                cluster_within=args.cluster_within,
-                                cluster_on=cluster_col_name,
-                                cluster_on_weight=ClusterArgs.weight_col,
-                                save_name=cluster_col_name,
-                                **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
-                            )
+                            if args.cluster_within:
+                                mc.cluster(
+                                    algorithm=ClusterArgs.algorithm,
+                                    similarity_threshold=sim_threshold,
+                                    cluster_within_on=(args.cluster_within,cluster_col_name),
+                                    cluster_on_weight=ClusterArgs.weight_col,
+                                    save_name=cluster_col_name,
+                                    **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
+                                )
+                            else:
+                                mc.cluster(
+                                    algorithm=ClusterArgs.algorithm,
+                                    similarity_threshold=sim_threshold,
+                                    cluster_on=cluster_col_name,
+                                    cluster_on_weight=ClusterArgs.weight_col,
+                                    save_name=cluster_col_name,
+                                    **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
+                                )
                             new_min_len = mc[cluster_col_name].nunique()
                             if min_len == new_min_len:
                                 break
@@ -846,15 +874,24 @@ if __name__ == "__main__":
                         if args.verbose:
                             logging.info(f"Force-clustering motifs using: {ClusterArgs.algorithm_force}_{args.sim_threshold_force}{recursive_name or ''}{force_name or ''}...")
                         for i in range(ClusterArgs.max_iter):
-                            mc.cluster(
-                                algorithm=ClusterArgs.algorithm_force,
-                                similarity_threshold=args.sim_threshold_force,
-                                cluster_within=args.cluster_within,
-                                cluster_on=cluster_col_name,
-                                cluster_on_weight=ClusterArgs.weight_col,
-                                save_name=cluster_col_name,
-                                **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_force],
-                            )
+                            if args.cluster_within:
+                                mc.cluster(
+                                    algorithm=ClusterArgs.algorithm_force,
+                                    similarity_threshold=args.sim_threshold_force,
+                                    cluster_within_on=(args.cluster_within, cluster_col_name),
+                                    cluster_on_weight=ClusterArgs.weight_col,
+                                    save_name=cluster_col_name,
+                                    **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_force],
+                                )
+                            else:
+                                mc.cluster(
+                                    algorithm=ClusterArgs.algorithm_force,
+                                    similarity_threshold=args.sim_threshold_force,
+                                    cluster_on=cluster_col_name,
+                                    cluster_on_weight=ClusterArgs.weight_col,
+                                    save_name=cluster_col_name,
+                                    **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_force],
+                                )
                             new_min_len = mc[cluster_col_name].nunique()
                             if not args.cluster_recursive:
                                 break
@@ -953,8 +990,7 @@ if __name__ == "__main__":
                                 mc.cluster(
                                     algorithm=ClusterArgs.algorithm_sub,
                                     similarity_threshold=args.sim_threshold_sub,
-                                    cluster_within=cluster_col_name,
-                                    cluster_on=subcluster_col_name,
+                                    cluster_within_on=(cluster_col_name, subcluster_col_name),
                                     cluster_on_weight=ClusterArgs.weight_col,
                                     save_name=subcluster_col_name,
                                     **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_sub],
@@ -972,8 +1008,7 @@ if __name__ == "__main__":
                                 mc.cluster(
                                     algorithm=ClusterArgs.algorithm_force,
                                     similarity_threshold=args.sim_threshold_force,
-                                    cluster_within=cluster_col_name,
-                                    cluster_on=subcluster_col_name,
+                                    cluster_within_on=(cluster_col_name, subcluster_col_name),
                                     cluster_on_weight=ClusterArgs.weight_col,
                                     save_name=subcluster_col_name,
                                     **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_force],
