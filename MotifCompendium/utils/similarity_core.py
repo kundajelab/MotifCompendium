@@ -1,7 +1,6 @@
 import numpy as np
 
 import MotifCompendium.utils.config as utils_config
-import MotifCompendium.utils.motif as utils_motif
 
 
 ####################
@@ -28,7 +27,7 @@ def compute_similarity_and_align(
         motifsA_normalized, motifsB_normalized, xp
     )  # skew-symmetric alignment
     # Reverse complement
-    motifsB_normalized_revcomp = utils_motif.reverse_complement(motifsB_normalized)
+    motifsB_normalized_revcomp = _reverse_complement(motifsB_normalized)
     del motifsB_normalized  # Free up memory
     # Backward similarity
     sim_2, sim_2_alignment = _compute_similarity(
@@ -77,6 +76,11 @@ def _get_array_module():
 #####################
 # PRIVATE FUNCTIONS #
 #####################
+def _reverse_complement(motifs):
+    """Computes the reverse complement of a (N, L, K) motif stack."""
+    return motifs[:, ::-1, ::-1]
+
+
 def _compute_similarity(motif_set_1, motif_set_2, xp):
     """Computes similarity and alignment for two sets of motifs."""
     # Get shapes

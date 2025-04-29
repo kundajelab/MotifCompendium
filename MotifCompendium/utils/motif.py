@@ -69,7 +69,7 @@ def validate_motif_stack_compendium(motifs: np.ndarray) -> None:
 #######################
 @single_or_many_motifs
 def reverse_complement(x: np.ndarray) -> np.ndarray:
-    """Reveres complements motifs."""
+    """Reverse complements motifs."""
     return x[:, ::-1, ::-1]
 
 

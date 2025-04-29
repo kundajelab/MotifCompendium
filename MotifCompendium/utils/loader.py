@@ -311,7 +311,7 @@ def load_meme(
                     a, c, g, t = x.split()
                     a, c, g, t = float(a), float(c), float(g), float(t)
                     acgt = np.asarray([[a, c, g, t]])  # (1, 4)
-                    acgt_ic = ic_scale(acgt)
+                    acgt_ic = utils_motif.ic_scale(acgt)
                     current_pwm["A"].append(acgt_ic[0, 0])
                     current_pwm["C"].append(acgt_ic[0, 1])
                     current_pwm["G"].append(acgt_ic[0, 2])
