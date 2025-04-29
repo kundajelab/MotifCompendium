@@ -252,8 +252,9 @@ def build_from_modisco(
     """
     # Load from Modisco
     motifs, motif_names, seqlet_counts, model_names, posneg, avgdist_summits = (
-        utils_loader.load_modiscos(modisco_dict,
-                                    modisco_region_width=modisco_region_width, ic=ic)
+        utils_loader.load_modiscos(
+            modisco_dict, modisco_region_width=modisco_region_width, ic=ic
+        )
     )
     # Convert motifs to normalized 8-channel motifs
     motifs = utils_motif.motif_4_to_8(motifs)
@@ -264,7 +265,7 @@ def build_from_modisco(
     metadata["num_seqlets"] = seqlet_counts
     metadata["model"] = model_names
     metadata["posneg"] = posneg
-    metadata["avg_dist_summit"] = avgdist_summits
+    metadata["avg_dist_from_summit"] = avgdist_summits
     # Construct object
     return build(
         motifs,
@@ -631,7 +632,7 @@ class MotifCompendium:
             raise KeyError("All keys in the mapper must be columns in the metadata.")
         self.metadata.rename(columns=mapper, inplace=True)
 
-    def delete_column(self, column: str | list[str]) -> None:
+    def delete_columns(self, column: str | list[str]) -> None:
         """Deletes the specified column(s) from the metadata."""
         if not (
             isinstance(column, str)
@@ -660,6 +661,10 @@ class MotifCompendium:
         """
         # Check inputs
         utils_motif.validate_motif_stack_standard(motifs)
+        if not (motifs.shape[0] == len(self)):
+            raise ValueError(
+                "The number of motifs must be the same as the number of motifs in the MotifCompendium."
+            )
         if not isinstance(image_name, str):
             raise TypeError("image_name must be a string.")
         if image_name in self.columns():
@@ -760,6 +765,10 @@ class MotifCompendium:
             Works exactly like setting a Pandas DataFrame column does.
         """
         if isinstance(key, str):
+            if key in self.__images.columns:
+                raise ValueError(
+                    f"{key} is already a saved image. Names may not overlap."
+                )
             self.metadata[key] = value
         else:
             raise TypeError("MotifCompendium column names must be strings.")
@@ -865,11 +874,14 @@ class MotifCompendium:
               DataFrame with motif names.
 
         Returns:
-            A pd.DataFrame containing the similarity scores between two subsets of motifs.
+            A pd.DataFrame containing the similarity scores between two subsets of
+              motifs.
 
         Notes:
             If only slice1 is provided then the similarity scores between the motifs
               specified by slice1 and all other motifs are returned.
+            If with_names is provided then it is assumed that the metadata has a "name"
+              column.
         """
         if not (isinstance(slice1, pd.Series) and (slice1.dtype == bool)):
             raise TypeError("slice1 must be a pd.Series of dtype bool.")
@@ -1220,7 +1232,9 @@ class MotifCompendium:
                         stats.loc[c1, "lowest_internal_similarity_motif1_motif"] = (
                             motifs_standard[culprit_1_idx]
                             if not culprit_1_rc
-                            else motifs_standard[culprit_1_idx][::-1, ::-1]
+                            else utils_motif.reverse_complement(
+                                motifs_standard[culprit_1_idx]
+                            )
                         )
                         stats.loc[c1, "lowest_internal_similarity_motif2_name"] = (
                             motif_names[culprit_2_idx]
@@ -1228,7 +1242,9 @@ class MotifCompendium:
                         stats.loc[c1, "lowest_internal_similarity_motif2_motif"] = (
                             motifs_standard[culprit_2_idx]
                             if not culprit_2_rc
-                            else motifs_standard[culprit_2_idx][::-1, ::-1]
+                            else utils_motif.reverse_complement(
+                                motifs_standard[culprit_2_idx]
+                            )
                         )
                 # Upper triangle
                 else:
@@ -1270,7 +1286,7 @@ class MotifCompendium:
                 (
                     motifs_standard[y]
                     if ci_idxs[x] and not self.alignment_rc[ci_idxs[x][0], y]
-                    else motifs_standard[y][::-1, ::-1]
+                    else utils_motif.reverse_complement(motifs_standard[y])
                 )
                 for x, y in zip(
                     highest_external_sim_idx, highest_external_similarity_motif_idxs
@@ -1309,7 +1325,7 @@ class MotifCompendium:
                         source column for each cluster.
                     - "sum": This option sums the values in the source column for each
                         cluster.
-                    - "average" or "avg" or "mean": This option averages the values in the 
+                    - "average" or "avg" or "mean": This option averages the values in the
                         source column for each cluster.
                     - "concatenate" or "concat": This option lists all the unique values
                         in the source column for each cluster.
@@ -1435,7 +1451,9 @@ class MotifCompendium:
                         (
                             mc_avg_standard_motifs[x]
                             if not mc_avg.alignment_rc[i, x]
-                            else mc_avg_standard_motifs[x][::-1, ::-1]
+                            else utils_motif.reverse_complement(
+                                mc_avg_standard_motifs[x]
+                            )
                         )
                         for i, x in enumerate(best_match_idx)
                     ]
@@ -1480,7 +1498,9 @@ class MotifCompendium:
                         (
                             mc_avg_standard_motifs[cluster_revcomp[x]]
                             if not y
-                            else mc_avg_standard_motifs[cluster_revcomp[x]][::-1, ::-1]
+                            else utils_motif.reverse_complement(
+                                mc_avg_standard_motifs[cluster_revcomp[x]]
+                            )
                         )
                         for x, y in zip(
                             quality_df["highest_external_similarity_cluster"],
@@ -1493,7 +1513,7 @@ class MotifCompendium:
             mc_avg.add_logos(
                 np.stack(
                     [
-                        x if not y else x[::-1, ::-1]
+                        x if not y else utils_motif.reverse_complement(x)
                         for x, y in zip(
                             quality_df["highest_external_similarity_motif_motif"],
                             external_cluster_rc,
@@ -1634,7 +1654,10 @@ class MotifCompendium:
         if "logo (fwd)" not in self.get_saved_images():
             self.add_logos(self.get_standard_motif_stack(), "logo (fwd)")
         if "logo (rev)" not in self.get_saved_images():
-            self.add_logos(self.get_standard_motif_stack()[:, ::-1, ::-1], "logo (rev)")
+            self.add_logos(
+                utils_motif.reverse_complement(self.get_standard_motif_stack()),
+                "logo (rev)",
+            )
         # Build table
         columns = ["logo (fwd)", "logo (rev)"] + columns
         table_columns = []

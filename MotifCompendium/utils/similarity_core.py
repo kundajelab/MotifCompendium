@@ -1,6 +1,7 @@
 import numpy as np
 
-from MotifCompendium.utils.config import get_use_gpu
+import MotifCompendium.utils.config as utils_config
+import MotifCompendium.utils.motif as utils_motif
 
 
 ####################
@@ -27,7 +28,7 @@ def compute_similarity_and_align(
         motifsA_normalized, motifsB_normalized, xp
     )  # skew-symmetric alignment
     # Reverse complement
-    motifsB_normalized_revcomp = _reverse_complement(motifsB_normalized)
+    motifsB_normalized_revcomp = utils_motif.reverse_complement(motifsB_normalized)
     del motifsB_normalized  # Free up memory
     # Backward similarity
     sim_2, sim_2_alignment = _compute_similarity(
@@ -43,7 +44,7 @@ def compute_similarity_and_align(
         0  # When 0 similarity, set alignment to 0 for alignment symmetry properties
     )
     # Return
-    if get_use_gpu():
+    if utils_config.get_use_gpu():
         sim = sim.get()
         alignment_rc = alignment_rc.get()
         alignment_h = alignment_h.get()
@@ -63,7 +64,7 @@ _LEFT_TENSOR = None
 
 
 def _get_array_module():
-    if get_use_gpu():
+    if utils_config.get_use_gpu():
         global _CUPY_IMPORT
         if _CUPY_IMPORT is None:
             import cupy as cp
@@ -76,11 +77,6 @@ def _get_array_module():
 #####################
 # PRIVATE FUNCTIONS #
 #####################
-def _reverse_complement(motifs):
-    """Computes the reverse complement of a (N, L, K) motif stack."""
-    return motifs[:, ::-1, ::-1]
-
-
 def _compute_similarity(motif_set_1, motif_set_2, xp):
     """Computes similarity and alignment for two sets of motifs."""
     # Get shapes

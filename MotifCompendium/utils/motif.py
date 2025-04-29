@@ -68,6 +68,12 @@ def validate_motif_stack_compendium(motifs: np.ndarray) -> None:
 # MOTIF MANIPULATIONS #
 #######################
 @single_or_many_motifs
+def reverse_complement(x: np.ndarray) -> np.ndarray:
+    """Reveres complements motifs."""
+    return x[:, ::-1, ::-1]
+
+
+@single_or_many_motifs
 def motif_4_to_8(x: np.ndarray) -> np.ndarray:
     """Converts a 4 channel motif(s) into an 8 channel motif(s)."""
     if not x.shape[-1] == 4:
@@ -130,7 +136,7 @@ def align_motifs(
     alignment_rc_mtx = np.expand_dims(alignment_rc, axis=(1, 2))
     complemented_motifs = (
         motif_stack * (1 - alignment_rc_mtx)
-        + motif_stack[:, ::-1, ::-1] * alignment_rc_mtx
+        + reverse_complement(motif_stack) * alignment_rc_mtx
     )
     # Align motifs
     h_max = np.max(alignment_h)

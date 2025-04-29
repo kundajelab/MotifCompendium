@@ -4,7 +4,7 @@ import numpy as np
 from tqdm import tqdm
 
 import MotifCompendium.utils.config as utils_config
-from MotifCompendium.utils.motif import validate_motif_stack_similarity
+import MotifCompendium.utils.motif as utils_motif
 from MotifCompendium.utils.similarity_core import compute_similarity_and_align
 
 
@@ -45,7 +45,7 @@ def compute_similarities(
           utils file .similarity_core_cpu.py.
     """
     for motif_stack in motif_stack_list:
-        validate_motif_stack_similarity(motif_stack)
+        utils_motif.validate_motif_stack_similarity(motif_stack)
     if utils_config.get_max_chunk() != -1:
         (
             chunked_motif_stack_list,

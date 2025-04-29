@@ -4,7 +4,7 @@ import numpy as np
 import scipy.sparse
 import sklearn.cluster
 
-from MotifCompendium.utils.config import get_use_gpu
+import MotifCompendium.utils.config as utils_config
 
 
 ######################
@@ -60,7 +60,7 @@ def cluster(
             weighted_adjacency_matrix = similarity_matrix * (
                 similarity_matrix >= similarity_threshold
             )
-            if get_use_gpu():
+            if utils_config.get_use_gpu():
                 print("Warning: GPU version not yet implemented. Falling back to CPU.")
                 return rb_leiden_clustering_cpu(weighted_adjacency_matrix, **kwargs)
             else:
