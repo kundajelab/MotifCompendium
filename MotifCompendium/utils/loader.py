@@ -6,8 +6,8 @@ import h5py
 import numpy as np
 import pandas as pd
 
-from MotifCompendium.utils.config import get_max_cpus
-from MotifCompendium.utils.motif import ic_scale, motif_4_to_8, resize_motif
+import MotifCompendium.utils.config as utils_config
+import MotifCompendium.utils.motif as utils_motif
 
 
 ####################
@@ -63,7 +63,7 @@ def load_modiscos(
         Motifs are returned as an (N, 30, 8) motif stack.
         Using ic scaling is highly recommended.
     """
-    max_cpus = get_max_cpus()
+    max_cpus = utils_config.get_max_cpus()
     if max_cpus == 1 or len(modisco_dict) == 1:
         # Load serially
         motifs, motif_names, seqlet_counts, model_names, posnegs, avgdist_summits, avg_contribs = [], [], [], [], [], [], []
@@ -163,9 +163,14 @@ def load_modisco(
                 seqlet_counts.append(seqlets.shape[0])
                 posneg.append("neg")
                 avgdist_summits.append(
-                    np.abs(f["neg_patterns"][pattern]["seqlets"]["start"][:] # Start position
-                    - (modisco_region_width // 2) # Modisco region half-width
-                    + np.unravel_index(np.abs(motif_sim).argmax(), motif_sim.shape)[0] # Motif peak
+                    np.abs(
+                        f["neg_patterns"][pattern]["seqlets"]["start"][
+                            :
+                        ]  # Start position
+                        - (modisco_region_width // 2)  # Modisco region half-width
+                        + np.unravel_index(np.abs(motif_sim).argmax(), motif_sim.shape)[
+                            0
+                        ]  # Motif peak
                     ).mean()
                 )
                 avg_contribs.append(
@@ -217,7 +222,7 @@ def load_pfm(
                     a, c, g, t = x.split()
                     a, c, g, t = float(a), float(c), float(g), float(t)
                     acgt = np.asarray([[a, c, g, t]])  # (1, 4)
-                    acgt_ic = ic_scale(acgt)
+                    acgt_ic = utils_motif.ic_scale(acgt)
                     current_pwm["A"].append(acgt_ic[0, 0])
                     current_pwm["C"].append(acgt_ic[0, 1])
                     current_pwm["G"].append(acgt_ic[0, 2])
@@ -228,7 +233,7 @@ def load_pfm(
                 current_pwm_name = x[1:]
                 current_pwm = {"A": [], "C": [], "G": [], "T": []}
     resize_to = longest_motif_length if motif_len is None else motif_len
-    pwms = [resize_motif(x, resize_to) for x in pwms]
+    pwms = [utils_motif.resize_motif(x, resize_to) for x in pwms]
     pwms = np.stack(pwms, axis=0)
     pwms /= np.sum(pwms, axis=(1, 2), keepdims=True)
     return pwms, names
@@ -291,7 +296,7 @@ def load_meme(
                     a, c, g, t = x.split()
                     a, c, g, t = float(a), float(c), float(g), float(t)
                     acgt = np.asarray([[a, c, g, t]])  # (1, 4)
-                    acgt_ic = ic_scale(acgt)
+                    acgt_ic = utils_motif.ic_scale(acgt)
                     current_pwm["A"].append(acgt_ic[0, 0])
                     current_pwm["C"].append(acgt_ic[0, 1])
                     current_pwm["G"].append(acgt_ic[0, 2])
@@ -309,7 +314,7 @@ def load_meme(
                         # restart
                         active_pwm = False
     resize_to = longest_motif_length if motif_len is None else motif_len
-    pwms = [resize_motif(x, resize_to) for x in pwms]
+    pwms = [utils_motif.resize_motif(x, resize_to) for x in pwms]
     pwms = np.stack(pwms, axis=0)
     pwms /= np.sum(pwms, axis=(1, 2), keepdims=True)
     return pwms, names
@@ -341,7 +346,7 @@ def _sequence_importance_from_seqlets(seqlets: np.ndarray, ic: bool) -> np.ndarr
     seqlets_avg = seqlets_avg / np.sum(np.abs(seqlets_avg))
     # Information content scaling
     if ic:
-        seqlets_avg = ic_scale(seqlets_avg)
+        seqlets_avg = utils_motif.ic_scale(seqlets_avg)
     # Normalize
     seqlets_avg = seqlets_avg / np.sum(np.abs(seqlets_avg))
     return seqlets_avg

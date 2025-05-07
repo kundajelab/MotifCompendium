@@ -12,8 +12,8 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
-from MotifCompendium.utils.config import get_fast_plotting, get_max_cpus
-from MotifCompendium.utils.motif import motif_to_df, validate_motif_stack_standard
+import MotifCompendium.utils.config as utils_config
+import MotifCompendium.utils.motif as utils_motif
 
 
 #######################
@@ -92,9 +92,9 @@ class LogoPlottingInput:
         """Returns a pd.DataFrame of the motif that can be passed to logomaker."""
         # Reverse complement
         if self.revcomp:
-            motif_df = motif_to_df(self.motif[::-1, ::-1])
+            motif_df = utils_motif.motif_to_df(utils_motif.reverse_complement(self.motif))
         else:
-            motif_df = motif_to_df(self.motif)
+            motif_df = utils_motif.motif_to_df(self.motif)
         # Then shift
         motif_df.index += self.pos
         # Then set bounds
@@ -127,7 +127,7 @@ def plot_motif_stack(
         save_loc: Where to save the motif plot to. If None, the motif plot is not saved.
     """
     # Check inputs
-    validate_motif_stack_standard(motif_stack)
+    utils_motif.validate_motif_stack_standard(motif_stack)
     N = motif_stack.shape[0]
     if alignment_rc is not None and not (
         isinstance(alignment_rc, np.ndarray) and alignment_rc.shape == (N,)
@@ -211,7 +211,7 @@ def plot_many_motif_logos(
     matplotlib.use("Agg")  # Use Agg backend
     # Determine the number of processes to use
     num_processes = min(
-        get_max_cpus(), multiprocessing.cpu_count()
+        utils_config.get_max_cpus(), multiprocessing.cpu_count()
     )  # don't use more CPUs than available
     # Plot
     if num_processes == 1 or len(motif_info_list) == 1:
@@ -306,7 +306,7 @@ def _plot_motif_logo(motif_info: LogoPlottingInput) -> LogoPlottingInput:
         plot_ax = motif_info.ax
     # Plot
     if not (motif_info.motif == 0).all():  # Only plot if motif is not all zeros
-        if get_fast_plotting():
+        if utils_config.get_fast_plotting():
             _plot_logo_on_axis_fast(motif_info.get_motif_df(), plot_ax)
         else:
             logomaker.Logo(motif_info.get_motif_df(), ax=plot_ax)

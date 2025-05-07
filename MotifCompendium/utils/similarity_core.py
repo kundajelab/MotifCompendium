@@ -1,6 +1,6 @@
 import numpy as np
 
-from MotifCompendium.utils.config import get_use_gpu
+import MotifCompendium.utils.config as utils_config
 
 
 ####################
@@ -43,7 +43,7 @@ def compute_similarity_and_align(
         0  # When 0 similarity, set alignment to 0 for alignment symmetry properties
     )
     # Return
-    if get_use_gpu():
+    if utils_config.get_use_gpu():
         sim = sim.get()
         alignment_rc = alignment_rc.get()
         alignment_h = alignment_h.get()
@@ -63,7 +63,7 @@ _LEFT_TENSOR = None
 
 
 def _get_array_module():
-    if get_use_gpu():
+    if utils_config.get_use_gpu():
         global _CUPY_IMPORT
         if _CUPY_IMPORT is None:
             import cupy as cp

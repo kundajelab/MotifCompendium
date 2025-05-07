@@ -10,3 +10,4 @@
 */.ipynb_checkpoints
 */__pycache__/*
 MotifCompendium.egg-info/*
+!tutorials/tutorial_outputs/*.html
