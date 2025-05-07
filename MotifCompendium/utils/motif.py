@@ -531,6 +531,47 @@ def remove_motif_component(
 ###########
 # ENTROPY #
 ###########
+def valid_2d_l1norm_motif(motif: np.ndarray) -> np.ndarray:
+    """Check that motif is a valid, positive, 2D, L1-normalized motif."""
+    # Check if motif is valid
+    if not isinstance(motif, np.ndarray):
+        raise TypeError("Motif must be a NumPy array.")
+    if len(motif.shape) != 2:
+        raise ValueError("Motif must be a 2D array.")
+    if motif.shape[1] not in [4, 8]:
+        raise ValueError("Motif second dimension must be 4 or 8.")
+    if motif.shape[1] == 8:
+        motif = motif_8_to_4_unsigned(motif)  # Convert motif to 8-channel
+    if np.any(motif < 0):
+        motif = np.abs(motif) # Motif must be positive
+    
+    # L1-normalize, into a probability
+    motif = motif / np.sum(motif)
+    return motif
+
+
+def norm_shannon_entropy(prob_array: np.array, axis: int|None = None) -> float:
+    """Normalized Shannon entropy, normalized by the number of discrete states 
+    to range between [0,1], along a given axis.
+    
+    Args:
+        prob_array: (L, 4) motif (np.ndarray)
+        axis: Axis along which to calculate the entropy. Default is None, which
+            calculates the entropy across all axes.
+    
+    Returns:
+        norm_entropy: float
+    """
+    # Normalize, along axis
+    prob_array = prob_array / np.sum(prob_array, axis=axis, keepdims=True)
+    axis_size = prob_array.size if axis is None else prob_array.shape[axis]
+
+    # Calculate normalized Shannon entropy, normalized by number of possible states [0,1]
+    norm_entropy = (-np.sum(prob_array * np.log2(np.where(prob_array == 0, 1, prob_array)), axis=axis)
+        / np.log2(axis_size))
+    return norm_entropy
+
+
 def motif8_to_copair28(motif8: np.array) -> np.array:
     """Expand base channel (e.g., 8-channel: A+,C+,G+,T+,A-,C-,G-,T-)
     to co-occurrrence of all, non-repeating dinucleotide pairs per position
@@ -544,20 +585,18 @@ def motif8_to_copair28(motif8: np.array) -> np.array:
         np.math.factorial(cols)
         / (np.math.factorial(cols - nuc) * np.math.factorial(nuc))
     )  # C(n,r)
-    new_cols_2 = int(new_cols / 2)
     copair28 = np.zeros((rows, new_cols))
 
     ## Matrix multiplication + mask
     mask = np.tril(np.ones(cols), k=-1).astype(
         bool
-    )  # Mask for bottom left off-diagonal half
+    )  # Mask for bottom left off-diagonal half, to exclude self-repeats
 
     for i in range(rows):
         copair_perm = np.outer(motif8[i, :], motif8[i, :])  # Permutations: With order
         copair28[i, :] = copair_perm[
             mask
         ]  # Combinations: Without order; Exclude self (e.g., AA,CC,GG,TT)
-
     return copair28
 
 
@@ -574,38 +613,18 @@ def motif8_to_dinuc64(motif8: np.array) -> np.array:
     dinuc64 = np.zeros((new_rows, new_cols))
 
     # Calculate dinucleotide pairs, as product of distributions
-    # Calculate dinucleotide pairs, as product of distributions
-    mask = ~np.eye(cols, dtype=bool)
-
-    # Calculate dinucleotide pairs, as product of distributions
-    mask = ~np.eye(cols, dtype=bool)
+    # mask = ~np.eye(cols, dtype=bool) # Include self-repeats, if commented out
 
     for i in range(new_rows):
         dinuc_pair = np.outer(motif8[2 * i, :], motif8[2 * i + 1, :])
         dinuc64[i, :] = dinuc_pair.flatten()
-
     return dinuc64
 
 
-def shannon_entropy(prob_array: np.array, epsilon: float = 1e-10) -> float:
-    # Normalize, flatten array
-    prob_array = prob_array / np.sum(prob_array)
-    prob_array = prob_array.flatten()
-
-    # Replace zeroes with epsilon
-    prob_array[prob_array == 0] = epsilon
-    length = prob_array.shape[0]
-
-    # Calculate Shannon entropy
-    entropy = -np.sum(prob_array * np.log2(prob_array)) / np.log2(length)
-
-    return entropy
-
-
 def calculate_motif_entropy(motif: np.array) -> float:
-    """Calculate Shannon entropy of motif.
+    """Calculate normalized Shannon entropy of motif, across all positions and bases.
 
-    Calculation: Shannon entropy on (L,8)
+    Calculation: Shannon entropy on (L, 4)
     Purpose:    (High) Archetype: Noise/chaos
                 (Low) Archetype: Sharp nucleotide peak (e.g., G)
 
@@ -615,24 +634,37 @@ def calculate_motif_entropy(motif: np.array) -> float:
     Returns:
         motif_entropy: float
     """
-    # Check if motif is valid
-    if not isinstance(motif, np.ndarray):
-        raise TypeError("Motif must be a NumPy array.")
-    if len(motif.shape) != 2:
-        raise ValueError("Motif must be a 2D array.")
-    if motif.shape[1] not in [4, 8]:
-        raise ValueError("Motif second dimension must be 4 or 8.")
-    if motif.shape[1] == 4:
-        motif = motif_4_to_8(motif)  # Convert motif to 8-channel
-
-    # Standardize motif: Normalized, as probability
-    rows, cols = motif.shape
-    motif8_prob = motif / np.sum(motif)
+    # Check and normalize motif
+    motif = valid_2d_l1norm_motif(motif)
 
     # Calculate Shannon entropy
-    motif_entropy = shannon_entropy(motif8_prob)
-
+    motif_entropy = norm_shannon_entropy(motif)
     return motif_entropy
+
+
+def calculate_weighted_base_entropy(motif: np.array) -> float:
+    """Calculate information-weighted base-wise entropy.
+    
+    Calculation: Weighted average of per-base entropy, across position
+    For motif_i,j (L, 4)
+      = Sum across position_i [ Relative information of position_i * Entropy of position_i ]
+      = Sum across position_i [ Sum across base_j (motif_i,j) /  Sum_i,j (motif_i,j)
+        * Normalized Shannon entropy (L1-normalized motif_i) ]
+      = Sum across position_i [ Sum across base_j (motif_i,j) /  Sum_i,j (motif_i,j)
+        * Normalized Shannon entropy ( motif_i / sum_i (motif_i) )
+    
+    Args:
+        motif: (L, 4) or (L, 8) motif (np.ndarray)
+    
+    Returns:
+        weighted_base_entropy: float
+    """
+    # Check and normalize motif
+    motif = valid_2d_l1norm_motif(motif)
+
+    # Calculate weigthed base entropy: weight * norm entropy
+    weighted_base_entropy = np.sum(np.sum(motif, axis=1) * norm_shannon_entropy(motif, axis=1)) / np.sum(motif)
+    return weighted_base_entropy
 
 
 def calculate_posbase_entropy_ratio(motif: np.array) -> float:
@@ -647,34 +679,18 @@ def calculate_posbase_entropy_ratio(motif: np.array) -> float:
     Returns:
         posbase_entropy_ratio: float
     """
-    # Check if motif is valid
-    if not isinstance(motif, np.ndarray):
-        raise TypeError("Motif must be a NumPy array.")
-    if len(motif.shape) != 2:
-        raise ValueError("Motif must be a 2D array.")
-    if motif.shape[1] not in [4, 8]:
-        raise ValueError("Motif second dimension must be 4 or 8.")
-    if motif.shape[1] == 4:
-        motif = motif_4_to_8(motif)  # Convert motif to 8-channel
+    # Check and normalize motif
+    motif = valid_2d_l1norm_motif(motif)
 
-    # Standardize motif: Normalized, as probability
-    rows, cols = motif.shape
-    motif8_prob = motif / np.sum(motif)
-
-    # Sum across position-wise, base-wise
-    pos_prob = np.sum(motif8_prob, axis=1) / np.sum(
-        motif8_prob
-    )  # Sum across bases (L,), normalize
-    base_prob = np.sum(motif8_prob, axis=0) / np.sum(
-        motif8_prob
-    )  # Sum across positions (,8), normalize
+    # Positional, base-wise probability
+    pos_prob = np.sum(motif, axis=1) # Sum across bases (L,)
+    base_prob = np.sum(motif, axis=0)  # Sum across positions (,8)
 
     # Calculate position-wise, base-wise entropy
-    pos_entropy = shannon_entropy(pos_prob)
-    base_entropy = shannon_entropy(base_prob)
+    pos_entropy = norm_shannon_entropy(pos_prob)
+    base_entropy = norm_shannon_entropy(base_prob)
 
     posbase_entropy_ratio = pos_entropy / base_entropy
-
     return posbase_entropy_ratio
 
 
@@ -691,38 +707,22 @@ def calculate_copair_entropy_ratio(motif: np.array) -> float:
     Returns:
         copair_entropy_ratio: float
     """
-    # Check if motif is valid
-    if not isinstance(motif, np.ndarray):
-        raise TypeError("Motif must be a NumPy array.")
-    if len(motif.shape) != 2:
-        raise ValueError("Motif must be a 2D array.")
-    if motif.shape[1] not in [4, 8]:
-        raise ValueError("Motif second dimension must be 4 or 8.")
-    if motif.shape[1] == 4:
-        motif = motif_4_to_8(motif)  # Convert motif to 8-channel
-
-    # Standardize motif: Normalized, as probability
-    rows, cols = motif.shape
-    motif8_prob = motif / np.sum(motif)
+    # Check and normalize motif
+    motif = valid_2d_l1norm_motif(motif)
 
     # Calculate joint distribution of all non-repeating, non-ordered pairs of bases, normalized
     copair28 = motif8_to_copair28(motif)
     copair28_prob = copair28 / np.sum(copair28)
 
-    # Sum across position-wise, base-wise
-    copair_pos_prob = np.sum(copair28_prob, axis=1) / np.sum(
-        copair28_prob
-    )  # Sum across bases (L,), normalize
-    copair_base_prob = np.sum(copair28_prob, axis=0) / np.sum(
-        copair28_prob
-    )  # Sum across positions (,8), normalize
+    # Positional, base-wise probability
+    copair_pos_prob = np.sum(copair28_prob, axis=1)  # Sum across bases (L,)
+    copair_base_prob = np.sum(copair28_prob, axis=0)  # Sum across positions (,8)
 
     # Calculate position-wise, base-wise entropy
-    copair_pos_entropy = shannon_entropy(copair_pos_prob)
-    copair_base_entropy = shannon_entropy(copair_base_prob)
+    copair_pos_entropy = norm_shannon_entropy(copair_pos_prob)
+    copair_base_entropy = norm_shannon_entropy(copair_base_prob)
 
     copair_entropy_ratio = copair_pos_entropy / copair_base_entropy
-
     return copair_entropy_ratio
 
 
@@ -738,36 +738,20 @@ def calculate_dinuc_entropy_ratio(motif: np.array) -> float:
     Returns:
         dinuc_entropy_ratio: Calculated Shannon entropy (float)
     """
-    # Check if motif is valid
-    if not isinstance(motif, np.ndarray):
-        raise TypeError("Motif must be a NumPy array.")
-    if len(motif.shape) != 2:
-        raise ValueError("Motif must be a 2D array.")
-    if motif.shape[1] not in [4, 8]:
-        raise ValueError("Motif second dimension must be 4 or 8.")
-    if motif.shape[1] == 4:
-        motif = motif_4_to_8(motif)  # Convert motif to 8-channel
-
-    # Standardize motif: Normalized, as probability
-    rows, cols = motif.shape
-    motif8_prob = motif / np.sum(motif)
+    # Check and normalize motif
+    motif = valid_2d_l1norm_motif(motif)
 
     # Calculate distribution of all dinucleotide pairs of bases, per 2 positions, normalized
     dinuc64 = motif8_to_dinuc64(motif)
     dinuc64_prob = dinuc64 / np.sum(dinuc64)
 
-    # Sum across position-wise, base-wise
-    dinuc_pos_prob = np.sum(dinuc64_prob, axis=1) / np.sum(
-        dinuc64_prob
-    )  # Sum across bases (L/2,), normalize
-    dinuc_base_prob = np.sum(dinuc64_prob, axis=0) / np.sum(
-        dinuc64_prob
-    )  # Sum across positions (,64), normalize
+    # Positional, base-wise probability
+    dinuc_pos_prob = np.sum(dinuc64_prob, axis=1) # Sum across bases (L/2,)
+    dinuc_base_prob = np.sum(dinuc64_prob, axis=0) # Sum across positions (,64)
 
     # Calculate position-wise, base-wise entropy
-    dinuc_pos_entropy = shannon_entropy(dinuc_pos_prob)
-    dinuc_base_entropy = shannon_entropy(dinuc_base_prob)
+    dinuc_pos_entropy = norm_shannon_entropy(dinuc_pos_prob)
+    dinuc_base_entropy = norm_shannon_entropy(dinuc_base_prob)
 
     dinuc_entropy_ratio = dinuc_pos_entropy / dinuc_base_entropy
-
     return dinuc_entropy_ratio

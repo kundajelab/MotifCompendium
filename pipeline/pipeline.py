@@ -3,6 +3,7 @@ import sys
 import time
 import argparse
 import logging
+import json
 
 import numpy as np
 import pandas as pd
@@ -56,6 +57,7 @@ def setup_parser():
     parser.add_argument("--html-motif-removed", action="store_true", help="Generate HTML summary table of removed motifs.")
     parser.add_argument("--html-cluster-table", action="store_true", help="Generate HTML summary table of clusters, meta-clusters, sub-clusters.")
     parser.add_argument("--html-cluster-removed", action="store_true", help="Generate HTML summary table of removed clusters, meta-clusters, sub-clusters.")
+    parser.add_argument("--html-max-rows", type=int, default=None, help="Maximum number of rows to display in HTML tables.")
     
     parser.add_argument("-ch", "--max-chunk", type=int, default=1000, help="Maximum number of motifs to process at a time. Set to -1 to use no chunking.")
     parser.add_argument("-cp", "--max-cpus", type=int, default=1, help="Maximum number of CPUs to use.")
@@ -103,59 +105,6 @@ def build_modisco_dict(h5_list: list, name_list: list | None) -> dict:
         name_list = [os.path.basename(h5) for h5 in h5_list]
     modisco_dict = dict(zip(name_list, h5_list))
     return modisco_dict
-
-def apply_filter_threshold(
-    mc: MotifCompendium,
-    flag_col: str,
-    metric: str,
-    operation: str,
-    threshold: float,
-    override: bool,
-) -> None:
-    """
-    Apply a filter threshold to the MotifCompendium object.
-    
-    Args:
-        mc (MotifCompendium): The MotifCompendium object.
-        flag_col (str): The column name to use for the filter flag.
-        metric (str): The metric to use for the filter.
-        operation (str): The operation to use for the filter. One of: <, <=, >, >=, ==, !=
-        threshold (float): The threshold to use for the filter.
-        override (bool): Whether to override the existing flag or not.
-    
-    Returns:
-        None
-    """
-    if override is True:
-        if operation == "<":
-            mc[flag_col] = mc[flag_col] & (mc[metric] < threshold)
-        elif operation == "<=":
-            mc[flag_col] = mc[flag_col] & (mc[metric] <= threshold)
-        elif operation == ">":
-            mc[flag_col] = mc[flag_col] & (mc[metric] > threshold)
-        elif operation == ">=":
-            mc[flag_col] = mc[flag_col] & (mc[metric] >= threshold)
-        elif operation == "==":
-            mc[flag_col] = mc[flag_col] & (mc[metric] == threshold)
-        elif operation == "!=":
-            mc[flag_col] = mc[flag_col] & (mc[metric] != threshold)
-        else:
-            raise ValueError("Invalid operation for filter threshold.")
-    elif override is False:
-        if operation == "<":
-            mc[flag_col] = mc[flag_col] | (mc[metric] < threshold)
-        elif operation == "<=":
-            mc[flag_col] = mc[flag_col] | (mc[metric] <= threshold)
-        elif operation == ">":
-            mc[flag_col] = mc[flag_col] | (mc[metric] > threshold)
-        elif operation == ">=":
-            mc[flag_col] = mc[flag_col] | (mc[metric] >= threshold)
-        elif operation == "==":
-            mc[flag_col] = mc[flag_col] | (mc[metric] == threshold)
-        elif operation == "!=":
-            mc[flag_col] = mc[flag_col] | (mc[metric] != threshold)
-        else:
-            raise ValueError("Invalid operation for filter threshold.")
 
 def label_motifs(
     mc: MotifCompendium,
@@ -500,6 +449,66 @@ def filter_clusters(
         if args.time:
             logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
+def apply_filter_threshold(
+    mc: MotifCompendium,
+    flag_col: str,
+    metric: str,
+    operation: str,
+    threshold: float,
+    override: bool,
+) -> None:
+    """
+    Apply a filter threshold to the MotifCompendium object.
+    
+    Args:
+        mc (MotifCompendium): The MotifCompendium object.
+        flag_col (str): The column name to use for the filter flag.
+        metric (str): The metric to use for the filter.
+        operation (str): The operation to use for the filter. One of: <, <=, >, >=, ==, !=
+        threshold (float): The threshold to use for the filter.
+        override (bool): Whether to override the existing flag or not.
+    
+    Returns:
+        None
+    """
+    if override is True:
+        if operation == "<":
+            mc[flag_col] = mc[flag_col] & (mc[metric] < threshold)
+        elif operation == "<=":
+            mc[flag_col] = mc[flag_col] & (mc[metric] <= threshold)
+        elif operation == ">":
+            mc[flag_col] = mc[flag_col] & (mc[metric] > threshold)
+        elif operation == ">=":
+            mc[flag_col] = mc[flag_col] & (mc[metric] >= threshold)
+        elif operation == "==":
+            mc[flag_col] = mc[flag_col] & (mc[metric] == threshold)
+        elif operation == "!=":
+            mc[flag_col] = mc[flag_col] & (mc[metric] != threshold)
+        elif operation == "isna":
+            mc[flag_col] = mc[flag_col] & (mc[metric].isna())
+        elif operation == "notna":
+            mc[flag_col] = mc[flag_col] & (mc[metric].notna())
+        else:
+            raise ValueError("Invalid operation for filter threshold.")
+    elif override is False:
+        if operation == "<":
+            mc[flag_col] = mc[flag_col] | (mc[metric] < threshold)
+        elif operation == "<=":
+            mc[flag_col] = mc[flag_col] | (mc[metric] <= threshold)
+        elif operation == ">":
+            mc[flag_col] = mc[flag_col] | (mc[metric] > threshold)
+        elif operation == ">=":
+            mc[flag_col] = mc[flag_col] | (mc[metric] >= threshold)
+        elif operation == "==":
+            mc[flag_col] = mc[flag_col] | (mc[metric] == threshold)
+        elif operation == "!=":
+            mc[flag_col] = mc[flag_col] | (mc[metric] != threshold)
+        elif operation == "isna":
+            mc[flag_col] = mc[flag_col] | (mc[metric].isna())
+        elif operation == "notna":
+            mc[flag_col] = mc[flag_col] | (mc[metric].notna())
+        else:
+            raise ValueError("Invalid operation for filter threshold.")
 
 def generate_quality_plots(
     mc: MotifCompendium,
@@ -1434,14 +1443,19 @@ if __name__ == "__main__":
         if args.verbose:
             logging.info(f"Visualizing the following columns for motif table: {html_table_cols_motif}")
 
+        # Set max_rows
+        max_rows_series = pd.Series([True] * len(mc))
+        if args.html_max_rows:
+            max_rows_series = pd.Series([True] * args.html_max_rows + [False] * (len(mc) - args.html_max_rows))
+
         # Create HTML table
         html_motif_table_path = os.path.join(html_dir, OutputPaths.html_motif_table)
         if args.verbose:
             logging.info(f"Visualizing motif table: {html_motif_table_path}...\n"
                         f"Number of motifs: {len(mc)}")
         if args.time:
-            start_time = time.time()        
-        mc.summary_table_html(
+            start_time = time.time()
+        mc[max_rows_series].summary_table_html(
             html_out=html_motif_table_path,
             columns=html_table_cols_motif,
             editable=VisualizeArgs.editable,
@@ -1456,14 +1470,19 @@ if __name__ == "__main__":
         if args.verbose:
             logging.info(f"Visualizing the following columns for removed motif table: {html_motif_removed_cols}")
 
+        # Set max_rows
+        max_rows_series = pd.Series([True] * len(mc_removed))
+        if args.html_max_rows:
+            max_rows_series = pd.Series([True] * args.html_max_rows + [False] * (len(mc_removed) - args.html_max_rows))
+
         # Create HTML table
         html_motif_removed_path = os.path.join(html_dir, OutputPaths.html_motif_removed)
         if args.verbose:
             logging.info(f"Visualizing removed motifs: {html_motif_removed_path}...\n"
                         f"Number of motifs removed: {len(mc_removed)}")
         if args.time:
-            start_time = time.time()        
-        mc_removed.summary_table_html(
+            start_time = time.time()
+        mc_removed[max_rows_series].summary_table_html(
             html_out=html_motif_removed_path,
             columns=html_motif_removed_cols,
             editable=VisualizeArgs.editable,
@@ -1482,14 +1501,19 @@ if __name__ == "__main__":
         if args.verbose:
             logging.info(f"Visualizing the following columns for cluster table: {html_table_cols_cluster}")
 
+        # Set max_rows
+        max_rows_series = pd.Series([True] * len(mc_avg))
+        if args.html_max_rows:
+            max_rows_series = pd.Series([True] * args.html_max_rows + [False] * (len(mc_avg) - args.html_max_rows))
+
         # Cluster: Create HTML table
         html_cluster_table_path = os.path.join(html_dir, OutputPaths.html_cluster_table)
         if args.verbose:
             logging.info(f"Visualizing cluster table: {html_cluster_table_path}...\n"
                         f"Number of clusters: {len(mc_avg)}")
         if args.time:
-            start_time = time.time()        
-        mc_avg.summary_table_html(
+            start_time = time.time()
+        mc_avg[max_rows_series].summary_table_html(
             html_out=html_cluster_table_path,
             columns=html_table_cols_cluster,
             editable=VisualizeArgs.editable,
@@ -1499,13 +1523,19 @@ if __name__ == "__main__":
         
         # Meta-cluster: Create HTML table
         if args.sim_threshold_meta:
+            # Set max_rows
+            max_rows_series = pd.Series([True] * len(mc_metaavg))
+            if args.html_max_rows:
+                max_rows_series = pd.Series([True] * args.html_max_rows + [False] * (len(mc_metaavg) - args.html_max_rows))
+            
+            # Create HTML table
             html_metacluster_table_path = os.path.join(html_dir, OutputPaths.html_metacluster_table)
             if args.verbose:
                 logging.info(f"Visualizing meta-cluster table: {html_metacluster_table_path}...\n"
                              f"Number of meta-clusters: {len(mc_metaavg)}")
             if args.time:
-                start_time = time.time()        
-            mc_metaavg.summary_table_html(
+                start_time = time.time()
+            mc_metaavg[max_rows_series].summary_table_html(
                 html_out=html_metacluster_table_path,
                 columns=html_table_cols_cluster,
                 editable=VisualizeArgs.editable,
@@ -1515,13 +1545,19 @@ if __name__ == "__main__":
         
         # Sub-cluster: Create HTML table
         if args.sim_threshold_sub:
+            # Set max_rows
+            max_rows_series = pd.Series([True] * len(mc_subavg))
+            if args.html_max_rows:
+                max_rows_series = pd.Series([True] * args.html_max_rows + [False] * (len(mc_subavg) - args.html_max_rows))
+
+            # Create HTML table
             html_subcluster_table_path = os.path.join(html_dir, OutputPaths.html_subcluster_table)
             if args.verbose:
                 logging.info(f"Visualizing sub-cluster table: {html_subcluster_table_path}...\n"
                              f"Number of sub-clusters: {len(mc_subavg)}")
             if args.time:
-                start_time = time.time()        
-            mc_subavg.summary_table_html(
+                start_time = time.time()
+            mc_subavg[max_rows_series].summary_table_html(
                 html_out=html_subcluster_table_path,
                 columns=html_table_cols_cluster,
                 editable=VisualizeArgs.editable,
@@ -1536,14 +1572,19 @@ if __name__ == "__main__":
         if args.verbose:
             logging.info(f"Visualizing the following columns for removed cluster table: {html_cluster_removed_cols}")
 
+        # Set max_rows
+        max_rows_series = pd.Series([True] * len(mc_avg_removed))
+        if args.html_max_rows:
+            max_rows_series = pd.Series([True] * args.html_max_rows + [False] * (len(mc_avg_removed) - args.html_max_rows))
+
         # Cluster: Create HTML table
         html_cluster_removed_path = os.path.join(html_dir, OutputPaths.html_cluster_removed)
         if args.verbose:
             logging.info(f"Visualizing removed clusters: {html_cluster_removed_path}...\n"
                             f"Number of clusters removed: {len(mc_avg_removed)}")
         if args.time:
-            start_time = time.time()        
-        mc_avg_removed.summary_table_html(
+            start_time = time.time()
+        mc_avg_removed[max_rows_series].summary_table_html(
             html_out=html_cluster_removed_path,
             columns=html_cluster_removed_cols,
             editable=VisualizeArgs.editable,
@@ -1553,13 +1594,19 @@ if __name__ == "__main__":
 
         # Meta-cluster: Create HTML table
         if args.sim_threshold_meta:
+            # Set max_rows
+            max_rows_series = pd.Series([True] * len(mc_metaavg_removed))
+            if args.html_max_rows:
+                max_rows_series = pd.Series([True] * args.html_max_rows + [False] * (len(mc_metaavg_removed) - args.html_max_rows))
+            
+            # Create HTML table
             html_metacluster_removed_path = os.path.join(html_dir, OutputPaths.html_metacluster_removed)
             if args.verbose:
                 logging.info(f"Visualizing removed meta-clusters: {html_metacluster_removed_path}...\n"
                              f"Number of meta-clusters removed: {len(mc_metaavg_removed)}")
             if args.time:
-                start_time = time.time()        
-            mc_metaavg_removed.summary_table_html(
+                start_time = time.time()
+            mc_metaavg_removed[max_rows_series].summary_table_html(
                 html_out=html_metacluster_removed_path,
                 columns=html_cluster_removed_cols,
                 editable=VisualizeArgs.editable,
@@ -1569,12 +1616,18 @@ if __name__ == "__main__":
             
         # Sub-cluster: Create HTML table
         if args.sim_threshold_sub:
+            # Set max_rows
+            max_rows_series = pd.Series([True] * len(mc_subavg_removed))
+            if args.html_max_rows:
+                max_rows_series = pd.Series([True] * args.html_max_rows + [False] * (len(mc_subavg_removed) - args.html_max_rows))
+            
+            # Create HTML table
             html_subcluster_removed_path = os.path.join(html_dir, OutputPaths.html_subcluster_removed)
             if args.verbose:
                 logging.info(f"Visualizing removed sub-clusters: {html_subcluster_removed_path}...\n"
                              f"Number of sub-clusters removed: {len(mc_subavg_removed)}")
             if args.time:
-                start_time = time.time()        
+                start_time = time.time()
             mc_subavg_removed.summary_table_html(
                 html_out=html_subcluster_removed_path,
                 columns=html_cluster_removed_cols,
@@ -1583,6 +1636,23 @@ if __name__ == "__main__":
             if args.time:
                 logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
+
+    ## ARGUMENTS ---------------------------------------------------------------
+    # Save arguments
+    arg_json = os.path.join(args.output_dir, "args.json")
+    if args.verbose:
+        logging.info(f"Saving arguments to: {arg_json}...")
+    all_args = [
+        {"args": vars(args)},
+        {"OutputPaths": vars(OutputPaths)},
+        {"MotifMatchArgs": vars(MotifMatchArgs)},
+        {"ClusterArgs": vars(ClusterArgs)},
+        {"MetadataCols": vars(MetadataCols)},
+        {"MotifFilterArgs": MotifFilterArgs.to_dict()},
+        {"VisualizeArgs": vars(VisualizeArgs)},
+    ]
+    with open(arg_json, "w") as f:
+        json.dump(all_args, f, indent=4)
 
     ## END ----------------------------------------------------------------
     print(f"MotifCompendium pipeline completed successfully. Output saved to {args.output_dir}.")

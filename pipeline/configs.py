@@ -1,5 +1,5 @@
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from typing import Union, List, Tuple
 
 
@@ -12,6 +12,9 @@ class FilterArgs:
     override: bool
     apply_motif: bool
     apply_cluster: bool
+
+    def to_dict(self):
+        return asdict(self)
 
 
 @dataclass
@@ -56,11 +59,12 @@ class MotifMatchArgs:
     reference_default: str = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "data",
-        "JASPAR2024-HOCOMOCOv13.meme.txt",
+        "HUMAN-JASPAR2024-HOCOMOCOv13.meme.txt",
     )
-    max_submotifs: int = 3
+    max_submotifs: int = 2
     min_score: float = 0.7
-    composite_threshold: float = 0.8
+    base_threshold: float = 0.88
+    composite_threshold: float = 0.7
 
 
 @dataclass
@@ -76,10 +80,13 @@ class ClusterArgs:
         ("num_seqlets", "sum", "num_seqlets"),
         ("model", "concat", "model"),
         ("avg_dist_summit", "average", "avg_dist_summit"),
-        ("biosample", "concat", "biosample"),
+        ("avg_contrib", "average", "avg_contrib"),
+        ("invitro_cluster", "concat", "invitro_cluster"),
         ("target", "concat", "target"),
+        ("family", "concat", "family"),
         ("tissue", "concat", "tissue"),
         ("organ", "concat", "organ"),
+        ("biosample", "concat", "biosample"),
     ])
     algorithm_kwargs: dict = field(default_factory=lambda: {
         "leiden": {},
@@ -111,13 +118,16 @@ class VisualizeArgs:
             f"{MetadataCols.match_column_prefix}_score{iter}",
             ]
         ] +
-        ["posneg", "num_motifs", "num_seqlets", "avg_dist_summit", "biosample", "target", "tissue", "organ", "system",])
+        ["posneg", "num_motifs", "num_seqlets", "avg_dist_summit", "avg_contrib", 
+         "invitro_cluster", "target", "tissue", "organ", "system", # biosample,
+         ])
 
 
 @dataclass
 class MotifFilterArgs:
     motif_metrics: tuple = (
         "motif_entropy",
+        "weighted_base_entropy",
         "posbase_entropy_ratio",
         "copair_entropy_ratio",
         "dinuc_entropy_ratio",
@@ -138,40 +148,49 @@ class MotifFilterArgs:
             name="2_noisemix",
             metric="motif_entropy",
             operation=">",
-            threshold=0.7, #0.65, 0.7
+            threshold=0.73,
             override=False,
             apply_motif=True,
             apply_cluster=True,
         ),
         FilterArgs(
-            name="3_broadsingle",
+            name="3_noisypeaks",
+            metric="weighted_base_entropy",
+            operation=">",
+            threshold=0.5,
+            override=False,
+            apply_motif=True,
+            apply_cluster=True,
+        ),
+        FilterArgs(
+            name="4_broadsingle",
             metric="posbase_entropy_ratio",
             operation=">",
-            threshold=1.9, #1.75, 1.9
+            threshold=1.4,
             override=False,
             apply_motif=True,
             apply_cluster=True,
         ),
         FilterArgs(
-            name="4_gcbias",
+            name="5_gcbias",
             metric="copair_entropy_ratio",
             operation=">",
-            threshold=1.9, #1.75, 1.9
+            threshold=1.4,
             override=False,
             apply_motif=True,
             apply_cluster=True,
         ),
         FilterArgs(
-            name="5_dinucrepeat",
+            name="6_dinucrepeat",
             metric="dinuc_entropy_ratio",
             operation=">",
-            threshold=2.9, #1.9 2.9
+            threshold=1.6,
             override=False,
             apply_motif=True,
             apply_cluster=True,
         ),
         FilterArgs(
-            name="6_posneg_inverted",
+            name="7_posneg_inverted",
             metric="posneg_inverted",
             operation="==",
             threshold=True,
@@ -180,7 +199,7 @@ class MotifFilterArgs:
             apply_cluster=True,
         ),
         FilterArgs(
-            name="7_truncated",
+            name="8_truncated",
             metric="truncated",
             operation="==",
             threshold=True,
@@ -195,7 +214,7 @@ class MotifFilterArgs:
             name="base_match",
             metric=f"{MetadataCols.match_column_prefix}_score0",
             operation="<",
-            threshold=0.9,
+            threshold=MotifMatchArgs.base_threshold,
             override=True,
             apply_motif=True,
             apply_cluster=True,
@@ -218,36 +237,71 @@ class MotifFilterArgs:
             name="2_noisemix",
             metric="motif_entropy",
             operation=">",
-            threshold=0.8, #0.7, 0.8
+            threshold=0.75,
             override=False,
             apply_motif=True,
             apply_cluster=True,
         ),
         FilterArgs(
-            name="3_broadsingle",
+            name="3_noisypeaks",
+            metric="weighted_base_entropy",
+            operation=">",
+            threshold=0.55,
+            override=False,
+            apply_motif=True,
+            apply_cluster=True,
+        ),
+        FilterArgs(
+            name="4_broadsingle",
             metric="posbase_entropy_ratio",
             operation=">",
-            threshold=5.0, #1.9, 5.0
+            threshold=1.5,
             override=False,
             apply_motif=True,
             apply_cluster=True,
         ),
         FilterArgs(
-            name="4_gcbias",
+            name="5_gcbias",
             metric="copair_entropy_ratio",
             operation=">",
-            threshold=5.0, #1.9, 5.0
+            threshold=1.5,
             override=False,
             apply_motif=True,
             apply_cluster=True,
         ),
         FilterArgs(
-            name="5_dinucrepeat",
+            name="6_dinucrepeat",
             metric="dinuc_entropy_ratio",
             operation=">",
-            threshold=10.0, #2.9, 10.0
+            threshold=2.0,
+            override=False,
+            apply_motif=True,
+            apply_cluster=True,
+        ),
+        FilterArgs(
+            name="7_posneg_inverted",
+            metric="posneg_inverted",
+            operation="==",
+            threshold=True,
+            override=False,
+            apply_motif=True,
+            apply_cluster=True,
+        ),
+        FilterArgs(
+            name="8_truncated",
+            metric="truncated",
+            operation="==",
+            threshold=True,
             override=False,
             apply_motif=True,
             apply_cluster=True,
         ),
     )
+
+    def to_dict(self):
+        return {
+            "motif_metrics": list(self.motif_metrics),
+            "motif_filters": [f.to_dict() for f in self.motif_filters],
+            "override_filters": [f.to_dict() for f in self.override_filters],
+            "strict_filters": [f.to_dict() for f in self.strict_filters],
+        }

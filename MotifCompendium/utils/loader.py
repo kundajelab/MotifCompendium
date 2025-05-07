@@ -66,9 +66,9 @@ def load_modiscos(
     max_cpus = get_max_cpus()
     if max_cpus == 1 or len(modisco_dict) == 1:
         # Load serially
-        motifs, motif_names, seqlet_counts, model_names, posnegs, avgdist_summits = [], [], [], [], [], []
+        motifs, motif_names, seqlet_counts, model_names, posnegs, avgdist_summits, avg_contribs = [], [], [], [], [], [], []
         for m_name, m_loc in modisco_dict.items():
-            m_motifs, m_motif_names, m_seqlet_counts, m_posneg, m_avgdist_summits = load_modisco(
+            m_motifs, m_motif_names, m_seqlet_counts, m_posneg, m_avgdist_summits, m_avg_contribs = load_modisco(
                 m_loc, ic=ic, modisco_region_width=modisco_region_width,
             )
             m_motif_names = [f"{m_name}-{x}" for x in m_motif_names]
@@ -78,6 +78,7 @@ def load_modiscos(
             model_names += [m_name] * len(m_motif_names)
             posnegs += m_posneg
             avgdist_summits += m_avgdist_summits
+            avg_contribs += m_avg_contribs
         motifs = np.concatenate(motifs, axis=0)
     else:
         # Load in parallel
@@ -91,9 +92,9 @@ def load_modiscos(
         payloads = [(m_loc, modisco_region_width, ic) for m_loc in m_locs]
         with multiprocessing.Pool(processes=num_processes) as p:
             results = p.starmap(load_modisco, payloads)
-        motifs, motif_names, seqlet_counts, model_names, posnegs, avgdist_summits = [], [], [], [], [], []
+        motifs, motif_names, seqlet_counts, model_names, posnegs, avgdist_summits, avg_contribs = [], [], [], [], [], [], []
         for i, r in enumerate(results):
-            m_motifs, m_motif_names, m_seqlet_counts, m_posneg, m_avgdist_summits = r
+            m_motifs, m_motif_names, m_seqlet_counts, m_posneg, m_avgdist_summits, m_avg_contribs = r
             m_motif_names = [f"{m_names[i]}-{x}" for x in m_motif_names]
             motifs.append(m_motifs)
             motif_names += m_motif_names
@@ -101,8 +102,9 @@ def load_modiscos(
             model_names += [m_names[i]] * len(m_motif_names)
             posnegs += m_posneg
             avgdist_summits += m_avgdist_summits
+            avg_contribs += m_avg_contribs
         motifs = np.concatenate(motifs, axis=0)
-    return motifs, motif_names, seqlet_counts, model_names, posnegs, avgdist_summits
+    return motifs, motif_names, seqlet_counts, model_names, posnegs, avgdist_summits, avg_contribs
 
 
 @which_file_load_failed
@@ -133,7 +135,7 @@ def load_modisco(
         Motifs are returned as an (N, 30, 8) 8 channel motif stack.
         Using ic scaling is highly recommended.
     """
-    motifs, motif_names, seqlet_counts, posneg, avgdist_summits = [], [], [], [], []
+    motifs, motif_names, seqlet_counts, posneg, avgdist_summits, avg_contribs = [], [], [], [], [], []
     with h5py.File(modisco_file, "r") as f:
         if "pos_patterns" in f:
             for pattern in list(f["pos_patterns"]):
@@ -144,10 +146,13 @@ def load_modisco(
                 seqlet_counts.append(seqlets.shape[0])
                 posneg.append("pos")
                 avgdist_summits.append(
-                    np.abs(f["pos_patterns"][pattern]["seqlets"]["start"][:] # Start position
+                    np.mean(np.abs(f["pos_patterns"][pattern]["seqlets"]["start"][:] # Start position
                     - (modisco_region_width // 2) # Modisco region half-width
                     + np.unravel_index(np.abs(motif_sim).argmax(), motif_sim.shape)[0] # Motif peak
-                    ).mean()
+                    ))
+                )
+                avg_contribs.append(
+                    np.mean(np.sum(np.abs(seqlets), axis=(1,2)), axis=0)
                 )
         if "neg_patterns" in f:
             for pattern in list(f["neg_patterns"]):
@@ -163,8 +168,11 @@ def load_modisco(
                     + np.unravel_index(np.abs(motif_sim).argmax(), motif_sim.shape)[0] # Motif peak
                     ).mean()
                 )
+                avg_contribs.append(
+                    np.mean(np.sum(np.abs(seqlets), axis=(1,2)), axis=0)
+                )
     motifs = np.stack(motifs, axis=0)
-    return motifs, motif_names, seqlet_counts, posneg, avgdist_summits
+    return motifs, motif_names, seqlet_counts, posneg, avgdist_summits, avg_contribs
 
 
 @which_file_load_failed

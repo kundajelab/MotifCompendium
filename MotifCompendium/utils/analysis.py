@@ -348,26 +348,29 @@ def calculate_filters(
 
     List of filter metrics:
         (1) Motif entropy:
-            Calculation: Shannon entropy on (L,8)
+            Calculation: Shannon entropy on (L,4)
             Purpose:    (Low) Archetype #1: Sharp nucleotide peak (e.g., G)
                         (High) Archetype #2: Noise/chaos
-        (2) Pos-base entropy ratio:
+        (2) Contribution-weighted base entropy:
+            Calculation: Sum of contribution-weighted base entropy per position
+            Purpose:    (High) Archetype #3: Noisy peaks (e.g., peak is not a single base)
+        (3) Pos-base entropy ratio:
             Calculation: Position-wise entropy on (L,) / Base-wise entropy on (8,)
-            Purpose:    (High) Archetype #3: Single nucleotide repeats (e.g., AAAAA, GGGGG)
-        (3) Co-pair entropy ratio:
+            Purpose:    (High) Archetype #4: Single nucleotide repeats (e.g., AAAAA, GGGGG)
+        (4) Co-pair entropy ratio:
             Calculation: Entropy across position (L,) /
                 Entropy across all pairs of co-occurring, non-repeating bases (28,)
-            Purpose:    (High) Archetype #4: High GC, AT bias
-        (4) Dinucleotide entropy ratio:
+            Purpose:    (High) Archetype #5: High GC, AT bias
+        (5) Dinucleotide entropy ratio:
             Calculation: Entropy across pairs of positions (L/2,) /
                 Entropy across all dinucleotide pairs (64,)
             Purpose:    (High) Dinucleotide repeats (e.g., GCGCGC, ATATAT)
-        (5) Positive-negative inverted:
+        (6) Positive-negative inverted:
             Calculation: Check if positive pattern with a negative peak, and vice versa
-            Purpose:    (True) Archetype #5: Sharp positive peak in negative pattern
-        (6) Truncated:
+            Purpose:    (True) Archetype #6: Sharp positive peak in negative pattern
+        (7) Truncated:
             Calculation: Check if max position is at the end of the motif
-            Purpose:    (True) Archetype #6: Truncated motifs
+            Purpose:    (True) Archetype #7: Truncated motifs
 
     Args:
         metric_list: List of filter metrics to calculate.
@@ -378,12 +381,14 @@ def calculate_filters(
     metric_list = list(set(metric_list))  # Convert metric_list into a unique list
     valid_filter_metrics = [
         "motif_entropy",
+        "weighted_base_entropy",
         "posbase_entropy_ratio",
         "copair_entropy_ratio",
         "dinuc_entropy_ratio",
         "posneg_inverted",
         "truncated",
     ]
+    
     for filter_metric in metric_list:
         if filter_metric not in valid_filter_metrics:
             raise ValueError(
@@ -399,6 +404,12 @@ def calculate_filters(
                     metric = utils_motif.calculate_motif_entropy(motif)
                     metrics_list.append(metric)
                 mc["motif_entropy"] = metrics_list
+
+            case "weighted_base_entropy":
+                for motif in mc.motifs:
+                    metric = utils_motif.calculate_weighted_base_entropy(motif)
+                    metrics_list.append(metric)
+                mc["weighted_base_entropy"] = metrics_list
 
             case "posbase_entropy_ratio":
                 for motif in mc.motifs:
@@ -425,8 +436,8 @@ def calculate_filters(
                 )
 
             case "truncated":
-                max_pos = mc.motifs.sum(axis=-1).argmax(axis=-1)  # (N, )
-                mc["truncated"] = (max_pos == 0) | (max_pos == mc.motifs.shape[1] - 1)
+                max_pos = mc.motifs.sum(axis=-1).argmax(axis=-1) # (N,)
+                mc["truncated"] = (max_pos < 2) | (max_pos > mc.motifs.shape[1] - 3)
 
             case _:
                 raise ValueError(

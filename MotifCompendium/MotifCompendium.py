@@ -251,7 +251,7 @@ def build_from_modisco(
           large objects.
     """
     # Load from Modisco
-    motifs, motif_names, seqlet_counts, model_names, posneg, avgdist_summits = (
+    motifs, motif_names, seqlet_counts, model_names, posneg, avgdist_summits, avg_contribs = (
         utils_loader.load_modiscos(modisco_dict,
                                     modisco_region_width=modisco_region_width, ic=ic)
     )
@@ -265,6 +265,7 @@ def build_from_modisco(
     metadata["model"] = model_names
     metadata["posneg"] = posneg
     metadata["avg_dist_summit"] = avgdist_summits
+    metadata["avg_contrib"] = avg_contribs
     # Construct object
     return build(
         motifs,
@@ -319,13 +320,13 @@ def combine(
         )
     # Confirm that the metadata and __images of each MotifCompendium has the same columns
     metadata_columns = compendiums[0].columns()
-    if not all([x.columns() == metadata_columns] for x in compendiums):
+    if not all([x.columns() == metadata_columns for x in compendiums]):
         raise ValueError(
             "The metadata of each MotifCompendium must have the same columns."
             + "\n(Check mc.columns() for each MotifCompendium.)"
         )
     image_columns = compendiums[0].get_saved_images()
-    if not all([x.get_saved_images() == image_columns] for x in compendiums):
+    if not all([x.get_saved_images() == image_columns for x in compendiums]):
         raise ValueError(
             "Each MotifCompendium must have the same saved images."
             + "\n(Check mc.get_saved_images() for each MotifCompendium.)"
@@ -370,7 +371,7 @@ def combine(
     __images = pd.DataFrame()
     for images in compendiums[0].get_saved_images():
         __images[images] = pd.concat(
-            [mc.get_images(images) for mc in compendiums], ignore_index=True
+            [pd.Series(mc.get_images(images)) for mc in compendiums], ignore_index=True
         )
     # Construct object
     return MotifCompendium(
@@ -1385,6 +1386,7 @@ class MotifCompendium:
             # Aggregations
             for agg_dict in aggregations_dicts:
                 agg_c_data = self.metadata.loc[c_idxs, agg_dict["source"]]
+                agg_c_data = agg_c_data.dropna() # Remove NaNs
                 match agg_dict["method"]:
                     case "count":
                         agg_dict["values"].append(len(agg_c_data))
@@ -1394,6 +1396,8 @@ class MotifCompendium:
                         agg_dict["values"].append(np.sum(agg_c_data))
                     case "average" | "avg" | "mean":
                         agg_dict["values"].append(np.mean(agg_c_data))
+                    case "weighted_avg" | "weighted_mean":
+                        assert False, "Weighted average is not implemented yet."
                     case "concatenate" | "concat":
                         agg_dict["values"].append(
                             ",".join(sorted(set(map(str, agg_c_data))))
