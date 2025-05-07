@@ -251,16 +251,9 @@ def build_from_modisco(
           large objects.
     """
     # Load from Modisco
-<<<<<<< HEAD
     motifs, motif_names, seqlet_counts, model_names, posneg, avgdist_summits, avg_contribs = (
         utils_loader.load_modiscos(modisco_dict,
                                     modisco_region_width=modisco_region_width, ic=ic)
-=======
-    motifs, motif_names, seqlet_counts, model_names, posneg, avgdist_summits = (
-        utils_loader.load_modiscos(
-            modisco_dict, modisco_region_width=modisco_region_width, ic=ic
-        )
->>>>>>> refs/remotes/origin/next_version
     )
     # Convert motifs to normalized 8-channel motifs
     motifs = utils_motif.motif_4_to_8(motifs)
@@ -271,12 +264,8 @@ def build_from_modisco(
     metadata["num_seqlets"] = seqlet_counts
     metadata["model"] = model_names
     metadata["posneg"] = posneg
-<<<<<<< HEAD
-    metadata["avg_dist_summit"] = avgdist_summits
     metadata["avg_contrib"] = avg_contribs
-=======
     metadata["avg_dist_from_summit"] = avgdist_summits
->>>>>>> refs/remotes/origin/next_version
     # Construct object
     return build(
         motifs,
