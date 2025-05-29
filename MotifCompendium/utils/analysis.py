@@ -338,6 +338,7 @@ def calculate_filters(
     mc: MotifCompendiumClass,
     metric_list: list[str] = [
         "motif_entropy",
+        "weighted_base_entropy",
         "posbase_entropy_ratio",
         "copair_entropy_ratio",
         "dinuc_entropy_ratio",

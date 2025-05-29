@@ -3,8 +3,16 @@ from dataclasses import dataclass, field, asdict
 from typing import Union, List, Tuple
 
 
+## INTERNAL -------------------------------------------------------------------------------------------------------
 @dataclass
-class FilterArgs:
+class _MetadataCols:
+    # INTERNAL: Metadata columns for MotifCompendium
+    match_column_prefix: str = "reference"
+    filter_col_flag: str = "flag_remove"
+
+@dataclass
+class _FilterArgs:
+    # INTERNAL: Standard filter arguments
     name: str
     metric: str
     operation: str
@@ -14,11 +22,14 @@ class FilterArgs:
     apply_cluster: bool
 
     def to_dict(self):
+        # Return filter arguments as a dictionary
         return asdict(self)
 
 
+## PARAMETERS --------------------------------------------------------------------------------------------------
 @dataclass
 class OutputPaths:
+    # Relative output paths for MotifCompendium objects and HTMLs
     mc_full: str = "motifcompendium.mc"
     mc_filtered: str = "motifcompendium_filtered.mc"
     mc_removed: str = "motifcompendium_removed.mc"
@@ -49,13 +60,8 @@ class OutputPaths:
 
 
 @dataclass
-class MetadataCols:
-    match_column_prefix: str = "reference"
-    filter_col_flag: str = "flag_remove"
-
-
-@dataclass
 class MotifMatchArgs:
+    # Parameters for matching vs. reference database
     reference_default: str = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "data",
@@ -69,6 +75,7 @@ class MotifMatchArgs:
 
 @dataclass
 class ClusterArgs:
+    # Parameters for clustering
     algorithm: str = "cpm_leiden"
     algorithm_meta: str = "cpm_leiden"
     algorithm_sub: str = "cpm_leiden"
@@ -105,7 +112,9 @@ class ClusterArgs:
 
 @dataclass
 class VisualizeArgs:
+    # Allow editable HTML table
     editable: bool = True
+    # Specify HTML table columns
     html_table_cols: List[str] = field(default_factory=lambda: ["name",
         "best_match_similarity", "best_match_cluster",
         "highest_external_similarity", "highest_external_similarity_cluster", "highest_external_similarity_motif", 
@@ -113,18 +122,18 @@ class VisualizeArgs:
         [col
         for iter in range(MotifMatchArgs.max_submotifs)
         for col in [
-            f"{MetadataCols.match_column_prefix}_logo{iter}",
-            f"{MetadataCols.match_column_prefix}_name{iter}",
-            f"{MetadataCols.match_column_prefix}_score{iter}",
+            f"{_MetadataCols.match_column_prefix}_logo{iter}",
+            f"{_MetadataCols.match_column_prefix}_name{iter}",
+            f"{_MetadataCols.match_column_prefix}_score{iter}",
             ]
         ] +
         ["posneg", "num_motifs", "num_seqlets", "avg_dist_summit", "avg_contrib", 
          "invitro_cluster", "target", "tissue", "organ", "system", # biosample,
          ])
 
-
 @dataclass
 class MotifFilterArgs:
+    # Motif metrics to be calculated
     motif_metrics: tuple = (
         "motif_entropy",
         "weighted_base_entropy",
@@ -134,8 +143,9 @@ class MotifFilterArgs:
         "posneg_inverted",
         "truncated",
     )
+    # Motif filters to be applied
     motif_filters: tuple = (
-        FilterArgs(
+        _FilterArgs(
             name="1_singlepeak",
             metric="motif_entropy",
             operation="<",
@@ -144,7 +154,7 @@ class MotifFilterArgs:
             apply_motif=True,
             apply_cluster=True,
         ),
-        FilterArgs(
+        _FilterArgs(
             name="2_noisemix",
             metric="motif_entropy",
             operation=">",
@@ -153,7 +163,7 @@ class MotifFilterArgs:
             apply_motif=True,
             apply_cluster=True,
         ),
-        FilterArgs(
+        _FilterArgs(
             name="3_noisypeaks",
             metric="weighted_base_entropy",
             operation=">",
@@ -162,7 +172,7 @@ class MotifFilterArgs:
             apply_motif=True,
             apply_cluster=True,
         ),
-        FilterArgs(
+        _FilterArgs(
             name="4_broadsingle",
             metric="posbase_entropy_ratio",
             operation=">",
@@ -171,7 +181,7 @@ class MotifFilterArgs:
             apply_motif=True,
             apply_cluster=True,
         ),
-        FilterArgs(
+        _FilterArgs(
             name="5_gcbias",
             metric="copair_entropy_ratio",
             operation=">",
@@ -180,7 +190,7 @@ class MotifFilterArgs:
             apply_motif=True,
             apply_cluster=True,
         ),
-        FilterArgs(
+        _FilterArgs(
             name="6_dinucrepeat",
             metric="dinuc_entropy_ratio",
             operation=">",
@@ -189,7 +199,7 @@ class MotifFilterArgs:
             apply_motif=True,
             apply_cluster=True,
         ),
-        FilterArgs(
+        _FilterArgs(
             name="7_posneg_inverted",
             metric="posneg_inverted",
             operation="==",
@@ -198,7 +208,7 @@ class MotifFilterArgs:
             apply_motif=True,
             apply_cluster=True,
         ),
-        FilterArgs(
+        _FilterArgs(
             name="8_truncated",
             metric="truncated",
             operation="==",
@@ -210,9 +220,9 @@ class MotifFilterArgs:
     )
     # Override: filter_col_flag AND apply_filter_threshold must both be True, to keep flag True
     override_filters: tuple = (
-        FilterArgs(
+        _FilterArgs(
             name="base_match",
-            metric=f"{MetadataCols.match_column_prefix}_score0",
+            metric=f"{_MetadataCols.match_column_prefix}_score0",
             operation="<",
             threshold=MotifMatchArgs.base_threshold,
             override=True,
@@ -220,9 +230,9 @@ class MotifFilterArgs:
             apply_cluster=True,
         ),
     ) + tuple(
-        FilterArgs(
+        _FilterArgs(
             name="composite_match",
-            metric=f"{MetadataCols.match_column_prefix}_score{iter}",
+            metric=f"{_MetadataCols.match_column_prefix}_score{iter}",
             operation="<",
             threshold=MotifMatchArgs.composite_threshold,
             override=True,
@@ -233,7 +243,7 @@ class MotifFilterArgs:
     )
     # Repeat strict filters
     strict_filters: tuple = (
-        FilterArgs(
+        _FilterArgs(
             name="2_noisemix",
             metric="motif_entropy",
             operation=">",
@@ -242,7 +252,7 @@ class MotifFilterArgs:
             apply_motif=True,
             apply_cluster=True,
         ),
-        FilterArgs(
+        _FilterArgs(
             name="3_noisypeaks",
             metric="weighted_base_entropy",
             operation=">",
@@ -251,7 +261,7 @@ class MotifFilterArgs:
             apply_motif=True,
             apply_cluster=True,
         ),
-        FilterArgs(
+        _FilterArgs(
             name="4_broadsingle",
             metric="posbase_entropy_ratio",
             operation=">",
@@ -260,7 +270,7 @@ class MotifFilterArgs:
             apply_motif=True,
             apply_cluster=True,
         ),
-        FilterArgs(
+        _FilterArgs(
             name="5_gcbias",
             metric="copair_entropy_ratio",
             operation=">",
@@ -269,7 +279,7 @@ class MotifFilterArgs:
             apply_motif=True,
             apply_cluster=True,
         ),
-        FilterArgs(
+        _FilterArgs(
             name="6_dinucrepeat",
             metric="dinuc_entropy_ratio",
             operation=">",
@@ -278,7 +288,7 @@ class MotifFilterArgs:
             apply_motif=True,
             apply_cluster=True,
         ),
-        FilterArgs(
+        _FilterArgs(
             name="7_posneg_inverted",
             metric="posneg_inverted",
             operation="==",
@@ -287,7 +297,7 @@ class MotifFilterArgs:
             apply_motif=True,
             apply_cluster=True,
         ),
-        FilterArgs(
+        _FilterArgs(
             name="8_truncated",
             metric="truncated",
             operation="==",
@@ -299,6 +309,7 @@ class MotifFilterArgs:
     )
 
     def to_dict(self):
+        # Return filters as a dictionary
         return {
             "motif_metrics": list(self.motif_metrics),
             "motif_filters": [f.to_dict() for f in self.motif_filters],
