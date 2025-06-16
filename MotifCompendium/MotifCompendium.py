@@ -1143,7 +1143,7 @@ class MotifCompendium:
             with_stats: Whether or not to compute and store extra quality statistics
               columns. If True, it adds the following columns, which have per-cluster
               information to the returned pd.DataFrame:
-                - "lowest_internal_similarity": The lowest internal similarity.
+                - "lowest_internal_similarity": The lowest internal similarity score.
                 - "lowest_internal_similarity_motif1_name": The name of the first motif
                   contributing to the lowest internal similarity.
                 - "lowest_internal_similarity_motif1_motif": The motif of the first
@@ -1152,13 +1152,13 @@ class MotifCompendium:
                   contributing to the lowest internal similarity.
                 - "lowest_internal_similarity_motif2_motif": The motif of the second
                   motif contributing to the lowest internal similarity.
-                - "highest_external_similarity": The highest external similarity.
-                - "highest_external_similarity_cluster": The cluster with which there is
-                  a high external similarity.
+                - "highest_external_similarity": The highest external similarity score.
                 - "highest_external_similarity_motif_name": The name of the motif in the
                   external cluster that is driving high external similarity.
                 - "highest_external_similarity_motif_motif": The motif of the motif in
                   the external cluster that is driving high external similarity.
+                - "highest_external_similarity_cluster": The cluster within which the
+                  highest external similarity motif is clustered in.
 
 
         Returns:

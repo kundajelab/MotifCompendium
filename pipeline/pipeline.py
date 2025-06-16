@@ -4,6 +4,7 @@ import time
 import argparse
 import logging
 import json
+import h5py
 
 import numpy as np
 import pandas as pd
@@ -319,7 +320,7 @@ def filter_motifs(
             logging.info(f"Total number of first positive motifs: {len(mc[mc['name'].str.contains('pattern_0') & (mc['posneg'] == 'pos')])}")
         if args.time:
             logging.info(f"Time taken: {time.time() - start_time:.2f}s")
-        
+
 
 def filter_clusters(
     mc: MotifCompendium,
@@ -600,15 +601,16 @@ if __name__ == "__main__":
 
 
     ### BUILD --------------------------------------------------------------------
-    # Check input
-    if args.verbose:
-        logging.info("Checking input paths...")
-
     # Load the input MotifCompendium object
     if args.input_mc:
+        # Check input
+        if args.verbose:
+            logging.info("Checking input paths...")
         if not os.path.exists(args.input_mc):
             logging.error(f"Input MotifCompendium object not found: {args.input_mc}")
             raise FileNotFoundError(f"Input MotifCompendium object not found: {args.input_mc}")
+        
+        # Load MotifCompendium object
         if args.verbose:
             logging.info(f"Loading input MotifCompendium object: {args.input_mc}...")
         if args.time:
@@ -622,12 +624,17 @@ if __name__ == "__main__":
             )
         if args.time:
             logging.info(f"Time taken: {time.time() - start_time:.2f}s")
-    
+
     # Load the input old MotifCompendium object
     elif args.input_old_mc:
+        # Check input
+        if args.verbose:
+            logging.info("Checking input paths...")
         if not os.path.exists(args.input_old_mc):
             logging.error(f"Input old MotifCompendium object not found: {args.input_old_mc}")
             raise FileNotFoundError(f"Input old MotifCompendium object not found: {args.input_old_mc}")
+        
+        # Load old MotifCompendium object
         if args.verbose:
             logging.info(f"Loading input old MotifCompendium object: {args.input_old_mc}...")
         if args.time:
@@ -646,11 +653,32 @@ if __name__ == "__main__":
 
     # Load the input H5 files
     elif args.input_h5s:
+        # Check input
+        if args.verbose:
+            logging.info("Checking input paths...")
+        failed_h5s = []
         for h5 in args.input_h5s:
+            # Check if H5 file exists
             if not os.path.exists(h5):
                 logging.error(f"Input H5 file not found: {h5}")
-                raise FileNotFoundError(f"Input H5 file not found: {h5}")
-    
+                failed_h5s.append(h5)
+
+            # Check if H5 file is not empty
+            elif os.path.getsize(h5) <= 888: # 888 bytes is the minimum size for a valid HDF5 file
+                logging.error(f"Input H5 file is empty: {h5}")
+                failed_h5s.append(h5)
+            
+            # Check if H5 file is a valid Modisco file
+            else:
+                with h5py.File(h5, "r") as f:
+                    if "pos_patterns" not in f and "neg_patterns" not in f:
+                        logging.error(f"Input H5 file is not a valid Modisco file: {h5}")
+
+        if failed_h5s:
+            logging.error(f"Failed to load the following H5 files: {', '.join(failed_h5s)}")
+            raise ValueError(f"Failed to load the following H5 files: {', '.join(failed_h5s)}")
+
+        # Build MotifCompendium object
         modisco_dict = build_modisco_dict(args.input_h5s, args.input_names)
         if args.verbose:
             logging.info("Loading input H5 files...")
@@ -684,11 +712,11 @@ if __name__ == "__main__":
                 if args.max_chunk <= 0:
                     logging.critical("Error building MotifCompendium object. max_chunk has reached 0.")
                     raise ValueError("Error building MotifCompendium object.")
-                
+
     else:
         logging.error("Input MotifCompendium object or H5 files must be provided.")
         raise ValueError("Input MotifCompendium object or H5 files must be provided.")
-    
+
     # Load metadata
     if args.metadata:
         if args.verbose:
@@ -824,7 +852,7 @@ if __name__ == "__main__":
                         logging.info(f"Clustering motifs using: {cluster_col_name}...")
                     if args.time:
                         start_time = time.time()
-                    if args.cluster_on and args.cluster_within:
+                    if args.cluster_on and args.cluster_within: # Cluster ON and WITHIN
                         mc.cluster(
                             algorithm=ClusterArgs.algorithm,
                             similarity_threshold=sim_threshold,
@@ -833,7 +861,7 @@ if __name__ == "__main__":
                             save_name=cluster_col_name,
                             **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
                         )
-                    elif args.cluster_on and not args.cluster_within:
+                    elif args.cluster_on and not args.cluster_within: # Cluster ON only
                         mc.cluster(
                             algorithm=ClusterArgs.algorithm,
                             similarity_threshold=sim_threshold,
@@ -842,7 +870,7 @@ if __name__ == "__main__":
                             save_name=cluster_col_name,
                             **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
                         )
-                    elif not args.cluster_on and args.cluster_within:
+                    elif not args.cluster_on and args.cluster_within: # Cluster WITHIN only
                         mc.cluster(
                             algorithm=ClusterArgs.algorithm,
                             similarity_threshold=sim_threshold,
@@ -850,6 +878,14 @@ if __name__ == "__main__":
                             save_name=cluster_col_name,
                             **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
                         )
+                    else: # Cluster STANDARD
+                        mc.cluster(
+                            algorithm=ClusterArgs.algorithm,
+                            similarity_threshold=sim_threshold,
+                            save_name=cluster_col_name,
+                            **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
+                        )
+                    # Recursive cluster
                     if args.cluster_recursive:
                         min_len = mc[cluster_col_name].nunique()
                         for i in range(ClusterArgs.max_iter):
@@ -877,7 +913,7 @@ if __name__ == "__main__":
                             if min_len == new_min_len:
                                 break
                             else:
-                                min_len = new_min_len
+                                min_len = new_min_len                    
                     # Force-cluster
                     if args.sim_threshold_force:
                         if args.verbose:
@@ -931,6 +967,7 @@ if __name__ == "__main__":
                             save_name=metacluster_col_name,
                             **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_meta],
                         )
+                        # Recursive cluster:
                         if args.cluster_recursive:
                             min_len = mc[metacluster_col_name].nunique()
                             for i in range(ClusterArgs.max_iter):
@@ -991,6 +1028,7 @@ if __name__ == "__main__":
                             save_name=subcluster_col_name,
                             **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_sub],
                         )
+                        # Recursive cluster:
                         if args.cluster_recursive:
                             min_len = mc[subcluster_col_name].nunique()
                             for i in range(ClusterArgs.max_iter):
@@ -1009,7 +1047,7 @@ if __name__ == "__main__":
                                     break
                                 else:
                                     min_len = new_min_len
-                        # Force-cluster
+                        # Force-cluster:
                         if args.sim_threshold_force:
                             if args.verbose:
                                 logging.info(f"Force-clustering motifs using: {ClusterArgs.algorithm_force}_{args.sim_threshold_force}{recursive_name or ''}{force_name or ''}...")

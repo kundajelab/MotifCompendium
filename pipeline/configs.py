@@ -5,12 +5,6 @@ from typing import Union, List, Tuple
 
 ## INTERNAL -------------------------------------------------------------------------------------------------------
 @dataclass
-class _MetadataCols:
-    # INTERNAL: Metadata columns for MotifCompendium
-    match_column_prefix: str = "reference"
-    filter_col_flag: str = "flag_remove"
-
-@dataclass
 class _FilterArgs:
     # INTERNAL: Standard filter arguments
     name: str
@@ -27,6 +21,12 @@ class _FilterArgs:
 
 
 ## PARAMETERS --------------------------------------------------------------------------------------------------
+@dataclass
+class MetadataCols:
+    # INTERNAL: Metadata columns for MotifCompendium
+    match_column_prefix: str = "reference"
+    filter_col_flag: str = "flag_remove"
+
 @dataclass
 class OutputPaths:
     # Relative output paths for MotifCompendium objects and HTMLs
@@ -117,14 +117,14 @@ class VisualizeArgs:
     # Specify HTML table columns
     html_table_cols: List[str] = field(default_factory=lambda: ["name",
         "best_match_similarity", "best_match_cluster",
-        "highest_external_similarity", "highest_external_similarity_cluster", "highest_external_similarity_motif", 
+        "highest_external_similarity", "highest_external_similarity_motif", "highest_external_similarity_cluster",
         "lowest_internal_similarity", "lowest_internal_similarity_motif1", "lowest_internal_similarity_motif2"] + 
         [col
         for iter in range(MotifMatchArgs.max_submotifs)
         for col in [
-            f"{_MetadataCols.match_column_prefix}_logo{iter}",
-            f"{_MetadataCols.match_column_prefix}_name{iter}",
-            f"{_MetadataCols.match_column_prefix}_score{iter}",
+            f"{MetadataCols.match_column_prefix}_logo{iter}",
+            f"{MetadataCols.match_column_prefix}_name{iter}",
+            f"{MetadataCols.match_column_prefix}_score{iter}",
             ]
         ] +
         ["posneg", "num_motifs", "num_seqlets", "avg_dist_summit", "avg_contrib", 
@@ -222,7 +222,7 @@ class MotifFilterArgs:
     override_filters: tuple = (
         _FilterArgs(
             name="base_match",
-            metric=f"{_MetadataCols.match_column_prefix}_score0",
+            metric=f"{MetadataCols.match_column_prefix}_score0",
             operation="<",
             threshold=MotifMatchArgs.base_threshold,
             override=True,
@@ -232,7 +232,7 @@ class MotifFilterArgs:
     ) + tuple(
         _FilterArgs(
             name="composite_match",
-            metric=f"{_MetadataCols.match_column_prefix}_score{iter}",
+            metric=f"{MetadataCols.match_column_prefix}_score{iter}",
             operation="<",
             threshold=MotifMatchArgs.composite_threshold,
             override=True,

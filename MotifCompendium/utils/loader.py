@@ -18,7 +18,6 @@ def which_file_load_failed(func):
 
     Helps identify which file load failed. Helps in multiprocessing settings.
     """
-
     @functools.wraps(func)
     def wrapper(file_loc, *args, **kwargs):
         if not os.path.exists(file_loc):
@@ -35,6 +34,31 @@ def which_file_load_failed(func):
 ####################
 # PUBLIC FUNCTIONS #
 ####################
+def validate_modisco(
+    modisco_file: str,
+) -> None:
+    """Validate a Modisco file.
+
+    Checks if the Modisco file exists and contains the required datasets.
+
+    Args:
+        modisco_file: The Modisco file path.
+
+    Raises:
+        ValueError: If the file does not exist or does not contain the required datasets.
+    """
+    # Check if file exists
+    if not os.path.exists(modisco_file):
+        raise ValueError(f"File {modisco_file} does not exist.")
+    # Check if file is not empty
+    if os.path.getsize(modisco_file) <= 888:  # 888 is the minimum size for a valid HDF5 file
+        raise ValueError(f"File {modisco_file} is empty.")
+    # Check if file contains the required structure
+    with h5py.File(modisco_file, "r") as f:
+        if "pos_patterns" not in f and "neg_patterns" not in f:
+            raise ValueError(f"File {modisco_file} does not contain 'pos_patterns' or 'neg_patterns'.")
+
+
 def load_modiscos(
     modisco_dict: dict[str, str],
     modisco_region_width: int = 400,
@@ -103,6 +127,9 @@ def load_modiscos(
             posnegs += m_posneg
             avgdist_summits += m_avgdist_summits
             avg_contribs += m_avg_contribs
+        # Pad motifs to max length
+        max_len = max(x.shape[1] for x in motifs)
+        motifs = [np.pad(x, ((0, 0), (0, max_len - x.shape[1]), (0, 0)), mode='constant') for x in motifs]
         motifs = np.concatenate(motifs, axis=0)
     return motifs, motif_names, seqlet_counts, model_names, posnegs, avgdist_summits, avg_contribs
 
@@ -135,6 +162,7 @@ def load_modisco(
         Motifs are returned as an (N, 30, 8) 8 channel motif stack.
         Using ic scaling is highly recommended.
     """
+    validate_modisco(modisco_file) # Validate Modisco file
     motifs, motif_names, seqlet_counts, posneg, avgdist_summits, avg_contribs = [], [], [], [], [], []
     with h5py.File(modisco_file, "r") as f:
         if "pos_patterns" in f:
@@ -235,7 +263,8 @@ def load_pfm(
     resize_to = longest_motif_length if motif_len is None else motif_len
     pwms = [utils_motif.resize_motif(x, resize_to) for x in pwms]
     pwms = np.stack(pwms, axis=0)
-    pwms /= np.sum(pwms, axis=(1, 2), keepdims=True)
+    pwm_sums = np.sum(pwms, axis=(1, 2), keepdims=True)
+    pwms = np.where(pwm_sums != 0, pwms / pwm_sums, pwms) # Prevent division by zero
     return pwms, names
 
 
@@ -316,7 +345,8 @@ def load_meme(
     resize_to = longest_motif_length if motif_len is None else motif_len
     pwms = [utils_motif.resize_motif(x, resize_to) for x in pwms]
     pwms = np.stack(pwms, axis=0)
-    pwms /= np.sum(pwms, axis=(1, 2), keepdims=True)
+    pwm_sums = np.sum(pwms, axis=(1, 2), keepdims=True)
+    pwms = np.where(pwm_sums != 0, pwms / pwm_sums, pwms) # Prevent division by zero
     return pwms, names
 
 
