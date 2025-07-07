@@ -33,65 +33,64 @@ def plot_similarity_distribution(
         tolerance: The tolerance of error with respect to target similarity values to display.
         n_per: The number of examples of each similarity score to display.
     """
-    clustering = [False for _ in range(len(mc))]
+    label = [False for _ in range(len(mc))]
     for val in vals:
         # Find all locations where similarity is val <= similarity < val+tolerance
         indices = np.where((mc.similarity >= val) & (mc.similarity < val + tolerance))
         indices = list(zip(indices[0], indices[1]))
         p = 1
         for i, j in indices:
-            if not (clustering[i] or clustering[j]):
-                clustering[i] = f"Similarity {val} example {p}"
-                clustering[j] = f"Similarity {val} example {p}"
+            if not (label[i] or label[j]):
+                label[i] = f"Similarity {val} example {p}"
+                label[j] = f"Similarity {val} example {p}"
                 p += 1
             if p > n_per:
                 break
     # Create MotifCompendium of only displayed motifs
-    clustering_series = pd.Series(clustering)
-    mc_distribution = mc[clustering_series != False]
-    distribution_clusters = clustering_series[clustering_series != False].tolist()
+    label_series = pd.Series(label)
+    mc_distribution = mc[label_series != False]
+    distribution_clusters = label_series[label_series != False].tolist()
     mc_distribution.motif_collection_html(
         save_loc, distribution_clusters, average_motif=False
     )
 
 
-def plot_ground_truth_mismatch(
+def plot_clustering_similarity_mismatch(
     mc: MotifCompendiumClass,
-    ground_truth: str,
+    clustering: str,
+    similarity_threshold: float,
     save_loc: str,
-    similarity_threshold: float = 0.95,
     max_examples: int = 100,
 ) -> None:
-    """Plots examples of when similarity did not match a ground truth motif grouping.
+    """Plots examples of when similarity did not match a motif clustering.
 
-    Given a MotifCompendium, a ground truth grouping of motifs, and a similarity
-      threshold, plot examples of when motif similarities did not match with the ground
-      truth. Plot examples where two motifs are grouped together in the ground truth but
-      have a lower similarity than the threshold. Also plot examples where two motifs
-      are not grouped together in the ground turth but havea  higher similarity than the
-      threshold.
+    Given a MotifCompendium, a clustering/grouping of motifs, and a similarity
+      threshold, plot examples of when motif similarities did not match with the
+      clustering. Plot examples where two motifs are clustered together in the
+      clustering but have a lower similarity than the threshold. Also, plot examples
+      where two motifs are not clustered together in the ground truth but have a higher
+      similarity than the threshold.
 
     Args:
         mc: The MotifCompendium to analyze.
-        ground_truth: The column in the MotifCompendium metadata to use as the ground
-          truth label.
-        save_loc: The location where to save the output html file.
+        clustering: The column in the MotifCompendium metadata to use compare against.
         similarity_threshold: The similarity value to threshold at.
+        save_loc: The location where to save the output html file.
         max_examples: The maximum number of mismatch examples to plot.
     """
-    quality = mc.clustering_quality(ground_truth)
-    clustering = [False for _ in range(len(mc))]
+    quality = mc.clustering_quality(clustering)
+    label = [False for _ in range(len(mc))]
     # Low internal similarity
     n_examples = 0
-    for i, c in enumerate(quality.columns):
-        if quality[i, i] >= similarity_threshold:
+    for c in quality.columns:
+        if quality.loc[c, c] >= similarity_threshold:
             continue
-        c_select = mc[ground_truth] == c
+        c_select = mc[clustering] == c
         similarity_slice_ii_df = mc.get_similarity_slice(c_select, c_select)
         similarity_slice_ii_df_stacked = similarity_slice_ii_df.stack()
         row_label, col_label = similarity_slice_ii_df_stacked.idxmin()
-        clustering[row_label] = f"Low internal similarity {c} ({quality[i, i]:.3})"
-        clustering[col_label] = f"Low internal similarity {c} ({quality[i, i]:.3})"
+        label[row_label] = f"Low internal similarity {c} ({quality.loc[c, c]:.3})"
+        label[col_label] = f"Low internal similarity {c} ({quality.loc[c, c]:.3})"
         n_examples += 1
         if n_examples >= (max_examples) // 2:
             break
@@ -101,18 +100,18 @@ def plot_ground_truth_mismatch(
         for j, cj in enumerate(quality.columns):
             if j <= i:
                 continue
-            if quality[i, j] < similarity_threshold:
+            if quality.loc[ci, cj] < similarity_threshold:
                 continue
             similarity_slice_ij_df = mc.get_similarity_slice(
-                mc[ground_truth] == ci, mc[ground_truth] == cj
+                mc[clustering] == ci, mc[clustering] == cj
             )
             similarity_slice_ij_df_stacked = similarity_slice_ij_df.stack()
             row_label, col_label = similarity_slice_ij_df_stacked.idxmax()
-            clustering[row_label] = (
-                f"High external similarity {ci} & {cj} ({quality[i, j]:.3})"
+            label[row_label] = (
+                f"High external similarity {ci} & {cj} ({quality.loc[ci, cj]:.3})"
             )
-            clustering[col_label] = (
-                f"High external similarity {ci} & {cj} ({quality[i, j]:.3})"
+            label[col_label] = (
+                f"High external similarity {ci} & {cj} ({quality.loc[ci, cj]:.3})"
             )
             n_examples += 1
             if n_examples >= (max_examples) // 2:
@@ -120,13 +119,18 @@ def plot_ground_truth_mismatch(
         if n_examples >= (max_examples) // 2:
             break
     # Create MotifCompendium of only displayed motifs
-    clustering_series = pd.Series(clustering)
-    mc_mismatch = mc[clustering_series != False]
-    mismatch_clusters = clustering_series[clustering_series != False].tolist()
+    label_series = pd.Series(label)
+    mc_mismatch = mc[label_series != False]
+    mismatch_clusters = label_series[label_series != False].tolist()
     mc_mismatch.motif_collection_html(save_loc, mismatch_clusters, average_motif=False)
 
 
-def judge_clustering(mc: MotifCompendiumClass, cluster_col: str, save_loc: str) -> None:
+def judge_clustering(
+    mc: MotifCompendiumClass,
+    cluster_col: str,
+    show: bool = False,
+    save_loc: str | None = None,
+) -> None:
     """Plots histograms of inter-cluster and intra-cluster similarities.
 
     Judges a motif clustering by computing the quality of the clustering and then
@@ -136,6 +140,7 @@ def judge_clustering(mc: MotifCompendiumClass, cluster_col: str, save_loc: str) 
     Args:
         mc: The MotifCompendium to analyze.
         clustering: The motif clustering to judge.
+        show: Whether or not to show the plot with plt.show().
         save_loc: The file prefix to save the clustering quality and the clustering
           quality plot to.
     """
@@ -148,18 +153,22 @@ def judge_clustering(mc: MotifCompendiumClass, cluster_col: str, save_loc: str) 
     diag = np.diag(clustering_quality)
     diag = np.sort(diag)
     sns.histplot(diag, ax=axs[0], stat="proportion", kde=True, bins=bins)
-    axs[0].set_title("worst intra-cluster similarities")
+    axs[0].set_title("lowest intra-cluster similarities")
     axs[0].set_xlim(0, 1)  # Shared
     # Plot inter-cluster similarities
     triu = np.triu(clustering_quality, k=1)
     triu = triu[triu != 0]
     triu = np.sort(triu)
     sns.histplot(triu, ax=axs[1], stat="proportion", kde=True, bins=bins)
-    axs[1].set_title("best inter-cluster similarities")
+    axs[1].set_title("highest inter-cluster similarities")
     axs[1].set_xlabel("similarity")
-    # Titles and save
+    # Title
     plt.suptitle(f"{cluster_col} ({clustering_quality.shape[0]} clusters)")
-    plt.savefig(save_loc)
+    # Save/show/close
+    if save_loc is not None:
+        plt.savefig(save_loc)
+    if show:
+        plt.show()
     plt.close(fig)
 
 

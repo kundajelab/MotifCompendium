@@ -1439,10 +1439,11 @@ class MotifCompendium:
             )
         # Check weights
         if weight_col is not None:
-            if weight_col in self.metadata.columns:
-                weights = self.metadata[weight_col].to_numpy()
-            else:
-                raise ValueError(f"{weight_col} is not a column in metadata.")
+            if weight_col not in self.metadata.columns:
+                raise KeyError(f"{weight_col} not in metadata.")
+            if not pd.api.types.is_numeric_dtype(self.metadata[weight_col]):
+                raise TypeError(f"{weight_col} must be numeric.")
+            weights = self.metadata[weight_col].to_numpy()
         else:
             weights = None
         # Cache cluster --> idxs dictionary

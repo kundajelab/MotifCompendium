@@ -92,7 +92,9 @@ class LogoPlottingInput:
         """Returns a pd.DataFrame of the motif that can be passed to logomaker."""
         # Reverse complement
         if self.revcomp:
-            motif_df = utils_motif.motif_to_df(utils_motif.reverse_complement(self.motif))
+            motif_df = utils_motif.motif_to_df(
+                utils_motif.reverse_complement(self.motif)
+            )
         else:
             motif_df = utils_motif.motif_to_df(self.motif)
         # Then shift
@@ -104,6 +106,36 @@ class LogoPlottingInput:
 ###########################
 # LOGO PLOTTING FUNCTIONS #
 ###########################
+def plot_motif(
+    motif: np.ndarray,
+    show: bool = True,
+    save_loc: str | None = None,
+) -> None:
+    """Plots a single motif.
+
+    Plots a single motif. If show is True, the figure is shown. If save_loc is not None,
+      the motif plot is saved to that location.
+
+    Args:
+        motif: A np.ndarray of shape (L, 4) representing the motif to be plotted.
+        show: Whether or not to show the heatmap with plt.show().
+        save_loc: Where to save the motif plot to. If None, the motif plot is not saved.
+    """
+    # Check inputs
+    utils_motif.validate_motif_basic(motif)
+    if not len(motif.shape) == 2 and motif.shape[1] == 4:
+        raise TypeError("motif must be a 2D array with shape (L, 4).")
+    # Plot
+    fig, ax = plt.subplots(figsize=(6, 2))
+    motif_logo = LogoPlottingInput(motif, ax=ax, encode=False)
+    _plot_motif_logo(motif_logo)
+    # Output
+    if save_loc is not None:
+        fig.savefig(save_loc, bbox_inches="tight")
+    if show:
+        plt.show()
+
+
 def plot_motif_stack(
     motif_stack: np.ndarray,
     alignment_rc: np.ndarray | None = None,
@@ -275,10 +307,12 @@ def plot_heatmap(
         df = pd.DataFrame(data, index=labels, columns=labels)
     plt.figure(figsize=(10, 10))
     heatmap = sns.heatmap(df, annot=annot)
+    # Save/show/close
     if save_loc is not None:
         heatmap.get_figure().savefig(save_loc)
     if show:
         plt.show()
+    plt.close()
 
 
 ###################################
@@ -304,6 +338,7 @@ def _plot_motif_logo(motif_info: LogoPlottingInput) -> LogoPlottingInput:
         plot_ax = ax
     else:
         plot_ax = motif_info.ax
+        fig = plot_ax.figure
     # Plot
     if not (motif_info.motif == 0).all():  # Only plot if motif is not all zeros
         if utils_config.get_fast_plotting():
