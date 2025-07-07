@@ -50,7 +50,7 @@ def compute_similarity_and_align(
     return (
         sim.astype(np.single),
         alignment_rc.astype(np.bool_),
-        alignment_h.astype(np.short),
+        alignment_h.astype(np.byte),
     )
 
 
