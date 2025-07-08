@@ -309,7 +309,8 @@ def _plot_motif_logo(motif_info: LogoPlottingInput) -> LogoPlottingInput:
         if utils_config.get_fast_plotting():
             _plot_logo_on_axis_fast(motif_info.get_motif_df(), plot_ax)
         else:
-            logomaker.Logo(motif_info.get_motif_df(), ax=plot_ax)
+            logo = logomaker.Logo(motif_info.get_motif_df(), ax=plot_ax)
+            logo.style_spines(visible=False)
     plot_ax.spines[["top", "right", "bottom", "left"]].set_visible(False)
     plot_ax.set_axis_off()
     # Encode image in UTF-8

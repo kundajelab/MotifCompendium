@@ -24,39 +24,43 @@ class _FilterArgs:
 @dataclass
 class MetadataCols:
     # INTERNAL: Metadata columns for MotifCompendium
-    match_column_prefix: str = "reference"
+    label_column_prefix: str = "reference"
     filter_col_flag: str = "flag_remove"
 
 @dataclass
 class OutputPaths:
     # Relative output paths for MotifCompendium objects and HTMLs
     mc_full: str = "motifcompendium.mc"
+    mc_labeled: str = "motifcompendium_labeled.mc"
     mc_filtered: str = "motifcompendium_filtered.mc"
     mc_removed: str = "motifcompendium_removed.mc"
     mc_clustered: str = "motifcompendium_clustered.mc"
 
     mc_avg: str = "motifcompendium_avg.mc"
+    mc_avg_labeled: str = "motifcompendium_avg_labeled.mc"
     mc_avg_filtered: str = "motifcompendium_avg_filtered.mc"
     mc_avg_removed: str = "motifcompendium_avg_removed.mc"
-    
+
     mc_metaavg: str = "motifcompendium_metaavg.mc"
+    mc_metaavg_labeled: str = "motifcompendium_metaavg_labeled.mc"
     mc_metaavg_filtered: str = "motifcompendium_metaavg_filtered.mc"
     mc_metaavg_removed: str = "motifcompendium_metaavg_removed.mc"
 
     mc_subavg: str = "motifcompendium_subavg.mc"
+    mc_subavg_labeled: str = "motifcompendium_subavg_labeled.mc"
     mc_subavg_filtered: str = "motifcompendium_subavg_filtered.mc"
     mc_subavg_removed: str = "motifcompendium_subavg_removed.mc"
 
     html_motif_collection: str = "motifcompendium_motif_collection.html"
     html_motif_table: str = "motifcompendium_motif_table.html"
-    html_motif_removed: str = "motifcompendium_motif_removed.html"
-    
-    html_cluster_table: str = "motifcompendium_cluster_table.html"
-    html_cluster_removed: str = "motifcompendium_cluster_removed.html"
-    html_metacluster_table: str = "motifcompendium_metacluster_table.html"
-    html_metacluster_removed: str = "motifcompendium_metacluster_removed.html"
-    html_subcluster_table: str = "motifcompendium_subcluster_table.html"
-    html_subcluster_removed: str = "motifcompendium_subcluster_removed.html"
+    html_motif_removed: str = "motifcompendium_motif_removed_table.html"
+
+    html_cluster_table: str = "motifcompendium_avg_table.html"
+    html_cluster_removed: str = "motifcompendium_avg_removed_table.html"
+    html_metacluster_table: str = "motifcompendium_metaavg_table.html"
+    html_metacluster_removed: str = "motifcompendium_metaavg_removed_table.html"
+    html_subcluster_table: str = "motifcompendium_subavg_table.html"
+    html_subcluster_removed: str = "motifcompendium_subavg_removed_table.html"
 
 
 @dataclass
@@ -64,6 +68,7 @@ class MotifMatchArgs:
     # Parameters for matching vs. reference database
     reference_default: str = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "pipeline",
         "data",
         "HUMAN-JASPAR2024-HOCOMOCOv13.meme.txt",
     )
@@ -88,12 +93,13 @@ class ClusterArgs:
         ("model", "concat", "model"),
         ("avg_dist_summit", "average", "avg_dist_summit"),
         ("avg_contrib", "average", "avg_contrib"),
-        ("invitro_cluster", "concat", "invitro_cluster"),
         ("target", "concat", "target"),
         ("family", "concat", "family"),
         ("tissue", "concat", "tissue"),
         ("organ", "concat", "organ"),
         ("biosample", "concat", "biosample"),
+        ("motifs", "concat", "motifs"),
+        ("source", "concat", "source"),
     ])
     algorithm_kwargs: dict = field(default_factory=lambda: {
         "leiden": {},
@@ -114,22 +120,26 @@ class ClusterArgs:
 class VisualizeArgs:
     # Allow editable HTML table
     editable: bool = True
+
     # Specify HTML table columns
     html_table_cols: List[str] = field(default_factory=lambda: ["name",
+        "posneg", "num_motifs", "num_seqlets", "avg_dist_summit", "avg_contrib",
+         "invitro_cluster", "target", "tissue", "organ", "system", "source", "motifs", "biosample",
+    ])
+    html_table_label_cols: List[str] = field(default_factory=lambda: [
+        col
+        for iter in range(MotifMatchArgs.max_submotifs)
+            for col in [
+                f"{MetadataCols.label_column_prefix}_logo{iter}",
+                f"{MetadataCols.label_column_prefix}_name{iter}",
+                f"{MetadataCols.label_column_prefix}_score{iter}",
+            ]
+        ])
+    html_table_quality_cols: List[str] = field(default_factory=lambda: [
         "best_match_similarity", "best_match_cluster",
         "highest_external_similarity", "highest_external_similarity_motif", "highest_external_similarity_cluster",
-        "lowest_internal_similarity", "lowest_internal_similarity_motif1", "lowest_internal_similarity_motif2"] + 
-        [col
-        for iter in range(MotifMatchArgs.max_submotifs)
-        for col in [
-            f"{MetadataCols.match_column_prefix}_logo{iter}",
-            f"{MetadataCols.match_column_prefix}_name{iter}",
-            f"{MetadataCols.match_column_prefix}_score{iter}",
-            ]
-        ] +
-        ["posneg", "num_motifs", "num_seqlets", "avg_dist_summit", "avg_contrib", 
-         "invitro_cluster", "target", "tissue", "organ", "system", # biosample,
-         ])
+        "lowest_internal_similarity", "lowest_internal_similarity_motif1", "lowest_internal_similarity_motif2"
+    ])
 
 @dataclass
 class MotifFilterArgs:
@@ -200,16 +210,25 @@ class MotifFilterArgs:
             apply_cluster=True,
         ),
         _FilterArgs(
-            name="7_posneg_inverted",
+            name="7_minseqlets",
+            metric="num_seqlets",
+            operation="<",
+            threshold=100,
+            override=False,
+            apply_motif=True,
+            apply_cluster=False,
+        ),
+        _FilterArgs(
+            name="8_posneg_inverted",
             metric="posneg_inverted",
             operation="==",
             threshold=True,
             override=False,
             apply_motif=True,
-            apply_cluster=True,
+            apply_cluster=False,
         ),
         _FilterArgs(
-            name="8_truncated",
+            name="9_truncated",
             metric="truncated",
             operation="==",
             threshold=True,
@@ -222,7 +241,7 @@ class MotifFilterArgs:
     override_filters: tuple = (
         _FilterArgs(
             name="base_match",
-            metric=f"{MetadataCols.match_column_prefix}_score0",
+            metric=f"{MetadataCols.label_column_prefix}_score0",
             operation="<",
             threshold=MotifMatchArgs.base_threshold,
             override=True,
@@ -232,7 +251,7 @@ class MotifFilterArgs:
     ) + tuple(
         _FilterArgs(
             name="composite_match",
-            metric=f"{MetadataCols.match_column_prefix}_score{iter}",
+            metric=f"{MetadataCols.label_column_prefix}_score{iter}",
             operation="<",
             threshold=MotifMatchArgs.composite_threshold,
             override=True,
@@ -289,22 +308,31 @@ class MotifFilterArgs:
             apply_cluster=True,
         ),
         _FilterArgs(
-            name="7_posneg_inverted",
+            name="7_minseqlets",
+            metric="num_seqlets",
+            operation="<",
+            threshold=20,
+            override=False,
+            apply_motif=True,
+            apply_cluster=False,
+        ),
+        _FilterArgs(
+            name="8_posneg_inverted",
             metric="posneg_inverted",
             operation="==",
             threshold=True,
             override=False,
             apply_motif=True,
-            apply_cluster=True,
+            apply_cluster=False,
         ),
         _FilterArgs(
-            name="8_truncated",
+            name="9_truncated",
             metric="truncated",
             operation="==",
             threshold=True,
             override=False,
             apply_motif=True,
-            apply_cluster=True,
+            apply_cluster=False,
         ),
     )
 

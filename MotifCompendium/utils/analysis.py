@@ -298,6 +298,7 @@ def export_clusters_modisco(
     cluster_name: str,
     save_loc: str,
     inverse_ic: bool = False,
+    weight_col: str | None = None,
 ) -> None:
     """Exports cluster average motifs in the Modisco file format.
 
@@ -317,18 +318,136 @@ def export_clusters_modisco(
         The resultant h5py file can be fed directly into FiNeMo (hitcaller).
         Cluster names cannot have slashes (/) in them!
     """
-    mc_cluster_avg = mc.cluster_averages(
-        cluster_name,
+    # Validate motifs
+    utils_motif.validate_motif_stack(mc.motifs)
+    size_4 = mc.motifs.shape[2] == 4
+    # Average motifs in the cluster
+    mc_avg = mc.cluster_averages(
+        clustering=cluster_name,
         aggregations=[],
-        safe=False,
+        weight_col=weight_col,
     )
-    mc_cluster_avg["name"] = (mc_cluster_avg["name"].str.split("#").str[1]).astype(
+    mc_avg[cluster_name] = (mc_avg["name"].str.split("#").str[1]).astype(
         mc[cluster_name].dtype
     )
-    mc_cluster_avg.sort_values("name", inplace=True)
-    export_full_compendium_modisco(
-        mc_cluster_avg, "name", save_loc, inverse_ic=inverse_ic
-    )
+    mc_avg.sort("name", inplace=True)
+    # Create Modisco export
+    avg_motifs = mc_avg.motifs if size_4 else utils_motif.motif_8_to_4_signed(mc_avg.motifs)
+    pos_neg = utils_motif.motif_posneg_sum(avg_motifs)
+    with h5py.File(save_loc, "w") as f:
+        f.attrs["window_size"] = avg_motifs.shape[1]
+        # Positive
+        if "pos" in pos_neg:
+            pos_group = f.create_group("pos_patterns")
+            mc_avg_pos = mc_avg[pd.Series(pos_neg) == "pos"]
+            avg_motifs_pos = (
+                mc_avg_pos.motifs
+                if size_4
+                else utils_motif.motif_8_to_4_signed(mc_avg_pos.motifs)
+            )
+            # Pattern = Cluster average
+            for i in range(len(mc_avg_pos)):
+                pattern_name = f"{mc_avg_pos.metadata.loc[i, cluster_name]}_{i}"
+                if "/" in pattern_name:
+                    raise ValueError("Motif names cannot have slashes (/) in them!")
+                pos_pattern = pos_group.create_group(pattern_name)
+                avg_motif = avg_motifs_pos[i, :, :]
+                if inverse_ic:
+                    avg_motif = utils_motif.ic_scale(avg_motif, invert=True)
+                pos_pattern.create_dataset("contrib_scores", data=avg_motif)
+                # Sub pattern = Motif
+                mc_i = mc[mc[cluster_name] == mc_avg_pos.metadata.loc[i, cluster_name]]
+                motifs_i = (mc_i.motifs if size_4 else utils_motif.motif_8_to_4_signed(mc_i.motifs))
+                for j in range(len(mc_i)):
+                    subpattern_name = f"{mc_i.metadata.loc[j, 'name']}_{j}"
+                    if "/" in subpattern_name:
+                        raise ValueError("Motif names cannot have slashes (/) in them!")
+                    pos_pattern_subpattern = pos_pattern.create_group(subpattern_name)
+                    motif = motifs_i[j, :, :]
+                    if inverse_ic:
+                        motif = utils_motif.ic_scale(motif, invert=True)
+                    pos_pattern_subpattern.create_dataset("contrib_scores", data=motif)
+
+        # Negative
+        if "neg" in pos_neg:
+            neg_group = f.create_group("neg_patterns")
+            mc_avg_neg = mc_avg[pd.Series(pos_neg) == "neg"]
+            avg_motifs_neg = (
+                mc_avg_neg.motifs
+                if size_4
+                else utils_motif.motif_8_to_4_signed(mc_avg_neg.motifs)
+            )
+            # Pattern = Cluster average
+            for i in range(len(mc_avg_neg)):
+                pattern_name = f"{mc_avg_neg.metadata.loc[i, cluster_name]}_{i}"
+                if "/" in pattern_name:
+                    raise ValueError("Motif names cannot have slashes (/) in them!")
+                neg_pattern = neg_group.create_group(pattern_name)
+                avg_motif = avg_motifs_neg[i, :, :]
+                if inverse_ic:
+                    motif = utils_motif.ic_scale(avg_motif, invert=True)
+                neg_pattern.create_dataset("contrib_scores", data=avg_motif)
+                # Sub pattern = Motif
+                mc_i = mc[mc[cluster_name] == mc_avg_neg.metadata.loc[i, cluster_name]]
+                motifs_i = (mc_i.motifs if size_4 else utils_motif.motif_8_to_4_signed(mc_i.motifs))
+                for j in range(len(mc_i)):
+                    subpattern_name = f"{mc_i.metadata.loc[j, 'name']}_{j}"
+                    if "/" in subpattern_name:
+                        raise ValueError("Motif names cannot have slashes (/) in them!")
+                    neg_pattern_subpattern = neg_pattern.create_group(subpattern_name)
+                    motif = motifs_i[j, :, :]
+                    if inverse_ic:
+                        motif = utils_motif.ic_scale(motif, invert=True)
+                    neg_pattern_subpattern.create_dataset("contrib_scores", data=motif)
+
+
+def export_full_compendium_meme(
+    mc: MotifCompendiumClass,
+    name_col: str,
+    save_loc: str,
+    inverse_ic: bool = False,
+) -> None:
+    """Exports MotifCompendium in the MEME file format.
+
+    Assumes that the MotifCompendium is already clustered and just exports it to a MEME
+      file format.
+
+    Args:
+        mc: The MotifCompendium to analyze.
+        name_col: The column in the MotifCompendium to name the motifs by.
+        save_loc: The location to save the MEME file to.
+
+    Notes:
+        The resultant MEME file can be fed directly into FiNeMo (hitcaller).
+        Motif names cannot have slashes (/) in them!
+    """
+    # Validate motifs
+    utils_motif.validate_motif_stack(mc.motifs)
+    size_4 = mc.motifs.shape[2] == 4
+    motifs = mc.motifs if size_4 else utils_motif.motif_8_to_4_signed(mc.motifs)
+    pos_neg = utils_motif.motif_posneg_sum(motifs)
+    # Write MEME file
+    with open(save_loc, "w") as f:
+        f.write("MEME version 4\n")
+        f.write(f"ALPHABET= {'ACGT' if size_4 else 'ACGTN'}\n")
+        f.write(f"strands: {'+' if 'pos' in pos_neg else ''}{'-' if 'neg' in pos_neg else ''}\n")
+        f.write(f"Background letter frequencies:\n")
+        f.write("A 0.25 C 0.25 G 0.25 T 0.25\n")
+        for i in range(len(mc)):
+            name = f"{mc.metadata.loc[i, name_col]}"
+            if "/" in name:
+                raise ValueError("Motif names cannot have slashes (/) in them!")
+            motif = motifs[i, :, :]
+            # Remove empty flanks
+            motif = utils_motif.remove_zero_flanks(motif)
+            # Inverse IC scaling
+            if inverse_ic:
+                motif = utils_motif.ic_scale(motif, invert=True)
+            # Write motif
+            f.write(f"\nMOTIF {name}\n")
+            f.write(f"letter-probability matrix: alength= {motif.shape[1]} w= {motif.shape[0]} nsites= {mc.metadata.loc[i, 'num_seqlets']} E= 0\n")
+            for j in range(motif.shape[0]):
+                f.write(" ".join([f"{x:.6f}" for x in motif[j, :]]) + "\n")
 
 
 ####################
@@ -452,22 +571,23 @@ def calculate_filters(
 def assign_label_from_pfms(
     mc: MotifCompendiumClass,
     pfm_file: str,
-    save_column_prefix: str = "match",
+    save_col_prefix: str = "match",
     max_submotifs: int = 1,
     min_score: float = 0.5,
+    save_images: bool = True,
 ) -> None:
     """Automatic labeling of motifs from a pfm file.
 
     For each motif in the MotifCompendium, computes the similarity between that motif
       and all motifs in the PFM file, for max_submotif iterations. The highest similarity
       and closest motif match for each iteration will be saved as columns
-      {save_column_prefix}_score and {save_column_prefix}_name in the MotifCompendium
+      {save_col_prefix}_score and {save_col_prefix}_name in the MotifCompendium
       metadata.
 
     Args:
         mc: The MotifCompendium to analyze.
         pfm_file: The PFM file path.
-        save_column_prefix: The prefix to use for the saved columns.
+        save_col_prefix: The prefix to use for the saved columns.
         max_submotifs: The maximum number of submotifs to consider in a match.
         min_score: The minimum similarity score to consider as a match.
     """
@@ -484,7 +604,8 @@ def assign_label_from_pfms(
     mc.assign_label_from_motifs(
         pfm_motifs,
         pfm_names,
-        save_column_prefix=save_column_prefix,
+        save_col_prefix=save_col_prefix,
         max_submotifs=max_submotifs,
         min_score=min_score,
+        save_images=save_images,
     )

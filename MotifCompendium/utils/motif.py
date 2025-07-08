@@ -186,6 +186,62 @@ def resize_motif(motif: np.ndarray, resize_to: int) -> np.ndarray:
         return motif
 
 
+def remove_zero_flanks(motif: np.ndarray) -> np.ndarray:
+    """Remove zero flanks from a motif, left and right.
+
+    Args:
+        motif: A (L, K) motif.
+
+    Returns:
+        motif: A (l, K) motif, where l <= L, with zero flanks removed, left and right.
+    """
+    validate_motif_basic(motif)
+    if not len(motif.shape) == 2:
+        raise ValueError("remove_flanks() only removes flanks from 2D motifs.")
+    nonzero_pos = np.any(motif != 0, axis=1)
+    if not np.any(nonzero_pos):
+        return motif
+    start = np.argmax(nonzero_pos) # First non-zero position
+    end = motif.shape[0] - np.argmax(nonzero_pos[::-1]) # Last non-zero position
+    return motif[start:end, :]    
+
+
+def trim_motif(motif: np.ndarray, trim_frac: float = 0.1) -> np.ndarray:
+    """Shorten a motif by trimming down flanks until left and right are greater than trim_frac.
+    
+    Args:
+        motif: A (L, K) motif.
+        trim_frac: Fraction of max CWM importance to trim flanks.
+          If trim_frac is 1, then returns a (1, K) motif of zeros.
+        
+    Returns:
+        motif: A (l, K) motif, where l <= L, with flanks trimmed.
+    """
+    validate_motif_basic(motif)
+    if not len(motif.shape) == 2:
+        raise ValueError("trim_motif() only trims flanks from 2D motifs.")
+    max_score = np.max(np.abs(motif))
+    max_trim = max_score * trim_frac
+    # Find left trim
+    left_trim = 0
+    for i in range(motif.shape[0]):
+        if np.max(np.abs(motif[i, :])) < max_trim:
+            left_trim += 1
+        else:
+            break
+    # Find right trim
+    right_trim = 0
+    for i in range(motif.shape[0] - 1, -1, -1):
+        if np.max(np.abs(motif[i, :])) < max_trim:
+            right_trim += 1
+        else:
+            break
+    # Trim motif
+    if left_trim + right_trim >= motif.shape[0]:
+        return np.zeros((1, motif.shape[1]))
+    return motif[left_trim : motif.shape[0] - right_trim, :]
+
+
 @single_or_many_motifs
 def view_motif_from_position_range(
     motif: np.ndarray,
@@ -318,12 +374,13 @@ def ic_scale(x: np.ndarray, invert: bool = False) -> np.ndarray:
         raise ValueError("IC scaling only allowed for 4 channel motif.")
     # x = (N, L, 4)
     x_abs = np.abs(x)
-    x_avg = x_abs / np.sum(x_abs, axis=2, keepdims=True)
+    x_sum = np.sum(x_abs, axis=-1, keepdims=True)
+    x_avg = np.where(x_sum != 0, x_abs / x_sum, 0)
     xlogx = x_avg * np.log2(x_avg, where=(x_avg != 0))
     entropy = np.sum(-xlogx, axis=2, keepdims=True) / 2
     ic = 1 - entropy
     if invert:
-        scaled = x / ic
+        scaled = np.where(ic != 0, x / ic, 0)
     else:
         scaled = x * ic
     return scaled

@@ -28,30 +28,30 @@ def setup_parser():
 
     parser.add_argument("-im", "--input-mc", type=str, default=None, help="Path to the input MotifCompendium object.")
     parser.add_argument("-io", "--input-old-mc", type=str, default=None, help="Path to the input old MotifCompendium object.")
-    parser.add_argument("-ih", "--input-h5s", nargs="+", type=str, default=None, help="Path to the input Modisco H5 file(s).")
-    parser.add_argument("-nh", "--input-names", nargs="+", type=str, default=None, help="Nickname of the input Modisco H5 file(s).")
+    parser.add_argument("-ih", "--input-h5s", nargs="+", type=str, default=None, help="Path(s) to the input Modisco H5 file(s).")
+    parser.add_argument("-nh", "--input-names", nargs="+", type=str, default=None, help="Nickname(s) of the input Modisco H5 file(s).")
+    parser.add_argument("-ip", "--input-pfms", nargs="+", type=str, default=None, help="Path(s) to the input motif PFM files, in PFM or MEME format.")
 
     parser.add_argument("-o", "--output-dir", type=str, required=True, help="Path to the output directory.")
     parser.add_argument("-m", "--metadata", type=str, default=None, help="Path to the metadata file, per h5 or motif: CSV, TSV format.")
     parser.add_argument("-r", "--reference", type=str, default=None, help="Path to the main reference motif file: MotifCompendium object, or PFM, MEME .txt format.")
-    parser.add_argument("--add-reference", nargs="+", type=str, default=None, help="Path to additional reference motif files for final labeling: MotifCompendium object, or PFM, MEME .txt format.")
+    parser.add_argument("--add-reference", nargs="+", type=str, default=None, help="Path(s) to additional reference motif files for final labeling: MotifCompendium object, or PFM, MEME .txt format.")
     parser.add_argument("--modisco-region-width", type=int, default=400, help="Width of region used during TF-Modisco run. (Default: 400 bp)")
     
-    parser.add_argument("--min-seqlets", type=int, default=100, help="Minimum number of seqlets to consider a motif.")
-    parser.add_argument("--first-posmotif-only", action="store_true", help="Only include the first positive motif in the MotifCompendium object.")
+    parser.add_argument("--no-filter", action="store_false", dest="filter", help="Do not apply ANY filters to motifs, clusters, meta-clusters, sub-clusters. This will override all other filter options.")
     parser.add_argument("--strict-filter", action="store_true", help="Apply a strict filter, that does not add back motifs even when matched with a database.")
     parser.add_argument("--rm-singletons", action="store_true", help="Remove singletons from the averaged MotifCompendium object.")
-    parser.add_argument("--no-filter", action="store_false", dest="filter", help="Do not apply ANY filters to motifs, clusters, meta-clusters, sub-clusters. This will override all other filter options.")
 
     parser.add_argument("--sim-scan", nargs="+", type=float, default=None, help="List of similarity thresholds to scan during clustering.")
-    parser.add_argument("--sim-threshold", type=float, default=0.9, help="Similarity threshold to apply during clustering.")
-    parser.add_argument("--sim-threshold-meta", type=float, default=None, help="Second similarity threshold to apply ON TOP of clusters, to create meta-clusters (meta-cluster > cluster). If not provided, will not create meta-clusters.")
-    parser.add_argument("--sim-threshold-sub", type=float, default=None, help="Second similarity threshold to apply WITHIN clusters, to create sub-clusters (sub-cluster < cluster) If not provided, will not create sub-clusters.")
-    parser.add_argument("--sim-threshold-force", type=float, default=None, help="Forced minimum similarity between clusters, meta-clusters, sub-clusters, by recursive connected components clustering. If not provided, will not enforce minimum similarity.")
+    parser.add_argument("--sim-threshold", type=float, default=0.88, help="Similarity threshold to apply during clustering.")
+    parser.add_argument("--sim-threshold-meta", type=float, default=None, help="Similarity threshold to apply during clustering ON TOP of clusters, to create meta-clusters (meta-cluster > cluster). If not provided, will not create meta-clusters.")
+    parser.add_argument("--sim-threshold-sub", type=float, default=None, help="Similarity threshold to apply during clustering WITHIN clusters, to create sub-clusters (sub-cluster < cluster) If not provided, will not create sub-clusters.")
+    parser.add_argument("--sim-threshold-force", type=float, default=None, help="Maximum similarity ensured between clusters, meta-clusters, sub-clusters, by recursive connected components clustering. If not provided, will not enforce minimum similarity.")
     parser.add_argument("--cluster-on", type=str, default=None, help="Prior categorization to cluster on, provided as a column in the metadata. If not provided, will cluster each motif individually. CANNOT have cluster-on and cluster-within at the same time.")
     parser.add_argument("--cluster-within", type=str, default=None, help="Prior categorization to cluster within, provided as a column in the metadata. If not provided, will cluster each motif individually. CANNOT have cluster-on and cluster-within at the same time.")
     parser.add_argument("--cluster-recursive", action="store_true", help="Recursively cluster meta-clusters, and sub-clusters.")
-    parser.add_argument("--quality", action="store_true", help="Calculate quality metrics and plots for clustering.")
+    parser.add_argument("--cluster-sort", action="store_true", help="Sort clusters by metaclusters. Sort metaclusters by meta-meta clusters.")
+    parser.add_argument("--quality", action="store_true", help="Generate quality metrics and plots to check clustering quality.")
     
     parser.add_argument("--html-motif-collection", action="store_true", help="Generate HTML collection of motif constituents per cluster.")
     parser.add_argument("--html-motif-table", action="store_true", help="Generate HTML summary table of individual motifs.")
@@ -62,12 +62,13 @@ def setup_parser():
     
     parser.add_argument("-ch", "--max-chunk", type=int, default=1000, help="Maximum number of motifs to process at a time. Set to -1 to use no chunking.")
     parser.add_argument("-cp", "--max-cpus", type=int, default=1, help="Maximum number of CPUs to use.")
+    parser.add_argument("--var-chunk", action="store_true", help="Use variable chunking, based on GPU memory usage.")
     parser.add_argument("--no-ic", action="store_false", dest="ic", help="Do not compute information content.")
     parser.add_argument("--unsafe", action="store_false", dest="safe", help="Disable safety checks.")
     parser.add_argument("--use-gpu", action="store_true", help="Use GPU for processing.")
     parser.add_argument("--fast-plot", action="store_true", help="Use fast plotting.")
-    parser.add_argument("--time", action="store_true", help="Print time taken for each step.")
-    parser.add_argument("--verbose", action="store_true", help="Print verbose output.")
+    parser.add_argument("-t", "--time", action="store_true", help="Print time taken for each step.")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Print verbose output.")
 
     return parser.parse_args()
 
@@ -127,16 +128,12 @@ def label_motifs(
     Returns:
         None
     """
-    if args.verbose:
-        logging.info(f"Matching motifs to reference file: {reference}...")
-        logging.info(f"Label column: {label_col}")
-
     # Match reference motifs
     if reference.endswith(".mc"):
         ref_mc = MotifCompendium.load(reference, safe=args.safe)
         mc.assign_label_from_other(
             other=ref_mc,
-            save_column_prefix=label_col,
+            save_col_prefix=label_col,
             max_submotifs=max_submotifs,
             min_score=min_score,
         )
@@ -145,7 +142,7 @@ def label_motifs(
         utils_analysis.assign_label_from_pfms(
             mc=mc,
             pfm_file=reference,
-            save_column_prefix=label_col,
+            save_col_prefix=label_col,
             max_submotifs=max_submotifs,
             min_score=min_score,
         )
@@ -175,26 +172,7 @@ def filter_motifs(
     Returns:
         None
     """
-    # Filter #1: Match reference motifs
-    if args.verbose:
-        logging.info(f"Matching motifs to reference file: {args.reference}...\n"
-                f"Label column: {MetadataCols.match_column_prefix}"
-        )
-    if args.time:
-        start_time = time.time()
-    label_motifs(
-        mc=mc,
-        reference=args.reference,
-        label_col=MetadataCols.match_column_prefix,
-        max_submotifs=MotifMatchArgs.max_submotifs,
-        min_score=MotifMatchArgs.min_score,
-        args=args,
-    )
-    if args.time:
-        logging.info(f"Time taken: {time.time() - start_time:.2f}s")
-
-
-    # Filter #2: Calculate and apply filter metrics
+    # Filter #1: Calculate and apply filter metrics
     if args.verbose:
         logging.info(f"Calculating filter metrics:\n"
                 f"  {MotifFilterArgs.motif_metrics}\n"
@@ -229,27 +207,7 @@ def filter_motifs(
     if args.time:
         logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
-
-    # Filter #3: Flag motifs with less than min_seqlets
-    if args.verbose:
-        logging.info(f"Flagging motifs with less than {args.min_seqlets} seqlets...")
-    if args.time:
-        start_time = time.time()
-    apply_filter_threshold(
-        mc=mc,
-        flag_col=MetadataCols.filter_col_flag,
-        metric="num_seqlets",
-        operation="<",
-        threshold=args.min_seqlets,
-        override=False,
-    )
-    if args.verbose:
-        logging.info(f"Total number of motifs less than {args.min_seqlets} seqlets: {len(mc[mc['num_seqlets'] < args.min_seqlets])}")
-    if args.time:
-        logging.info(f"Time taken: {time.time() - start_time:.2f}s")
-
-
-    # Filter #4: Override flag: Good matches
+    # Filter #3: Override flag: Good matches
     if args.verbose:
         logging.info(
             f"Overriding flags for matches above threshold:\n"
@@ -272,7 +230,7 @@ def filter_motifs(
     if args.time:
         logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
-    # # Filter #5: Override flag: First motif
+    # # Filter #4: Override flag: First motif
     # if args.first_posmotif:
     #     if args.verbose:
     #         logging.info(f"Overriding flags for first positive motif...")
@@ -282,7 +240,7 @@ def filter_motifs(
     # if args.verbose:
     #     logging.info(f"Total number of first positive motifs: {len(mc[mc['name'].str.contains('pattern_0') & (mc['posneg'] == 'pos')])}")
 
-    # Filter #6: Apply strict filters
+    # Filter #5: Apply strict filters
     if args.strict_filter:
         if args.verbose:
             logging.info(
@@ -306,20 +264,20 @@ def filter_motifs(
         if args.time:
             logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
-    # Filter #7: Select first positive motif only
-    if args.first_posmotif_only:
-        if args.verbose:
-            logging.info(f"Selecting first positive motif only...")
-        if args.time:
-            start_time = time.time()
-        mc[MetadataCols.filter_col_flag] = True
-        mc[MetadataCols.filter_col_flag] = (mc[MetadataCols.filter_col_flag] & 
-                                                        ((~mc["name"].str.contains("pattern_0")) |
-                                                        (mc["posneg"] != "pos")))
-        if args.verbose:
-            logging.info(f"Total number of first positive motifs: {len(mc[mc['name'].str.contains('pattern_0') & (mc['posneg'] == 'pos')])}")
-        if args.time:
-            logging.info(f"Time taken: {time.time() - start_time:.2f}s")
+    # # Filter #6: Select first positive motif only
+    # if args.first_posmotif_only:
+    #     if args.verbose:
+    #         logging.info(f"Selecting first positive motif only...")
+    #     if args.time:
+    #         start_time = time.time()
+    #     mc[MetadataCols.filter_col_flag] = True
+    #     mc[MetadataCols.filter_col_flag] = (mc[MetadataCols.filter_col_flag] & 
+    #                                                     ((~mc["name"].str.contains("pattern_0")) |
+    #                                                     (mc["posneg"] != "pos")))
+    #     if args.verbose:
+    #         logging.info(f"Total number of first positive motifs: {len(mc[mc['name'].str.contains('pattern_0') & (mc['posneg'] == 'pos')])}")
+    #     if args.time:
+    #         logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
 
 def filter_clusters(
@@ -339,26 +297,7 @@ def filter_clusters(
     Returns:
         None
     """
-    # Filter #1: Match reference motifs
-    if args.verbose:
-        logging.info(f"Matching motifs to reference file: {args.reference}...\n"
-                f"Label column: {MetadataCols.match_column_prefix}"
-        )
-    if args.time:
-        start_time = time.time()
-    label_motifs(
-        mc=mc,
-        reference=args.reference,
-        label_col=MetadataCols.match_column_prefix,
-        max_submotifs=MotifMatchArgs.max_submotifs,
-        min_score=MotifMatchArgs.min_score,
-        args=args,
-    )
-    if args.time:
-        logging.info(f"Time taken: {time.time() - start_time:.2f}s")
-    
-
-    # Filter #2: Calculate and flag filters
+    # Filter #1: Calculate and flag filters
     if args.verbose:
         logging.info(f"Calculating filter metrics:\n"
             f"  {MotifFilterArgs.motif_metrics}"
@@ -394,7 +333,7 @@ def filter_clusters(
         logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
 
-    # Filter #3: Flag singleton clusters
+    # Filter #2: Flag singleton clusters
     if args.rm_singletons:
         if args.verbose:
             logging.info(f"Flagging singleton clusters...")
@@ -407,7 +346,7 @@ def filter_clusters(
             logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
 
-    # Filter #4: Override flags, for good matches
+    # Filter #3: Override flags, for good matches
     if args.verbose:
         logging.info(
             f"Overriding flags for matches above threshold:\n"
@@ -428,7 +367,7 @@ def filter_clusters(
     if args.time:
         logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
-    # Filter #5: Apply strict filters
+    # Filter #4: Apply strict filters
     if args.strict_filter:
         if args.verbose:
             logging.info(
@@ -541,19 +480,19 @@ def generate_quality_plots(
     if args.time:
         logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
-    # # Quality: Heatmap
-    # heatmap_path = os.path.join(quality_dir, f"heatmap_{cluster_col_name}.png")
-    # if args.verbose:
-    #     logging.info(f"Summarizing cluster quality (Heatmap): {heatmap_path}...")
-    # if args.time:
-    #     start_time = time.time()
-    # mc.heatmap(
-    #     sort_by=cluster_col_name,
-    #     save_loc=heatmap_path,
-    # )
-    # plt.savefig(heatmap_path)
-    # if args.time:
-    #     logging.info(f"Time taken: {time.time() - start_time:.2f}s")
+    # Quality: Heatmap
+    heatmap_path = os.path.join(quality_dir, f"heatmap_{cluster_col_name}.png")
+    if args.verbose:
+        logging.info(f"Summarizing cluster quality (Heatmap): {heatmap_path}...")
+    if args.time:
+        start_time = time.time()
+    mc.heatmap(
+        sort_by=cluster_col_name,
+        save_loc=heatmap_path,
+    )
+    plt.savefig(heatmap_path)
+    if args.time:
+        logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
 
 #### MAIN -----------------------------------------------------------------------
@@ -590,7 +529,7 @@ if __name__ == "__main__":
         use_gpu=args.use_gpu,
         fast_plotting=args.fast_plot,
     )
-    
+
     # Check output
     if args.verbose:
         logging.info("Checking output directory...")
@@ -609,7 +548,7 @@ if __name__ == "__main__":
         if not os.path.exists(args.input_mc):
             logging.error(f"Input MotifCompendium object not found: {args.input_mc}")
             raise FileNotFoundError(f"Input MotifCompendium object not found: {args.input_mc}")
-        
+
         # Load MotifCompendium object
         if args.verbose:
             logging.info(f"Loading input MotifCompendium object: {args.input_mc}...")
@@ -633,7 +572,7 @@ if __name__ == "__main__":
         if not os.path.exists(args.input_old_mc):
             logging.error(f"Input old MotifCompendium object not found: {args.input_old_mc}")
             raise FileNotFoundError(f"Input old MotifCompendium object not found: {args.input_old_mc}")
-        
+
         # Load old MotifCompendium object
         if args.verbose:
             logging.info(f"Loading input old MotifCompendium object: {args.input_old_mc}...")
@@ -706,12 +645,75 @@ if __name__ == "__main__":
 
             except Exception as e:
                 logging.error(f"Error: {e}")
+                if not args.var_chunk:
+                    raise ValueError("Error building MotifCompendium object.")
+
                 args.max_chunk = args.max_chunk - 100
                 MotifCompendium.set_compute_options(max_chunk=args.max_chunk)
                 logging.info(f"Retrying with max_chunk={args.max_chunk}...")
                 if args.max_chunk <= 0:
                     logging.critical("Error building MotifCompendium object. max_chunk has reached 0.")
                     raise ValueError("Error building MotifCompendium object.")
+
+    # Load the input PFM files
+    elif args.input_pfms:
+        # Check input
+        if args.verbose:
+            logging.info("Checking input paths...")
+        failed_pfms = []
+        for pfm in args.input_pfms:
+            # Check if PFM file exists
+            if not os.path.exists(pfm):
+                logging.error(f"Input PFM file not found: {pfm}")
+                failed_pfms.append(pfm)
+
+            # Check if PFM file is not empty
+            elif os.path.getsize(pfm) <= 0:
+                logging.error(f"Input PFM file is empty: {pfm}")
+                failed_pfms.append(pfm)
+
+        if failed_pfms:
+            logging.error(f"Failed to load the following PFM files: {', '.join(failed_pfms)}")
+            raise ValueError(f"Failed to load the following PFM files: {', '.join(failed_pfms)}")
+
+        # Build MotifCompendium object from PFMs
+        if args.verbose:
+            logging.info("Loading input PFM files...")
+        if args.time:
+            start_time = time.time()
+        motifs = []
+        motif_names = []
+        for pfm_path in args.input_pfms:
+            if 'meme' in pfm_path:
+                motif, motif_name = utils_loader.load_meme(pfm_path)
+            elif 'pfm' in pfm_path:
+                motif, motif_name = utils_loader.load_pfm(pfm_path)
+            else:
+                logging.info(f" Assuming PFM file format for: {pfm_path}")
+                motif, motif_name = utils_loader.load_pfm(pfm_path)
+            motifs.append(motif)
+            motif_names.append(motif_name)
+        motifs = np.stack(motifs, axis=0)
+        posneg = utils_motif.motif_posneg_sum(motifs)
+        num_motifs = [1] * len(motif_names)
+        metadata = pd.DataFrame({
+            'name': motif_names,
+            'posneg': posneg,
+            'num_motifs': num_motifs,
+        })
+        mc = MotifCompendium.build(
+            motifs=motifs,
+            metadata=metadata,
+            safe=args.safe,
+        )
+        if args.verbose:
+            logging.info(
+                f"Completed building MotifCompendium object from PFMs:\n"
+                f"  Total number of motifs: {len(mc)}\n"
+                f"  Metadata columns: {mc.metadata.columns.tolist()}"
+            )
+        if args.time:
+            logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
     else:
         logging.error("Input MotifCompendium object or H5 files must be provided.")
@@ -775,6 +777,65 @@ if __name__ == "__main__":
     if args.time:
         logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
+    ### LABEL: MODISCO -----------------------------------------------------------
+    if args.reference is None:
+        args.reference = MotifMatchArgs.reference_default
+
+    ## Apply labels
+    if args.verbose:
+        logging.info(f"Matching motifs to reference file: {args.reference}...\n"
+                f"Label column: {MetadataCols.label_column_prefix}"
+        )
+    if args.time:
+        start_time = time.time()
+    label_motifs(
+        mc=mc,
+        reference=args.reference,
+        label_col=MetadataCols.label_column_prefix,
+        max_submotifs=MotifMatchArgs.max_submotifs,
+        min_score=MotifMatchArgs.min_score,
+        args=args,
+    )
+    if args.time:
+        logging.info(f"Time taken: {time.time() - start_time:.2f}s")
+    
+    ## Additional labels
+    if args.add_reference:
+        html_addlabel_cols = []
+        for reference in args.add_reference:
+            label_col = os.path.splitext(os.path.basename(reference))[0]
+
+            ## Label: Cluster
+            if args.verbose:
+                logging.info(f"Adding labels to clusters, from reference file: {reference}...")
+            if args.time:
+                start_time = time.time()
+            label_motifs(
+                mc=mc,
+                reference=reference,
+                label_col=label_col,
+                max_submotifs=1,
+                min_score=MotifMatchArgs.min_score,
+                args=args,
+            )
+            if args.time:
+                logging.info(f"Time taken: {time.time() - start_time:.2f}s")
+        
+            # Update HTML table columns
+            html_addlabel_cols.extend([f"{label_col}_logo0", f"{label_col}_name0", f"{label_col}_score0"])
+            if args.verbose:
+                logging.info(f"Adding the following columns to HTML table: {html_addlabel_cols}")
+            VisualizeArgs.html_table_label_cols.extend(html_addlabel_cols)
+        
+    ## Save MotifCompendium object
+    mc_path = os.path.join(args.output_dir, OutputPaths.mc_labeled)
+    if args.verbose:
+        logging.info(f"Saving labeled MotifCompendium object: {mc_path}...")
+    if args.time:
+        start_time = time.time()
+    mc.save(mc_path)
+    if args.time:
+        logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
     ### FILTER: MODISCO ----------------------------------------------------------
     if args.filter:
@@ -819,125 +880,195 @@ if __name__ == "__main__":
             logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
 
-        ### CLUSTERING ---------------------------------------------------------------
-        # Set options
-        if args.sim_scan:
-            sim_thresholds = args.sim_scan
-            if args.sim_threshold not in sim_thresholds:
-                sim_thresholds.append(args.sim_threshold)
-        else:
-            sim_thresholds = [args.sim_threshold]
+    ### CLUSTERING ---------------------------------------------------------------
+    # Set options
+    if args.sim_scan:
+        sim_thresholds = args.sim_scan
+        if args.sim_threshold not in sim_thresholds:
+            sim_thresholds.append(args.sim_threshold)
+    else:
+        sim_thresholds = [args.sim_threshold]
 
-        # Column names
-        cluster_on_name = None
-        cluster_within_name = None
-        recursive_name = None
-        force_name = None
-        if args.cluster_on:
-            cluster_on_name = f"On-{args.cluster_on}-"
-        if args.cluster_within:
-            cluster_within_name = f"Within-{args.cluster_within}-"
-        if args.cluster_recursive:
-            recursive_name = f"-rec"
-        if args.sim_threshold_force:
-            force_name = f"-force{args.sim_threshold_force}"
+    # Column names
+    cluster_on_name = None
+    cluster_within_name = None
+    recursive_name = None
+    force_name = None
+    if args.cluster_within:
+        cluster_within_name = f"Within-{args.cluster_within}-"
+    if args.cluster_on:
+        cluster_on_name = f"On-{args.cluster_on}-"
+    if args.cluster_recursive:
+        recursive_name = f"-rec"
+    if args.sim_threshold_force:
+        force_name = f"-force{args.sim_threshold_force}"
 
-        # Cluster: Cluster, Meta-cluster, Sub-cluster
-        for sim_threshold in sim_thresholds:
-            while True:
-                try:
-                    ## Cluster: Cluster motifs
-                    cluster_col_name = f"{cluster_on_name or ''}{cluster_within_name or ''}{ClusterArgs.algorithm}_{sim_threshold}{recursive_name or ''}{force_name or ''}"
+    # Weight column
+    # Weight column
+    if ClusterArgs.weight_col not in mc.metadata.columns:
+        logging.warning(f"Weight column '{ClusterArgs.weight_col}' not found in metadata. Using default value: None.")
+        ClusterArgs.weight_col = None
+
+    # Cluster: Cluster, Meta-cluster, Sub-cluster
+    for sim_threshold in sim_thresholds:
+        while True:
+            try:
+                ## Cluster: Cluster motifs
+                cluster_col_name = f"{cluster_within_name or ''}{cluster_on_name or ''}{ClusterArgs.algorithm}_{sim_threshold}{recursive_name or ''}{force_name or ''}"
+                if args.verbose:
+                    logging.info(f"Clustering motifs using: {cluster_col_name}...")
+                if args.time:
+                    start_time = time.time()
+                if args.cluster_on and args.cluster_within: # Cluster ON and WITHIN
+                    mc.cluster(
+                        algorithm=ClusterArgs.algorithm,
+                        similarity_threshold=sim_threshold,
+                        cluster_within_on=(args.cluster_within, args.cluster_on),
+                        cluster_on_weight=ClusterArgs.weight_col,
+                        save_name=cluster_col_name,
+                        **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
+                    )
+                elif args.cluster_on and not args.cluster_within: # Cluster ON only
+                    mc.cluster(
+                        algorithm=ClusterArgs.algorithm,
+                        similarity_threshold=sim_threshold,
+                        cluster_on=args.cluster_on,
+                        cluster_on_weight=ClusterArgs.weight_col,
+                        save_name=cluster_col_name,
+                        **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
+                    )
+                elif not args.cluster_on and args.cluster_within: # Cluster WITHIN only
+                    mc.cluster(
+                        algorithm=ClusterArgs.algorithm,
+                        similarity_threshold=sim_threshold,
+                        cluster_within=args.cluster_within,
+                        save_name=cluster_col_name,
+                        **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
+                    )
+                else: # Cluster STANDARD
+                    mc.cluster(
+                        algorithm=ClusterArgs.algorithm,
+                        similarity_threshold=sim_threshold,
+                        save_name=cluster_col_name,
+                        **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
+                    )
+                # Recursive cluster
+                if args.cluster_recursive:
+                    min_len = mc[cluster_col_name].nunique()
+                    for i in range(ClusterArgs.max_iter):
+                        if args.verbose:
+                            logging.info(f"Recursively clustering motifs: {i+1}...")
+                        if args.cluster_within:
+                            mc.cluster(
+                                algorithm=ClusterArgs.algorithm,
+                                similarity_threshold=sim_threshold,
+                                cluster_within_on=(args.cluster_within, cluster_col_name),
+                                cluster_on_weight=ClusterArgs.weight_col,
+                                save_name=cluster_col_name,
+                                **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
+                            )
+                        else:
+                            mc.cluster(
+                                algorithm=ClusterArgs.algorithm,
+                                similarity_threshold=sim_threshold,
+                                cluster_on=cluster_col_name,
+                                cluster_on_weight=ClusterArgs.weight_col,
+                                save_name=cluster_col_name,
+                                **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
+                            )
+                        new_min_len = mc[cluster_col_name].nunique()
+                        if min_len == new_min_len:
+                            break
+                        else:
+                            min_len = new_min_len                    
+                # Force-cluster
+                if args.sim_threshold_force:
                     if args.verbose:
-                        logging.info(f"Clustering motifs using: {cluster_col_name}...")
+                        logging.info(f"Force-clustering motifs using: {ClusterArgs.algorithm_force}_{args.sim_threshold_force}{recursive_name or ''}{force_name or ''}...")
+                    for i in range(ClusterArgs.max_iter):
+                        if args.cluster_within:
+                            mc.cluster(
+                                algorithm=ClusterArgs.algorithm_force,
+                                similarity_threshold=args.sim_threshold_force,
+                                cluster_within_on=(args.cluster_within, cluster_col_name),
+                                cluster_on_weight=ClusterArgs.weight_col,
+                                save_name=cluster_col_name,
+                                **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_force],
+                            )
+                        else:
+                            mc.cluster(
+                                algorithm=ClusterArgs.algorithm_force,
+                                similarity_threshold=args.sim_threshold_force,
+                                cluster_on=cluster_col_name,
+                                cluster_on_weight=ClusterArgs.weight_col,
+                                save_name=cluster_col_name,
+                                **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_force],
+                            )
+                        new_min_len = mc[cluster_col_name].nunique()
+                        if not args.cluster_recursive:
+                            break
+                        if args.verbose:
+                            logging.info(f"Recursively clustering motifs: {i+1}...")
+                        if min_len == new_min_len:
+                            break
+                        else:
+                            min_len = new_min_len
+                if args.verbose:
+                    logging.info(f"Total number of clusters ({cluster_col_name}): {mc[cluster_col_name].nunique()}")
+                if args.time:
+                    logging.info(f"Time taken: {time.time() - start_time:.2f}s")
+                # Add to aggregate metadata
+                ClusterArgs.aggregate_metadata.append((cluster_col_name, "concat", cluster_col_name))
+                
+
+                ## Meta-cluster: Cluster on top of clusters
+                if args.sim_threshold_meta:
+                    metacluster_col_name = f"{cluster_col_name}-meta{ClusterArgs.algorithm_meta}_{args.sim_threshold_meta}{recursive_name or ''}{force_name or ''}"
+                    if args.verbose:
+                        logging.info(f"Meta-clustering motifs using: {ClusterArgs.algorithm_meta}_{args.sim_threshold_meta}{recursive_name or ''}{force_name or ''}...")
                     if args.time:
                         start_time = time.time()
-                    if args.cluster_on and args.cluster_within: # Cluster ON and WITHIN
-                        mc.cluster(
-                            algorithm=ClusterArgs.algorithm,
-                            similarity_threshold=sim_threshold,
-                            cluster_within_on=(args.cluster_within, args.cluster_on),
-                            cluster_on_weight=ClusterArgs.weight_col,
-                            save_name=cluster_col_name,
-                            **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
-                        )
-                    elif args.cluster_on and not args.cluster_within: # Cluster ON only
-                        mc.cluster(
-                            algorithm=ClusterArgs.algorithm,
-                            similarity_threshold=sim_threshold,
-                            cluster_on=args.cluster_on,
-                            cluster_on_weight=ClusterArgs.weight_col,
-                            save_name=cluster_col_name,
-                            **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
-                        )
-                    elif not args.cluster_on and args.cluster_within: # Cluster WITHIN only
-                        mc.cluster(
-                            algorithm=ClusterArgs.algorithm,
-                            similarity_threshold=sim_threshold,
-                            cluster_within=args.cluster_within,
-                            save_name=cluster_col_name,
-                            **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
-                        )
-                    else: # Cluster STANDARD
-                        mc.cluster(
-                            algorithm=ClusterArgs.algorithm,
-                            similarity_threshold=sim_threshold,
-                            save_name=cluster_col_name,
-                            **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
-                        )
-                    # Recursive cluster
+                    mc.cluster(
+                        algorithm=ClusterArgs.algorithm_meta,
+                        similarity_threshold=args.sim_threshold_meta,
+                        cluster_on=cluster_col_name,
+                        cluster_on_weight=ClusterArgs.weight_col,
+                        save_name=metacluster_col_name,
+                        **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_meta],
+                    )
+                    # Recursive cluster:
                     if args.cluster_recursive:
-                        min_len = mc[cluster_col_name].nunique()
+                        min_len = mc[metacluster_col_name].nunique()
                         for i in range(ClusterArgs.max_iter):
                             if args.verbose:
                                 logging.info(f"Recursively clustering motifs: {i+1}...")
-                            if args.cluster_within:
-                                mc.cluster(
-                                    algorithm=ClusterArgs.algorithm,
-                                    similarity_threshold=sim_threshold,
-                                    cluster_within_on=(args.cluster_within,cluster_col_name),
-                                    cluster_on_weight=ClusterArgs.weight_col,
-                                    save_name=cluster_col_name,
-                                    **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
-                                )
-                            else:
-                                mc.cluster(
-                                    algorithm=ClusterArgs.algorithm,
-                                    similarity_threshold=sim_threshold,
-                                    cluster_on=cluster_col_name,
-                                    cluster_on_weight=ClusterArgs.weight_col,
-                                    save_name=cluster_col_name,
-                                    **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
-                                )
-                            new_min_len = mc[cluster_col_name].nunique()
+                            mc.cluster(
+                                algorithm=ClusterArgs.algorithm_meta,
+                                similarity_threshold=args.sim_threshold_meta,
+                                cluster_on=metacluster_col_name,
+                                cluster_on_weight=ClusterArgs.weight_col,
+                                save_name=metacluster_col_name,
+                                **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_meta],
+                            )
+                            new_min_len = mc[metacluster_col_name].nunique()
                             if min_len == new_min_len:
                                 break
                             else:
-                                min_len = new_min_len                    
-                    # Force-cluster
+                                min_len = new_min_len
+                    # Force-cluster:
                     if args.sim_threshold_force:
                         if args.verbose:
                             logging.info(f"Force-clustering motifs using: {ClusterArgs.algorithm_force}_{args.sim_threshold_force}{recursive_name or ''}{force_name or ''}...")
                         for i in range(ClusterArgs.max_iter):
-                            if args.cluster_within:
-                                mc.cluster(
-                                    algorithm=ClusterArgs.algorithm_force,
-                                    similarity_threshold=args.sim_threshold_force,
-                                    cluster_within_on=(args.cluster_within, cluster_col_name),
-                                    cluster_on_weight=ClusterArgs.weight_col,
-                                    save_name=cluster_col_name,
-                                    **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_force],
-                                )
-                            else:
-                                mc.cluster(
-                                    algorithm=ClusterArgs.algorithm_force,
-                                    similarity_threshold=args.sim_threshold_force,
-                                    cluster_on=cluster_col_name,
-                                    cluster_on_weight=ClusterArgs.weight_col,
-                                    save_name=cluster_col_name,
-                                    **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_force],
-                                )
-                            new_min_len = mc[cluster_col_name].nunique()
+                            mc.cluster(
+                                algorithm=ClusterArgs.algorithm_force,
+                                similarity_threshold=args.sim_threshold_force,
+                                cluster_on=metacluster_col_name,
+                                cluster_on_weight=ClusterArgs.weight_col,
+                                save_name=metacluster_col_name,
+                                **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_force],
+                            )
+                            new_min_len = mc[metacluster_col_name].nunique()
                             if not args.cluster_recursive:
                                 break
                             if args.verbose:
@@ -947,217 +1078,160 @@ if __name__ == "__main__":
                             else:
                                 min_len = new_min_len
                     if args.verbose:
-                        logging.info(f"Total number of clusters ({cluster_col_name}): {mc[cluster_col_name].nunique()}")
+                        logging.info(f"Total number of meta-clusters ({metacluster_col_name}): {mc[metacluster_col_name].nunique()}")
                     if args.time:
                         logging.info(f"Time taken: {time.time() - start_time:.2f}s")
+                    # Add to aggregate metadata
+                    ClusterArgs.aggregate_metadata.append((metacluster_col_name, "concat", metacluster_col_name))
                     
 
-                    ## Meta-cluster: Cluster on top of clusters
+                ## Sub-cluster: Cluster motifs within clusters
+                if args.sim_threshold_sub:
+                    subcluster_col_name = f"{cluster_col_name}-sub{ClusterArgs.algorithm_sub}_{args.sim_threshold_sub}{recursive_name or ''}{force_name or ''}"
+                    if args.verbose:
+                        logging.info(f"Sub-clustering motifs within {cluster_col_name} using: {ClusterArgs.algorithm_sub}_{args.sim_threshold_sub}{recursive_name or ''}{force_name or ''}...")
+                    if args.time:
+                        start_time = time.time()
+                    mc.cluster(
+                        algorithm=ClusterArgs.algorithm_sub,
+                        similarity_threshold=args.sim_threshold_sub,
+                        cluster_within=cluster_col_name,
+                        save_name=subcluster_col_name,
+                        **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_sub],
+                    )
+                    # Recursive cluster:
+                    if args.cluster_recursive:
+                        min_len = mc[subcluster_col_name].nunique()
+                        for i in range(ClusterArgs.max_iter):
+                            if args.verbose:
+                                logging.info(f"Recursively clustering motifs: {i+1}...")
+                            mc.cluster(
+                                algorithm=ClusterArgs.algorithm_sub,
+                                similarity_threshold=args.sim_threshold_sub,
+                                cluster_within_on=(cluster_col_name, subcluster_col_name),
+                                cluster_on_weight=ClusterArgs.weight_col,
+                                save_name=subcluster_col_name,
+                                **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_sub],
+                            )
+                            new_min_len = mc[subcluster_col_name].nunique()
+                            if min_len == new_min_len:
+                                break
+                            else:
+                                min_len = new_min_len
+                    # Force-cluster:
+                    if args.sim_threshold_force:
+                        if args.verbose:
+                            logging.info(f"Force-clustering motifs using: {ClusterArgs.algorithm_force}_{args.sim_threshold_force}{recursive_name or ''}{force_name or ''}...")
+                        for i in range(ClusterArgs.max_iter):
+                            mc.cluster(
+                                algorithm=ClusterArgs.algorithm_force,
+                                similarity_threshold=args.sim_threshold_force,
+                                cluster_within_on=(cluster_col_name, subcluster_col_name),
+                                cluster_on_weight=ClusterArgs.weight_col,
+                                save_name=subcluster_col_name,
+                                **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_force],
+                            )
+                            new_min_len = mc[subcluster_col_name].nunique()
+                            if not args.cluster_recursive:
+                                break
+                            if args.verbose:
+                                logging.info(f"Recursively clustering motifs: {i+1}...")
+                            if min_len == new_min_len:
+                                break
+                            else:
+                                min_len = new_min_len
+                    if args.verbose:
+                        logging.info(f"Total number of sub-clusters ({subcluster_col_name}): {mc[subcluster_col_name].nunique()}")
+                    if args.time:
+                        logging.info(f"Time taken: {time.time() - start_time:.2f}s")
+                    # Add to aggregate metadata
+                    ClusterArgs.aggregate_metadata.append((subcluster_col_name, "concat", subcluster_col_name))
+
+
+                # Quality: Inspect cluster quality
+                if args.quality:
+                    # Make directory
+                    quality_dir = os.path.join(args.output_dir, "quality")
+                    if not os.path.exists(quality_dir):
+                        if args.verbose:
+                            logging.info(f"Creating quality directory: {quality_dir}...")
+                        os.makedirs(quality_dir, exist_ok=True)
+
+                    # Cluster: Quality plots
+                    if args.verbose:
+                        logging.info(f"Generating cluster quality plots...")
+                    generate_quality_plots(
+                        mc=mc,
+                        cluster_col_name=cluster_col_name,
+                        quality_dir=quality_dir,
+                        args=args,
+                    )
+
+                    # Meta-cluster: Quality plots
                     if args.sim_threshold_meta:
-                        metacluster_col_name = f"{cluster_col_name}-meta{ClusterArgs.algorithm_meta}_{args.sim_threshold_meta}{recursive_name or ''}{force_name or ''}"
                         if args.verbose:
-                            logging.info(f"Meta-clustering motifs using: {ClusterArgs.algorithm_meta}_{args.sim_threshold_meta}{recursive_name or ''}{force_name or ''}...")
-                        if args.time:
-                            start_time = time.time()
-                        mc.cluster(
-                            algorithm=ClusterArgs.algorithm_meta,
-                            similarity_threshold=args.sim_threshold_meta,
-                            cluster_on=cluster_col_name,
-                            cluster_on_weight=ClusterArgs.weight_col,
-                            save_name=metacluster_col_name,
-                            **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_meta],
-                        )
-                        # Recursive cluster:
-                        if args.cluster_recursive:
-                            min_len = mc[metacluster_col_name].nunique()
-                            for i in range(ClusterArgs.max_iter):
-                                if args.verbose:
-                                    logging.info(f"Recursively clustering motifs: {i+1}...")
-                                mc.cluster(
-                                    algorithm=ClusterArgs.algorithm_meta,
-                                    similarity_threshold=args.sim_threshold_meta,
-                                    cluster_on=metacluster_col_name,
-                                    cluster_on_weight=ClusterArgs.weight_col,
-                                    save_name=metacluster_col_name,
-                                    **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_meta],
-                                )
-                                new_min_len = mc[metacluster_col_name].nunique()
-                                if min_len == new_min_len:
-                                    break
-                                else:
-                                    min_len = new_min_len
-                        # Force-cluster:
-                        if args.sim_threshold_force:
-                            if args.verbose:
-                                logging.info(f"Force-clustering motifs using: {ClusterArgs.algorithm_force}_{args.sim_threshold_force}{recursive_name or ''}{force_name or ''}...")
-                            for i in range(ClusterArgs.max_iter):
-                                mc.cluster(
-                                    algorithm=ClusterArgs.algorithm_force,
-                                    similarity_threshold=args.sim_threshold_force,
-                                    cluster_on=metacluster_col_name,
-                                    cluster_on_weight=ClusterArgs.weight_col,
-                                    save_name=metacluster_col_name,
-                                    **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_force],
-                                )
-                                new_min_len = mc[metacluster_col_name].nunique()
-                                if not args.cluster_recursive:
-                                    break
-                                if args.verbose:
-                                    logging.info(f"Recursively clustering motifs: {i+1}...")
-                                if min_len == new_min_len:
-                                    break
-                                else:
-                                    min_len = new_min_len
-                        if args.verbose:
-                            logging.info(f"Total number of meta-clusters ({metacluster_col_name}): {mc[metacluster_col_name].nunique()}")
-                        if args.time:
-                            logging.info(f"Time taken: {time.time() - start_time:.2f}s")
-                        
-
-                    ## Sub-cluster: Cluster motifs within clusters
-                    if args.sim_threshold_sub:
-                        subcluster_col_name = f"{cluster_col_name}-sub{ClusterArgs.algorithm_sub}_{args.sim_threshold_sub}{recursive_name or ''}{force_name or ''}"
-                        if args.verbose:
-                            logging.info(f"Sub-clustering motifs within {cluster_col_name} using: {ClusterArgs.algorithm_sub}_{args.sim_threshold_sub}{recursive_name or ''}{force_name or ''}...")
-                        if args.time:
-                            start_time = time.time()
-                        mc.cluster(
-                            algorithm=ClusterArgs.algorithm_sub,
-                            similarity_threshold=args.sim_threshold_sub,
-                            cluster_within=cluster_col_name,
-                            save_name=subcluster_col_name,
-                            **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_sub],
-                        )
-                        # Recursive cluster:
-                        if args.cluster_recursive:
-                            min_len = mc[subcluster_col_name].nunique()
-                            for i in range(ClusterArgs.max_iter):
-                                if args.verbose:
-                                    logging.info(f"Recursively clustering motifs: {i+1}...")
-                                mc.cluster(
-                                    algorithm=ClusterArgs.algorithm_sub,
-                                    similarity_threshold=args.sim_threshold_sub,
-                                    cluster_within_on=(cluster_col_name, subcluster_col_name),
-                                    cluster_on_weight=ClusterArgs.weight_col,
-                                    save_name=subcluster_col_name,
-                                    **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_sub],
-                                )
-                                new_min_len = mc[subcluster_col_name].nunique()
-                                if min_len == new_min_len:
-                                    break
-                                else:
-                                    min_len = new_min_len
-                        # Force-cluster:
-                        if args.sim_threshold_force:
-                            if args.verbose:
-                                logging.info(f"Force-clustering motifs using: {ClusterArgs.algorithm_force}_{args.sim_threshold_force}{recursive_name or ''}{force_name or ''}...")
-                            for i in range(ClusterArgs.max_iter):
-                                mc.cluster(
-                                    algorithm=ClusterArgs.algorithm_force,
-                                    similarity_threshold=args.sim_threshold_force,
-                                    cluster_within_on=(cluster_col_name, subcluster_col_name),
-                                    cluster_on_weight=ClusterArgs.weight_col,
-                                    save_name=subcluster_col_name,
-                                    **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_force],
-                                )
-                                new_min_len = mc[subcluster_col_name].nunique()
-                                if not args.cluster_recursive:
-                                    break
-                                if args.verbose:
-                                    logging.info(f"Recursively clustering motifs: {i+1}...")
-                                if min_len == new_min_len:
-                                    break
-                                else:
-                                    min_len = new_min_len
-                        if args.verbose:
-                            logging.info(f"Total number of sub-clusters ({subcluster_col_name}): {mc[subcluster_col_name].nunique()}")
-                        if args.time:
-                            logging.info(f"Time taken: {time.time() - start_time:.2f}s")
-
-
-                    # Quality: Inspect cluster quality
-                    if args.quality:
-                        # Make directory
-                        quality_dir = os.path.join(args.output_dir, "quality")
-                        if not os.path.exists(quality_dir):
-                            if args.verbose:
-                                logging.info(f"Creating quality directory: {quality_dir}...")
-                            os.makedirs(quality_dir, exist_ok=True)
-
-                        # Cluster: Quality plots
-                        if args.verbose:
-                            logging.info(f"Generating cluster quality plots...")
+                            logging.info(f"Generating meta-cluster quality plots...")
                         generate_quality_plots(
                             mc=mc,
-                            cluster_col_name=cluster_col_name,
+                            cluster_col_name=metacluster_col_name,
                             quality_dir=quality_dir,
                             args=args,
                         )
-                        
-                        # Meta-cluster: Quality plots
-                        if args.sim_threshold_meta:
-                            if args.verbose:
-                                logging.info(f"Generating meta-cluster quality plots...")
-                            generate_quality_plots(
-                                mc=mc,
-                                cluster_col_name=metacluster_col_name,
-                                quality_dir=quality_dir,
-                                args=args,
-                            )
 
-                        # Sub-cluster: Quality plots
-                        if args.sim_threshold_sub:
-                            if args.verbose:
-                                logging.info(f"Generating sub-cluster quality plots...")
-                            generate_quality_plots(
-                                mc=mc,
-                                cluster_col_name=subcluster_col_name,
-                                quality_dir=quality_dir,
-                                args=args,
-                            )
-                    break
-                except Exception as e:
-                    logging.error(f"Error: {e}")
-                    args.max_chunk = args.max_chunk - 100
-                    MotifCompendium.set_compute_options(max_chunk=args.max_chunk)
-                    logging.info(f"Retrying with max_chunk={args.max_chunk}...")
-                    if args.max_chunk <= 0:
-                        logging.critical("Error clustering motifs. max_chunk has reached 0.")
-                        raise ValueError("Error clustering motifs.")
+                    # Sub-cluster: Quality plots
+                    if args.sim_threshold_sub:
+                        if args.verbose:
+                            logging.info(f"Generating sub-cluster quality plots...")
+                        generate_quality_plots(
+                            mc=mc,
+                            cluster_col_name=subcluster_col_name,
+                            quality_dir=quality_dir,
+                            args=args,
+                        )
+                break
+            except Exception as e:
+                logging.error(f"Error: {e}")
+                if not args.var_chunk:
+                    raise ValueError("Error building MotifCompendium object.")
+
+                args.max_chunk = args.max_chunk - 100
+                MotifCompendium.set_compute_options(max_chunk=args.max_chunk)
+                logging.info(f"Retrying with max_chunk={args.max_chunk}...")
+                if args.max_chunk <= 0:
+                    logging.critical("Error clustering motifs. max_chunk has reached 0.")
+                    raise ValueError("Error clustering motifs.")
 
 
-        # Save MotifCompendium object
-        mc_path = os.path.join(args.output_dir, OutputPaths.mc_clustered)
-        if args.verbose:
-            logging.info(f"Saving clustered MotifCompendium object: {mc_path}...")
-        if args.time:
-            start_time = time.time()
-        mc.save(mc_path)
-        if args.time:
-            logging.info(f"Time taken: {time.time() - start_time:.2f}s")
+    # Save MotifCompendium object
+    mc_path = os.path.join(args.output_dir, OutputPaths.mc_clustered)
+    if args.verbose:
+        logging.info(f"Saving clustered MotifCompendium object: {mc_path}...")
+    if args.time:
+        start_time = time.time()
+    mc.save(mc_path)
+    if args.time:
+        logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
 
     ### AVERAGE ------------------------------------------------------------------
-    # Check aggregation metadata columns
-    ClusterArgs.aggregate_metadata = [
+    # Clusters: Average motifs
+    if args.verbose:
+        logging.info(f"Averaging motifs per cluster: {cluster_col_name}...")
+    # Aggregate metadata columns
+    aggregate_metadata_avg = [
         (col, agg, new_col)
         for col, agg, new_col in ClusterArgs.aggregate_metadata
         if col in mc.metadata.columns
     ]
     if args.verbose:
-        logging.info(f"Aggregating the following metadata columns: {ClusterArgs.aggregate_metadata}")
-
-    # Clusters: Average motifs 
-    cluster_col_name = f"{cluster_on_name or ''}{cluster_within_name or ''}{ClusterArgs.algorithm}_{args.sim_threshold}{recursive_name or ''}{force_name or ''}"
-    if args.verbose:
-        logging.info(f"Averaging motifs per cluster: {cluster_col_name}...")
+        logging.info(f"Aggregating the following metadata columns: {aggregate_metadata_avg}")
     while True:
         try:
             if args.time:
                 start_time = time.time()
             mc_avg = mc.cluster_averages(
                 clustering=cluster_col_name,
-                aggregations=ClusterArgs.aggregate_metadata,
+                aggregations=aggregate_metadata_avg,
                 weight_col=ClusterArgs.weight_col,
                 compute_quality_stats=args.quality,
             )
@@ -1170,21 +1244,40 @@ if __name__ == "__main__":
             if args.time:
                 logging.info(f"Time taken: {time.time() - start_time:.2f}s")
             break
-        
+
         except Exception as e:
             logging.error(f"Error: {e}")
+            if not args.var_chunk:
+                    raise ValueError("Error building MotifCompendium object.")
+
             args.max_chunk = args.max_chunk - 100
             MotifCompendium.set_compute_options(max_chunk=args.max_chunk)
             logging.info(f"Retrying with max_chunk={args.max_chunk}...")
             if args.max_chunk <= 0:
                 logging.critical("Error averaging motifs per cluster. max_chunk has reached 0.")
                 raise ValueError("Error averaging motifs per cluster.")
-    
+
     # Add positive/negative column
     mc_avg["posneg"] = utils_motif.motif_posneg_sum(mc_avg.get_standard_motif_stack())
-    
-    # Sort by positive, then negative clusters
-    mc_avg.sort(by=["posneg","num_motifs"], ascending=False, inplace=True)
+
+    # Sort Average MotifCompendium object
+    if args.cluster_sort:
+        # Sort by cluster
+        if not args.sim_threshold_meta:
+            # Cluster: Using same conditions
+            if args.verbose:
+                logging.info(f"Sorting averages by clusters...")
+            metacluster_col_name = "cluster_sort"
+            mc_avg.cluster(
+                algorithm=ClusterArgs.algorithm,
+                save_name=metacluster_col_name,
+                **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
+            )
+        mc_avg.sort(by=["num_motifs"], ascending=False, inplace=True)
+        mc_avg.sort(by=[metacluster_col_name], ascending=True, inplace=True)
+    else:
+        # Sort by positive, then negative clusters
+        mc_avg.sort(by=["posneg", "num_motifs"], ascending=False, inplace=True)
 
     # Save Average MotifCompendium object
     mc_avg_path = os.path.join(args.output_dir, OutputPaths.mc_avg)
@@ -1195,15 +1288,22 @@ if __name__ == "__main__":
     mc_avg.save(mc_avg_path)
     if args.time:
         logging.info(f"Time taken: {time.time() - start_time:.2f}s")
-    
+
     # Meta-clusters: Average clusters
     if args.sim_threshold_meta:
         metacluster_col_name = f"{cluster_col_name}-meta{ClusterArgs.algorithm_meta}_{args.sim_threshold_meta}{recursive_name or ''}{force_name or ''}"
         if args.verbose:
             logging.info(f"Averaging motifs per meta-cluster: {metacluster_col_name}...")
+        aggregate_metadata_meta = [
+            (col, agg, new_col)
+            for col, agg, new_col in ClusterArgs.aggregate_metadata
+            if col in mc.metadata.columns
+        ]
+        if args.verbose:
+            logging.info(f"Aggregating the following metadata columns: {aggregate_metadata_meta}")
         mc_metaavg = mc.cluster_averages(
             clustering=metacluster_col_name,
-            aggregations=ClusterArgs.aggregate_metadata,
+            aggregations=aggregate_metadata_meta,
             weight_col=ClusterArgs.weight_col,
             compute_quality_stats=args.quality,
         )
@@ -1215,12 +1315,26 @@ if __name__ == "__main__":
             )
         if args.time:
             start_time = time.time()
-        
+
         # Add positive/negative column
         mc_metaavg["posneg"] = utils_motif.motif_posneg_sum(mc_metaavg.get_standard_motif_stack())
-        # Sort by positive, then negative clusters
-        mc_metaavg.sort(by=["posneg","num_motifs"], ascending=False, inplace=True)
-        
+        # Sort Meta MotifCompendium object
+        if args.cluster_sort:
+            # Sort by cluster: Using same conditions
+            if args.verbose:
+                logging.info(f"Sorting averages by clusters...")
+            metametacluster_col_name = "cluster_sort"
+            mc_metaavg.cluster(
+                algorithm=ClusterArgs.algorithm,
+                save_name=metametacluster_col_name,
+                **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
+            )
+            mc_metaavg.sort(by=["num_motifs"], ascending=False, inplace=True)
+            mc_metaavg.sort(by=[metametacluster_col_name], ascending=True, inplace=True)
+        else:
+            # Sort by positive, then negative clusters
+            mc_metaavg.sort(by=["posneg", "num_motifs"], ascending=False, inplace=True)
+
         # Save Average MotifCompendium object (meta-cluster)
         mc_metaavg_path = os.path.join(args.output_dir, OutputPaths.mc_metaavg)
         if args.verbose:
@@ -1237,9 +1351,16 @@ if __name__ == "__main__":
         subcluster_col_name = f"{cluster_col_name}-sub{ClusterArgs.algorithm_sub}_{args.sim_threshold_sub}{recursive_name or ''}{force_name or ''}"
         if args.verbose:
             logging.info(f"Averaging motifs per sub-cluster: {subcluster_col_name}...")
+        aggregate_metadata_sub = [
+            (col, agg, new_col)
+            for col, agg, new_col in ClusterArgs.aggregate_metadata
+            if col in mc.metadata.columns
+        ]
+        if args.verbose:
+            logging.info(f"Aggregating the following metadata columns: {aggregate_metadata_sub}")
         mc_subavg = mc.cluster_averages(
             clustering=subcluster_col_name,
-            aggregations=ClusterArgs.aggregate_metadata,
+            aggregations=aggregate_metadata_sub,
             weight_col=ClusterArgs.weight_col,
             compute_quality_stats=args.quality,
         )
@@ -1254,11 +1375,165 @@ if __name__ == "__main__":
 
         # Add positive/negative column
         mc_subavg["posneg"] = utils_motif.motif_posneg_sum(mc_subavg.get_standard_motif_stack())
-        
+        # Sort Sub MotifCompendium object
+        if args.cluster_sort:
+            # Sort by cluster
+            mc_subavg.sort(by=["num_motifs"], ascending=False, inplace=True)
+            mc_subavg.sort(by=[cluster_col_name], ascending=True, inplace=True)
+        else:
+            # Sort by positive, then negative clusters
+            mc_metaavg.sort(by=["posneg", "num_motifs"], ascending=False, inplace=True)
+
         # Save Average MotifCompendium object (sub-cluster)
         mc_subavg_path = os.path.join(args.output_dir, OutputPaths.mc_subavg)
         if args.verbose:
             logging.info(f"Saving average MotifCompendium object (sub-cluster): {mc_subavg_path}...")
+        if args.time:
+            start_time = time.time()
+        mc_subavg.save(mc_subavg_path)
+        if args.time:
+            logging.info(f"Time taken: {time.time() - start_time:.2f}s")
+    
+    ### LABEL: CLUSTERS ---------------------------------------------------------------------
+    ## Clusters: Apply labels
+    if args.verbose:
+        logging.info(f"Matching clusters to reference file: {args.reference}...\n"
+                f"Label column: {MetadataCols.label_column_prefix}"
+        )
+    if args.time:
+        start_time = time.time()
+    label_motifs(
+        mc=mc_avg,
+        reference=args.reference,
+        label_col=MetadataCols.label_column_prefix,
+        max_submotifs=MotifMatchArgs.max_submotifs,
+        min_score=MotifMatchArgs.min_score,
+        args=args,
+    )
+    if args.time:
+        logging.info(f"Time taken: {time.time() - start_time:.2f}s")
+    
+    ## Meta-cluster: Apply labels
+    if args.sim_threshold_meta:
+        if args.verbose:
+            logging.info(f"Matching meta-clusters to reference file: {args.reference}...\n"
+                    f"Label column: {MetadataCols.label_column_prefix}"
+            )
+        if args.time:
+            start_time = time.time()
+        label_motifs(
+            mc=mc_metaavg,
+            reference=args.reference,
+            label_col=MetadataCols.label_column_prefix,
+            max_submotifs=MotifMatchArgs.max_submotifs,
+            min_score=MotifMatchArgs.min_score,
+            args=args,
+        )
+        if args.time:
+            logging.info(f"Time taken: {time.time() - start_time:.2f}s")
+
+    ## Sub-cluster: Apply filters
+    if args.sim_threshold_sub:
+        if args.verbose:
+            logging.info(f"Matching sub-clusters to reference file: {args.reference}...\n"
+                    f"Label column: {MetadataCols.label_column_prefix}"
+            )
+        if args.time:
+            start_time = time.time()
+        label_motifs(
+            mc=mc_subavg,
+            reference=args.reference,
+            label_col=MetadataCols.label_column_prefix,
+            max_submotifs=MotifMatchArgs.max_submotifs,
+            min_score=MotifMatchArgs.min_score,
+            args=args,
+        )
+        if args.time:
+            logging.info(f"Time taken: {time.time() - start_time:.2f}s")
+
+    ## Additional labels
+    if args.add_reference:
+        html_addlabel_cols = []
+        for reference in args.add_reference:
+            label_col = os.path.splitext(os.path.basename(reference))[0]
+
+            ## Label: Cluster
+            if args.verbose:
+                logging.info(f"Adding labels to clusters, from reference file: {reference}...")
+            if args.time:
+                start_time = time.time()
+            label_motifs(
+                mc=mc_avg,
+                reference=reference,
+                label_col=label_col,
+                max_submotifs=1,
+                min_score=MotifMatchArgs.min_score,
+                args=args,
+            )
+            if args.time:
+                logging.info(f"Time taken: {time.time() - start_time:.2f}s")
+
+            ## Label: Meta-cluster
+            if args.sim_threshold_meta:
+                if args.verbose:
+                    logging.info(f"Adding labels to meta-clusters, from reference file: {reference}...")
+                if args.time:
+                    start_time = time.time()
+                label_motifs(
+                    mc=mc_metaavg,
+                    reference=reference,
+                    label_col=label_col,
+                    max_submotifs=1,
+                    min_score=MotifMatchArgs.min_score,
+                    args=args,
+                )
+                if args.time:
+                    logging.info(f"Time taken: {time.time() - start_time:.2f}s")
+
+            # Label: Sub-cluster
+            if args.sim_threshold_sub:
+                if args.verbose:
+                    logging.info(f"Adding labels to sub-clusters, from reference file: {reference}...")
+                if args.time:
+                    start_time = time.time()
+                label_motifs(
+                    mc=mc_subavg,
+                    reference=reference,
+                    label_col=label_col,
+                    max_submotifs=1,
+                    min_score=MotifMatchArgs.min_score,
+                    args=args,
+                )
+                if args.time:
+                    logging.info(f"Time taken: {time.time() - start_time:.2f}s") 
+
+    ## Save MotifCompendium objects
+    # Clusters: Save
+    mc_avg_path = os.path.join(args.output_dir, OutputPaths.mc_avg_labeled)
+    if args.verbose:
+        logging.info(f"Saving labeled cluster MotifCompendium object: {mc_avg_path}...")
+    if args.time:
+        start_time = time.time()
+    mc_avg.save(mc_avg_path)
+    if args.time:
+        logging.info(f"Time taken: {time.time() - start_time:.2f}s")
+    
+    # Meta-clusters: Save
+    if args.sim_threshold_meta:
+        mc_metaavg_path = os.path.join(args.output_dir, OutputPaths.mc_metaavg_labeled)
+        if args.verbose:
+            logging.info(f"Saving labeled meta-cluster MotifCompendium object: {mc_metaavg_path}...")
+        if args.time:
+            start_time = time.time()
+        mc_metaavg.save(mc_metaavg_path)
+        if args.time:
+            logging.info(f"Time taken: {time.time() - start_time:.2f}s")
+
+    # Sub-clusters: Save
+    if args.sim_threshold_sub:
+        mc_subavg_path = os.path.join(args.output_dir, OutputPaths.mc_subavg_labeled)
+        if args.verbose:
+            logging.info(f"Saving labeled sub-cluster MotifCompendium object: {mc_subavg_path}...")
         if args.time:
             start_time = time.time()
         mc_subavg.save(mc_subavg_path)
@@ -1353,7 +1628,7 @@ if __name__ == "__main__":
                 MotifMatchArgs=MotifMatchArgs,
                 args=args,
             )
-            
+
             # Remove flagged motifs
             if args.verbose:
                 logging.info(f"Removing flagged sub-clusters...")
@@ -1380,69 +1655,6 @@ if __name__ == "__main__":
                 logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
 
-    ### LABEL -------------------------------------------------------------------
-    if args.add_reference:
-        html_label_cols = []
-        for reference in args.add_reference:
-            label_col = os.path.splitext(os.path.basename(reference))[0]
-            
-            ## Label: Cluster
-            if args.verbose:
-                logging.info(f"Adding labels to clusters, from reference file: {reference}...")
-            if args.time:
-                start_time = time.time()
-            label_motifs(
-                mc=mc_avg,
-                reference=reference,
-                label_col=label_col,
-                max_submotifs=1,
-                min_score=MotifMatchArgs.min_score,
-                args=args,
-            )
-            if args.time:
-                logging.info(f"Time taken: {time.time() - start_time:.2f}s")
-
-            ## Label: Meta-cluster
-            if args.sim_threshold_meta:
-                if args.verbose:
-                    logging.info(f"Adding labels to meta-clusters, from reference file: {reference}...")
-                if args.time:
-                    start_time = time.time()
-                label_motifs(
-                    mc=mc_metaavg,
-                    reference=reference,
-                    label_col=label_col,
-                    max_submotifs=1,
-                    min_score=MotifMatchArgs.min_score,
-                    args=args,
-                )
-                if args.time:
-                    logging.info(f"Time taken: {time.time() - start_time:.2f}s")
-
-            # Label: Sub-cluster
-            if args.sim_threshold_sub:
-                if args.verbose:
-                    logging.info(f"Adding labels to sub-clusters, from reference file: {reference}...")
-                if args.time:
-                    start_time = time.time()
-                label_motifs(
-                    mc=mc_subavg,
-                    reference=reference,
-                    label_col=label_col,
-                    max_submotifs=1,
-                    min_score=MotifMatchArgs.min_score,
-                    args=args,
-                )
-                if args.time:
-                    logging.info(f"Time taken: {time.time() - start_time:.2f}s") 
-        
-            # Update HTML table columns
-            html_label_cols.extend([f"{label_col}_logo0", f"{label_col}_name0", f"{label_col}_score0"])
-            if args.verbose:
-                logging.info(f"Adding the following columns to HTML table: {html_label_cols}")
-            VisualizeArgs.html_table_cols = html_label_cols + VisualizeArgs.html_table_cols
-
-
     ## VISUALIZE ----------------------------------------------------------------
     # Create HTML directory
     if args.html_motif_collection or args.html_motif_table or args.html_motif_removed or args.html_cluster_table or args.html_cluster_removed:
@@ -1452,7 +1664,16 @@ if __name__ == "__main__":
             if args.verbose:
                 logging.info(f"Creating HTML directory: {html_dir}...")
             os.makedirs(html_dir, exist_ok=True)
-    
+
+    # Select HTML table columns
+    if args.verbose:
+        logging.info(f"Setting HTML table columns...")
+    html_table_cols = VisualizeArgs.html_table_cols
+    if args.reference:
+        html_table_cols.extend(VisualizeArgs.html_table_label_cols)
+    if args.quality:
+        html_table_cols.extend(VisualizeArgs.html_table_quality_cols)
+
     ## MOTIFS
     # Visualize: Motif collection
     if args.html_motif_collection:
@@ -1475,7 +1696,7 @@ if __name__ == "__main__":
     if args.html_motif_table:
         # Check html table columns
         html_table_cols_motif = [
-            col for col in VisualizeArgs.html_table_cols
+            col for col in html_table_cols
             if col in mc.metadata.columns or col in mc.get_saved_images()
         ]
         if args.verbose:
@@ -1484,7 +1705,8 @@ if __name__ == "__main__":
         # Set max_rows
         max_rows_series = pd.Series([True] * len(mc))
         if args.html_max_rows:
-            max_rows_series = pd.Series([True] * args.html_max_rows + [False] * (len(mc) - args.html_max_rows))
+            html_max_rows = min(args.html_max_rows, len(mc))
+            max_rows_series = pd.Series([True] * html_max_rows + [False] * (len(mc) - html_max_rows), index=mc.metadata.index)
 
         # Create HTML table
         html_motif_table_path = os.path.join(html_dir, OutputPaths.html_motif_table)
@@ -1502,7 +1724,7 @@ if __name__ == "__main__":
             logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
     # Visualize: Motifs removed
-    if args.html_motif_removed:
+    if args.html_motif_removed and args.filter:
         # Visualize all metadata columns
         html_motif_removed_cols = mc_removed.metadata.columns.tolist() + mc_removed.get_saved_images()
         if args.verbose:
@@ -1511,7 +1733,8 @@ if __name__ == "__main__":
         # Set max_rows
         max_rows_series = pd.Series([True] * len(mc_removed))
         if args.html_max_rows:
-            max_rows_series = pd.Series([True] * args.html_max_rows + [False] * (len(mc_removed) - args.html_max_rows))
+            html_max_rows = min(args.html_max_rows, len(mc_removed))
+            max_rows_series = pd.Series([True] * html_max_rows + [False] * (len(mc_removed) - html_max_rows), index=mc_removed.metadata.index)
 
         # Create HTML table
         html_motif_removed_path = os.path.join(html_dir, OutputPaths.html_motif_removed)
@@ -1533,7 +1756,7 @@ if __name__ == "__main__":
     if args.html_cluster_table:
         # Check html table columns
         html_table_cols_cluster = [
-            col for col in VisualizeArgs.html_table_cols
+            col for col in html_table_cols
             if col in mc_avg.metadata.columns or col in mc_avg.get_saved_images()
         ]
         if args.verbose:
@@ -1542,7 +1765,8 @@ if __name__ == "__main__":
         # Set max_rows
         max_rows_series = pd.Series([True] * len(mc_avg))
         if args.html_max_rows:
-            max_rows_series = pd.Series([True] * args.html_max_rows + [False] * (len(mc_avg) - args.html_max_rows))
+            html_max_rows = min(args.html_max_rows, len(mc_avg))
+            max_rows_series = pd.Series([True] * html_max_rows + [False] * (len(mc_avg) - html_max_rows), index=mc_avg.metadata.index)
 
         # Cluster: Create HTML table
         html_cluster_table_path = os.path.join(html_dir, OutputPaths.html_cluster_table)
@@ -1564,7 +1788,8 @@ if __name__ == "__main__":
             # Set max_rows
             max_rows_series = pd.Series([True] * len(mc_metaavg))
             if args.html_max_rows:
-                max_rows_series = pd.Series([True] * args.html_max_rows + [False] * (len(mc_metaavg) - args.html_max_rows))
+                html_max_rows = min(args.html_max_rows, len(mc_metaavg))
+                max_rows_series = pd.Series([True] * html_max_rows + [False] * (len(mc_metaavg) - html_max_rows), index=mc_metaavg.metadata.index)
             
             # Create HTML table
             html_metacluster_table_path = os.path.join(html_dir, OutputPaths.html_metacluster_table)
@@ -1586,7 +1811,8 @@ if __name__ == "__main__":
             # Set max_rows
             max_rows_series = pd.Series([True] * len(mc_subavg))
             if args.html_max_rows:
-                max_rows_series = pd.Series([True] * args.html_max_rows + [False] * (len(mc_subavg) - args.html_max_rows))
+                html_max_rows = min(args.html_max_rows, len(mc_subavg))
+                max_rows_series = pd.Series([True] * html_max_rows + [False] * (len(mc_subavg) - html_max_rows), index=mc_subavg.metadata.index)
 
             # Create HTML table
             html_subcluster_table_path = os.path.join(html_dir, OutputPaths.html_subcluster_table)
@@ -1604,7 +1830,7 @@ if __name__ == "__main__":
                 logging.info(f"Time taken: {time.time() - start_time:.2f}s")
     
     # Visualize: Clusters removed
-    if args.html_cluster_removed:
+    if args.html_cluster_removed and args.filter:
         # Visualize all metadata columns
         html_cluster_removed_cols = mc_avg_removed.metadata.columns.tolist() + mc_avg_removed.get_saved_images()
         if args.verbose:
@@ -1613,7 +1839,8 @@ if __name__ == "__main__":
         # Set max_rows
         max_rows_series = pd.Series([True] * len(mc_avg_removed))
         if args.html_max_rows:
-            max_rows_series = pd.Series([True] * args.html_max_rows + [False] * (len(mc_avg_removed) - args.html_max_rows))
+            html_max_rows = min(args.html_max_rows, len(mc_avg_removed))
+            max_rows_series = pd.Series([True] * html_max_rows + [False] * (len(mc_avg_removed) - html_max_rows), index=mc_avg_removed.metadata.index)
 
         # Cluster: Create HTML table
         html_cluster_removed_path = os.path.join(html_dir, OutputPaths.html_cluster_removed)
@@ -1635,7 +1862,8 @@ if __name__ == "__main__":
             # Set max_rows
             max_rows_series = pd.Series([True] * len(mc_metaavg_removed))
             if args.html_max_rows:
-                max_rows_series = pd.Series([True] * args.html_max_rows + [False] * (len(mc_metaavg_removed) - args.html_max_rows))
+                html_max_rows = min(args.html_max_rows, len(mc_metaavg_removed))
+                max_rows_series = pd.Series([True] * html_max_rows + [False] * (len(mc_metaavg_removed) - html_max_rows), index=mc_metaavg_removed.metadata.index)
             
             # Create HTML table
             html_metacluster_removed_path = os.path.join(html_dir, OutputPaths.html_metacluster_removed)
@@ -1657,7 +1885,8 @@ if __name__ == "__main__":
             # Set max_rows
             max_rows_series = pd.Series([True] * len(mc_subavg_removed))
             if args.html_max_rows:
-                max_rows_series = pd.Series([True] * args.html_max_rows + [False] * (len(mc_subavg_removed) - args.html_max_rows))
+                html_max_rows = min(args.html_max_rows, len(mc_subavg_removed))
+                max_rows_series = pd.Series([True] * html_max_rows + [False] * (len(mc_subavg_removed) - html_max_rows), index=mc_subavg_removed.metadata.index)
             
             # Create HTML table
             html_subcluster_removed_path = os.path.join(html_dir, OutputPaths.html_subcluster_removed)
@@ -1666,7 +1895,7 @@ if __name__ == "__main__":
                              f"Number of sub-clusters removed: {len(mc_subavg_removed)}")
             if args.time:
                 start_time = time.time()
-            mc_subavg_removed.summary_table_html(
+            mc_subavg_removed[max_rows_series].summary_table_html(
                 html_out=html_subcluster_removed_path,
                 columns=html_cluster_removed_cols,
                 editable=VisualizeArgs.editable,

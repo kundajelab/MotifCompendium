@@ -368,7 +368,7 @@ def combine(
     # Metadata
     metadata = pd.concat([mc.metadata for mc in compendiums], ignore_index=True)
     # Images
-    __images = pd.DataFrame()
+    __images = pd.DataFrame(index=metadata.index)
     for images in compendiums[0].get_saved_images():
         __images[images] = pd.concat(
             [pd.Series(mc.get_images(images)) for mc in compendiums], ignore_index=True
@@ -1811,9 +1811,10 @@ class MotifCompendium:
         other_motifs: np.ndarray,
         labels: list[str],
         utf8_images: list[str] | None = None,
-        save_column_prefix: str = "match",
+        save_col_prefix: str = "match",
         max_submotifs: int = 1,
         min_score: float = 0.0,
+        save_images: bool = True,
     ) -> None:
         """
         Assign labels to motifs based on an external set of labeled motifs.
@@ -1828,10 +1829,11 @@ class MotifCompendium:
             labels: A list of labels for each motif in other_motifs.
             utf8_images: A list of utf8 images for each motif in other_motifs.
             other_is_positive: Whether or not the other_motifs are positive motifs.
-            save_column_prefix: The prefix to use for the saved columns.
-              Will be saved as f"{save_column_prefix}_{score/name/logo}{i}"
+            save_col_prefix: The prefix to use for the saved columns.
+              Will be saved as f"{save_col_prefix}_{score/name/logo}{i}"
             max_submotifs: The maximum number of submotifs to consider in a match.
             min_score: The minimum similarity score to consider as a match.
+            save_images: Whether or not to save the logos of the matched motifs.
         """
         # Check arguments
         utils_motif.validate_motif_stack_similarity(other_motifs)
@@ -1907,27 +1909,29 @@ class MotifCompendium:
             match_idxs.append(match_idx)
         # Save match information
         for i in range(max_submotifs):
-            self[f"{save_column_prefix}_score{i}"] = match_scores[i]  # Save scores
-            self[f"{save_column_prefix}_name{i}"] = match_labels[i]  # Save labels
+            self[f"{save_col_prefix}_score{i}"] = match_scores[i]  # Save scores
+            self[f"{save_col_prefix}_name{i}"] = match_labels[i]  # Save labels
             # Save logos, matches only
-            # self.__images[f"{save_column_prefix}_logo{i}"] = ""
-            match_idx = np.where(match_idxs[i] >= 0)[0]
-            if utf8_images is None:
-                # Generate forward logos if not provided
-                self.add_logos(match_motifs[i], f"{save_column_prefix}_logo{i}")
-            else:
-                # Copy forward logos if provided
-                self.__images.loc[match_idx, f"{save_column_prefix}_logo{i}"] = [
-                    utf8_images[x] for x in match_idx
-                ]
+            if save_images:
+                # self.__images[f"{save_col_prefix}_logo{i}"] = ""
+                match_idx = np.where(match_idxs[i] >= 0)[0]
+                if utf8_images is None:
+                    # Generate forward logos if not provided
+                    self.add_logos(match_motifs[i], f"{save_col_prefix}_logo{i}")
+                else:
+                    # Copy forward logos if provided
+                    self.__images.loc[match_idx, f"{save_col_prefix}_logo{i}"] = [
+                        utf8_images[x] if x >= 0 else "" for x in match_idxs[i][match_idx]
+                    ]
 
     def assign_label_from_other(
         self,
         other: MotifCompendium,
-        other_label_column: str = "name",
-        save_column_prefix: str = "match",
+        other_label_col: str = "name",
+        save_col_prefix: str = "match",
         max_submotifs: int = 1,
         min_score: float = 0.0,
+        save_images: bool = True,
     ) -> None:
         """Assign clusters to motifs based on an already clustered MotifCompendium.
 
@@ -1935,25 +1939,26 @@ class MotifCompendium:
           labels, compute similarity between all the motifs in this MotifCompendium
           and other, for max_submotif iterations. The highest similarity and closest
           motif match for each iteration will be saved as columns
-          {save_column_prefix}_score{i} and {save_column_prefix}_name{i}.
+          {save_col_prefix}_score{i} and {save_col_prefix}_name{i}.
 
         Args:
             other: The other MotifCompendium to compare against.
-            other_label_column: The column in the other MotifCompendium to use as labels.
-            save_column_prefix: The name of the column in the metadata to save matches to.
+            other_label_col: The column in the other MotifCompendium to use as labels.
+            save_col_prefix: The name of the column in the metadata to save matches to.
               Will be saved as f"{save_col_sim}_{score/name/logo}{i}".
             max_submotifs: The maximum number of submotifs to consider in a match.
             min_score: The minimum similarity score to consider as a match.
+            save_images: Whether or not to save the logos of the matched motifs.
 
         Notes:
             The other MotifCompendium must have motifs length less than or equal to this
               MotifCompendium.
         """
         # Check if other_col_match exists in other MotifCompendium
-        if other_label_column in other.metadata.columns:
-            other_labels = other.metadata[other_label_column].tolist()
+        if other_label_col in other.metadata.columns:
+            other_labels = other.metadata[other_label_col].tolist()
         else:
-            raise KeyError(f"{other_label_column} not in other metadata.")
+            raise KeyError(f"{other_label_col} not in other metadata.")
         # Check if forward logos in other MotifCompendium
         if "logo (fwd)" in other.get_saved_images():
             other_logos = other.get_images("logo (fwd)")
@@ -1964,7 +1969,8 @@ class MotifCompendium:
             other_motifs=other.motifs,
             labels=other_labels,
             utf8_images=other_logos,
-            save_column_prefix=save_column_prefix,
+            save_col_prefix=save_col_prefix,
             max_submotifs=max_submotifs,
             min_score=min_score,
+            save_images=save_images,
         )
