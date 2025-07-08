@@ -206,7 +206,7 @@ def remove_zero_flanks(motif: np.ndarray) -> np.ndarray:
     return motif[start:end, :]    
 
 
-def trim_motif(motif: np.ndarray, trim_frac: float = 0.1) -> np.ndarray:
+def trim_flanks(motif: np.ndarray, trim_frac: float = 0.1) -> np.ndarray:
     """Shorten a motif by trimming down flanks until left and right are greater than trim_frac.
     
     Args:
@@ -219,7 +219,7 @@ def trim_motif(motif: np.ndarray, trim_frac: float = 0.1) -> np.ndarray:
     """
     validate_motif_basic(motif)
     if not len(motif.shape) == 2:
-        raise ValueError("trim_motif() only trims flanks from 2D motifs.")
+        raise ValueError("Trim only 2D motifs.")
     max_score = np.max(np.abs(motif))
     max_trim = max_score * trim_frac
     # Find left trim
