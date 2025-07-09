@@ -76,6 +76,7 @@ class MotifMatchArgs:
     min_score: float = 0.7
     base_threshold: float = 0.88
     composite_threshold: float = 0.7
+    sort_threshold: float = 0.7
 
 
 @dataclass

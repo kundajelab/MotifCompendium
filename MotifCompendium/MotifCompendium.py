@@ -236,7 +236,9 @@ def build_from_modisco(
     Loads motifs and metadata from all Modisco outputs then passes them to build().
 
     Args:
-        modisco_dict: A dictionary from model name to modisco file path.
+        modisco_dict: A dictionary, with:
+          Key(s): model name(s)
+          Value(s): modisco file path(s)
         subpattern: Whether to load subpatterns from the Modisco file.
           (Default: False; load main parent patterns, e.g., 'pos_pattern0')
         modisco_region_width: The region width (across the summit) used during modisco.
@@ -995,6 +997,7 @@ class MotifCompendium:
         cluster_on: str | None = None,
         cluster_within_on: tuple[str, str] | None = None,
         cluster_on_weight: str | None = None,
+        sort: bool = False,
         **kwargs,
     ) -> None:
         """Cluster motifs.
@@ -1029,6 +1032,9 @@ class MotifCompendium:
               use when averaging motifs while doing a cluster_on. If None, all motifs
               are equally weighted. cluster_on_weight can only be set when cluster_on or
               cluster_within_on is set.
+            sort: Whether or not to assign cluster numbers in order of constituents.
+                If True, the cluster numbers will be assigned in descending size, 
+                starting from 0.
             **kwargs: Additional named arguments specific to the clustering algorithm of
                 choice.
 
@@ -1183,6 +1189,13 @@ class MotifCompendium:
             raise ValueError(
                 "Only one of cluster_within, cluster_on, or cluster_within_on can be used at once."
             )
+        # Sort clusters by number of constituents
+        if sort:
+            # Sort by number of constituents
+            sorted_clusters = self.metadata[save_name].value_counts().sort_values(ascending=False).index
+            cluster_map = {old_cluster: new_cluster for new_cluster, old_cluster in enumerate(sorted_clusters)}
+            self.metadata[save_name] = self.metadata[save_name].map(cluster_map)
+
 
     def clustering_quality(
         self, clustering: str, with_stats: bool = False

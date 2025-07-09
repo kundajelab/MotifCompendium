@@ -481,18 +481,18 @@ def generate_quality_plots(
         logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
     # Quality: Heatmap
-    heatmap_path = os.path.join(quality_dir, f"heatmap_{cluster_col_name}.png")
-    if args.verbose:
-        logging.info(f"Summarizing cluster quality (Heatmap): {heatmap_path}...")
-    if args.time:
-        start_time = time.time()
-    mc.heatmap(
-        sort_by=cluster_col_name,
-        save_loc=heatmap_path,
-    )
-    plt.savefig(heatmap_path)
-    if args.time:
-        logging.info(f"Time taken: {time.time() - start_time:.2f}s")
+    # heatmap_path = os.path.join(quality_dir, f"heatmap_{cluster_col_name}.png")
+    # if args.verbose:
+    #     logging.info(f"Summarizing cluster quality (Heatmap): {heatmap_path}...")
+    # if args.time:
+    #     start_time = time.time()
+    # mc.heatmap(
+    #     sort_by=cluster_col_name,
+    #     save_loc=heatmap_path,
+    # )
+    # plt.savefig(heatmap_path)
+    # if args.time:
+    #     logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
 
 #### MAIN -----------------------------------------------------------------------
@@ -906,6 +906,7 @@ if __name__ == "__main__":
                         cluster_within_on=(args.cluster_within, args.cluster_on),
                         cluster_on_weight=ClusterArgs.weight_col,
                         save_name=cluster_col_name,
+                        sort=True,
                         **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
                     )
                 elif args.cluster_on and not args.cluster_within: # Cluster ON only
@@ -915,6 +916,7 @@ if __name__ == "__main__":
                         cluster_on=args.cluster_on,
                         cluster_on_weight=ClusterArgs.weight_col,
                         save_name=cluster_col_name,
+                        sort=True,
                         **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
                     )
                 elif not args.cluster_on and args.cluster_within: # Cluster WITHIN only
@@ -923,6 +925,7 @@ if __name__ == "__main__":
                         similarity_threshold=sim_threshold,
                         cluster_within=args.cluster_within,
                         save_name=cluster_col_name,
+                        sort=True,
                         **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
                     )
                 else: # Cluster STANDARD
@@ -930,6 +933,7 @@ if __name__ == "__main__":
                         algorithm=ClusterArgs.algorithm,
                         similarity_threshold=sim_threshold,
                         save_name=cluster_col_name,
+                        sort=True,
                         **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
                     )
                 # Recursive cluster
@@ -945,6 +949,7 @@ if __name__ == "__main__":
                                 cluster_within_on=(args.cluster_within, cluster_col_name),
                                 cluster_on_weight=ClusterArgs.weight_col,
                                 save_name=cluster_col_name,
+                                sort=True,
                                 **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
                             )
                         else:
@@ -954,6 +959,7 @@ if __name__ == "__main__":
                                 cluster_on=cluster_col_name,
                                 cluster_on_weight=ClusterArgs.weight_col,
                                 save_name=cluster_col_name,
+                                sort=True,
                                 **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
                             )
                         new_min_len = mc[cluster_col_name].nunique()
@@ -973,6 +979,7 @@ if __name__ == "__main__":
                                 cluster_within_on=(args.cluster_within, cluster_col_name),
                                 cluster_on_weight=ClusterArgs.weight_col,
                                 save_name=cluster_col_name,
+                                sort=True,
                                 **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_force],
                             )
                         else:
@@ -982,6 +989,7 @@ if __name__ == "__main__":
                                 cluster_on=cluster_col_name,
                                 cluster_on_weight=ClusterArgs.weight_col,
                                 save_name=cluster_col_name,
+                                sort=True,
                                 **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_force],
                             )
                         new_min_len = mc[cluster_col_name].nunique()
@@ -1014,6 +1022,7 @@ if __name__ == "__main__":
                         cluster_on=cluster_col_name,
                         cluster_on_weight=ClusterArgs.weight_col,
                         save_name=metacluster_col_name,
+                        sort=True,
                         **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_meta],
                     )
                     # Recursive cluster:
@@ -1028,6 +1037,7 @@ if __name__ == "__main__":
                                 cluster_on=metacluster_col_name,
                                 cluster_on_weight=ClusterArgs.weight_col,
                                 save_name=metacluster_col_name,
+                                sort=True,
                                 **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_meta],
                             )
                             new_min_len = mc[metacluster_col_name].nunique()
@@ -1046,6 +1056,7 @@ if __name__ == "__main__":
                                 cluster_on=metacluster_col_name,
                                 cluster_on_weight=ClusterArgs.weight_col,
                                 save_name=metacluster_col_name,
+                                sort=True,
                                 **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_force],
                             )
                             new_min_len = mc[metacluster_col_name].nunique()
@@ -1077,6 +1088,7 @@ if __name__ == "__main__":
                         similarity_threshold=args.sim_threshold_sub,
                         cluster_within=cluster_col_name,
                         save_name=subcluster_col_name,
+                        sort=True,
                         **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_sub],
                     )
                     # Recursive cluster:
@@ -1091,6 +1103,7 @@ if __name__ == "__main__":
                                 cluster_within_on=(cluster_col_name, subcluster_col_name),
                                 cluster_on_weight=ClusterArgs.weight_col,
                                 save_name=subcluster_col_name,
+                                sort=True,
                                 **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_sub],
                             )
                             new_min_len = mc[subcluster_col_name].nunique()
@@ -1109,6 +1122,7 @@ if __name__ == "__main__":
                                 cluster_within_on=(cluster_col_name, subcluster_col_name),
                                 cluster_on_weight=ClusterArgs.weight_col,
                                 save_name=subcluster_col_name,
+                                sort=True,
                                 **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_force],
                             )
                             new_min_len = mc[subcluster_col_name].nunique()
@@ -1250,7 +1264,9 @@ if __name__ == "__main__":
             metacluster_col_name = "cluster_sort"
             mc_avg.cluster(
                 algorithm=ClusterArgs.algorithm,
+                similarity_threshold=MotifMatchArgs.sort_threshold,
                 save_name=metacluster_col_name,
+                sort=True,
                 **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
             )
         mc_avg.sort(by=["num_motifs"], ascending=False, inplace=True)
@@ -1306,7 +1322,9 @@ if __name__ == "__main__":
             metametacluster_col_name = "cluster_sort"
             mc_metaavg.cluster(
                 algorithm=ClusterArgs.algorithm,
+                similarity_threshold=MotifMatchArgs.sort_threshold,
                 save_name=metametacluster_col_name,
+                sort=True,
                 **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
             )
             mc_metaavg.sort(by=["num_motifs"], ascending=False, inplace=True)
