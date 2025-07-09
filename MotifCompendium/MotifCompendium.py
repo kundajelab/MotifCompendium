@@ -226,6 +226,7 @@ def build(
 
 def build_from_modisco(
     modisco_dict: dict[str, str],
+    subpattern: bool = False,
     modisco_region_width: int = 400,
     ic: bool = True,
     safe: bool = True,
@@ -236,6 +237,8 @@ def build_from_modisco(
 
     Args:
         modisco_dict: A dictionary from model name to modisco file path.
+        subpattern: Whether to load subpatterns from the Modisco file.
+          (Default: False; load main parent patterns, e.g., 'pos_pattern0')
         modisco_region_width: The region width (across the summit) used during modisco.
           (Default: 400 bp)
         ic: Whether or not to apply information content scaling to Modisco motifs.
@@ -253,7 +256,7 @@ def build_from_modisco(
     # Load from Modisco
     motifs, motif_names, seqlet_counts, model_names, posneg, avgdist_summits, avg_contribs = (
         utils_loader.load_modiscos(modisco_dict,
-                                    modisco_region_width=modisco_region_width, ic=ic)
+            subpattern=subpattern, modisco_region_width=modisco_region_width, ic=ic)
     )
     # Convert motifs to normalized 8-channel motifs
     motifs = utils_motif.motif_4_to_8(motifs)
@@ -269,6 +272,64 @@ def build_from_modisco(
     # Construct object
     return build(
         motifs,
+        metadata=metadata,
+        safe=safe,
+    )
+
+
+def build_from_pfm(
+    pfm_files: list[str] | str,
+    ic: bool = True,
+    safe: bool = True,
+) -> MotifCompendium:
+    """Builds a MotifCompendium object from a set of PFM files.
+
+    Loads motifs from all PFM files, in PFM or MEME format, then passes them to build().
+
+    Args:
+        pfm_files: A list, or a single PFM file path, in PFM or MEME txt format.
+        ic: Whether or not to apply information content scaling to Modisco motifs.
+        safe: Whether or not to construct the MotifCompendium safely.
+
+    Returns:
+        A MotifCompendium object containing all motifs in all PFM files.
+
+    Notes:
+        Using information content scaling is highly recommended.
+        Safe building validates object integrity but may take significantly longer for
+          large objects.
+    """
+    # Check inputs
+    if isinstance(pfm_files, str):
+        pfm_files = [pfm_files]
+    # Load motifs
+    motifs = []
+    motif_names = []
+    file_names = []
+    for pfm_file in pfm_files:
+        if 'meme' in pfm_file:
+            motif, motif_name = utils_loader.load_meme(pfm_file)
+        elif 'pfm' in pfm_file:
+            motif, motif_name = utils_loader.load_pfm(pfm_file)
+        else:
+            print(f" Assuming PFM file format for: {pfm_file}")
+            motif, motif_name = utils_loader.load_pfm(pfm_file)
+        if ic:
+            motif = utils_motif.ic_scale(motif)
+        motifs.append(motif)
+        motif_names.append(motif_name)
+        file_names.append(os.path.basename(pfm_file).split(".")[:-1])
+    motifs = np.stack(motifs, axis=0)
+    posneg = utils_motif.motif_posneg_sum(motifs)
+    num_motifs = [1] * len(motif_names)
+    metadata = pd.DataFrame({
+        'name': motif_names,
+        'posneg': posneg,
+        'num_motifs': num_motifs,
+        'model': file_names,
+    })
+    return build(
+        motifs=motifs,
         metadata=metadata,
         safe=safe,
     )

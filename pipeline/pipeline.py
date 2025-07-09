@@ -681,29 +681,9 @@ if __name__ == "__main__":
             logging.info("Loading input PFM files...")
         if args.time:
             start_time = time.time()
-        motifs = []
-        motif_names = []
-        for pfm_path in args.input_pfms:
-            if 'meme' in pfm_path:
-                motif, motif_name = utils_loader.load_meme(pfm_path)
-            elif 'pfm' in pfm_path:
-                motif, motif_name = utils_loader.load_pfm(pfm_path)
-            else:
-                logging.info(f" Assuming PFM file format for: {pfm_path}")
-                motif, motif_name = utils_loader.load_pfm(pfm_path)
-            motifs.append(motif)
-            motif_names.append(motif_name)
-        motifs = np.stack(motifs, axis=0)
-        posneg = utils_motif.motif_posneg_sum(motifs)
-        num_motifs = [1] * len(motif_names)
-        metadata = pd.DataFrame({
-            'name': motif_names,
-            'posneg': posneg,
-            'num_motifs': num_motifs,
-        })
-        mc = MotifCompendium.build(
-            motifs=motifs,
-            metadata=metadata,
+        mc = MotifCompendium.build_from_pfm(
+            pfm_files=args.input_pfms,
+            ic=args.ic,
             safe=args.safe,
         )
         if args.verbose:

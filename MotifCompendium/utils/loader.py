@@ -61,6 +61,7 @@ def validate_modisco(
 
 def load_modiscos(
     modisco_dict: dict[str, str],
+    subpattern: bool = False,
     modisco_region_width: int = 400,
     ic: bool = True,
 ) -> tuple[np.ndarray, list[str], list[int]]:
@@ -71,6 +72,8 @@ def load_modiscos(
 
     Args:
         modisco_dict: A dictionary from model name to Modisco file path.
+        subpattern: Whether to load subpatterns from the Modisco file.
+          (Default: False; load main parent patterns, e.g., 'pos_pattern0')
         modisco_region_width: The region width (across the summit) used during modisco.
           (Default: 400 bp)
         ic: Whether or not to apply information content scaling to Modisco motifs.
@@ -93,7 +96,7 @@ def load_modiscos(
         motifs, motif_names, seqlet_counts, model_names, posnegs, avgdist_summits, avg_contribs = [], [], [], [], [], [], []
         for m_name, m_loc in modisco_dict.items():
             m_motifs, m_motif_names, m_seqlet_counts, m_posneg, m_avgdist_summits, m_avg_contribs = load_modisco(
-                m_loc, ic=ic, modisco_region_width=modisco_region_width,
+                m_loc, subpattern=subpattern, ic=ic, modisco_region_width=modisco_region_width,
             )
             m_motif_names = [f"{m_name}-{x}" for x in m_motif_names]
             motifs.append(m_motifs)
@@ -113,7 +116,7 @@ def load_modiscos(
         for m_name, m_loc in modisco_dict.items():
             m_names.append(m_name)
             m_locs.append(m_loc)
-        payloads = [(m_loc, modisco_region_width, ic) for m_loc in m_locs]
+        payloads = [(m_loc, subpattern, modisco_region_width, ic) for m_loc in m_locs]
         with multiprocessing.Pool(processes=num_processes) as p:
             results = p.starmap(load_modisco, payloads)
         motifs, motif_names, seqlet_counts, model_names, posnegs, avgdist_summits, avg_contribs = [], [], [], [], [], [], []
@@ -137,6 +140,7 @@ def load_modiscos(
 @which_file_load_failed
 def load_modisco(
     modisco_file: str,
+    subpattern: bool = False,
     modisco_region_width: int = 400,
     ic: bool = True,
 ) -> tuple[np.ndarray, list[str], list[int]]:
@@ -148,9 +152,12 @@ def load_modisco(
 
     Args:
         modisco_file: A Modisco file path.
+        subpattern: Whether to load subpatterns from the Modisco file.
+          (Default: False; load main parent patterns, e.g., 'pos_pattern0')
         modisco_region_width: The region width (across the summit) used during modisco.
           (Default: 400 bp)
         ic: Whether or not to apply information content scaling to Modisco motifs.
+          (Default: True)
 
     Returns:
         A tuple of motifs, motif names, number of seqlets per motifs, whether the
@@ -167,83 +174,32 @@ def load_modisco(
     with h5py.File(modisco_file, "r") as f:
         if "pos_patterns" in f:
             for pattern in list(f["pos_patterns"]):
-                seqlets = f["pos_patterns"][pattern]["seqlets"]["contrib_scores"][()]
-                motif_sim = _sequence_importance_from_seqlets(seqlets, ic)
-                motifs.append(motif_sim)
-                motif_names.append(f"pos.{pattern}")
-                seqlet_counts.append(seqlets.shape[0])
-                posneg.append("pos")
-                avgdist_summits.append(
-                    np.mean(np.abs(f["pos_patterns"][pattern]["seqlets"]["start"][:] # Start position
-                    - (modisco_region_width // 2) # Modisco region half-width
-                    + np.unravel_index(np.abs(motif_sim).argmax(), motif_sim.shape)[0] # Motif peak
-                    ))
-                )
-                avg_contribs.append(
-                    np.mean(np.sum(np.abs(seqlets), axis=(1,2)), axis=0)
-                )
-        if "neg_patterns" in f:
-            for pattern in list(f["neg_patterns"]):
-                seqlets = f["neg_patterns"][pattern]["seqlets"]["contrib_scores"][()]
-                motif_sim = _sequence_importance_from_seqlets(seqlets, ic)
-                motifs.append(motif_sim)
-                motif_names.append(f"neg.{pattern}")
-                seqlet_counts.append(seqlets.shape[0])
-                posneg.append("neg")
-                avgdist_summits.append(
-                    np.abs(f["neg_patterns"][pattern]["seqlets"]["start"][:] # Start position
-                    - (modisco_region_width // 2) # Modisco region half-width
-                    + np.unravel_index(np.abs(motif_sim).argmax(), motif_sim.shape)[0] # Motif peak
-                    ).mean()
-                )
-                avg_contribs.append(
-                    np.mean(np.sum(np.abs(seqlets), axis=(1,2)), axis=0)
-                )
-    motifs = np.stack(motifs, axis=0)
-    return motifs, motif_names, seqlet_counts, posneg, avgdist_summits, avg_contribs
-
-
-@which_file_load_failed
-def load_modisco_subpattern(
-    modisco_file: str,
-    modisco_region_width: int = 400,
-    ic: bool = True,
-) -> tuple[np.ndarray, list[str], list[int]]:
-    """Load motifs, names, and seqlet counts from a Modisco file.
-
-    Each motif from a Modisco results file is extracted, normalized, and optionally has
-      ic scaling applied. The name and number of seqlets for each motif are also
-      extracted.
-
-    Args:
-        modisco_file: A Modisco file path.
-        modisco_region_width: The region width (across the summit) used during modisco.
-          (Default: 400 bp)
-        ic: Whether or not to apply information content scaling to Modisco motifs.
-
-    Returns:
-        A tuple of motifs, motif names, number of seqlets per motifs, whether the
-          motifs were positive or negative patterns, and the mean seqlet start position
-          from the modisco region start position (default: -200 bp from summit).
-
-    Notes:
-        Assumes that all motifs are stored within "pos_patterns" or "neg_patterns".
-        Motifs are returned as an (N, 30, 8) 8 channel motif stack.
-        Using ic scaling is highly recommended.
-    """
-    motifs, motif_names, seqlet_counts, posneg, avgdist_summits, avg_contribs = [], [], [], [], [], []
-    with h5py.File(modisco_file, "r") as f:
-        if "pos_patterns" in f:
-            for pattern in list(f["pos_patterns"]):
-                for subpattern in [key for key in list(f["pos_patterns"][pattern]) if "subpattern" in key]:
-                    seqlets = f["pos_patterns"][pattern][subpattern]["seqlets"]["contrib_scores"][()]
+                if subpattern:
+                    for subpattern in [key for key in list(f["pos_patterns"][pattern]) if "subpattern" in key]:
+                        seqlets = f["pos_patterns"][pattern][subpattern]["seqlets"]["contrib_scores"][()]
+                        motif_sim = _sequence_importance_from_seqlets(seqlets, ic)
+                        motifs.append(motif_sim)
+                        motif_names.append(f"pos.{pattern}.{subpattern}")
+                        seqlet_counts.append(seqlets.shape[0])
+                        posneg.append("pos")
+                        avgdist_summits.append(
+                            np.mean(np.abs(f["pos_patterns"][pattern][subpattern]["seqlets"]["start"][:] # Start position
+                            - (modisco_region_width // 2) # Modisco region half-width
+                            + np.unravel_index(np.abs(motif_sim).argmax(), motif_sim.shape)[0] # Motif peak
+                            ))
+                        )
+                        avg_contribs.append(
+                            np.mean(np.sum(np.abs(seqlets), axis=(1,2)), axis=0)
+                        )
+                else:
+                    seqlets = f["pos_patterns"][pattern]["seqlets"]["contrib_scores"][()]
                     motif_sim = _sequence_importance_from_seqlets(seqlets, ic)
                     motifs.append(motif_sim)
-                    motif_names.append(f"pos.{pattern}.{subpattern}")
+                    motif_names.append(f"pos.{pattern}")
                     seqlet_counts.append(seqlets.shape[0])
                     posneg.append("pos")
                     avgdist_summits.append(
-                        np.mean(np.abs(f["pos_patterns"][pattern][subpattern]["seqlets"]["start"][:] # Start position
+                        np.mean(np.abs(f["pos_patterns"][pattern]["seqlets"]["start"][:] # Start position
                         - (modisco_region_width // 2) # Modisco region half-width
                         + np.unravel_index(np.abs(motif_sim).argmax(), motif_sim.shape)[0] # Motif peak
                         ))
@@ -253,15 +209,32 @@ def load_modisco_subpattern(
                     )
         if "neg_patterns" in f:
             for pattern in list(f["neg_patterns"]):
-                for subpattern in [key for key in list(f["neg_patterns"][pattern]) if "subpattern" in key]:
-                    seqlets = f["neg_patterns"][pattern][subpattern]["seqlets"]["contrib_scores"][()]
+                if subpattern:
+                    for subpattern in [key for key in list(f["neg_patterns"][pattern]) if "subpattern" in key]:
+                        seqlets = f["neg_patterns"][pattern][subpattern]["seqlets"]["contrib_scores"][()]
+                        motif_sim = _sequence_importance_from_seqlets(seqlets, ic)
+                        motifs.append(motif_sim)
+                        motif_names.append(f"neg.{pattern}.{subpattern}")
+                        seqlet_counts.append(seqlets.shape[0])
+                        posneg.append("neg")
+                        avgdist_summits.append(
+                            np.abs(f["neg_patterns"][pattern][subpattern]["seqlets"]["start"][:] # Start position
+                            - (modisco_region_width // 2) # Modisco region half-width
+                            + np.unravel_index(np.abs(motif_sim).argmax(), motif_sim.shape)[0] # Motif peak
+                            ).mean()
+                        )
+                        avg_contribs.append(
+                            np.mean(np.sum(np.abs(seqlets), axis=(1,2)), axis=0)
+                        )
+                else:
+                    seqlets = f["neg_patterns"][pattern]["seqlets"]["contrib_scores"][()]
                     motif_sim = _sequence_importance_from_seqlets(seqlets, ic)
                     motifs.append(motif_sim)
-                    motif_names.append(f"neg.{pattern}.{subpattern}")
+                    motif_names.append(f"neg.{pattern}")
                     seqlet_counts.append(seqlets.shape[0])
                     posneg.append("neg")
                     avgdist_summits.append(
-                        np.abs(f["neg_patterns"][pattern][subpattern]["seqlets"]["start"][:] # Start position
+                        np.abs(f["neg_patterns"][pattern]["seqlets"]["start"][:] # Start position
                         - (modisco_region_width // 2) # Modisco region half-width
                         + np.unravel_index(np.abs(motif_sim).argmax(), motif_sim.shape)[0] # Motif peak
                         ).mean()
@@ -292,6 +265,11 @@ def load_pfm(
     Notes:
         Assumes a standard PFM file format.
     """
+    # Check file
+    if not os.path.exists(pfm_file):
+        raise FileNotFoundError(f"PFM file {pfm_file} does not exist.")
+    if os.path.getsize(pfm_file) < 0:
+        raise ValueError(f"PFM file {pfm_file} is empty.")
     names = []
     pwms = []
     active_pwm = False
@@ -353,6 +331,11 @@ def load_meme(
     Notes:
         Assumes a standard MEME file format.
     """
+    # Check file
+    if not os.path.exists(meme_file):
+        raise FileNotFoundError(f"MEME file {meme_file} does not exist.")
+    if os.path.getsize(meme_file) < 0:
+        raise ValueError(f"MEME file {meme_file} is empty.")
     names = []
     pwms = []
     active_pwm = False
