@@ -1646,7 +1646,7 @@ class MotifCompendium:
             else self.motifs
         )
         # Group motifs
-        motif_groups = dict()  # group name --> {motif name --> motif dict}
+        motif_groups = dict()  # group name --> {motif name --> list of LogoPlottingInput}
         group_seeds = dict()  # group name --> index of seed motif in group
         group_xmin_xmax = dict()  # group name --> group name --> (xmin, xmax) for group
         for i, x in enumerate(groups):
@@ -1820,6 +1820,7 @@ class MotifCompendium:
 
     def heatmap(
         self,
+        similarity_threshold: float | None = None,
         annot: bool = False,
         label: bool = False,
         show: bool = False,
@@ -1831,6 +1832,8 @@ class MotifCompendium:
           formatting, display, and save options.
 
         Args:
+            similarity_threshold: The minimum score below which no similarity values are
+              shown. If None, all values are shown.
             annot: Whether or not to display the similarity score value in each cell in
               the heatmap.
             label: Whether or not to label rows and columns with motif names.
@@ -1842,11 +1845,19 @@ class MotifCompendium:
             Consider visualizing just one cluster at a time with
               mc[mc["cluster"] == "cluster_1"].heatmap().
         """
+        if similarity_threshold is not None:
+            if not (isinstance(similarity_threshold, float) and 0 <= similarity_threshold <= 1):
+                raise ValueError(
+                    "similarity_threshold must be a float between 0 and 1."
+                )
+            heatmap_data = self.similarity * (self.similarity >= similarity_threshold)
+        else:
+            heatmap_data = self.similarity
         if label:
             if "name" not in self.metadata.columns:
                 raise KeyError("metadata must have a 'name' column.")
             utils_plotting.plot_heatmap(
-                self.similarity,
+                heatmap_data,
                 annot=annot,
                 labels=list(self.metadata["name"]),
                 show=show,
@@ -1854,7 +1865,7 @@ class MotifCompendium:
             )
         else:
             utils_plotting.plot_heatmap(
-                self.similarity, annot=annot, show=show, save_loc=save_loc
+                heatmap_data, annot=annot, show=show, save_loc=save_loc
             )
 
     ######################

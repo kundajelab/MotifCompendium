@@ -315,7 +315,7 @@ def densely_cc_clustering(
     adjacency_matrix: np.ndarray, density: float = 1.0, seed: int = 1
 ) -> list[int]:
     """Find densely connected components in a greedy fashion in an adjacency matrix."""
-    if not (isinstance(density, float) and (0 <= density <= 1)):
+    if not (isinstance(density, float) and (0 < density <= 1)):
         raise ValueError("Density must be a float between 0 and 1.")
     N = adjacency_matrix.shape[0]
     clustering = np.zeros((N,), dtype=int)
