@@ -28,8 +28,9 @@ def setup_parser():
 
     parser.add_argument("-im", "--input-mc", type=str, default=None, help="Path to the input MotifCompendium object.")
     parser.add_argument("-io", "--input-old-mc", type=str, default=None, help="Path to the input old MotifCompendium object.")
-    parser.add_argument("-ih", "--input-h5s", nargs="+", type=str, default=None, help="Path(s) to the input Modisco H5 file(s).")
-    parser.add_argument("-nh", "--input-names", nargs="+", type=str, default=None, help="Nickname(s) of the input Modisco H5 file(s).")
+    parser.add_argument("-ih", "--input-modisco-h5s", nargs="+", type=str, default=None, help="Path(s) to the input TF-MoDISco (lite) H5 file(s).")
+    parser.add_argument("-nh", "--input-names", nargs="+", type=str, default=None, help="Nickname(s) of the input TF-MoDISco (lite) H5 file(s).")
+    parser.add_argument("-sh", "--input-subpatterns", action="store_true", help="Use subpatterns (instead of main patterns) when loading input TF-MoDISco (lite) H5 file(s).")
     parser.add_argument("-ip", "--input-pfms", nargs="+", type=str, default=None, help="Path(s) to the input motif PFM files, in PFM or MEME format.")
 
     parser.add_argument("-o", "--output-dir", type=str, required=True, help="Path to the output directory.")
@@ -591,12 +592,12 @@ if __name__ == "__main__":
             logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
     # Load the input H5 files
-    elif args.input_h5s:
+    elif args.input_modisco_h5s:
         # Check input
         if args.verbose:
             logging.info("Checking input paths...")
         failed_h5s = []
-        for h5 in args.input_h5s:
+        for h5 in args.input_modisco_h5s:
             # Check if H5 file exists
             if not os.path.exists(h5):
                 logging.error(f"Input H5 file not found: {h5}")
@@ -618,7 +619,7 @@ if __name__ == "__main__":
             raise ValueError(f"Failed to load the following H5 files: {', '.join(failed_h5s)}")
 
         # Build MotifCompendium object
-        modisco_dict = build_modisco_dict(args.input_h5s, args.input_names)
+        modisco_dict = build_modisco_dict(args.input_modisco_h5s, args.input_names)
         if args.verbose:
             logging.info("Loading input H5 files...")
         while True:
@@ -629,6 +630,7 @@ if __name__ == "__main__":
                     start_time = time.time()
                 mc = MotifCompendium.build_from_modisco(
                     modisco_dict=modisco_dict,
+                    use_subpatterns=args.input_subpatterns,
                     modisco_region_width=args.modisco_region_width,
                     ic=args.ic,
                     safe=args.safe,

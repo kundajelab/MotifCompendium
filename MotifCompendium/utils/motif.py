@@ -186,26 +186,6 @@ def resize_motif(motif: np.ndarray, resize_to: int) -> np.ndarray:
         return motif
 
 
-def remove_zero_flanks(motif: np.ndarray) -> np.ndarray:
-    """Remove zero flanks from a motif, left and right.
-
-    Args:
-        motif: A (L, K) motif.
-
-    Returns:
-        motif: A (l, K) motif, where l <= L, with zero flanks removed, left and right.
-    """
-    validate_motif_basic(motif)
-    if not len(motif.shape) == 2:
-        raise ValueError("remove_flanks() only removes flanks from 2D motifs.")
-    nonzero_pos = np.any(motif != 0, axis=1)
-    if not np.any(nonzero_pos):
-        return motif
-    start = np.argmax(nonzero_pos) # First non-zero position
-    end = motif.shape[0] - np.argmax(nonzero_pos[::-1]) # Last non-zero position
-    return motif[start:end, :]    
-
-
 def trim_flanks(motif: np.ndarray, trim_frac: float = 0.1) -> np.ndarray:
     """Shorten a motif by trimming down flanks until left and right are greater than trim_frac.
     
@@ -213,6 +193,7 @@ def trim_flanks(motif: np.ndarray, trim_frac: float = 0.1) -> np.ndarray:
         motif: A (L, K) motif.
         trim_frac: Fraction of max CWM importance to trim flanks.
           If trim_frac is 1, then returns a (1, K) motif of zeros.
+          If trim_frac is 0, then removes flanks with zeros.
         
     Returns:
         motif: A (l, K) motif, where l <= L, with flanks trimmed.
@@ -225,14 +206,14 @@ def trim_flanks(motif: np.ndarray, trim_frac: float = 0.1) -> np.ndarray:
     # Find left trim
     left_trim = 0
     for i in range(motif.shape[0]):
-        if np.max(np.abs(motif[i, :])) < max_trim:
+        if np.max(np.abs(motif[i, :])) <= max_trim:
             left_trim += 1
         else:
             break
     # Find right trim
     right_trim = 0
     for i in range(motif.shape[0] - 1, -1, -1):
-        if np.max(np.abs(motif[i, :])) < max_trim:
+        if np.max(np.abs(motif[i, :])) <= max_trim:
             right_trim += 1
         else:
             break
