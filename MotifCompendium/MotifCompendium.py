@@ -533,9 +533,9 @@ class MotifCompendium:
             save_loc += ".mc"
         with h5py.File(save_loc, "w") as f:
             f.create_dataset("motifs", data=self.motifs)
-            f.create_dataset("similarity", data=self.similarity)
-            f.create_dataset("alignment_rc", data=self.alignment_rc)
-            f.create_dataset("alignment_h", data=self.alignment_h)
+            f.create_dataset("similarity", data=self.similarity.astype(np.single))
+            f.create_dataset("alignment_rc", data=self.alignment_rc.astype(np.bool_))
+            f.create_dataset("alignment_h", data=self.alignment_h.astype(np.short))
         self.metadata.to_hdf(save_loc, key="metadata", mode="a")
         self.__images.to_hdf(save_loc, key="__images", mode="a")
 
