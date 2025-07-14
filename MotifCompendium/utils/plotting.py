@@ -229,7 +229,7 @@ def plot_many_motif_logos(
     """Plot the logos of multiple motifs.
 
     Calls plot_motif_logo() on each motif in motif_info_list and returns the updated
-      list. Parallelizes the plotting if allowed by config.get_max_cpus() > 1.
+      list. Parallelizes the plotting if config.get_max_cpus() > 1.
 
     Args:
         motif_info_list: A list of LogoPlottingInput object specifying how each motif
@@ -345,7 +345,6 @@ def _plot_motif_logo(motif_info: LogoPlottingInput) -> LogoPlottingInput:
             _plot_logo_on_axis_fast(motif_info.get_motif_df(), plot_ax)
         else:
             logo = logomaker.Logo(motif_info.get_motif_df(), ax=plot_ax)
-            # logo.style_spines(visible=False)
     plot_ax.spines[["top", "right", "bottom", "left"]].set_visible(False)
     plot_ax.set_axis_off()
     # Encode image in UTF-8

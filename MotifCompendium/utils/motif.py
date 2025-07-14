@@ -12,7 +12,10 @@ def single_or_many_motifs(func):
 
     Functions using this decorator will always have their first argument be a motif
       stack. However, for the user, the first argument can be either a single motif or
-      a motif stack. The return value will be be output accordingly.
+      a motif stack. The return value will either be a single motif or a motif stack,
+      matching the input. Also, this decorator assumes that any function that uses this
+      decorator will return a single output that can be indexed so that output[i]
+      corresponds to the output of the ith motif that was input.
     """
 
     @functools.wraps(func)
@@ -71,6 +74,20 @@ def validate_motif_stack_compendium(motifs: np.ndarray) -> None:
 def reverse_complement(x: np.ndarray) -> np.ndarray:
     """Reverse complements motifs."""
     return x[:, ::-1, ::-1]
+
+
+_MOTIF_4_TO_8_POS = np.zeros((4, 8))
+_MOTIF_4_TO_8_POS[0, 0] = 1
+_MOTIF_4_TO_8_POS[1, 2] = 1
+_MOTIF_4_TO_8_POS[2, 5] = 1
+_MOTIF_4_TO_8_POS[3, 7] = 1
+
+
+_MOTIF_4_TO_8_NEG = np.zeros((4, 8))
+_MOTIF_4_TO_8_NEG[0, 1] = 1
+_MOTIF_4_TO_8_NEG[1, 3] = 1
+_MOTIF_4_TO_8_NEG[2, 4] = 1
+_MOTIF_4_TO_8_NEG[3, 6] = 1
 
 
 @single_or_many_motifs
@@ -149,6 +166,34 @@ def align_motifs(
     return aligned_motifs
 
 
+def pad_motif(motif: np.ndarray, pad_to: int) -> np.ndarray:
+    """Pad a motif (by adding 0s) to a specified length.
+
+    If the given motif is shorter than pad_to, pad with 0s until it is large enough.
+      If the given motif is larger than pad_to, raise an error.
+
+    Args:
+        motif: A (L, K) motif.
+        pad_to: The length to pad the motif to.
+
+    Returns:
+        A (pad_to, K) motif.
+    """
+    validate_motif_basic(motif)
+    if not len(motif.shape) == 2:
+        raise ValueError("pad_motif() only pads 2D motifs.")
+    if not (isinstance(pad_to, int) and pad_to > 0):
+        raise ValueError("pad_to must be a positive integer.")
+    L, K = motif.shape
+    if L > pad_to:
+        raise ValueError(
+            f"Cannot pad motif of length {L} to {pad_to}. Must be longer than {pad_to}."
+        )
+    padded_motif = np.zeros((pad_to, K))
+    padded_motif[0:L, :] = motif
+    return padded_motif
+
+
 def resize_motif(motif: np.ndarray, resize_to: int) -> np.ndarray:
     """Resize a motif (by squashing or padding) to a specified length.
 
@@ -170,10 +215,7 @@ def resize_motif(motif: np.ndarray, resize_to: int) -> np.ndarray:
         raise ValueError("resize_to must be a positive integer.")
     L, K = motif.shape
     if L < resize_to:
-        # Pad with zeros
-        motif_resized = np.zeros((resize_to, K))
-        motif_resized[0:L, :] = motif
-        return motif_resized
+        return pad_motif(motif, pad_to=resize_to)
     elif L > resize_to:
         # Squash to the desired length
         i_sums = [
@@ -367,18 +409,7 @@ def ic_scale(x: np.ndarray, invert: bool = False) -> np.ndarray:
     return scaled
 
 
-_MOTIF_4_TO_8_POS = np.zeros((4, 8))
-_MOTIF_4_TO_8_POS[0, 0] = 1
-_MOTIF_4_TO_8_POS[1, 2] = 1
-_MOTIF_4_TO_8_POS[2, 5] = 1
-_MOTIF_4_TO_8_POS[3, 7] = 1
 
-
-_MOTIF_4_TO_8_NEG = np.zeros((4, 8))
-_MOTIF_4_TO_8_NEG[0, 1] = 1
-_MOTIF_4_TO_8_NEG[1, 3] = 1
-_MOTIF_4_TO_8_NEG[2, 4] = 1
-_MOTIF_4_TO_8_NEG[3, 6] = 1
 
 
 ####################
@@ -425,10 +456,10 @@ def motif_to_string(
         raise ValueError("importance must be a number in [0, 1].")
     # Turns to 1s and 0s
     per_position_totals = np.sum(x, axis=2, keepdims=True)
-    meets_specificity = x / per_position_totals >= specificity
+    meets_specificity = np.divide(x, per_position_totals, out=np.zeros_like(x), where=(per_position_totals != 0)) >= specificity
     meets_importance = per_position_totals >= importance
     motif_to_str = meets_specificity * meets_importance
-    assert (np.sum(motif_to_str, axis=2) <= 1).all()
+    assert (np.sum(motif_to_str, axis=2) <= 1).all() # Ensure only one base per position
     # Make strings
     str_revstr = []
     base_map = np.array(["A", "C", "G", "T"])
@@ -594,7 +625,7 @@ def valid_2d_l1norm_motif(motif: np.ndarray) -> np.ndarray:
     return motif
 
 
-def norm_shannon_entropy(prob_array: np.array, axis: int|None = None) -> float:
+def norm_shannon_entropy(prob_array: np.array, axis: int | None = None) -> float:
     """Normalized Shannon entropy, normalized by the number of discrete states 
     to range between [0,1], along a given axis.
     
