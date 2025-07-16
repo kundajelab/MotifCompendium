@@ -715,12 +715,13 @@ class MotifCompendium:
             raise KeyError(f"{image_name} is not a saved image.")
         return self.__images[image_name].tolist()
 
-    def add_logos(self, motifs: np.ndarray, image_name: str) -> None:
+    def add_logos(self, motifs: np.ndarray, image_name: str, trim: bool = True) -> None:
         """Saves logos of the provided motifs as saved images.
 
         Args:
             motifs: The motifs to save logos for. Of shape (N, L, 4).
             image_name: The name of the images to save the logos as.
+            trim: Whether or not to trim the motifs before plotting.
         """
         # Check inputs
         utils_motif.validate_motif_stack_standard(motifs)
@@ -736,7 +737,7 @@ class MotifCompendium:
             )
         # Prepare plotting
         logo_plotting_inputs = [
-            utils_plotting.LogoPlottingInput(motif=m) for m in motifs
+            utils_plotting.LogoPlottingInput(motif=m, trim=trim) for m in motifs
         ]
         # Plot and save
         self.__images[image_name] = [
@@ -1878,14 +1879,10 @@ class MotifCompendium:
 
         Adds a "motif_string" column to the metadata that contains the motif as a string.
         """
-        if self.motifs.shape[2] == 8:
-            motif_str_revstrs = utils_motif.motif_to_string(
-                utils_motif.motif_8_to_4_unsigned(self.motifs), specificity, importance
-            )
-        else:
-            motif_str_revstrs = utils_motif.motif_to_string(
-                self.motifs, specificity, importance
-            )
+        unsigned_motifs = np.abs(self.get_standard_motif_stack())
+        motif_str_revstrs = utils_motif.motif_to_string(
+            unsigned_motifs, specificity, importance
+        )
         self.metadata[name] = [f"{x[0]}<br/>{x[1]}" for x in motif_str_revstrs]
 
     def extend(self):

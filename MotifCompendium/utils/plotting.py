@@ -51,6 +51,7 @@ class LogoPlottingInput:
         motif: np.ndarray,
         revcomp: bool = False,
         pos: int = 0,
+        trim: bool = False,
         name: str = "motif",
         bgcolor: str = "white",
         encode: bool = True,
@@ -64,6 +65,10 @@ class LogoPlottingInput:
             motif: A np.ndarray that is assigned to self.motifs.
             revcomp: A bool that is assigned to self.revcomp.
             pos: An int that is assigned to self.pos.
+            trim: A bool that determines if the motif should be trimmed before plotting.
+              If True, the motif is trimmed and no positioning/reindexing is done. If
+              False, the motif is not trimmed and self.pos, self.xmin, and self.xmax are
+              taken into account.
             name: A str that is assigned to self.name.
             bgcolor: A str that is assigned to self.bgcolor.
             encode: A bool that is assigned to self.encode.
@@ -74,7 +79,8 @@ class LogoPlottingInput:
         self.revcomp = revcomp
         self.pos = pos
         self.xmin = 0
-        self.xmax = motif.shape[0]
+        self.xmax = motif.shape[0] - 1
+        self.trim = trim
         self.name = name
         # Plot options
         self.bgcolor = bgcolor
@@ -90,13 +96,17 @@ class LogoPlottingInput:
 
     def get_motif_df(self) -> pd.DataFrame:
         """Returns a pd.DataFrame of the motif that can be passed to logomaker."""
+        motif_to_plot = self.motif if not self.trim else utils_motif.trim_motif(self.motif, 1/self.motif.shape[0])
         # Reverse complement
         if self.revcomp:
             motif_df = utils_motif.motif_to_df(
-                utils_motif.reverse_complement(self.motif)
+                utils_motif.reverse_complement(motif_to_plot)
             )
         else:
-            motif_df = utils_motif.motif_to_df(self.motif)
+            motif_df = utils_motif.motif_to_df(motif_to_plot)
+        if self.trim:
+            # Don't reposition if trimming
+            return motif_df
         # Then shift
         motif_df.index += self.pos
         # Then set bounds
