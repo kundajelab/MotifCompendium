@@ -715,13 +715,16 @@ class MotifCompendium:
             raise KeyError(f"{image_name} is not a saved image.")
         return self.__images[image_name].tolist()
 
-    def add_logos(self, motifs: np.ndarray, image_name: str, trim: bool = True) -> None:
+    def add_logos(self, motifs: np.ndarray, image_name: str, trim: str = "trim") -> None:
         """Saves logos of the provided motifs as saved images.
 
         Args:
             motifs: The motifs to save logos for. Of shape (N, L, 4).
             image_name: The name of the images to save the logos as.
-            trim: Whether or not to trim the motifs before plotting.
+            trim: A string indicating how the motifs should be trimmed. The options are
+              "notrim" if you don't want trimming, "zerotrim" if you only want to trim
+              the positions with 0 importance, and "trim" if you want to perform a
+              standard level of trimming.
         """
         # Check inputs
         utils_motif.validate_motif_stack_standard(motifs)
@@ -1538,6 +1541,7 @@ class MotifCompendium:
                     ]
                 ),
                 "best_match_cluster",
+                "trim"
             )
             # Actual quality
             quality_df = self.clustering_quality(clustering, with_stats=True)
@@ -1552,10 +1556,12 @@ class MotifCompendium:
             mc_avg.add_logos(
                 np.stack(quality_df["lowest_internal_similarity_motif1_motif"]),
                 "lowest_internal_similarity_motif1",
+                "trim"
             )
             mc_avg.add_logos(
                 np.stack(quality_df["lowest_internal_similarity_motif2_motif"]),
                 "lowest_internal_similarity_motif2",
+                "trim"
             )
             mc_avg["highest_external_similarity"] = [
                 f"{x:.3} ({y}: {z})"
@@ -1588,6 +1594,7 @@ class MotifCompendium:
                     ]
                 ),
                 "highest_external_similarity_cluster",
+                "trim"
             )
             mc_avg.add_logos(
                 np.stack(
@@ -1600,6 +1607,7 @@ class MotifCompendium:
                     ]
                 ),
                 "highest_external_similarity_motif",
+                "trim"
             )
         return mc_avg
 
@@ -1731,11 +1739,12 @@ class MotifCompendium:
             raise KeyError(f"{missing_columns} not in metadata or saved images.")
         # If forward and reverse logos aren't in __images, create and add them
         if "logo (fwd)" not in self.get_saved_images():
-            self.add_logos(self.get_standard_motif_stack(), "logo (fwd)")
+            self.add_logos(self.get_standard_motif_stack(), "logo (fwd)", "trim")
         if "logo (rev)" not in self.get_saved_images():
             self.add_logos(
                 utils_motif.reverse_complement(self.get_standard_motif_stack()),
                 "logo (rev)",
+                "trim"
             )
         # Build table
         columns = ["logo (fwd)", "logo (rev)"] + columns
@@ -2000,7 +2009,7 @@ class MotifCompendium:
                 match_idx = np.where(match_idxs[i] >= 0)[0]
                 if utf8_images is None:
                     # Generate forward logos if not provided
-                    self.add_logos(match_motifs[i], f"{save_col_prefix}_logo{i}")
+                    self.add_logos(match_motifs[i], f"{save_col_prefix}_logo{i}", "zerotrim")
                 else:
                     # Copy forward logos if provided
                     self.__images.loc[match_idx, f"{save_col_prefix}_logo{i}"] = [

@@ -228,6 +228,34 @@ def resize_motif(motif: np.ndarray, resize_to: int) -> np.ndarray:
         return motif
 
 
+def trim_motif(motif: np.ndarray, importance: float = 1 / 30):
+    """Trim a motif by removing flanking low-importance positions.
+    
+    Find the leftmost and rightmost positions in the motif that have a percentage
+      importance greater than the importance threshold. Return a trimmed motif that only
+      includes the positions between those two positions, inclusive. The returned motif
+      is not normalized. If the importance threshold is too high and the entire motif
+      is trimmed, None is returned. If the importance threshold is 0, only positions
+      with 0 importance are trimmed.
+
+    Args:
+        motif: A (L, K) motif.
+        importance: The minimum level of importance a position must have to be included
+          in the trimmed motif.
+    """
+    validate_motif_basic(motif)
+    if not (isinstance(importance, (int, float)) and 0 <= importance <= 1):
+        raise ValueError("importance must be a number in [0, 1].")
+    motif_abs = np.abs(motif)
+    per_position_totals = np.sum(motif_abs, axis=1)
+    included_positions = per_position_totals > importance*np.sum(per_position_totals)
+    if np.sum(included_positions) == 0:
+        return None
+    min_index = np.argmax(included_positions)
+    max_index = motif.shape[0] - np.argmax(included_positions[::-1])
+    return motif[min_index:max_index]
+
+
 def trim_flanks(motif: np.ndarray, trim_frac: float = 0.1) -> np.ndarray:
     """Shorten a motif by trimming down flanks until left and right are greater than trim_frac.
     

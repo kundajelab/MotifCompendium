@@ -35,6 +35,10 @@ class LogoPlottingInput:
           complement).
         xmin: An int representing the minimum value of the x-axis in the logo plot.
         xmax: An int representing the maximum value of the x-axis in the logo plot.
+        trim: A str representing the way in which to trim the motif. The options are:
+            - "notrim": Do not trim the motif.
+            - "zerotrim": Trim the motif to only include positions with non-zero values.
+            - "trim": Trim the motif at the standard 1/L trimming level.
         name: A str representing the name of the motif. Not plotted.
         encode: A bool representing whether the plot should be encoded as a UTF-8
           string.
@@ -51,7 +55,7 @@ class LogoPlottingInput:
         motif: np.ndarray,
         revcomp: bool = False,
         pos: int = 0,
-        trim: bool = False,
+        trim: str = "trim",
         name: str = "motif",
         bgcolor: str = "white",
         encode: bool = True,
@@ -65,10 +69,11 @@ class LogoPlottingInput:
             motif: A np.ndarray that is assigned to self.motifs.
             revcomp: A bool that is assigned to self.revcomp.
             pos: An int that is assigned to self.pos.
-            trim: A bool that determines if the motif should be trimmed before plotting.
-              If True, the motif is trimmed and no positioning/reindexing is done. If
-              False, the motif is not trimmed and self.pos, self.xmin, and self.xmax are
-              taken into account.
+            trim: A str that determines the way in which the motif is trimmed. The
+              options are "notrim", which does no trimming, "zerotrim, which only trims
+              positions with zero importance, and "trim", which trims at the 1/L level.
+              If "trim" or "zerotrim" are selected, the motif is not repositioned or
+              reindexed using self.pos, self.xmin, and self.xmax.
             name: A str that is assigned to self.name.
             bgcolor: A str that is assigned to self.bgcolor.
             encode: A bool that is assigned to self.encode.
@@ -80,6 +85,10 @@ class LogoPlottingInput:
         self.pos = pos
         self.xmin = 0
         self.xmax = motif.shape[0] - 1
+        if trim not in ["notrim", "zerotrim", "trim"]:
+            raise ValueError(
+                "trim must be one of 'notrim', 'zerotrim', or 'trim'."
+            )
         self.trim = trim
         self.name = name
         # Plot options
@@ -96,7 +105,13 @@ class LogoPlottingInput:
 
     def get_motif_df(self) -> pd.DataFrame:
         """Returns a pd.DataFrame of the motif that can be passed to logomaker."""
-        motif_to_plot = self.motif if not self.trim else utils_motif.trim_motif(self.motif, 1/self.motif.shape[0])
+        if self.trim == "zerotrim":
+            motif_to_plot = utils_motif.trim_motif(self.motif, 0)
+        elif self.trim == "trim":
+            motif_to_plot = utils_motif.trim_motif(self.motif, 1 / self.motif.shape[0])
+        else:
+            # notrim
+            motif_to_plot = self.motif
         # Reverse complement
         if self.revcomp:
             motif_df = utils_motif.motif_to_df(
@@ -104,7 +119,7 @@ class LogoPlottingInput:
             )
         else:
             motif_df = utils_motif.motif_to_df(motif_to_plot)
-        if self.trim:
+        if self.trim in ["zerotrim", "trim"]:
             # Don't reposition if trimming
             return motif_df
         # Then shift
