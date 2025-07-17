@@ -226,7 +226,7 @@ def build(
 
 def build_from_modisco(
     modisco_dict: dict[str, str],
-    use_subpatterns: bool = False,
+    load_subpatterns: bool = False,
     modisco_region_width: int = 400,
     ic: bool = True,
     safe: bool = True,
@@ -239,7 +239,7 @@ def build_from_modisco(
         modisco_dict: A dictionary, with:
           Key(s): model name(s)
           Value(s): modisco file path(s)
-        use_subpatterns: Whether to load subpatterns from the Modisco file.
+        load_subpatterns: Whether to load subpatterns from the Modisco file.
           (Default: False; load main parent patterns, e.g., 'pos_pattern0')
         modisco_region_width: The region width (across the summit) used during modisco.
           (Default: 400 bp)
@@ -258,7 +258,7 @@ def build_from_modisco(
     # Load from Modisco
     motifs, motif_names, seqlet_counts, model_names, posneg, avgdist_summits, avg_contribs = (
         utils_loader.load_modiscos(modisco_dict,
-            use_subpatterns=use_subpatterns, modisco_region_width=modisco_region_width, ic=ic)
+            load_subpatterns=load_subpatterns, modisco_region_width=modisco_region_width, ic=ic)
     )
     # Convert motifs to normalized 8-channel motifs
     motifs = utils_motif.motif_4_to_8(motifs)
@@ -740,7 +740,7 @@ class MotifCompendium:
             )
         # Prepare plotting
         logo_plotting_inputs = [
-            utils_plotting.LogoPlottingInput(motif=m, trim=trim) for m in motifs
+            utils_plotting.LogoPlottingInput(motif=m, trim="zerotrim") for m in motifs
         ]
         # Plot and save
         self.__images[image_name] = [

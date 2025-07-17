@@ -507,7 +507,7 @@ def calculate_filters(
           'copair_entropy_ratio', 'dinuc_entropy_ratio']
     """
     # Check if filter metrics are valid
-    metric_list = list(set(metric_list))  # Convert metric_list into a unique list
+    metric_list = sorted(set(metric_list))  # Convert metric_list into a unique list
     valid_filter_metrics = [
         "motif_entropy",
         "weighted_base_entropy",
@@ -525,53 +525,123 @@ def calculate_filters(
             )
 
     # Calculate filter metrics
+    mc_motifs = mc.get_standard_motif_stack()
+    mc_motifs_abs = np.abs(mc_motifs)
     for filter_metric in metric_list:
-        metrics_list = []
         match filter_metric:
             case "motif_entropy":
-                for motif in mc.motifs:
-                    metric = utils_motif.calculate_motif_entropy(motif)
-                    metrics_list.append(metric)
-                mc["motif_entropy"] = metrics_list
-
+                # mc["motif_entropy"] = utils_motif.calculate_full_motif_entropy(mc_motifs_abs)
+                # mc["positional_entropy"] = (utils_motif.normalized_last_axis_entropy(np.sum(mc_motifs_abs, axis=2)).squeeze())
+                # mc["nonuniformity_score"] = utils_motif.motif_nonuniformity_score(mc_motifs_abs)
+                # mc["spikiness_score"] = utils_motif.motif_spikiness(mc_motifs_abs)
+                # mc["spikiness_score_2"] = utils_motif.motif_spikiness2(mc_motifs_abs)
+                # mc["OLD_motif_entropy"] = (
+                #     utils_motif.calculate_motif_entropy_old(mc_motifs_abs)
+                # )
+                mc["motif_entropy"] = utils_motif.calculate_full_motif_entropy(mc_motifs_abs)
+                mc["OLD_motif_entropy"] = utils_motif.calculate_motif_entropy_old(mc_motifs_abs)
             case "weighted_base_entropy":
-                for motif in mc.motifs:
-                    metric = utils_motif.calculate_weighted_base_entropy(motif)
-                    metrics_list.append(metric)
-                mc["weighted_base_entropy"] = metrics_list
-
+                # mc["weighted_base_entropy"] = (
+                #     utils_motif.calculate_weighted_base_entropy(mc_motifs_abs)
+                # )
+                # mc["OLD_weighted_base_entropy"] = (
+                #     utils_motif.calculate_weighted_base_entropy_old(mc_motifs_abs)
+                # )
+                mc["weighted_base_entropy"] = utils_motif.calculate_weighted_base_entropy(mc_motifs_abs)
             case "posbase_entropy_ratio":
-                for motif in mc.motifs:
-                    metric = utils_motif.calculate_posbase_entropy_ratio(motif)
-                    metrics_list.append(metric)
-                mc["posbase_entropy_ratio"] = metrics_list
-
+                # mc["posbase_entropy_ratio"] = (
+                #     utils_motif.calculate_position_over_base_entropy(mc_motifs_abs)
+                # )
+                # mc["posbase_entropy_ratio_2"] = (
+                #     utils_motif.calculate_position_over_base_entropy_2(mc_motifs_abs)
+                # )
+                # mc["posbase_entropy_ratio_3"] = (
+                #     utils_motif.calculate_position_over_base_entropy_3(mc_motifs_abs)
+                # )
+                # mc["posbase_entropy_ratio_4"] = (
+                #     utils_motif.calculate_position_over_base_entropy_4(mc_motifs_abs)
+                # )
+                # mc["posbase_entropy_ratio_5"] = (
+                #     utils_motif.calculate_position_over_base_entropy_5(mc_motifs_abs)
+                # )
+                # mc["posbase_entropy_ratio_6"] = (
+                #     utils_motif.calculate_position_over_base_entropy_6(mc_motifs_abs)
+                # )
+                # mc["posbase_entropy_ratio_7"] = (
+                #     utils_motif.calculate_position_over_base_entropy_7(mc_motifs_abs)
+                # )
+                # mc["posbase_entropy_ratio_8"] = (
+                #     utils_motif.calculate_position_over_base_entropy_8(mc_motifs_abs)
+                # )
+                # mc["OLD_posbase_entropy_ratio"] = (
+                #     utils_motif.calculate_posbase_entropy_ratio_old(mc_motifs_abs)
+                # )
+                mc["posbase_entropy_ratio"] = utils_motif.calculate_position_versus_base_entropy(mc_motifs_abs)
+                mc["OLD_posbase_entropy_ratio"] = utils_motif.calculate_posbase_entropy_ratio_old(mc_motifs_abs)
+                mc["OLD_posbase_entropy_ratio_2"] = utils_motif.calculate_posbase_entropy_ratio_old_2(mc_motifs_abs)
+                mc["weighted_position_entropy"] = utils_motif.calculate_weighted_position_entropy(mc_motifs_abs)
+                mc["posbase_entropy_ratio_5"] = utils_motif.TEST_calculate_position_over_base_entropy_5(mc_motifs_abs)
             case "copair_entropy_ratio":
-                for motif in mc.motifs:
-                    metric = utils_motif.calculate_copair_entropy_ratio(motif)
-                    metrics_list.append(metric)
-                mc["copair_entropy_ratio"] = metrics_list
-
+                # mc["copair_entropy_1"] = (
+                #     utils_motif.calculate_copair_entropy(mc_motifs_abs)
+                # )
+                # mc["copair_entropy_2"] = (
+                #     utils_motif.calculate_copair_entropy_2(mc_motifs_abs)
+                # )
+                # mc["copair_entropy_3"] = (
+                #     utils_motif.calculate_copair_entropy_3(mc_motifs_abs)
+                # )
+                # mc["OLD_copair_entropy_ratio"] = (
+                #     utils_motif.calculate_copair_entropy_ratio_old(mc_motifs_abs)
+                # )
+                # mc["OLD_copair_entropy_ratio_2"] = (
+                #     utils_motif.calculate_copair_entropy_ratio_old2(mc_motifs_abs)
+                # )
+                mc["copair_entropy"] = utils_motif.calculate_copair_entropy(mc_motifs_abs)
+                mc["OLD_copair_entropy_ratio"] = utils_motif.calculate_copair_entropy_ratio_old(mc_motifs_abs)
+                mc["OLD_copair_entropy_ratio_2"] = utils_motif.calculate_copair_entropy_ratio_old2(mc_motifs_abs)
+                mc["copair_composition"] = utils_motif.calculate_copair_composition(mc_motifs_abs)
+                mc["copair_entropy_3"] = utils_motif.TEST_calculate_copair_entropy_3(mc_motifs_abs)
             case "dinuc_entropy_ratio":
-                for motif in mc.motifs:
-                    metric = utils_motif.calculate_dinuc_entropy_ratio(motif)
-                    metrics_list.append(metric)
-                mc["dinuc_entropy_ratio"] = metrics_list
-
+                # mc["dinuc_entropy_ratio"] = (
+                #     utils_motif.calculate_dinuc_score(mc_motifs_abs)
+                # )
+                # mc["dinuc_entropy_ratio_2"] = (
+                #     utils_motif.calculate_dinuc_score_2(mc_motifs_abs)
+                # )
+                # mc["dinuc_entropy_ratio_3"] = (
+                #     utils_motif.calculate_dinuc_score_3(mc_motifs_abs)
+                # )
+                # mc["dinuc_entropy_ratio_4"] = (
+                #     utils_motif.calculate_dinuc_score_4(mc_motifs_abs)
+                # )
+                # mc["dinuc_entropy_ratio_5"] = (
+                #     utils_motif.calculate_dinuc_score_5(mc_motifs_abs)
+                # )
+                # mc["trinuc_entropy_ratio"] = (
+                #     utils_motif.calculate_trinuc_score(mc_motifs_abs)
+                # )
+                # mc["OLD_dinuc_entropy_ratio"] = (
+                #     utils_motif.calculate_dinuc_entropy_ratio_old(mc_motifs_abs)
+                # )
+                # mc["OLD_dinuc_entropy_ratio_2"] = (
+                #     utils_motif.calculate_dinuc_entropy_ratio_old2(mc_motifs_abs)
+                # )
+                mc["dinuc_entropy"] = utils_motif.calculate_dinucleotide_entropy(mc_motifs_abs)
+                mc["OLD_dinuc_entropy_ratio"] = utils_motif.calculate_dinuc_entropy_ratio_old(mc_motifs_abs)
+                mc["OLD_dinuc_entropy_ratio_2"] = utils_motif.calculate_dinuc_entropy_ratio_old2(mc_motifs_abs)
+                mc["dinuc_composition"] = utils_motif.calculate_dinucleotide_alternating_composition(mc_motifs_abs)
+                mc["dinuc_entropy_ratio"] = utils_motif.TEST_calculate_dinuc_score(mc_motifs_abs)
+                mc["dinucleotide_score"] = utils_motif.calculate_dinucleotide_score(mc_motifs_abs)
+                mc["dinuc_entropy_ratio_5"] = utils_motif.TEST_calculate_dinuc_score_5(mc_motifs_abs)
             case "posneg_inverted":
                 mc["posneg_inverted"] = (
-                    utils_motif.motif_posneg_max(mc.get_standard_motif_stack())
+                    utils_motif.motif_posneg_max(mc_motifs)
                     != mc["posneg"]
                 )
-
             case "truncated":
-                max_pos = mc.motifs.sum(axis=-1).argmax(axis=-1) # (N,)
-                mc["truncated"] = (max_pos < 2) | (max_pos > mc.motifs.shape[1] - 3)
-
-            case _:
-                raise ValueError(
-                    f"filter metric {filter_metric} is not valid. Must be one of: {valid_filter_metrics}"
-                )
+                max_pos = mc_motifs.sum(axis=-1).argmax(axis=-1) # (N,)
+                mc["truncated"] = (max_pos < 2) | (max_pos > mc_motifs.shape[1] - 3)
 
 
 ###########################
