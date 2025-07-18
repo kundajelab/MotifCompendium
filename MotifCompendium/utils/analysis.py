@@ -467,173 +467,92 @@ def calculate_filters(
     metric_list: list[str] = [
         "motif_entropy",
         "weighted_base_entropy",
+        "weighted_position_entropy",
         "posbase_entropy_ratio",
         "copair_entropy_ratio",
+        "copair_composition",
         "dinuc_entropy_ratio",
+        "dinuc_composition",
+        "dinuc_score"
     ],
 ) -> None:
-    """Calculate filter metrics, to be used for filtering low quality motifs.
-    Update metadata table with filter metric values.
+    """Calculates filter metrics and stores them in the MotifCompendium metadata.
 
-    List of filter metrics:
-        (1) Motif entropy:
-            Calculation: Shannon entropy on (L,4)
-            Purpose:    (Low) Archetype #1: Sharp nucleotide peak (e.g., G)
-                        (High) Archetype #2: Noise/chaos
-        (2) Contribution-weighted base entropy:
-            Calculation: Sum of contribution-weighted base entropy per position
-            Purpose:    (High) Archetype #3: Noisy peaks (e.g., peak is not a single base)
-        (3) Pos-base entropy ratio:
-            Calculation: Position-wise entropy on (L,) / Base-wise entropy on (8,)
-            Purpose:    (High) Archetype #4: Single nucleotide repeats (e.g., AAAAA, GGGGG)
-        (4) Co-pair entropy ratio:
-            Calculation: Entropy across position (L,) /
-                Entropy across all pairs of co-occurring, non-repeating bases (28,)
-            Purpose:    (High) Archetype #5: High GC, AT bias
-        (5) Dinucleotide entropy ratio:
-            Calculation: Entropy across pairs of positions (L/2,) /
-                Entropy across all dinucleotide pairs (64,)
-            Purpose:    (High) Dinucleotide repeats (e.g., GCGCGC, ATATAT)
-        (6) Positive-negative inverted:
-            Calculation: Check if positive pattern with a negative peak, and vice versa
-            Purpose:    (True) Archetype #6: Sharp positive peak in negative pattern
-        (7) Truncated:
-            Calculation: Check if max position is at the end of the motif
-            Purpose:    (True) Archetype #7: Truncated motifs
-
-    Args:
-        metric_list: List of filter metrics to calculate.
-          Possible values: ['motif_entropy', 'posbase_entropy_ratio',
-          'copair_entropy_ratio', 'dinuc_entropy_ratio']
-    """
-    # Check if filter metrics are valid
-    metric_list = sorted(set(metric_list))  # Convert metric_list into a unique list
-    valid_filter_metrics = [
-        "motif_entropy",
-        "weighted_base_entropy",
-        "posbase_entropy_ratio",
-        "copair_entropy_ratio",
-        "dinuc_entropy_ratio",
-        "posneg_inverted",
-        "truncated",
-    ]
+    Calculates the filter metrics for each motif in the provided MotifCompendium and
+      stores the values in the metadata table of the MotifCompendium. The filters are
+      intended to be used for filtering out low quality motifs. The filters can only be
+      chosen from a predefined list of metrics.
     
-    for filter_metric in metric_list:
-        if filter_metric not in valid_filter_metrics:
-            raise ValueError(
-                f"Filter metric {filter_metric} is not valid. Must be one of: {valid_filter_metrics}"
-            )
+    Args:
+        mc: The MotifCompendium to compute motif filters for.
+        metric_list: A list of filter metrics to calculated. Metrics must be one of:
+          - "motif_entropy": Computes the Shannon entropy of the motif treated as a
+              Lx4 vector.
+              When Low: Sharp nucleotide peak (e.g., G).
+              When High: Noise/chaos.
+          - "weighted_base_entropy": Computes the position-weighted base entropy of the
+              motif.
+              When High: Noisy motif core (e.g., motif is not a single base).
+          - "weighted_position_entropy": Computes the base-weighted position entropy of
+              the motif.
+              When High: Wide repeats (e.g., AAAAA, GGGGG).
+          - "posbase_entropy_score": Computes the position entropy * (1 - base entropy)
+              entropy score for the motif.
+              When High: Wide repeats (e.g., AAAAA, GGGGG).
+          - "copair_entropy_score": Computes the frequency of co-occurring bases, and
+              uses that copair representation to compute an entropy score for the motif.
+              When High: Noisy motif with base pair ambiguity (e.g. C/G share the same
+              position).
+          - "copair_composition": Computes a measure of how much of the motif can be
+              represented by pairs of co-occurring bases.
+              When High: Noisy motif with base pair ambiguity (e.g. C/G share the same
+              position).
+          - "dinuc_entropy_score": Computes the frequency of repeating dinucleotide
+              pairs, and uses that dinucleotide representation to compute an entropy
+              score for the motif.
+              When High: Dinucleotide repeats (e.g. GCGCGC, ATATAT).
+          - "dinuc_composition": Computes a measure of how much of the motif can be
+              represented by an alternating dinucleotide pair.
+              When High: Dinucleotide repeats (e.g. GCGCGC, ATATAT).
+          - "dinuc_score": Computes a score of how much dinucleotide repeating occurs
+              within the motif. This filter can identify a prominent dinucleotide pair
+              that does not appear in a strictly alternating manner.
+              When High: Dinucleotide repeats (e.g. GCGCGC, ATATAT).
+          - "posneg_inverted": Checks if a positive motif exists in an otherwise
+              negative pattern or if a negative motifs in an otherwise positive pattern.
+              When True: Positive motif in a negative pattern or visa versa.
+          - "truncated": Checks if the motif is truncated and likely has more mass
+              extending beyond the edge of the motif length.
+              When True: A truncated motif that has been cut off by the window size.
 
+    Notes:
+        After these filters are calculated, they can be thresholded to identify and
+          filter out low quality or low information content motifs. For guidance on the
+          value of thresholds to use, see MotifCompendium Tutorial 6 - Motif Filtering.
+    """
     # Calculate filter metrics
     mc_motifs = mc.get_standard_motif_stack()
     mc_motifs_abs = np.abs(mc_motifs)
     for filter_metric in metric_list:
         match filter_metric:
             case "motif_entropy":
-                # mc["motif_entropy"] = utils_motif.calculate_full_motif_entropy(mc_motifs_abs)
-                # mc["positional_entropy"] = (utils_motif.normalized_last_axis_entropy(np.sum(mc_motifs_abs, axis=2)).squeeze())
-                # mc["nonuniformity_score"] = utils_motif.motif_nonuniformity_score(mc_motifs_abs)
-                # mc["spikiness_score"] = utils_motif.motif_spikiness(mc_motifs_abs)
-                # mc["spikiness_score_2"] = utils_motif.motif_spikiness2(mc_motifs_abs)
-                # mc["OLD_motif_entropy"] = (
-                #     utils_motif.calculate_motif_entropy_old(mc_motifs_abs)
-                # )
                 mc["motif_entropy"] = utils_motif.calculate_full_motif_entropy(mc_motifs_abs)
-                mc["OLD_motif_entropy"] = utils_motif.calculate_motif_entropy_old(mc_motifs_abs)
             case "weighted_base_entropy":
-                # mc["weighted_base_entropy"] = (
-                #     utils_motif.calculate_weighted_base_entropy(mc_motifs_abs)
-                # )
-                # mc["OLD_weighted_base_entropy"] = (
-                #     utils_motif.calculate_weighted_base_entropy_old(mc_motifs_abs)
-                # )
                 mc["weighted_base_entropy"] = utils_motif.calculate_weighted_base_entropy(mc_motifs_abs)
-            case "posbase_entropy_ratio":
-                # mc["posbase_entropy_ratio"] = (
-                #     utils_motif.calculate_position_over_base_entropy(mc_motifs_abs)
-                # )
-                # mc["posbase_entropy_ratio_2"] = (
-                #     utils_motif.calculate_position_over_base_entropy_2(mc_motifs_abs)
-                # )
-                # mc["posbase_entropy_ratio_3"] = (
-                #     utils_motif.calculate_position_over_base_entropy_3(mc_motifs_abs)
-                # )
-                # mc["posbase_entropy_ratio_4"] = (
-                #     utils_motif.calculate_position_over_base_entropy_4(mc_motifs_abs)
-                # )
-                # mc["posbase_entropy_ratio_5"] = (
-                #     utils_motif.calculate_position_over_base_entropy_5(mc_motifs_abs)
-                # )
-                # mc["posbase_entropy_ratio_6"] = (
-                #     utils_motif.calculate_position_over_base_entropy_6(mc_motifs_abs)
-                # )
-                # mc["posbase_entropy_ratio_7"] = (
-                #     utils_motif.calculate_position_over_base_entropy_7(mc_motifs_abs)
-                # )
-                # mc["posbase_entropy_ratio_8"] = (
-                #     utils_motif.calculate_position_over_base_entropy_8(mc_motifs_abs)
-                # )
-                # mc["OLD_posbase_entropy_ratio"] = (
-                #     utils_motif.calculate_posbase_entropy_ratio_old(mc_motifs_abs)
-                # )
-                mc["posbase_entropy_ratio"] = utils_motif.calculate_position_versus_base_entropy(mc_motifs_abs)
-                mc["OLD_posbase_entropy_ratio"] = utils_motif.calculate_posbase_entropy_ratio_old(mc_motifs_abs)
-                mc["OLD_posbase_entropy_ratio_2"] = utils_motif.calculate_posbase_entropy_ratio_old_2(mc_motifs_abs)
+            case "weighted_position_entropy":
                 mc["weighted_position_entropy"] = utils_motif.calculate_weighted_position_entropy(mc_motifs_abs)
-                mc["posbase_entropy_ratio_5"] = utils_motif.TEST_calculate_position_over_base_entropy_5(mc_motifs_abs)
+            case "posbase_entropy_ratio":
+                mc["posbase_entropy_ratio"] = utils_motif.calculate_position_versus_base_entropy(mc_motifs_abs)
             case "copair_entropy_ratio":
-                # mc["copair_entropy_1"] = (
-                #     utils_motif.calculate_copair_entropy(mc_motifs_abs)
-                # )
-                # mc["copair_entropy_2"] = (
-                #     utils_motif.calculate_copair_entropy_2(mc_motifs_abs)
-                # )
-                # mc["copair_entropy_3"] = (
-                #     utils_motif.calculate_copair_entropy_3(mc_motifs_abs)
-                # )
-                # mc["OLD_copair_entropy_ratio"] = (
-                #     utils_motif.calculate_copair_entropy_ratio_old(mc_motifs_abs)
-                # )
-                # mc["OLD_copair_entropy_ratio_2"] = (
-                #     utils_motif.calculate_copair_entropy_ratio_old2(mc_motifs_abs)
-                # )
                 mc["copair_entropy"] = utils_motif.calculate_copair_entropy(mc_motifs_abs)
-                mc["OLD_copair_entropy_ratio"] = utils_motif.calculate_copair_entropy_ratio_old(mc_motifs_abs)
-                mc["OLD_copair_entropy_ratio_2"] = utils_motif.calculate_copair_entropy_ratio_old2(mc_motifs_abs)
+            case "copair_composition":
                 mc["copair_composition"] = utils_motif.calculate_copair_composition(mc_motifs_abs)
-                mc["copair_entropy_3"] = utils_motif.TEST_calculate_copair_entropy_3(mc_motifs_abs)
             case "dinuc_entropy_ratio":
-                # mc["dinuc_entropy_ratio"] = (
-                #     utils_motif.calculate_dinuc_score(mc_motifs_abs)
-                # )
-                # mc["dinuc_entropy_ratio_2"] = (
-                #     utils_motif.calculate_dinuc_score_2(mc_motifs_abs)
-                # )
-                # mc["dinuc_entropy_ratio_3"] = (
-                #     utils_motif.calculate_dinuc_score_3(mc_motifs_abs)
-                # )
-                # mc["dinuc_entropy_ratio_4"] = (
-                #     utils_motif.calculate_dinuc_score_4(mc_motifs_abs)
-                # )
-                # mc["dinuc_entropy_ratio_5"] = (
-                #     utils_motif.calculate_dinuc_score_5(mc_motifs_abs)
-                # )
-                # mc["trinuc_entropy_ratio"] = (
-                #     utils_motif.calculate_trinuc_score(mc_motifs_abs)
-                # )
-                # mc["OLD_dinuc_entropy_ratio"] = (
-                #     utils_motif.calculate_dinuc_entropy_ratio_old(mc_motifs_abs)
-                # )
-                # mc["OLD_dinuc_entropy_ratio_2"] = (
-                #     utils_motif.calculate_dinuc_entropy_ratio_old2(mc_motifs_abs)
-                # )
-                mc["dinuc_entropy"] = utils_motif.calculate_dinucleotide_entropy(mc_motifs_abs)
-                mc["OLD_dinuc_entropy_ratio"] = utils_motif.calculate_dinuc_entropy_ratio_old(mc_motifs_abs)
-                mc["OLD_dinuc_entropy_ratio_2"] = utils_motif.calculate_dinuc_entropy_ratio_old2(mc_motifs_abs)
+                mc["dinuc_entropy_ratio"] = utils_motif.calculate_dinucleotide_entropy(mc_motifs_abs)
+            case "dinuc_composition":
                 mc["dinuc_composition"] = utils_motif.calculate_dinucleotide_alternating_composition(mc_motifs_abs)
-                mc["dinuc_entropy_ratio"] = utils_motif.TEST_calculate_dinuc_score(mc_motifs_abs)
+            case "dinuc_score":
                 mc["dinucleotide_score"] = utils_motif.calculate_dinucleotide_score(mc_motifs_abs)
-                mc["dinuc_entropy_ratio_5"] = utils_motif.TEST_calculate_dinuc_score_5(mc_motifs_abs)
             case "posneg_inverted":
                 mc["posneg_inverted"] = (
                     utils_motif.motif_posneg_max(mc_motifs)
@@ -642,6 +561,8 @@ def calculate_filters(
             case "truncated":
                 max_pos = mc_motifs.sum(axis=-1).argmax(axis=-1) # (N,)
                 mc["truncated"] = (max_pos < 2) | (max_pos > mc_motifs.shape[1] - 3)
+            case _:
+                raise ValueError(f"Filter metric {filter_metric} is not implemented.")
 
 
 ###########################
