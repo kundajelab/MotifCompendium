@@ -1,6 +1,7 @@
 from __future__ import annotations
 from collections import defaultdict
 import os
+import warnings
 
 from bs4 import BeautifulSoup
 import h5py
@@ -298,8 +299,9 @@ def build_from_pfm(
     Loads motifs from all PFM files, in PFM or MEME format, then passes them to build().
 
     Args:
-        pfm_files: A list, or a single PFM file path, in PFM or MEME txt format.
-        ic: Whether or not to apply information content scaling to Modisco motifs.
+        pfm_files: A path or list of paths to files containing PFM information, all in
+          PFM or MEME text formats.
+        ic: Whether or not to apply information content scaling to the PFMs.
         safe: Whether or not to construct the MotifCompendium safely.
 
     Returns:
@@ -313,6 +315,10 @@ def build_from_pfm(
     # Check inputs
     if isinstance(pfm_files, str):
         pfm_files = [pfm_files]
+    if not (
+        isinstance(pfm_files, list) and all([isinstance(x, str) for x in pfm_files])
+    ):
+        raise TypeError("pfm_files must be a list of strings or a single string.")
     # Load motifs
     motifs = []
     motif_names = []
@@ -323,22 +329,28 @@ def build_from_pfm(
         elif "pfm" in pfm_file:
             motif, motif_name = utils_loader.load_pfm(pfm_file)
         else:
-            print(f" Assuming PFM file format for: {pfm_file}")
+            warnings.warn(
+                f"File {pfm_file} does not have a recognized format. Assuming PFM file format."
+            )
             motif, motif_name = utils_loader.load_pfm(pfm_file)
         if ic:
             motif = utils_motif.ic_scale(motif)
         motifs.append(motif)
         motif_names.append(motif_name)
-        file_names.append(os.path.basename(pfm_file).split(".")[:-1])
+        base_file_name = os.path.basename(pfm_file)
+        file_names.append(base_file_name[: base_file_name.rfind(".")])
+    # Motifs
     motifs = np.stack(motifs, axis=0)
+    # Convert motifs to normalized 8-channel motifs
+    motifs = utils_motif.motif_4_to_8(motifs)
+    motifs /= np.sum(motifs, axis=(1, 2), keepdims=True)
+    # Metadata
     posneg = utils_motif.motif_posneg_sum(motifs)
-    num_motifs = [1] * len(motif_names)
     metadata = pd.DataFrame(
         {
             "name": motif_names,
             "posneg": posneg,
-            "num_motifs": num_motifs,
-            "model": file_names,
+            "source_file": file_names,
         }
     )
     return build(
