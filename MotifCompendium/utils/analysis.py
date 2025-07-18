@@ -377,12 +377,18 @@ def export_clusters_modisco(
                     for j in range(len(mc_i)):
                         subpattern_name = f"{subpattern_names_i[j]}_{j}"
                         if "/" in subpattern_name:
-                            raise ValueError("Motif names cannot have slashes (/) in them!")
-                        pos_pattern_subpattern = pos_pattern.create_group(subpattern_name)
+                            raise ValueError(
+                                "Motif names cannot have slashes (/) in them!"
+                            )
+                        pos_pattern_subpattern = pos_pattern.create_group(
+                            subpattern_name
+                        )
                         motif = motifs_i[j]
                         if inverse_ic:
                             motif = utils_motif.ic_scale(motif, invert=True)
-                        pos_pattern_subpattern.create_dataset("contrib_scores", data=motif)
+                        pos_pattern_subpattern.create_dataset(
+                            "contrib_scores", data=motif
+                        )
         # Negative
         if "neg" in pos_neg:
             neg_group = f.create_group("neg_patterns")
@@ -406,12 +412,18 @@ def export_clusters_modisco(
                     for j in range(len(mc_i)):
                         subpattern_name = f"{subpattern_names_i[j]}_{j}"
                         if "/" in subpattern_name:
-                            raise ValueError("Motif names cannot have slashes (/) in them!")
-                        neg_pattern_subpattern = neg_pattern.create_group(subpattern_name)
+                            raise ValueError(
+                                "Motif names cannot have slashes (/) in them!"
+                            )
+                        neg_pattern_subpattern = neg_pattern.create_group(
+                            subpattern_name
+                        )
                         motif = motifs_i[j]
                         if inverse_ic:
                             motif = utils_motif.ic_scale(motif, invert=True)
-                        neg_pattern_subpattern.create_dataset("contrib_scores", data=motif)
+                        neg_pattern_subpattern.create_dataset(
+                            "contrib_scores", data=motif
+                        )
 
 
 def export_full_compendium_meme(
@@ -434,7 +446,7 @@ def export_full_compendium_meme(
           scaling. If you built your MotifCompendium from Modisco motifs and did not
           explicitly turn off IC scaling, then your motifs were IC scaled and you may
           want to perform inverse IC scaling before exporting them.
-    
+
     Notes:
         Assumes that there is a "num_seqlets" column in the MotifCompendium.
     """
@@ -453,13 +465,15 @@ def export_full_compendium_meme(
             name = motif_names[i]
             motif = motifs[i]
             # Remove empty flanks
-            motif = utils_motif.trim_motif(motif, 0) # Remove zero flanks
+            motif = utils_motif.trim_motif(motif, 0)  # Remove zero flanks
             # Inverse IC scaling
             if inverse_ic:
                 motif = utils_motif.ic_scale(motif, invert=True)
             # Write motif
             f.write(f"\nMOTIF {name}\n")
-            f.write(f"letter-probability matrix: alength= {motif.shape[1]} w= {motif.shape[0]} nsites= {num_seqlets[i]} E= 0\n")
+            f.write(
+                f"letter-probability matrix: alength= {motif.shape[1]} w= {motif.shape[0]} nsites= {num_seqlets[i]} E= 0\n"
+            )
             for j in range(motif.shape[0]):
                 f.write(" ".join([f"{x:.6f}" for x in motif[j, :]]) + "\n")
 
@@ -478,7 +492,7 @@ def calculate_filters(
         "copair_composition",
         "dinuc_entropy_ratio",
         "dinuc_composition",
-        "dinuc_score"
+        "dinuc_score",
     ],
 ) -> None:
     """Calculates filter metrics and stores them in the MotifCompendium metadata.
@@ -487,7 +501,7 @@ def calculate_filters(
       stores the values in the metadata table of the MotifCompendium. The filters are
       intended to be used for filtering out low quality motifs. The filters can only be
       chosen from a predefined list of metrics.
-    
+
     Args:
         mc: The MotifCompendium to compute motif filters for.
         metric_list: A list of filter metrics to calculated. Metrics must be one of:
@@ -541,30 +555,49 @@ def calculate_filters(
     for filter_metric in metric_list:
         match filter_metric:
             case "motif_entropy":
-                mc["motif_entropy"] = utils_motif.calculate_full_motif_entropy(mc_motifs_abs)
+                mc["motif_entropy"] = utils_motif.calculate_full_motif_entropy(
+                    mc_motifs_abs
+                )
             case "weighted_base_entropy":
-                mc["weighted_base_entropy"] = utils_motif.calculate_weighted_base_entropy(mc_motifs_abs)
+                mc["weighted_base_entropy"] = (
+                    utils_motif.calculate_weighted_base_entropy(mc_motifs_abs)
+                )
             case "weighted_position_entropy":
-                mc["weighted_position_entropy"] = utils_motif.calculate_weighted_position_entropy(mc_motifs_abs)
+                mc["weighted_position_entropy"] = (
+                    utils_motif.calculate_weighted_position_entropy(mc_motifs_abs)
+                )
             case "posbase_entropy_ratio":
-                mc["posbase_entropy_ratio"] = utils_motif.calculate_position_versus_base_entropy(mc_motifs_abs)
+                mc["posbase_entropy_ratio"] = (
+                    utils_motif.calculate_position_versus_base_entropy(mc_motifs_abs)
+                )
             case "copair_entropy_ratio":
-                mc["copair_entropy"] = utils_motif.calculate_copair_entropy(mc_motifs_abs)
+                mc["copair_entropy"] = utils_motif.calculate_copair_entropy(
+                    mc_motifs_abs
+                )
             case "copair_composition":
-                mc["copair_composition"] = utils_motif.calculate_copair_composition(mc_motifs_abs)
+                mc["copair_composition"] = utils_motif.calculate_copair_composition(
+                    mc_motifs_abs
+                )
             case "dinuc_entropy_ratio":
-                mc["dinuc_entropy_ratio"] = utils_motif.calculate_dinucleotide_entropy(mc_motifs_abs)
+                mc["dinuc_entropy_ratio"] = utils_motif.calculate_dinucleotide_entropy(
+                    mc_motifs_abs
+                )
             case "dinuc_composition":
-                mc["dinuc_composition"] = utils_motif.calculate_dinucleotide_alternating_composition(mc_motifs_abs)
+                mc["dinuc_composition"] = (
+                    utils_motif.calculate_dinucleotide_alternating_composition(
+                        mc_motifs_abs
+                    )
+                )
             case "dinuc_score":
-                mc["dinucleotide_score"] = utils_motif.calculate_dinucleotide_score(mc_motifs_abs)
+                mc["dinucleotide_score"] = utils_motif.calculate_dinucleotide_score(
+                    mc_motifs_abs
+                )
             case "posneg_inverted":
                 mc["posneg_inverted"] = (
-                    utils_motif.motif_posneg_max(mc_motifs)
-                    != mc["posneg"]
+                    utils_motif.motif_posneg_max(mc_motifs) != mc["posneg"]
                 )
             case "truncated":
-                max_pos = mc_motifs.sum(axis=-1).argmax(axis=-1) # (N,)
+                max_pos = mc_motifs.sum(axis=-1).argmax(axis=-1)  # (N,)
                 mc["truncated"] = (max_pos < 2) | (max_pos > mc_motifs.shape[1] - 3)
             case _:
                 raise ValueError(f"Filter metric {filter_metric} is not implemented.")

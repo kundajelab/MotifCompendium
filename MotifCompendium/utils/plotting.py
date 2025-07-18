@@ -86,9 +86,7 @@ class LogoPlottingInput:
         self.xmin = 0
         self.xmax = motif.shape[0] - 1
         if trim not in ["notrim", "zerotrim", "trim"]:
-            raise ValueError(
-                "trim must be one of 'notrim', 'zerotrim', or 'trim'."
-            )
+            raise ValueError("trim must be one of 'notrim', 'zerotrim', or 'trim'.")
         self.trim = trim
         self.name = name
         # Plot options

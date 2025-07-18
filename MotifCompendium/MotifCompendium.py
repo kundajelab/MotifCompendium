@@ -255,9 +255,19 @@ def build_from_modisco(
           large objects.
     """
     # Load from Modisco
-    motifs, motif_names, seqlet_counts, model_names, posnegs, avgdist_summits, avg_contribs = (
-        utils_loader.load_modiscos(modisco_dict,
-            load_subpatterns=load_subpatterns, modisco_region_width=modisco_region_width, ic=ic)
+    (
+        motifs,
+        motif_names,
+        seqlet_counts,
+        model_names,
+        posnegs,
+        avgdist_summits,
+        avg_contribs,
+    ) = utils_loader.load_modiscos(
+        modisco_dict,
+        load_subpatterns=load_subpatterns,
+        modisco_region_width=modisco_region_width,
+        ic=ic,
     )
     # Convert motifs to normalized 8-channel motifs
     motifs = utils_motif.motif_4_to_8(motifs)
@@ -308,9 +318,9 @@ def build_from_pfm(
     motif_names = []
     file_names = []
     for pfm_file in pfm_files:
-        if 'meme' in pfm_file:
+        if "meme" in pfm_file:
             motif, motif_name = utils_loader.load_meme(pfm_file)
-        elif 'pfm' in pfm_file:
+        elif "pfm" in pfm_file:
             motif, motif_name = utils_loader.load_pfm(pfm_file)
         else:
             print(f" Assuming PFM file format for: {pfm_file}")
@@ -323,12 +333,14 @@ def build_from_pfm(
     motifs = np.stack(motifs, axis=0)
     posneg = utils_motif.motif_posneg_sum(motifs)
     num_motifs = [1] * len(motif_names)
-    metadata = pd.DataFrame({
-        'name': motif_names,
-        'posneg': posneg,
-        'num_motifs': num_motifs,
-        'model': file_names,
-    })
+    metadata = pd.DataFrame(
+        {
+            "name": motif_names,
+            "posneg": posneg,
+            "num_motifs": num_motifs,
+            "model": file_names,
+        }
+    )
     return build(
         motifs=motifs,
         metadata=metadata,
@@ -714,7 +726,9 @@ class MotifCompendium:
             raise KeyError(f"{image_name} is not a saved image.")
         return self.__images[image_name].tolist()
 
-    def add_logos(self, motifs: np.ndarray, image_name: str, trim: str = "trim") -> None:
+    def add_logos(
+        self, motifs: np.ndarray, image_name: str, trim: str = "trim"
+    ) -> None:
         """Saves logos of the provided motifs as saved images.
 
         Args:
@@ -1114,7 +1128,9 @@ class MotifCompendium:
                 row["source_cluster"]: row["cluster"]
                 for _, row in mc_average.metadata.iterrows()
             }
-            self.metadata[save_name] = [cluster_map[c] for c in self.metadata[cluster_on]]
+            self.metadata[save_name] = [
+                cluster_map[c] for c in self.metadata[cluster_on]
+            ]
         # Cluster within+on
         elif (
             (cluster_within is None)
@@ -1195,7 +1211,10 @@ class MotifCompendium:
         # Sort clusters by number of constituents
         if largest_clusters_first:
             sorted_clusters = self.metadata[save_name].value_counts().index.tolist()
-            cluster_map = {old_cluster: new_cluster for new_cluster, old_cluster in enumerate(sorted_clusters)}
+            cluster_map = {
+                old_cluster: new_cluster
+                for new_cluster, old_cluster in enumerate(sorted_clusters)
+            }
             self.metadata[save_name] = self.metadata[save_name].map(cluster_map)
 
     def clustering_quality(
@@ -1476,7 +1495,7 @@ class MotifCompendium:
             # Aggregations
             for agg_dict in aggregations_dicts:
                 agg_c_data = self.metadata.loc[c_idxs, agg_dict["source"]]
-                agg_c_data = agg_c_data.dropna() # Remove NaNs
+                agg_c_data = agg_c_data.dropna()  # Remove NaNs
                 match agg_dict["method"]:
                     case "count":
                         agg_dict["values"].append(len(agg_c_data))
@@ -1535,7 +1554,7 @@ class MotifCompendium:
                     ]
                 ),
                 "best_match_cluster",
-                "trim"
+                "trim",
             )
             # Actual quality
             quality_df = self.clustering_quality(clustering, with_stats=True)
@@ -1550,12 +1569,12 @@ class MotifCompendium:
             mc_avg.add_logos(
                 np.stack(quality_df["lowest_internal_similarity_motif1_motif"]),
                 "lowest_internal_similarity_motif1",
-                "trim"
+                "trim",
             )
             mc_avg.add_logos(
                 np.stack(quality_df["lowest_internal_similarity_motif2_motif"]),
                 "lowest_internal_similarity_motif2",
-                "trim"
+                "trim",
             )
             mc_avg["highest_external_similarity"] = [
                 f"{x:.3} ({y}: {z})"
@@ -1588,7 +1607,7 @@ class MotifCompendium:
                     ]
                 ),
                 "highest_external_similarity_cluster",
-                "trim"
+                "trim",
             )
             mc_avg.add_logos(
                 np.stack(
@@ -1601,7 +1620,7 @@ class MotifCompendium:
                     ]
                 ),
                 "highest_external_similarity_motif",
-                "trim"
+                "trim",
             )
         return mc_avg
 
@@ -1649,7 +1668,9 @@ class MotifCompendium:
             else self.motifs
         )
         # Group motifs
-        motif_groups = dict()  # group name --> {motif name --> list of LogoPlottingInput}
+        motif_groups = (
+            dict()
+        )  # group name --> {motif name --> list of LogoPlottingInput}
         group_seeds = dict()  # group name --> index of seed motif in group
         group_xmin_xmax = dict()  # group name --> group name --> (xmin, xmax) for group
         for i, x in enumerate(groups):
@@ -1738,7 +1759,7 @@ class MotifCompendium:
             self.add_logos(
                 utils_motif.reverse_complement(self.get_standard_motif_stack()),
                 "logo (rev)",
-                "trim"
+                "trim",
             )
         # Build table
         columns = ["logo (fwd)", "logo (rev)"] + columns
@@ -1850,7 +1871,10 @@ class MotifCompendium:
               mc[mc["cluster"] == "cluster_1"].heatmap().
         """
         if similarity_threshold is not None:
-            if not (isinstance(similarity_threshold, float) and 0 <= similarity_threshold <= 1):
+            if not (
+                isinstance(similarity_threshold, float)
+                and 0 <= similarity_threshold <= 1
+            ):
                 raise ValueError(
                     "similarity_threshold must be a float between 0 and 1."
                 )
@@ -1995,7 +2019,9 @@ class MotifCompendium:
             match_idxs.append(match_idx)
         # Save match information
         for i in range(max_submotifs):
-            self.metadata[f"{save_col_prefix}_score{i}"] = match_scores[i]  # Save scores
+            self.metadata[f"{save_col_prefix}_score{i}"] = match_scores[
+                i
+            ]  # Save scores
             self.metadata[f"{save_col_prefix}_name{i}"] = match_labels[i]  # Save labels
             # Save logos, matches only
             if save_images:
@@ -2003,11 +2029,14 @@ class MotifCompendium:
                 match_idx = np.where(match_idxs[i] >= 0)[0]
                 if utf8_images is None:
                     # Generate forward logos if not provided
-                    self.add_logos(match_motifs[i], f"{save_col_prefix}_logo{i}", "zerotrim")
+                    self.add_logos(
+                        match_motifs[i], f"{save_col_prefix}_logo{i}", "zerotrim"
+                    )
                 else:
                     # Copy forward logos if provided
                     self.__images.loc[match_idx, f"{save_col_prefix}_logo{i}"] = [
-                        utf8_images[x] if x >= 0 else "" for x in match_idxs[i][match_idx]
+                        utf8_images[x] if x >= 0 else ""
+                        for x in match_idxs[i][match_idx]
                     ]
 
     def assign_label_from_other(

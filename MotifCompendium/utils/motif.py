@@ -146,7 +146,7 @@ def motif4_to_copair6(x: np.ndarray) -> np.ndarray:
         raise ValueError("Input motif(s) must have 4 channels.")
     x_cross = x[:, :, :, np.newaxis] @ x[:, :, np.newaxis, :]  # (N, L, 4, 4)
     x_copair = x_cross[:, :, _MOTIF_4_TO_COPAIR6_MASK]  # (N, L, 6)
-    return 4*x_copair # Renormalize because max value is 0.25
+    return 4 * x_copair  # Renormalize because max value is 0.25
 
 
 def align_motifs(
@@ -209,9 +209,7 @@ def pad_motif(motif: np.ndarray, pad_to: int) -> np.ndarray:
         raise ValueError("pad_to must be a positive integer.")
     N, L, K = motif.shape
     if L > pad_to:
-        raise ValueError(
-            f"Cannot pad motif of length {L} to {pad_to}."
-        )
+        raise ValueError(f"Cannot pad motif of length {L} to {pad_to}.")
     padded_motif = np.zeros((N, pad_to, K))
     padded_motif[:, 0:L, :] = motif
     return padded_motif
@@ -253,7 +251,7 @@ def resize_motif(motif: np.ndarray, resize_to: int) -> np.ndarray:
 
 def trim_motif(motif: np.ndarray, importance: float = 1 / 30):
     """Trim a motif by removing flanking low-importance positions.
-    
+
     Find the leftmost and rightmost positions in the motif that have a percentage
       importance greater than the importance threshold. Return a trimmed motif that only
       includes the positions between those two positions, inclusive. The returned motif
@@ -271,7 +269,7 @@ def trim_motif(motif: np.ndarray, importance: float = 1 / 30):
         raise ValueError("importance must be a number in [0, 1].")
     motif_abs = np.abs(motif)
     per_position_totals = np.sum(motif_abs, axis=1)
-    included_positions = per_position_totals > importance*np.sum(per_position_totals)
+    included_positions = per_position_totals > importance * np.sum(per_position_totals)
     if np.sum(included_positions) == 0:
         return None
     min_index = np.argmax(included_positions)
@@ -416,10 +414,20 @@ def motif_to_string(
         raise ValueError("importance must be a number in [0, 1].")
     # Turns to 1s and 0s
     per_position_totals = np.sum(x, axis=2, keepdims=True)
-    meets_specificity = np.divide(x, per_position_totals, out=np.zeros_like(x), where=(per_position_totals != 0)) >= specificity
+    meets_specificity = (
+        np.divide(
+            x,
+            per_position_totals,
+            out=np.zeros_like(x),
+            where=(per_position_totals != 0),
+        )
+        >= specificity
+    )
     meets_importance = per_position_totals >= importance
     motif_to_str = meets_specificity * meets_importance
-    assert (np.sum(motif_to_str, axis=2) <= 1).all() # Ensure only one base per position
+    assert (
+        np.sum(motif_to_str, axis=2) <= 1
+    ).all()  # Ensure only one base per position
     # Make strings
     str_revstr = []
     base_map = np.array(["A", "C", "G", "T"])
@@ -545,7 +553,7 @@ def remove_motif_component(
     remove_motifs_aligned = view_motif_from_position_range(
         remove_motifs_aligned,
         min_h,
-        max_h+remove_motifs.shape[1]-1,
+        max_h + remove_motifs.shape[1] - 1,
         0,
         remove_motifs.shape[1] - 1,
     )
@@ -567,9 +575,14 @@ def remove_motif_component(
 ########################
 import inspect
 
+
 def minusxlogx(x: np.ndarray, base: int) -> np.ndarray:
     """Compute -x*logb(x) with support in x >= 0."""
-    return (x * np.log2(x, where=(x > 0), out=np.zeros_like(x, dtype=x.dtype)))/-np.log2(base) # Minus at end for efficiency
+    return (
+        x * np.log2(x, where=(x > 0), out=np.zeros_like(x, dtype=x.dtype))
+    ) / -np.log2(
+        base
+    )  # Minus at end for efficiency
 
 
 def normalized_last_axis_entropy(x: np.ndarray) -> np.ndarray:
@@ -600,9 +613,9 @@ def ic_scale(x: np.ndarray, invert: bool = False) -> float | np.ndarray:
           And if all bases are present and represented equally, the weights will for all
           bases at that position will be set to 0.
     """
-    validate_motif_stack_standard(x) # (N, L, 4)
+    validate_motif_stack_standard(x)  # (N, L, 4)
     x_abs = np.abs(x)
-    entropy = normalized_last_axis_entropy(x_abs) # (N, L, 1)
+    entropy = normalized_last_axis_entropy(x_abs)  # (N, L, 1)
     ic = 1 - entropy
     if invert:
         scaled = np.divide(x, ic, out=np.zeros_like(x, dtype=x.dtype), where=(ic != 0))
@@ -617,14 +630,14 @@ def calculate_full_motif_entropy(x: np.ndarray) -> float | np.ndarray:
 
     Computes the full motif entropy of a motif or motif stack. The full motif entropy
       is computed as an entropy across all L*K dimensions of (L, K) motifs.
-    
+
     Args:
         x: A non-negative, normalized (L, 4) motif or (N, L, 4) motif stack.
 
     Returns:
         The full motif entropy as a float for a single motif or an array of floats for a
           motif stack. The values are bounded in [0, 1].
-    
+
     Notes:
         When the entropy is too low, the motif is likely a single nucleotide motif and
           you may want to filter it out. You will need to tune the threshold for
@@ -654,7 +667,7 @@ def calculate_weighted_base_entropy(x: np.ndarray) -> float | np.ndarray:
     Returns:
         The weighted base entropy as a float for a single motif or an array of floats
           for a motif stack. The values are bounded in [0, 1].
-    
+
     Notes:
         When the entropy is too high, the motif is likely noise and you may want to
           filter it out. You will need to tune the threshold for identifying these high
@@ -663,7 +676,7 @@ def calculate_weighted_base_entropy(x: np.ndarray) -> float | np.ndarray:
     """
     validate_motif_stack_entropy(x)
     across_base_entropy = normalized_last_axis_entropy(x)  # (N, L, 1)
-    position_importance = np.sum(x, axis=2, keepdims=True) # (N, L, 1)
+    position_importance = np.sum(x, axis=2, keepdims=True)  # (N, L, 1)
     return np.sum(across_base_entropy * position_importance, axis=(1, 2))  # (N, )
 
 
@@ -681,7 +694,7 @@ def calculate_weighted_position_entropy(x: np.ndarray) -> float | np.ndarray:
     Returns:
         The weighted position entropy as a float for a single motif or an array of
           floats for a motif stack. The values are bounded in [0, 1].
-    
+
     Notes:
         When the entropy is too high, the motif is a broad, noisy motif, and you may
           want to filter it out. You will need to tune the threshold for identifying
@@ -689,8 +702,11 @@ def calculate_weighted_position_entropy(x: np.ndarray) -> float | np.ndarray:
           start with a threshold of > 0.71.
     """
     validate_motif_stack_entropy(x)
-    across_position_entropy = np.stack([normalized_last_axis_entropy(x[:, :, i]).squeeze() for i in range(x.shape[2])], axis=1)  # (N, 4)
-    base_importance = np.sum(x, axis=1) # (N, 4)
+    across_position_entropy = np.stack(
+        [normalized_last_axis_entropy(x[:, :, i]).squeeze() for i in range(x.shape[2])],
+        axis=1,
+    )  # (N, 4)
+    base_importance = np.sum(x, axis=1)  # (N, 4)
     return np.sum(across_position_entropy * base_importance, axis=1)  # (N, )
 
 
@@ -702,14 +718,14 @@ def calculate_position_versus_base_entropy(x: np.ndarray) -> float | np.ndarray:
       all bases at each position. Then, computes the across-base entropy of each motif
       by summing the importance across all positions for each base. Then, computes the
       combined score of across-position entropy * (1 - across-base entropy).
-    
+
     Args:
         x: A non-negative, normalized (L, 4) motif or (N, L, 4) motif stack.
-    
+
     Returns:
         The position versus base entropy ratio as a float for a single motif or an array
           of floats for a motif stack. The values are bounded in [0, 1].
-    
+
     Notes:
         When the entropy is too high, the motif is a broad, noisy motif, and you may
           want to filter it out. You will need to tune the threshold for identifying
@@ -717,8 +733,12 @@ def calculate_position_versus_base_entropy(x: np.ndarray) -> float | np.ndarray:
           start with a threshold of > 0.45.
     """
     validate_motif_stack_entropy(x)
-    across_position_entropy = normalized_last_axis_entropy(np.sum(x, axis=2)).squeeze()  # (N, )
-    across_base_entropy = normalized_last_axis_entropy(np.sum(x, axis=1)).squeeze()  # (N, )
+    across_position_entropy = normalized_last_axis_entropy(
+        np.sum(x, axis=2)
+    ).squeeze()  # (N, )
+    across_base_entropy = normalized_last_axis_entropy(
+        np.sum(x, axis=1)
+    ).squeeze()  # (N, )
     return across_position_entropy * (1 - across_base_entropy)
 
 
@@ -734,11 +754,11 @@ def calculate_copair_entropy(x: np.ndarray) -> float | np.ndarray:
 
     Args:
         x: A non-negative, normalized (L, 4) motif or (N, L, 4) motif stack.
-    
+
     Returns:
         The copair entropy as a float for a single motif or an array of floats for a
           motif stack. The values are bounded in [0, 1].
-    
+
     Notes:
         When the entropy is too high, the motif is likely noise and you may want to
           filter it out. You will need to tune the threshold for identifying these high
@@ -749,11 +769,15 @@ def calculate_copair_entropy(x: np.ndarray) -> float | np.ndarray:
     # Calculate copair
     x_cross = x[:, :, :, np.newaxis] @ x[:, :, np.newaxis, :]  # (N, L, 4, 4)
     copair_mask = np.triu(np.ones(x.shape[2]), k=1).astype(np.bool_)
-    copair = x_cross[:, :, copair_mask] # (N, L, 6)
+    copair = x_cross[:, :, copair_mask]  # (N, L, 6)
     copair /= np.sum(copair, axis=(1, 2), keepdims=True)  # Normalize copair
     # across-position entropy * (1 - across-base entropy) for copair
-    across_position_entropy = normalized_last_axis_entropy(np.sum(copair, axis=2)).squeeze()  # (N, )
-    across_base_entropy = normalized_last_axis_entropy(np.sum(copair, axis=1)).squeeze()  # (N, )
+    across_position_entropy = normalized_last_axis_entropy(
+        np.sum(copair, axis=2)
+    ).squeeze()  # (N, )
+    across_base_entropy = normalized_last_axis_entropy(
+        np.sum(copair, axis=1)
+    ).squeeze()  # (N, )
     return across_position_entropy * (1 - across_base_entropy)
 
 
@@ -765,14 +789,14 @@ def calculate_copair_composition(x: np.ndarray) -> float | np.ndarray:
       of bases. This is done by computing the copair score at each position for a given
       copair, which is 2 * min(base1, base2) at that position. Then, the max copair
       score at each position is computed and summed across the length of the motif.
-    
+
     Args:
         x: A non-negative, normalized (L, 4) motif or (N, L, 4) motif stack.
-    
+
     Returns:
         The copair entropy as a float for a single motif or an array of floats for a
           motif stack. The values are bounded in [0, 1].
-    
+
     Notes:
         When the composition is too high, the motif is likely noise, and you may want to
           filter it out. You will need to tune the threshold for identifying these high
@@ -782,15 +806,15 @@ def calculate_copair_composition(x: np.ndarray) -> float | np.ndarray:
     validate_motif_stack_entropy(x)
     # Calculate copair
     N, L, K = x.shape
-    num_copairs = K*(K - 1) // 2  # Number of unique copairs for K bases
+    num_copairs = K * (K - 1) // 2  # Number of unique copairs for K bases
     copair_scores = np.zeros((N, L, num_copairs), dtype=x.dtype)  # (N, L, 6)
     idx = 0
     for i in range(K):
         for j in range(i + 1, K):
-            copair_scores[:, :, idx] = 2*np.minimum(x[:, :, i], x[:, :, j])
+            copair_scores[:, :, idx] = 2 * np.minimum(x[:, :, i], x[:, :, j])
             idx += 1
     # Overall copair composition
-    return np.sum(np.max(copair_scores, axis=2), axis=1) # (N, )
+    return np.sum(np.max(copair_scores, axis=2), axis=1)  # (N, )
 
 
 @single_or_many_motifs
@@ -806,11 +830,11 @@ def calculate_dinucleotide_entropy(x: np.ndarray) -> float | np.ndarray:
 
     Args:
         x: A non-negative, normalized (L, 4) motif or (N, L, 4) motif stack.
-    
+
     Returns:
         The dinucleotide entropy as a float for a single motif or an array of floats for
           a motif stack. The values are bounded in [0, 1].
-    
+
     Notes:
         When the entropy is too high, the motif is likely a repeat or GC content, and
           you may want to filter it out. You will need to tune the threshold for
@@ -824,13 +848,23 @@ def calculate_dinucleotide_entropy(x: np.ndarray) -> float | np.ndarray:
     odd_idxs = np.arange(1, L, 2)
     x_even = x[:, even_idxs, :]  # (N, L/2, 4)
     x_odd = x[:, odd_idxs, :]  # (N, L/2, 4)
-    x_even = x_even[:, :x_odd.shape[1], :]  # Ensure even and odd lengths match
-    dinucleotide = x_even[:, :, :, np.newaxis] @ x_odd[:, :, np.newaxis, :]  # (N, L/2, 4, 4)
-    dinucleotide = np.reshape(dinucleotide, (dinucleotide.shape[0], dinucleotide.shape[1], -1))  # (N, L/2, 16)
-    dinucleotide /= np.sum(dinucleotide, axis=(1, 2), keepdims=True)  # Normalize dinucleotide
+    x_even = x_even[:, : x_odd.shape[1], :]  # Ensure even and odd lengths match
+    dinucleotide = (
+        x_even[:, :, :, np.newaxis] @ x_odd[:, :, np.newaxis, :]
+    )  # (N, L/2, 4, 4)
+    dinucleotide = np.reshape(
+        dinucleotide, (dinucleotide.shape[0], dinucleotide.shape[1], -1)
+    )  # (N, L/2, 16)
+    dinucleotide /= np.sum(
+        dinucleotide, axis=(1, 2), keepdims=True
+    )  # Normalize dinucleotide
     # across-position entropy * (1 - across-base entropy) for dinucleotide
-    across_position_entropy = normalized_last_axis_entropy(np.sum(dinucleotide, axis=2)).squeeze()  # (N, )
-    across_base_entropy = normalized_last_axis_entropy(np.sum(dinucleotide, axis=1)).squeeze()  # (N, )
+    across_position_entropy = normalized_last_axis_entropy(
+        np.sum(dinucleotide, axis=2)
+    ).squeeze()  # (N, )
+    across_base_entropy = normalized_last_axis_entropy(
+        np.sum(dinucleotide, axis=1)
+    ).squeeze()  # (N, )
     return across_position_entropy * (1 - across_base_entropy)
 
 
@@ -843,14 +877,14 @@ def calculate_dinucleotide_alternating_composition(x: np.ndarray) -> float | np.
       pair of positions, which is the sum of contributions by both bases. Then, the
       highest total importance across all possible non-repeating dinucleotides is
       returned.
-    
+
     Args:
         x: A non-negative, normalized (L, 4) motif or (N, L, 4) motif stack.
-    
+
     Returns:
         The dinucleotide composition as a float for a single motif or an array of floats for
           a motif stack. The values are bounded in [0, 1].
-    
+
     Notes:
         When the composition is too high, the motif is likely a repeat or GC content,
           and you may want to filter it out. You will need to tune the threshold for
@@ -869,12 +903,16 @@ def calculate_dinucleotide_alternating_composition(x: np.ndarray) -> float | np.
     odd_idxs = np.arange(1, L, 2)
     x_even = x[:, even_idxs, :]  # (N, L/2, 4)
     x_odd = x[:, odd_idxs, :]  # (N, L/2, 4)
-    x_even = x_even[:, :x_odd.shape[1], :]  # Ensure even and odd lengths match
+    x_even = x_even[:, : x_odd.shape[1], :]  # Ensure even and odd lengths match
     x_even_bases = np.sum(x_even, axis=1)  # (N, 4)
     x_odd_bases = np.sum(x_odd, axis=1)  # (N, 4)
     # Compute dinucleotide composition
-    dinucleotide_composition = x_even_bases[:, :, np.newaxis] + x_odd_bases[:, np.newaxis, :]  # (N, 4, 4)
-    dinucleotide_composition *= 1 - np.eye(x.shape[2])[np.newaxis, :, :]  # Remove diagonal (self-pairs)
+    dinucleotide_composition = (
+        x_even_bases[:, :, np.newaxis] + x_odd_bases[:, np.newaxis, :]
+    )  # (N, 4, 4)
+    dinucleotide_composition *= (
+        1 - np.eye(x.shape[2])[np.newaxis, :, :]
+    )  # Remove diagonal (self-pairs)
     return np.max(dinucleotide_composition, axis=(1, 2))
 
 
@@ -888,14 +926,14 @@ def calculate_dinucleotide_score(x: np.ndarray) -> float | np.ndarray:
       importance of the other base at the subsequent position. Then, this score is
       summed across the length of the motif. The highest dinucleotide score across all
       possible non-repeating dinucleotides is returned.
-    
+
     Args:
         x: A non-negative, normalized (L, 4) motif or (N, L, 4) motif stack.
-    
+
     Returns:
         The dinucleotide score as a float for a single motif or an array of floats for
           a motif stack. The values are bounded in [0, 1].
-    
+
     Notes:
         When the composition is too high, the motif is likely a repeat or GC content,
           and you may want to filter it out. You will need to tune the threshold for
@@ -911,6 +949,10 @@ def calculate_dinucleotide_score(x: np.ndarray) -> float | np.ndarray:
     # Calculate dinucleotide
     x_0 = x[:, :-1, :]  # (N, L-1, 4)
     x_1 = x[:, 1:, :]  # (N, L-1, 4)
-    dinucleotide_scores = np.sqrt(x_0[:, :, :, np.newaxis] @ x_1[:, :, np.newaxis, :])  # (N, L-1, 4, 4)
-    dinucleotide_scores *= 1 - np.eye(x.shape[2])[np.newaxis, np.newaxis, :, :]  # Remove diagonal (self-pairs)
+    dinucleotide_scores = np.sqrt(
+        x_0[:, :, :, np.newaxis] @ x_1[:, :, np.newaxis, :]
+    )  # (N, L-1, 4, 4)
+    dinucleotide_scores *= (
+        1 - np.eye(x.shape[2])[np.newaxis, np.newaxis, :, :]
+    )  # Remove diagonal (self-pairs)
     return np.max(np.sum(dinucleotide_scores, axis=1), axis=(1, 2))  # (N, )

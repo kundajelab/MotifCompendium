@@ -72,8 +72,7 @@ def cluster(
             return cpm_leiden_clustering(weighted_adjacency_matrix, **kwargs)
         case "leiden" | "leidenalg":
             warnings.warn(
-                "Defaulting Leiden algorithm: Constant Potts model",
-                UserWarning
+                "Defaulting Leiden algorithm: Constant Potts model", UserWarning
             )
             weighted_adjacency_matrix = similarity_matrix * (
                 similarity_matrix >= similarity_threshold
