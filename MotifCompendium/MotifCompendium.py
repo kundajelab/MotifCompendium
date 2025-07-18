@@ -1930,58 +1930,81 @@ class MotifCompendium:
 
     def assign_label_from_motifs(
         self,
-        other_motifs: np.ndarray,
+        reference_motifs: np.ndarray,
         labels: list[str],
+        min_score: float,
+        max_submotifs: int = 1,
+        save_images: bool = True,
+        logo_trimming: str = "trim",
         utf8_images: list[str] | None = None,
         save_col_prefix: str = "match",
-        max_submotifs: int = 1,
-        min_score: float = 0.0,
-        save_images: bool = True,
     ) -> None:
         """
         Assign labels to motifs based on an external set of labeled motifs.
 
-        Given an external set of motifs with labels, compute the closest matching
-          motifs. Composite matching can be enabled by setting max_submotifs > 1. Labels
-          are imported from the labeled motifs. utf8 images can also be imported if
-          provided.
+        Given an external reference set of motifs with labels, for each motif in this
+          MotifCompendium, find the closest match that appears in the reference set. The
+          match score and the label of the best match are saved in the metadata.
+          Optionally, the logos of the matched motifs can be saved as images. These
+          logos can be computed on the fly or passed in as utf8 images if they have been
+          precomputed. Composite matching can be enabled by setting max_submotifs > 1.
 
         Args:
-            other_motifs: A np.ndarray motif stack to compare against. (M, L, 4)
-            labels: A list of labels for each motif in other_motifs.
-            utf8_images: A list of utf8 images for each motif in other_motifs.
-            other_is_positive: Whether or not the other_motifs are positive motifs.
-            save_col_prefix: The prefix to use for the saved columns.
-              Will be saved as f"{save_col_prefix}_{score/name/logo}{i}"
-            max_submotifs: The maximum number of submotifs to consider in a match.
-            min_score: The minimum similarity score to consider as a match.
-            save_images: Whether or not to save the logos of the matched motifs.
+            reference_motifs: A np.ndarray motif stack of shape (M, L, 4) to compare
+              against.
+            labels: A list of labels for each motif in reference_motifs.
+            min_score: The minimum similarity score to consider a match.
+            max_submotifs: The maximum number of submotifs to consider in a match. If
+              max_submotifs = 1, only a single match is given to each motif. If
+              max_submotifs > 1, the best match for each motif can be from a combination
+              of multiple reference motifs.
+            save_images: Whether or not to save the logos of the matched motifs. If
+              True, the logos will appear as a saved image. If False, logos will not be
+              saved as saved images.
+            logo_trimming:  A string indicating how the motifs should be trimmed if
+              logos need to be generated. The options are "notrim" if you don't want
+              trimming, "zerotrim" if you only want to trim the positions with 0
+              importance, and "trim" if you want to perform a standard level of
+              trimming.
+            utf8_images: A list of utf8 images for each motif in reference_motifs. If
+              saved_images is True and utf8_images is None, the logos will be generated
+              on the fly using the trimming option logo_trimming. If saved_images is
+              True and utf8_images is a list of utf8 images, these images will be used
+              as the logos for the matched motifs.
+            save_col_prefix: The prefix to use for the saved columns. All saved columns
+              and saved images generated from the labeling process will begin with
+              save_col_prefix. These columns will have the structure
+              f"{save_col_prefix}_{score/name/logo}{i}".
         """
         # Check arguments
-        utils_motif.validate_motif_stack_similarity(other_motifs)
+        utils_motif.validate_motif_stack_similarity(reference_motifs)
+        if not save_images and utf8_images is not None:
+            raise ValueError("save_images is False but utf8_images is not None.")
         if (utf8_images is not None) and not (
             (isinstance(utf8_images, list))
-            and len(utf8_images) == other_motifs.shape[0]
+            and len(utf8_images) == reference_motifs.shape[0]
         ):
             raise ValueError(
-                "utf8_images must be a list of the same length as other_motifs."
+                "utf8_images must be a list of the same length as reference_motifs."
             )
         my_motifs = self.motifs.copy()
         # Length dimensions: Resize motifs to match length
-        if my_motifs.shape[1] > other_motifs.shape[1]:
-            other_pad = self.motifs.shape[1] - other_motifs.shape[1]
-            other_motifs = np.pad(other_motifs, ((0, 0), (0, other_pad), (0, 0)))
-        elif my_motifs.shape[1] < other_motifs.shape[1]:
-            my_pad = other_motifs.shape[1] - my_motifs.shape[1]
+        if my_motifs.shape[1] > reference_motifs.shape[1]:
+            other_pad = self.motifs.shape[1] - reference_motifs.shape[1]
+            reference_motifs = np.pad(
+                reference_motifs, ((0, 0), (0, other_pad), (0, 0))
+            )
+        elif my_motifs.shape[1] < reference_motifs.shape[1]:
+            my_pad = reference_motifs.shape[1] - my_motifs.shape[1]
             my_motifs = np.pad(my_motifs, ((0, 0), (0, my_pad), (0, 0)))
         # Channel dimensions
-        if my_motifs.shape[2] == 8 and other_motifs.shape[2] == 4:
+        if my_motifs.shape[2] == 8 and reference_motifs.shape[2] == 4:
             my_motifs = utils_motif.motif_8_to_4_unsigned(my_motifs)
-        elif self.motifs.shape[2] == 4 and other_motifs.shape[2] == 8:
-            other_motifs = utils_motif.motif_8_to_4_unsigned(other_motifs)
+        elif self.motifs.shape[2] == 4 and reference_motifs.shape[2] == 8:
+            reference_motifs = utils_motif.motif_8_to_4_unsigned(reference_motifs)
         # L2 normalize once
         my_motifs /= np.linalg.norm(my_motifs, axis=(1, 2), keepdims=True)
-        other_motifs /= np.linalg.norm(other_motifs, axis=(1, 2), keepdims=True)
+        reference_motifs /= np.linalg.norm(reference_motifs, axis=(1, 2), keepdims=True)
         # Find best match, per iteration
         match_scores = []
         match_labels = []
@@ -1991,13 +2014,13 @@ class MotifCompendium:
         for i in range(max_submotifs):
             # Compute similarity
             sim, alignment_rc, alignment_h = utils_similarity.compute_similarities(
-                [my_motifs, other_motifs], [(0, 1)]
+                [my_motifs, reference_motifs], [(0, 1)]
             )[0]
 
             # Unscale L2 similarity, for dot product only
             sim = sim * (
                 np.linalg.norm(my_motifs, axis=(1, 2))[:, np.newaxis]
-                * np.linalg.norm(other_motifs, axis=(1, 2))[np.newaxis, :]
+                * np.linalg.norm(reference_motifs, axis=(1, 2))[np.newaxis, :]
             )  # (N, M)
             # Identify matches, Scale score by i
             match_score = np.max(sim, axis=1) * np.sqrt(i + 1)  # (N,)
@@ -2008,7 +2031,7 @@ class MotifCompendium:
             alignment_h = alignment_h[
                 np.arange(alignment_h.shape[0]), match_idx
             ]  # (N,)
-            match_motif = other_motifs[match_idx, :, :]
+            match_motif = reference_motifs[match_idx]
             # Remove matches below threshold
             match_mask = match_mask & (match_score >= min_score)  # (N,)
             match_score[~match_mask] = 0
@@ -2042,7 +2065,7 @@ class MotifCompendium:
                 if utf8_images is None:
                     # Generate forward logos if not provided
                     self.add_logos(
-                        match_motifs[i], f"{save_col_prefix}_logo{i}", "zerotrim"
+                        match_motifs[i], f"{save_col_prefix}_logo{i}", logo_trimming
                     )
                 else:
                     # Copy forward logos if provided
@@ -2050,54 +2073,3 @@ class MotifCompendium:
                         utf8_images[x] if x >= 0 else ""
                         for x in match_idxs[i][match_idx]
                     ]
-
-    def assign_label_from_other(
-        self,
-        other: MotifCompendium,
-        other_label_col: str = "name",
-        save_col_prefix: str = "match",
-        max_submotifs: int = 1,
-        min_score: float = 0.0,
-        save_images: bool = True,
-    ) -> None:
-        """Assign clusters to motifs based on an already clustered MotifCompendium.
-
-        Given another MotifCompendium that has already been clustered and assigned
-          labels, compute similarity between all the motifs in this MotifCompendium
-          and other, for max_submotif iterations. The highest similarity and closest
-          motif match for each iteration will be saved as columns
-          {save_col_prefix}_score{i} and {save_col_prefix}_name{i}.
-
-        Args:
-            other: The other MotifCompendium to compare against.
-            other_label_col: The column in the other MotifCompendium to use as labels.
-            save_col_prefix: The name of the column in the metadata to save matches to.
-              Will be saved as f"{save_col_sim}_{score/name/logo}{i}".
-            max_submotifs: The maximum number of submotifs to consider in a match.
-            min_score: The minimum similarity score to consider as a match.
-            save_images: Whether or not to save the logos of the matched motifs.
-
-        Notes:
-            The other MotifCompendium must have motifs length less than or equal to this
-              MotifCompendium.
-        """
-        # Check if other_col_match exists in other MotifCompendium
-        if other_label_col in other.metadata.columns:
-            other_labels = other.metadata[other_label_col].tolist()
-        else:
-            raise KeyError(f"{other_label_col} not in other metadata.")
-        # Check if forward logos in other MotifCompendium
-        if "logo (fwd)" in other.get_saved_images():
-            other_logos = other.get_images("logo (fwd)")
-        else:
-            other_logos = None
-        # Assign labels
-        self.assign_label_from_motifs(
-            other_motifs=other.motifs,
-            labels=other_labels,
-            utf8_images=other_logos,
-            save_col_prefix=save_col_prefix,
-            max_submotifs=max_submotifs,
-            min_score=min_score,
-            save_images=save_images,
-        )
