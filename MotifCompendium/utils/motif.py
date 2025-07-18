@@ -569,7 +569,6 @@ import inspect
 
 def minusxlogx(x: np.ndarray, base: int) -> np.ndarray:
     """Compute -x*logb(x) with support in x >= 0."""
-    print(base)
     return (x * np.log2(x, where=(x > 0), out=np.zeros_like(x, dtype=x.dtype)))/-np.log2(base) # Minus at end for efficiency
 
 

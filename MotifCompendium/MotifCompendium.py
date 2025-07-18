@@ -236,13 +236,12 @@ def build_from_modisco(
     Loads motifs and metadata from all Modisco outputs then passes them to build().
 
     Args:
-        modisco_dict: A dictionary, with:
-          Key(s): model name(s)
-          Value(s): modisco file path(s)
-        load_subpatterns: Whether to load subpatterns from the Modisco file.
-          (Default: False; load main parent patterns, e.g., 'pos_pattern0')
-        modisco_region_width: The region width (across the summit) used during modisco.
-          (Default: 400 bp)
+        modisco_dict: A dictionary from model name to Modisco file path.
+        load_subpatterns: Whether or not to load subpatterns from the Modisco file. If
+          True, motifs will be loaded at the subpattern level. If False, motifs will be
+          loaded at the pattern level.
+        modisco_region_width: The region width used during Modisco. This argument only
+          needs to be specified if using a non-standard region width.
         ic: Whether or not to apply information content scaling to Modisco motifs.
         safe: Whether or not to construct the MotifCompendium safely.
 
@@ -256,7 +255,7 @@ def build_from_modisco(
           large objects.
     """
     # Load from Modisco
-    motifs, motif_names, seqlet_counts, model_names, posneg, avgdist_summits, avg_contribs = (
+    motifs, motif_names, seqlet_counts, model_names, posnegs, avgdist_summits, avg_contribs = (
         utils_loader.load_modiscos(modisco_dict,
             load_subpatterns=load_subpatterns, modisco_region_width=modisco_region_width, ic=ic)
     )
@@ -268,7 +267,7 @@ def build_from_modisco(
     metadata["name"] = motif_names
     metadata["num_seqlets"] = seqlet_counts
     metadata["model"] = model_names
-    metadata["posneg"] = posneg
+    metadata["posneg"] = posnegs
     metadata["avg_contrib"] = avg_contribs
     metadata["avg_dist_from_summit"] = avgdist_summits
     # Construct object
@@ -350,7 +349,7 @@ def combine(
       alignment matrices, and metadata are passed to the MotifCompendium constructor.
 
     Args:
-        compendiums: A list of MotifCompendium objects.
+        compendiums: A list of MotifCompendium objects to combine.
         safe: Whether or not to construct the MotifCompendium safely.
 
     Returns:
@@ -431,7 +430,7 @@ def combine(
     # Metadata
     metadata = pd.concat([mc.metadata for mc in compendiums], ignore_index=True)
     # Images
-    __images = pd.DataFrame(index=metadata.index)
+    __images = pd.DataFrame()
     for images in compendiums[0].get_saved_images():
         __images[images] = pd.concat(
             [pd.Series(mc.get_images(images)) for mc in compendiums], ignore_index=True
@@ -1001,7 +1000,7 @@ class MotifCompendium:
         cluster_on: str | None = None,
         cluster_within_on: tuple[str, str] | None = None,
         cluster_on_weight: str | None = None,
-        sort: bool = False,
+        largest_clusters_first: bool = False,
         **kwargs,
     ) -> None:
         """Cluster motifs.
@@ -1036,9 +1035,9 @@ class MotifCompendium:
               use when averaging motifs while doing a cluster_on. If None, all motifs
               are equally weighted. cluster_on_weight can only be set when cluster_on or
               cluster_within_on is set.
-            sort: Whether or not to assign cluster numbers in order of constituents.
-                If True, the cluster numbers will be assigned in descending size, 
-                starting from 0.
+            largest_clusters_first: Whether or not the first clusters (0, 1, 2, ...)
+              should be the largest clusters. If True, cluster 0 will be the largest
+              cluster. If False, the cluster order will not relate to cluster size.
             **kwargs: Additional named arguments specific to the clustering algorithm of
                 choice.
 
@@ -1070,8 +1069,8 @@ class MotifCompendium:
             clusters = pd.Series(-1, index=self.metadata.index)  # -1 for int
             num_clusters_so_far = 0
             # Cluster within each cluster_within cluster
-            for c in set(self[cluster_within]):
-                c_condition = self[cluster_within] == c
+            for c in set(self.metadata[cluster_within]):
+                c_condition = self.metadata[cluster_within] == c
                 c_idxs = list(c_condition[c_condition].index)
                 c_similarity = self.similarity[c_idxs, :][:, c_idxs]
                 c_clusters = utils_clustering.cluster(
@@ -1083,7 +1082,7 @@ class MotifCompendium:
                 c_clusters = [c + num_clusters_so_far for c in c_clusters]
                 clusters[c_idxs] = c_clusters
                 num_clusters_so_far += len(set(c_clusters))
-            self[save_name] = clusters
+            self.metadata[save_name] = clusters
         # Cluster on
         elif (
             (cluster_within is None)
@@ -1115,7 +1114,7 @@ class MotifCompendium:
                 row["source_cluster"]: row["cluster"]
                 for _, row in mc_average.metadata.iterrows()
             }
-            self[save_name] = [cluster_map[c] for c in self[cluster_on]]
+            self.metadata[save_name] = [cluster_map[c] for c in self.metadata[cluster_on]]
         # Cluster within+on
         elif (
             (cluster_within is None)
@@ -1149,11 +1148,11 @@ class MotifCompendium:
             num_clusters_so_far = 0
             cluster_within, cluster_on = cluster_within_on
             # Cluster within each cluster_within cluster
-            for c in set(self[cluster_within]):
+            for c in set(self.metadata[cluster_within]):
                 # Identify motifs corresponding to cluster_within
-                c_condition = self[cluster_within] == c
+                c_condition = self.metadata[cluster_within] == c
                 c_idxs = list(c_condition[c_condition].index)
-                c_mc = self[c_condition]
+                c_mc = self.metadata[c_condition]
                 # Average for cluster_on
                 c_mc_average = c_mc.cluster_averages(
                     clustering=cluster_on, weight_col=cluster_on_weight
@@ -1175,7 +1174,7 @@ class MotifCompendium:
                 num_clusters_so_far += len(set(c_clusters))
                 # Map back to self
                 clusters[c_idxs] = c_clusters
-            self[save_name] = clusters
+            self.metadata[save_name] = clusters
         # If all are None, cluster on entire MotifCompendium
         elif (
             (cluster_within is None)
@@ -1194,12 +1193,10 @@ class MotifCompendium:
                 "Only one of cluster_within, cluster_on, or cluster_within_on can be used at once."
             )
         # Sort clusters by number of constituents
-        if sort:
-            # Sort by number of constituents
-            sorted_clusters = self.metadata[save_name].value_counts().sort_values(ascending=False).index
+        if largest_clusters_first:
+            sorted_clusters = self.metadata[save_name].value_counts().index.tolist()
             cluster_map = {old_cluster: new_cluster for new_cluster, old_cluster in enumerate(sorted_clusters)}
             self.metadata[save_name] = self.metadata[save_name].map(cluster_map)
-
 
     def clustering_quality(
         self, clustering: str, with_stats: bool = False
@@ -1221,7 +1218,7 @@ class MotifCompendium:
             with_stats: Whether or not to compute and store extra quality statistics
               columns. If True, it adds the following columns, which have per-cluster
               information to the returned pd.DataFrame:
-                - "lowest_internal_similarity": The lowest internal similarity score.
+                - "lowest_internal_similarity": The lowest internal similarity.
                 - "lowest_internal_similarity_motif1_name": The name of the first motif
                   contributing to the lowest internal similarity.
                 - "lowest_internal_similarity_motif1_motif": The motif of the first
@@ -1230,14 +1227,13 @@ class MotifCompendium:
                   contributing to the lowest internal similarity.
                 - "lowest_internal_similarity_motif2_motif": The motif of the second
                   motif contributing to the lowest internal similarity.
-                - "highest_external_similarity": The highest external similarity score.
+                - "highest_external_similarity": The highest external similarity.
+                - "highest_external_similarity_cluster": The cluster within which the
+                  highest external similarity motif is found in.
                 - "highest_external_similarity_motif_name": The name of the motif in the
                   external cluster that is driving high external similarity.
                 - "highest_external_similarity_motif_motif": The motif of the motif in
                   the external cluster that is driving high external similarity.
-                - "highest_external_similarity_cluster": The cluster within which the
-                  highest external similarity motif is clustered in.
-
 
         Returns:
             A pd.DataFrame containing information about the lowest intra-cluster
@@ -1272,7 +1268,7 @@ class MotifCompendium:
                     "highest_external_similarity_motif_motif",
                 ],
             )
-            motif_names = list(self["name"])
+            motif_names = list(self.metadata["name"])
             motifs_standard = self.get_standard_motif_stack()
             external_similarity_culprit_idxs = np.zeros(
                 (len(clusters), len(clusters)), dtype=np.int32
@@ -1413,7 +1409,7 @@ class MotifCompendium:
                 save: The name of the column in the new metadata to save the aggregated
                   data to.
             weight_col: The name of the metadata column to be used to weight motifs when
-              computing motif averages. Should be numeric.
+              computing motif averages. The data in the weight_col should be numeric.
             compute_quality_stats: Whether or not to compute quality statistics for the
               clustering. If True, the quality statistics will be saved in the metadata
               of the returned MotifCompendium.
@@ -1490,8 +1486,6 @@ class MotifCompendium:
                         agg_dict["values"].append(np.sum(agg_c_data))
                     case "average" | "avg" | "mean":
                         agg_dict["values"].append(np.mean(agg_c_data))
-                    case "weighted_avg" | "weighted_mean":
-                        assert False, "Weighted average is not implemented yet."
                     case "concatenate" | "concat":
                         agg_dict["values"].append(
                             ",".join(sorted(set(map(str, agg_c_data))))
@@ -2001,8 +1995,8 @@ class MotifCompendium:
             match_idxs.append(match_idx)
         # Save match information
         for i in range(max_submotifs):
-            self[f"{save_col_prefix}_score{i}"] = match_scores[i]  # Save scores
-            self[f"{save_col_prefix}_name{i}"] = match_labels[i]  # Save labels
+            self.metadata[f"{save_col_prefix}_score{i}"] = match_scores[i]  # Save scores
+            self.metadata[f"{save_col_prefix}_name{i}"] = match_labels[i]  # Save labels
             # Save logos, matches only
             if save_images:
                 # self.__images[f"{save_col_prefix}_logo{i}"] = ""

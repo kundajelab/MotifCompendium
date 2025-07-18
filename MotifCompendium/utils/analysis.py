@@ -247,37 +247,41 @@ def export_full_compendium_modisco(
 ) -> None:
     """Exports MotifCompendium in the Modisco file format.
 
-    Assumes that the MotifCompendium is already clustered and just exports it to an h5py
-      structure that matches Modisco outputs.
+    Exports a MotifCompendium into an h5py file that matches the structure of Modisco
+      outputs. Each motif in the MotifCompendium becomes a pattern in the Modisco
+      output.
 
     Args:
-        mc: The MotifCompendium to analyze.
+        mc: The MotifCompendium to export.
         name_col: The column in the MotifCompendium to name the motifs by.
         save_loc: The location to save the Modisco h5py to.
+        inverse_ic: Whether or not to perform inverse information content scaling on
+          motifs. This should only be set to True if you want to revert previous IC
+          scaling. If you built your MotifCompendium from Modisco motifs and did not
+          explicitly turn off IC scaling, then your motifs were IC scaled and you may
+          want to perform inverse IC scaling before exporting them.
+
     Notes:
-        The resultant h5py file can be fed directly into FiNeMo (hitcaller).
         Motif names cannot have slashes (/) in them!
+        The resultant h5py file can be fed directly into FiNeMo.
+        If you are exporting your motifs to FiNeMo and your motifs were previously IC
+          scaled but you don't want to revert the IC scaling, you may need to adjust the
+          default trimming threshold during finemo call-hits with option -t 0.15.
     """
-    utils_motif.validate_motif_stack(mc.motifs)
-    size_4 = mc.motifs.shape[2] == 4
-    motifs = mc.motifs if size_4 else utils_motif.motif_8_to_4_signed(mc.motifs)
-    pos_neg = utils_motif.motif_posneg_sum(motifs)
+    pos_neg = pd.Series(utils_motif.motif_posneg_sum(mc.get_standard_motif_stack()))
     with h5py.File(save_loc, "w") as f:
-        f.attrs["window_size"] = motifs.shape[1]
+        f.attrs["window_size"] = mc.motifs.shape[1]
         # Positive
         if "pos" in pos_neg:
             pos_group = f.create_group("pos_patterns")
-            mc_pos = mc[pd.Series(pos_neg) == "pos"]
-            motifs_pos = (
-                mc_pos.motifs
-                if size_4
-                else utils_motif.motif_8_to_4_signed(mc_pos.motifs)
-            )
+            mc_pos = mc[pos_neg == "pos"]
+            motifs_pos = mc_pos.get_standard_motif_stack()
+            pos_names = mc_pos[name_col].tolist()
             for i in range(len(mc_pos)):
-                name = f"{mc_pos.metadata.loc[i, name_col]}_{i}"
+                name = f"{pos_names[i]}_{i}"
                 if "/" in name:
                     raise ValueError("Motif names cannot have slashes (/) in them!")
-                motif = motifs_pos[i, :, :]
+                motif = motifs_pos[i]
                 if inverse_ic:
                     motif = utils_motif.ic_scale(motif, invert=True)
                 pos_cluster = pos_group.create_group(name)
@@ -285,17 +289,14 @@ def export_full_compendium_modisco(
         # Negative
         if "neg" in pos_neg:
             neg_group = f.create_group("neg_patterns")
-            mc_neg = mc[pd.Series(pos_neg) == "neg"]
-            motifs_neg = (
-                mc_neg.motifs
-                if size_4
-                else utils_motif.motif_8_to_4_signed(mc_neg.motifs)
-            )
+            mc_neg = mc[pos_neg == "neg"]
+            motifs_neg = mc_neg.get_standard_motif_stack()
+            neg_names = mc_neg[name_col].tolist()
             for i in range(len(mc_neg)):
-                name = f"{mc_neg.metadata.loc[i, name_col]}_{i}"
+                name = f"{neg_names[i]}_{i}"
                 if "/" in name:
                     raise ValueError("Motif names cannot have slashes (/) in them!")
-                motif = motifs_neg[i, :, :]
+                motif = motifs_neg[i]
                 if inverse_ic:
                     motif = utils_motif.ic_scale(motif, invert=True)
                 neg_cluster = neg_group.create_group(name)
@@ -308,106 +309,109 @@ def export_clusters_modisco(
     save_loc: str,
     inverse_ic: bool = False,
     weight_col: str | None = None,
+    export_subpatterns: bool = False,
 ) -> None:
     """Exports cluster average motifs in the Modisco file format.
 
-    Given a clustering, compute the average MotifCompendium and call
-      export_full_compendium_modisco() on it to export them to an h5py structure that
-      matches Modisco outputs.
+    Exports a MotifCompendium into an h5py file that matches the structure of Modisco
+      outputs. A clustering is specified, and the cluster averages each become a pattern
+      in the Modisco output. Optionally, each motif in the MotifCompendium can become a
+      subpattern of the cluster it is a part of.
 
     Args:
-        mc: The MotifCompendium to analyze.
-        cluster_name: The motif clustering to compute average motifs on.
+        mc: The MotifCompendium to export.
+        cluster_name: The motif clustering to group motifs by.
         save_loc: The location to save the Modisco h5py to.
-        inverse_ic: Whether or not to revert IC scaling on motifs. Consider using if
-          motifs were ingested from Modisco with IC scaling.
-        safe: Whether or not to construct the MotifCompendium safely.
+        inverse_ic: Whether or not to perform inverse information content scaling on
+          motifs. This should only be set to True if you want to revert previous IC
+          scaling. If you built your MotifCompendium from Modisco motifs and did not
+          explicitly turn off IC scaling, then your motifs were IC scaled and you may
+          want to perform inverse IC scaling before exporting them.
+        weight_col: The name of the metadata column to be used to weight motifs when
+          computing motif averages. The data in the weight_col should be numeric.
+        export_subpatterns: Whether or not to export the individual motifs as
+          subpatterns under the cluster average patterns.
 
     Notes:
-        The resultant h5py file can be fed directly into FiNeMo (hitcaller).
         Cluster names cannot have slashes (/) in them!
+        If export_subpatterns is True, then motif names cannot have slashes (/) in them!
+          Also, motif names will be taken from the "name" column in the MotifCompendium.
+        The resultant h5py file can be fed directly into FiNeMo.
+        If you are exporting your motifs to FiNeMo and your motifs were previously IC
+          scaled but you don't want to revert the IC scaling, you may need to adjust the
+          default trimming threshold during finemo call-hits with option -t 0.15.
     """
-    # Validate motifs
-    utils_motif.validate_motif_stack(mc.motifs)
-    size_4 = mc.motifs.shape[2] == 4
-    # Average motifs in the cluster
+    if export_subpatterns and "name" not in mc.columns():
+        raise KeyError(
+            "If export_subpatterns is True, then the MotifCompendium must have a 'name' column."
+        )
     mc_avg = mc.cluster_averages(
         clustering=cluster_name,
         aggregations=[],
         weight_col=weight_col,
     )
-    mc_avg[cluster_name] = (mc_avg["name"].str.split("#").str[1]).astype(
-        mc[cluster_name].dtype
-    )
-    mc_avg.sort("name", inplace=True)
-    # Create Modisco export
-    avg_motifs = mc_avg.motifs if size_4 else utils_motif.motif_8_to_4_signed(mc_avg.motifs)
-    pos_neg = utils_motif.motif_posneg_sum(avg_motifs)
+    mc_avg.sort("source_cluster", inplace=True)
+    pos_neg = pd.Series(utils_motif.motif_posneg_sum(mc_avg.get_standard_motif_stack()))
     with h5py.File(save_loc, "w") as f:
-        f.attrs["window_size"] = avg_motifs.shape[1]
+        f.attrs["window_size"] = mc_avg.motifs.shape[1]
         # Positive
         if "pos" in pos_neg:
             pos_group = f.create_group("pos_patterns")
-            mc_avg_pos = mc_avg[pd.Series(pos_neg) == "pos"]
-            avg_motifs_pos = (
-                mc_avg_pos.motifs
-                if size_4
-                else utils_motif.motif_8_to_4_signed(mc_avg_pos.motifs)
-            )
-            # Pattern = Cluster average
+            mc_avg_pos = mc_avg[pos_neg == "pos"]
+            avg_motifs_pos = mc_avg_pos.get_standard_motif_stack()
+            pos_pattern_names = mc_avg_pos["source_cluster"].tolist()
             for i in range(len(mc_avg_pos)):
-                pattern_name = f"{mc_avg_pos.metadata.loc[i, cluster_name]}_{i}"
+                pattern_name = f"{pos_pattern_names[i]}_{i}"
                 if "/" in pattern_name:
-                    raise ValueError("Motif names cannot have slashes (/) in them!")
-                pos_pattern = pos_group.create_group(pattern_name)
-                avg_motif = avg_motifs_pos[i, :, :]
+                    raise ValueError("Cluster names cannot have slashes (/) in them!")
+                avg_motif = avg_motifs_pos[i]
                 if inverse_ic:
                     avg_motif = utils_motif.ic_scale(avg_motif, invert=True)
+                pos_pattern = pos_group.create_group(pattern_name)
                 pos_pattern.create_dataset("contrib_scores", data=avg_motif)
-                # Sub pattern = Motif
-                mc_i = mc[mc[cluster_name] == mc_avg_pos.metadata.loc[i, cluster_name]]
-                motifs_i = (mc_i.motifs if size_4 else utils_motif.motif_8_to_4_signed(mc_i.motifs))
-                for j in range(len(mc_i)):
-                    subpattern_name = f"{mc_i.metadata.loc[j, 'name']}_{j}"
-                    if "/" in subpattern_name:
-                        raise ValueError("Motif names cannot have slashes (/) in them!")
-                    pos_pattern_subpattern = pos_pattern.create_group(subpattern_name)
-                    motif = motifs_i[j, :, :]
-                    if inverse_ic:
-                        motif = utils_motif.ic_scale(motif, invert=True)
-                    pos_pattern_subpattern.create_dataset("contrib_scores", data=motif)
-
+                # Subpatterns
+                if export_subpatterns:
+                    mc_i = mc[mc[cluster_name] == pattern_name]
+                    motifs_i = mc_i.get_standard_motif_stack()
+                    subpattern_names_i = mc_i["name"].tolist()
+                    for j in range(len(mc_i)):
+                        subpattern_name = f"{subpattern_names_i[j]}_{j}"
+                        if "/" in subpattern_name:
+                            raise ValueError("Motif names cannot have slashes (/) in them!")
+                        pos_pattern_subpattern = pos_pattern.create_group(subpattern_name)
+                        motif = motifs_i[j]
+                        if inverse_ic:
+                            motif = utils_motif.ic_scale(motif, invert=True)
+                        pos_pattern_subpattern.create_dataset("contrib_scores", data=motif)
         # Negative
         if "neg" in pos_neg:
             neg_group = f.create_group("neg_patterns")
-            mc_avg_neg = mc_avg[pd.Series(pos_neg) == "neg"]
-            avg_motifs_neg = (
-                mc_avg_neg.motifs
-                if size_4
-                else utils_motif.motif_8_to_4_signed(mc_avg_neg.motifs)
-            )
-            # Pattern = Cluster average
+            mc_avg_neg = mc_avg[pos_neg == "neg"]
+            avg_motifs_neg = mc_avg_neg.get_standard_motif_stack()
+            neg_pattern_names = mc_avg_neg["source_cluster"].tolist()
             for i in range(len(mc_avg_neg)):
-                pattern_name = f"{mc_avg_neg.metadata.loc[i, cluster_name]}_{i}"
+                pattern_name = f"{neg_pattern_names[i]}_{i}"
                 if "/" in pattern_name:
-                    raise ValueError("Motif names cannot have slashes (/) in them!")
-                neg_pattern = neg_group.create_group(pattern_name)
-                avg_motif = avg_motifs_neg[i, :, :]
+                    raise ValueError("Cluster names cannot have slashes (/) in them!")
+                avg_motif = avg_motifs_neg[i]
                 if inverse_ic:
-                    motif = utils_motif.ic_scale(avg_motif, invert=True)
+                    avg_motif = utils_motif.ic_scale(avg_motif, invert=True)
+                neg_pattern = neg_group.create_group(pattern_name)
                 neg_pattern.create_dataset("contrib_scores", data=avg_motif)
-                # Sub pattern = Motif
-                mc_i = mc[mc[cluster_name] == mc_avg_neg.metadata.loc[i, cluster_name]]
-                motifs_i = (mc_i.motifs if size_4 else utils_motif.motif_8_to_4_signed(mc_i.motifs))
-                for j in range(len(mc_i)):
-                    subpattern_name = f"{mc_i.metadata.loc[j, 'name']}_{j}"
-                    if "/" in subpattern_name:
-                        raise ValueError("Motif names cannot have slashes (/) in them!")
-                    neg_pattern_subpattern = neg_pattern.create_group(subpattern_name)
-                    motif = motifs_i[j, :, :]
-                    if inverse_ic:
-                        motif = utils_motif.ic_scale(motif, invert=True)
-                    neg_pattern_subpattern.create_dataset("contrib_scores", data=motif)
+                # Subpatterns
+                if export_subpatterns:
+                    mc_i = mc[mc[cluster_name] == pattern_name]
+                    motifs_i = mc_i.get_standard_motif_stack()
+                    subpattern_names_i = mc_i["name"].tolist()
+                    for j in range(len(mc_i)):
+                        subpattern_name = f"{subpattern_names_i[j]}_{j}"
+                        if "/" in subpattern_name:
+                            raise ValueError("Motif names cannot have slashes (/) in them!")
+                        neg_pattern_subpattern = neg_pattern.create_group(subpattern_name)
+                        motif = motifs_i[j]
+                        if inverse_ic:
+                            motif = utils_motif.ic_scale(motif, invert=True)
+                        neg_pattern_subpattern.create_dataset("contrib_scores", data=motif)
 
 
 def export_full_compendium_meme(
@@ -418,43 +422,44 @@ def export_full_compendium_meme(
 ) -> None:
     """Exports MotifCompendium in the MEME file format.
 
-    Assumes that the MotifCompendium is already clustered and just exports it to a MEME
-      file format.
+    Exports a MotifCompendium into a MEME file format with each motif in the
+      MotifCompendium becoming a motif in the MEME output.
 
     Args:
-        mc: The MotifCompendium to analyze.
+        mc: The MotifCompendium to export.
         name_col: The column in the MotifCompendium to name the motifs by.
         save_loc: The location to save the MEME file to.
-
+        inverse_ic: Whether or not to perform inverse information content scaling on
+          motifs. This should only be set to True if you want to revert previous IC
+          scaling. If you built your MotifCompendium from Modisco motifs and did not
+          explicitly turn off IC scaling, then your motifs were IC scaled and you may
+          want to perform inverse IC scaling before exporting them.
+    
     Notes:
-        The resultant MEME file can be fed directly into FiNeMo (hitcaller).
-        Motif names cannot have slashes (/) in them!
+        Assumes that there is a "num_seqlets" column in the MotifCompendium.
     """
     # Validate motifs
-    utils_motif.validate_motif_stack(mc.motifs)
-    size_4 = mc.motifs.shape[2] == 4
-    motifs = mc.motifs if size_4 else utils_motif.motif_8_to_4_signed(mc.motifs)
-    pos_neg = utils_motif.motif_posneg_sum(motifs)
+    motifs = mc.get_standard_motif_stack()
+    motif_names = mc[name_col].tolist()
+    num_seqlets = mc.metadata["num_seqlets"].tolist()
     # Write MEME file
     with open(save_loc, "w") as f:
         f.write("MEME version 4\n")
-        f.write(f"ALPHABET= {'ACGT' if size_4 else 'ACGTN'}\n")
-        f.write(f"strands: {'+' if 'pos' in pos_neg else ''}{'-' if 'neg' in pos_neg else ''}\n")
+        f.write(f"ALPHABET= ACGT\n")
+        f.write(f"strands: +\n")
         f.write(f"Background letter frequencies:\n")
         f.write("A 0.25 C 0.25 G 0.25 T 0.25\n")
         for i in range(len(mc)):
-            name = f"{mc.metadata.loc[i, name_col]}"
-            if "/" in name:
-                raise ValueError("Motif names cannot have slashes (/) in them!")
-            motif = motifs[i, :, :]
+            name = motif_names[i]
+            motif = motifs[i]
             # Remove empty flanks
-            motif = utils_motif.remove_zero_flanks(motif)
+            motif = utils_motif.trim_motif(motif, 0) # Remove zero flanks
             # Inverse IC scaling
             if inverse_ic:
                 motif = utils_motif.ic_scale(motif, invert=True)
             # Write motif
             f.write(f"\nMOTIF {name}\n")
-            f.write(f"letter-probability matrix: alength= {motif.shape[1]} w= {motif.shape[0]} nsites= {mc.metadata.loc[i, 'num_seqlets']} E= 0\n")
+            f.write(f"letter-probability matrix: alength= {motif.shape[1]} w= {motif.shape[0]} nsites= {num_seqlets[i]} E= 0\n")
             for j in range(motif.shape[0]):
                 f.write(" ".join([f"{x:.6f}" for x in motif[j, :]]) + "\n")
 
@@ -585,11 +590,12 @@ def assign_label_from_pfms(
       metadata.
 
     Args:
-        mc: The MotifCompendium to analyze.
+        mc: The MotifCompendium whose motifs to assign labels to.
         pfm_file: The PFM file path.
         save_col_prefix: The prefix to use for the saved columns.
         max_submotifs: The maximum number of submotifs to consider in a match.
         min_score: The minimum similarity score to consider as a match.
+        save_images: Whether or not to save images of the matched motifs.
     """
     # Load PFM database, with same length as motifs
     L = mc.motifs.shape[1]

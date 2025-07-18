@@ -74,7 +74,7 @@ def load_modiscos(
         # Load serially
         motifs, motif_names, seqlet_counts, model_names, posnegs, avgdist_summits, avg_contribs = [], [], [], [], [], [], []
         for m_name, m_loc in modisco_dict.items():
-            m_motifs, m_motif_names, m_seqlet_counts, m_posneg, m_avgdist_summits, m_avg_contribs = load_modisco(
+            m_motifs, m_motif_names, m_seqlet_counts, m_posnegs, m_avgdist_summits, m_avg_contribs = load_modisco(
                 m_loc, subpattern=load_subpatterns, modisco_region_width=modisco_region_width, ic=ic
             )
             m_motif_names = [f"{m_name}-{x}" for x in m_motif_names]
