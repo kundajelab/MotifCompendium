@@ -247,37 +247,41 @@ def export_full_compendium_modisco(
 ) -> None:
     """Exports MotifCompendium in the Modisco file format.
 
-    Assumes that the MotifCompendium is already clustered and just exports it to an h5py
-      structure that matches Modisco outputs.
+    Exports a MotifCompendium into an h5py file that matches the structure of Modisco
+      outputs. Each motif in the MotifCompendium becomes a pattern in the Modisco
+      output.
 
     Args:
-        mc: The MotifCompendium to analyze.
+        mc: The MotifCompendium to export.
         name_col: The column in the MotifCompendium to name the motifs by.
         save_loc: The location to save the Modisco h5py to.
+        inverse_ic: Whether or not to perform inverse information content scaling on
+          motifs. This should only be set to True if you want to revert previous IC
+          scaling. If you built your MotifCompendium from Modisco motifs and did not
+          explicitly turn off IC scaling, then your motifs were IC scaled and you may
+          want to perform inverse IC scaling before exporting them.
+
     Notes:
-        The resultant h5py file can be fed directly into FiNeMo (hitcaller).
         Motif names cannot have slashes (/) in them!
+        The resultant h5py file can be fed directly into FiNeMo.
+        If you are exporting your motifs to FiNeMo and your motifs were previously IC
+          scaled but you don't want to revert the IC scaling, you may need to adjust the
+          default trimming threshold during finemo call-hits with option -t 0.15.
     """
-    utils_motif.validate_motif_stack(mc.motifs)
-    size_4 = mc.motifs.shape[2] == 4
-    motifs = mc.motifs if size_4 else utils_motif.motif_8_to_4_signed(mc.motifs)
-    pos_neg = utils_motif.motif_posneg_sum(motifs)
+    pos_neg = pd.Series(utils_motif.motif_posneg_sum(mc.get_standard_motif_stack()))
     with h5py.File(save_loc, "w") as f:
-        f.attrs["window_size"] = motifs.shape[1]
+        f.attrs["window_size"] = mc.motifs.shape[1]
         # Positive
         if "pos" in pos_neg:
             pos_group = f.create_group("pos_patterns")
-            mc_pos = mc[pd.Series(pos_neg) == "pos"]
-            motifs_pos = (
-                mc_pos.motifs
-                if size_4
-                else utils_motif.motif_8_to_4_signed(mc_pos.motifs)
-            )
+            mc_pos = mc[pos_neg == "pos"]
+            motifs_pos = mc_pos.get_standard_motif_stack()
+            pos_names = mc_pos[name_col].tolist()
             for i in range(len(mc_pos)):
-                name = f"{mc_pos.metadata.loc[i, name_col]}_{i}"
+                name = f"{pos_names[i]}_{i}"
                 if "/" in name:
                     raise ValueError("Motif names cannot have slashes (/) in them!")
-                motif = motifs_pos[i, :, :]
+                motif = motifs_pos[i]
                 if inverse_ic:
                     motif = utils_motif.ic_scale(motif, invert=True)
                 pos_cluster = pos_group.create_group(name)
@@ -285,17 +289,14 @@ def export_full_compendium_modisco(
         # Negative
         if "neg" in pos_neg:
             neg_group = f.create_group("neg_patterns")
-            mc_neg = mc[pd.Series(pos_neg) == "neg"]
-            motifs_neg = (
-                mc_neg.motifs
-                if size_4
-                else utils_motif.motif_8_to_4_signed(mc_neg.motifs)
-            )
+            mc_neg = mc[pos_neg == "neg"]
+            motifs_neg = mc_neg.get_standard_motif_stack()
+            neg_names = mc_neg[name_col].tolist()
             for i in range(len(mc_neg)):
-                name = f"{mc_neg.metadata.loc[i, name_col]}_{i}"
+                name = f"{neg_names[i]}_{i}"
                 if "/" in name:
                     raise ValueError("Motif names cannot have slashes (/) in them!")
-                motif = motifs_neg[i, :, :]
+                motif = motifs_neg[i]
                 if inverse_ic:
                     motif = utils_motif.ic_scale(motif, invert=True)
                 neg_cluster = neg_group.create_group(name)
@@ -308,106 +309,121 @@ def export_clusters_modisco(
     save_loc: str,
     inverse_ic: bool = False,
     weight_col: str | None = None,
+    export_subpatterns: bool = False,
 ) -> None:
     """Exports cluster average motifs in the Modisco file format.
 
-    Given a clustering, compute the average MotifCompendium and call
-      export_full_compendium_modisco() on it to export them to an h5py structure that
-      matches Modisco outputs.
+    Exports a MotifCompendium into an h5py file that matches the structure of Modisco
+      outputs. A clustering is specified, and the cluster averages each become a pattern
+      in the Modisco output. Optionally, each motif in the MotifCompendium can become a
+      subpattern of the cluster it is a part of.
 
     Args:
-        mc: The MotifCompendium to analyze.
-        cluster_name: The motif clustering to compute average motifs on.
+        mc: The MotifCompendium to export.
+        cluster_name: The motif clustering to group motifs by.
         save_loc: The location to save the Modisco h5py to.
-        inverse_ic: Whether or not to revert IC scaling on motifs. Consider using if
-          motifs were ingested from Modisco with IC scaling.
-        safe: Whether or not to construct the MotifCompendium safely.
+        inverse_ic: Whether or not to perform inverse information content scaling on
+          motifs. This should only be set to True if you want to revert previous IC
+          scaling. If you built your MotifCompendium from Modisco motifs and did not
+          explicitly turn off IC scaling, then your motifs were IC scaled and you may
+          want to perform inverse IC scaling before exporting them.
+        weight_col: The name of the metadata column to be used to weight motifs when
+          computing motif averages. The data in the weight_col should be numeric.
+        export_subpatterns: Whether or not to export the individual motifs as
+          subpatterns under the cluster average patterns.
 
     Notes:
-        The resultant h5py file can be fed directly into FiNeMo (hitcaller).
         Cluster names cannot have slashes (/) in them!
+        If export_subpatterns is True, then motif names cannot have slashes (/) in them!
+          Also, motif names will be taken from the "name" column in the MotifCompendium.
+        The resultant h5py file can be fed directly into FiNeMo.
+        If you are exporting your motifs to FiNeMo and your motifs were previously IC
+          scaled but you don't want to revert the IC scaling, you may need to adjust the
+          default trimming threshold during finemo call-hits with option -t 0.15.
     """
-    # Validate motifs
-    utils_motif.validate_motif_stack(mc.motifs)
-    size_4 = mc.motifs.shape[2] == 4
-    # Average motifs in the cluster
+    if export_subpatterns and "name" not in mc.columns():
+        raise KeyError(
+            "If export_subpatterns is True, then the MotifCompendium must have a 'name' column."
+        )
     mc_avg = mc.cluster_averages(
         clustering=cluster_name,
         aggregations=[],
         weight_col=weight_col,
     )
-    mc_avg[cluster_name] = (mc_avg["name"].str.split("#").str[1]).astype(
-        mc[cluster_name].dtype
-    )
-    mc_avg.sort("name", inplace=True)
-    # Create Modisco export
-    avg_motifs = mc_avg.motifs if size_4 else utils_motif.motif_8_to_4_signed(mc_avg.motifs)
-    pos_neg = utils_motif.motif_posneg_sum(avg_motifs)
+    mc_avg.sort("source_cluster", inplace=True)
+    pos_neg = pd.Series(utils_motif.motif_posneg_sum(mc_avg.get_standard_motif_stack()))
     with h5py.File(save_loc, "w") as f:
-        f.attrs["window_size"] = avg_motifs.shape[1]
+        f.attrs["window_size"] = mc_avg.motifs.shape[1]
         # Positive
         if "pos" in pos_neg:
             pos_group = f.create_group("pos_patterns")
-            mc_avg_pos = mc_avg[pd.Series(pos_neg) == "pos"]
-            avg_motifs_pos = (
-                mc_avg_pos.motifs
-                if size_4
-                else utils_motif.motif_8_to_4_signed(mc_avg_pos.motifs)
-            )
-            # Pattern = Cluster average
+            mc_avg_pos = mc_avg[pos_neg == "pos"]
+            avg_motifs_pos = mc_avg_pos.get_standard_motif_stack()
+            pos_pattern_names = mc_avg_pos["source_cluster"].tolist()
             for i in range(len(mc_avg_pos)):
-                pattern_name = f"{mc_avg_pos.metadata.loc[i, cluster_name]}_{i}"
+                pattern_name = f"{pos_pattern_names[i]}_{i}"
                 if "/" in pattern_name:
-                    raise ValueError("Motif names cannot have slashes (/) in them!")
-                pos_pattern = pos_group.create_group(pattern_name)
-                avg_motif = avg_motifs_pos[i, :, :]
+                    raise ValueError("Cluster names cannot have slashes (/) in them!")
+                avg_motif = avg_motifs_pos[i]
                 if inverse_ic:
                     avg_motif = utils_motif.ic_scale(avg_motif, invert=True)
+                pos_pattern = pos_group.create_group(pattern_name)
                 pos_pattern.create_dataset("contrib_scores", data=avg_motif)
-                # Sub pattern = Motif
-                mc_i = mc[mc[cluster_name] == mc_avg_pos.metadata.loc[i, cluster_name]]
-                motifs_i = (mc_i.motifs if size_4 else utils_motif.motif_8_to_4_signed(mc_i.motifs))
-                for j in range(len(mc_i)):
-                    subpattern_name = f"{mc_i.metadata.loc[j, 'name']}_{j}"
-                    if "/" in subpattern_name:
-                        raise ValueError("Motif names cannot have slashes (/) in them!")
-                    pos_pattern_subpattern = pos_pattern.create_group(subpattern_name)
-                    motif = motifs_i[j, :, :]
-                    if inverse_ic:
-                        motif = utils_motif.ic_scale(motif, invert=True)
-                    pos_pattern_subpattern.create_dataset("contrib_scores", data=motif)
-
+                # Subpatterns
+                if export_subpatterns:
+                    mc_i = mc[mc[cluster_name] == pattern_name]
+                    motifs_i = mc_i.get_standard_motif_stack()
+                    subpattern_names_i = mc_i["name"].tolist()
+                    for j in range(len(mc_i)):
+                        subpattern_name = f"{subpattern_names_i[j]}_{j}"
+                        if "/" in subpattern_name:
+                            raise ValueError(
+                                "Motif names cannot have slashes (/) in them!"
+                            )
+                        pos_pattern_subpattern = pos_pattern.create_group(
+                            subpattern_name
+                        )
+                        motif = motifs_i[j]
+                        if inverse_ic:
+                            motif = utils_motif.ic_scale(motif, invert=True)
+                        pos_pattern_subpattern.create_dataset(
+                            "contrib_scores", data=motif
+                        )
         # Negative
         if "neg" in pos_neg:
             neg_group = f.create_group("neg_patterns")
-            mc_avg_neg = mc_avg[pd.Series(pos_neg) == "neg"]
-            avg_motifs_neg = (
-                mc_avg_neg.motifs
-                if size_4
-                else utils_motif.motif_8_to_4_signed(mc_avg_neg.motifs)
-            )
-            # Pattern = Cluster average
+            mc_avg_neg = mc_avg[pos_neg == "neg"]
+            avg_motifs_neg = mc_avg_neg.get_standard_motif_stack()
+            neg_pattern_names = mc_avg_neg["source_cluster"].tolist()
             for i in range(len(mc_avg_neg)):
-                pattern_name = f"{mc_avg_neg.metadata.loc[i, cluster_name]}_{i}"
+                pattern_name = f"{neg_pattern_names[i]}_{i}"
                 if "/" in pattern_name:
-                    raise ValueError("Motif names cannot have slashes (/) in them!")
-                neg_pattern = neg_group.create_group(pattern_name)
-                avg_motif = avg_motifs_neg[i, :, :]
+                    raise ValueError("Cluster names cannot have slashes (/) in them!")
+                avg_motif = avg_motifs_neg[i]
                 if inverse_ic:
-                    motif = utils_motif.ic_scale(avg_motif, invert=True)
+                    avg_motif = utils_motif.ic_scale(avg_motif, invert=True)
+                neg_pattern = neg_group.create_group(pattern_name)
                 neg_pattern.create_dataset("contrib_scores", data=avg_motif)
-                # Sub pattern = Motif
-                mc_i = mc[mc[cluster_name] == mc_avg_neg.metadata.loc[i, cluster_name]]
-                motifs_i = (mc_i.motifs if size_4 else utils_motif.motif_8_to_4_signed(mc_i.motifs))
-                for j in range(len(mc_i)):
-                    subpattern_name = f"{mc_i.metadata.loc[j, 'name']}_{j}"
-                    if "/" in subpattern_name:
-                        raise ValueError("Motif names cannot have slashes (/) in them!")
-                    neg_pattern_subpattern = neg_pattern.create_group(subpattern_name)
-                    motif = motifs_i[j, :, :]
-                    if inverse_ic:
-                        motif = utils_motif.ic_scale(motif, invert=True)
-                    neg_pattern_subpattern.create_dataset("contrib_scores", data=motif)
+                # Subpatterns
+                if export_subpatterns:
+                    mc_i = mc[mc[cluster_name] == pattern_name]
+                    motifs_i = mc_i.get_standard_motif_stack()
+                    subpattern_names_i = mc_i["name"].tolist()
+                    for j in range(len(mc_i)):
+                        subpattern_name = f"{subpattern_names_i[j]}_{j}"
+                        if "/" in subpattern_name:
+                            raise ValueError(
+                                "Motif names cannot have slashes (/) in them!"
+                            )
+                        neg_pattern_subpattern = neg_pattern.create_group(
+                            subpattern_name
+                        )
+                        motif = motifs_i[j]
+                        if inverse_ic:
+                            motif = utils_motif.ic_scale(motif, invert=True)
+                        neg_pattern_subpattern.create_dataset(
+                            "contrib_scores", data=motif
+                        )
 
 
 def export_full_compendium_meme(
@@ -418,43 +434,46 @@ def export_full_compendium_meme(
 ) -> None:
     """Exports MotifCompendium in the MEME file format.
 
-    Assumes that the MotifCompendium is already clustered and just exports it to a MEME
-      file format.
+    Exports a MotifCompendium into a MEME file format with each motif in the
+      MotifCompendium becoming a motif in the MEME output.
 
     Args:
-        mc: The MotifCompendium to analyze.
+        mc: The MotifCompendium to export.
         name_col: The column in the MotifCompendium to name the motifs by.
         save_loc: The location to save the MEME file to.
+        inverse_ic: Whether or not to perform inverse information content scaling on
+          motifs. This should only be set to True if you want to revert previous IC
+          scaling. If you built your MotifCompendium from Modisco motifs and did not
+          explicitly turn off IC scaling, then your motifs were IC scaled and you may
+          want to perform inverse IC scaling before exporting them.
 
     Notes:
-        The resultant MEME file can be fed directly into FiNeMo (hitcaller).
-        Motif names cannot have slashes (/) in them!
+        Assumes that there is a "num_seqlets" column in the MotifCompendium.
     """
     # Validate motifs
-    utils_motif.validate_motif_stack(mc.motifs)
-    size_4 = mc.motifs.shape[2] == 4
-    motifs = mc.motifs if size_4 else utils_motif.motif_8_to_4_signed(mc.motifs)
-    pos_neg = utils_motif.motif_posneg_sum(motifs)
+    motifs = mc.get_standard_motif_stack()
+    motif_names = mc[name_col].tolist()
+    num_seqlets = mc.metadata["num_seqlets"].tolist()
     # Write MEME file
     with open(save_loc, "w") as f:
         f.write("MEME version 4\n")
-        f.write(f"ALPHABET= {'ACGT' if size_4 else 'ACGTN'}\n")
-        f.write(f"strands: {'+' if 'pos' in pos_neg else ''}{'-' if 'neg' in pos_neg else ''}\n")
+        f.write(f"ALPHABET= ACGT\n")
+        f.write(f"strands: +\n")
         f.write(f"Background letter frequencies:\n")
         f.write("A 0.25 C 0.25 G 0.25 T 0.25\n")
         for i in range(len(mc)):
-            name = f"{mc.metadata.loc[i, name_col]}"
-            if "/" in name:
-                raise ValueError("Motif names cannot have slashes (/) in them!")
-            motif = motifs[i, :, :]
+            name = motif_names[i]
+            motif = motifs[i]
             # Remove empty flanks
-            motif = utils_motif.trim_flanks(motif, 0)
+            motif = utils_motif.trim_motif(motif, 0)  # Remove zero flanks
             # Inverse IC scaling
             if inverse_ic:
                 motif = utils_motif.ic_scale(motif, invert=True)
             # Write motif
             f.write(f"\nMOTIF {name}\n")
-            f.write(f"letter-probability matrix: alength= {motif.shape[1]} w= {motif.shape[0]} nsites= {mc.metadata.loc[i, 'num_seqlets']} E= 0\n")
+            f.write(
+                f"letter-probability matrix: alength= {motif.shape[1]} w= {motif.shape[0]} nsites= {num_seqlets[i]} E= 0\n"
+            )
             for j in range(motif.shape[0]):
                 f.write(" ".join([f"{x:.6f}" for x in motif[j, :]]) + "\n")
 
@@ -467,111 +486,121 @@ def calculate_filters(
     metric_list: list[str] = [
         "motif_entropy",
         "weighted_base_entropy",
+        "weighted_position_entropy",
         "posbase_entropy_ratio",
         "copair_entropy_ratio",
+        "copair_composition",
         "dinuc_entropy_ratio",
+        "dinuc_composition",
+        "dinuc_score",
     ],
 ) -> None:
-    """Calculate filter metrics, to be used for filtering low quality motifs.
-    Update metadata table with filter metric values.
+    """Calculates filter metrics and stores them in the MotifCompendium metadata.
 
-    List of filter metrics:
-        (1) Motif entropy:
-            Calculation: Shannon entropy on (L,4)
-            Purpose:    (Low) Archetype #1: Sharp nucleotide peak (e.g., G)
-                        (High) Archetype #2: Noise/chaos
-        (2) Contribution-weighted base entropy:
-            Calculation: Sum of contribution-weighted base entropy per position
-            Purpose:    (High) Archetype #3: Noisy peaks (e.g., peak is not a single base)
-        (3) Pos-base entropy ratio:
-            Calculation: Position-wise entropy on (L,) / Base-wise entropy on (8,)
-            Purpose:    (High) Archetype #4: Single nucleotide repeats (e.g., AAAAA, GGGGG)
-        (4) Co-pair entropy ratio:
-            Calculation: Entropy across position (L,) /
-                Entropy across all pairs of co-occurring, non-repeating bases (28,)
-            Purpose:    (High) Archetype #5: High GC, AT bias
-        (5) Dinucleotide entropy ratio:
-            Calculation: Entropy across pairs of positions (L/2,) /
-                Entropy across all dinucleotide pairs (64,)
-            Purpose:    (High) Dinucleotide repeats (e.g., GCGCGC, ATATAT)
-        (6) Positive-negative inverted:
-            Calculation: Check if positive pattern with a negative peak, and vice versa
-            Purpose:    (True) Archetype #6: Sharp positive peak in negative pattern
-        (7) Truncated:
-            Calculation: Check if max position is at the end of the motif
-            Purpose:    (True) Archetype #7: Truncated motifs
+    Calculates the filter metrics for each motif in the provided MotifCompendium and
+      stores the values in the metadata table of the MotifCompendium. The filters are
+      intended to be used for filtering out low quality motifs. The filters can only be
+      chosen from a predefined list of metrics.
 
     Args:
-        metric_list: List of filter metrics to calculate.
-          Possible values: ['motif_entropy', 'posbase_entropy_ratio',
-          'copair_entropy_ratio', 'dinuc_entropy_ratio']
-    """
-    # Check if filter metrics are valid
-    metric_list = list(set(metric_list))  # Convert metric_list into a unique list
-    valid_filter_metrics = [
-        "motif_entropy",
-        "weighted_base_entropy",
-        "posbase_entropy_ratio",
-        "copair_entropy_ratio",
-        "dinuc_entropy_ratio",
-        "posneg_inverted",
-        "truncated",
-    ]
-    
-    for filter_metric in metric_list:
-        if filter_metric not in valid_filter_metrics:
-            raise ValueError(
-                f"Filter metric {filter_metric} is not valid. Must be one of: {valid_filter_metrics}"
-            )
+        mc: The MotifCompendium to compute motif filters for.
+        metric_list: A list of filter metrics to calculated. Metrics must be one of:
+          - "motif_entropy": Computes the Shannon entropy of the motif treated as a
+              Lx4 vector.
+              When Low: Sharp nucleotide peak (e.g., G).
+              When High: Noise/chaos.
+          - "weighted_base_entropy": Computes the position-weighted base entropy of the
+              motif.
+              When High: Noisy motif core (e.g., motif is not a single base).
+          - "weighted_position_entropy": Computes the base-weighted position entropy of
+              the motif.
+              When High: Wide repeats (e.g., AAAAA, GGGGG).
+          - "posbase_entropy_score": Computes the position entropy * (1 - base entropy)
+              entropy score for the motif.
+              When High: Wide repeats (e.g., AAAAA, GGGGG).
+          - "copair_entropy_score": Computes the frequency of co-occurring bases, and
+              uses that copair representation to compute an entropy score for the motif.
+              When High: Noisy motif with base pair ambiguity (e.g. C/G share the same
+              position).
+          - "copair_composition": Computes a measure of how much of the motif can be
+              represented by pairs of co-occurring bases.
+              When High: Noisy motif with base pair ambiguity (e.g. C/G share the same
+              position).
+          - "dinuc_entropy_score": Computes the frequency of repeating dinucleotide
+              pairs, and uses that dinucleotide representation to compute an entropy
+              score for the motif.
+              When High: Dinucleotide repeats (e.g. GCGCGC, ATATAT).
+          - "dinuc_composition": Computes a measure of how much of the motif can be
+              represented by an alternating dinucleotide pair.
+              When High: Dinucleotide repeats (e.g. GCGCGC, ATATAT).
+          - "dinuc_score": Computes a score of how much dinucleotide repeating occurs
+              within the motif. This filter can identify a prominent dinucleotide pair
+              that does not appear in a strictly alternating manner.
+              When High: Dinucleotide repeats (e.g. GCGCGC, ATATAT).
+          - "posneg_inverted": Checks if a positive motif exists in an otherwise
+              negative pattern or if a negative motifs in an otherwise positive pattern.
+              When True: Positive motif in a negative pattern or visa versa.
+          - "truncated": Checks if the motif is truncated and likely has more mass
+              extending beyond the edge of the motif length.
+              When True: A truncated motif that has been cut off by the window size.
 
+    Notes:
+        After these filters are calculated, they can be thresholded to identify and
+          filter out low quality or low information content motifs. For guidance on the
+          value of thresholds to use, see MotifCompendium Tutorial 6 - Motif Filtering.
+    """
     # Calculate filter metrics
+    mc_motifs = mc.get_standard_motif_stack()
+    mc_motifs_abs = np.abs(mc_motifs)
     for filter_metric in metric_list:
-        metrics_list = []
         match filter_metric:
             case "motif_entropy":
-                for motif in mc.motifs:
-                    metric = utils_motif.calculate_motif_entropy(motif)
-                    metrics_list.append(metric)
-                mc["motif_entropy"] = metrics_list
-
+                mc["motif_entropy"] = utils_motif.calculate_full_motif_entropy(
+                    mc_motifs_abs
+                )
             case "weighted_base_entropy":
-                for motif in mc.motifs:
-                    metric = utils_motif.calculate_weighted_base_entropy(motif)
-                    metrics_list.append(metric)
-                mc["weighted_base_entropy"] = metrics_list
-
+                mc["weighted_base_entropy"] = (
+                    utils_motif.calculate_weighted_base_entropy(mc_motifs_abs)
+                )
+            case "weighted_position_entropy":
+                mc["weighted_position_entropy"] = (
+                    utils_motif.calculate_weighted_position_entropy(mc_motifs_abs)
+                )
             case "posbase_entropy_ratio":
-                for motif in mc.motifs:
-                    metric = utils_motif.calculate_posbase_entropy_ratio(motif)
-                    metrics_list.append(metric)
-                mc["posbase_entropy_ratio"] = metrics_list
-
+                mc["posbase_entropy_ratio"] = (
+                    utils_motif.calculate_position_versus_base_entropy(mc_motifs_abs)
+                )
             case "copair_entropy_ratio":
-                for motif in mc.motifs:
-                    metric = utils_motif.calculate_copair_entropy_ratio(motif)
-                    metrics_list.append(metric)
-                mc["copair_entropy_ratio"] = metrics_list
-
+                mc["copair_entropy"] = utils_motif.calculate_copair_entropy(
+                    mc_motifs_abs
+                )
+            case "copair_composition":
+                mc["copair_composition"] = utils_motif.calculate_copair_composition(
+                    mc_motifs_abs
+                )
             case "dinuc_entropy_ratio":
-                for motif in mc.motifs:
-                    metric = utils_motif.calculate_dinuc_entropy_ratio(motif)
-                    metrics_list.append(metric)
-                mc["dinuc_entropy_ratio"] = metrics_list
-
+                mc["dinuc_entropy_ratio"] = utils_motif.calculate_dinucleotide_entropy(
+                    mc_motifs_abs
+                )
+            case "dinuc_composition":
+                mc["dinuc_composition"] = (
+                    utils_motif.calculate_dinucleotide_alternating_composition(
+                        mc_motifs_abs
+                    )
+                )
+            case "dinuc_score":
+                mc["dinucleotide_score"] = utils_motif.calculate_dinucleotide_score(
+                    mc_motifs_abs
+                )
             case "posneg_inverted":
                 mc["posneg_inverted"] = (
-                    utils_motif.motif_posneg_max(mc.get_standard_motif_stack())
-                    != mc["posneg"]
+                    utils_motif.motif_posneg_max(mc_motifs) != mc["posneg"]
                 )
-
             case "truncated":
-                max_pos = mc.motifs.sum(axis=-1).argmax(axis=-1) # (N,)
-                mc["truncated"] = (max_pos < 2) | (max_pos > mc.motifs.shape[1] - 3)
-
+                max_pos = mc_motifs.sum(axis=-1).argmax(axis=-1)  # (N,)
+                mc["truncated"] = (max_pos < 2) | (max_pos > mc_motifs.shape[1] - 3)
             case _:
-                raise ValueError(
-                    f"filter metric {filter_metric} is not valid. Must be one of: {valid_filter_metrics}"
-                )
+                raise ValueError(f"Filter metric {filter_metric} is not implemented.")
 
 
 ###########################
@@ -580,25 +609,39 @@ def calculate_filters(
 def assign_label_from_pfms(
     mc: MotifCompendiumClass,
     pfm_file: str,
-    save_col_prefix: str = "match",
-    max_submotifs: int = 1,
     min_score: float = 0.5,
+    max_submotifs: int = 1,
     save_images: bool = True,
+    logo_trimming: str = "trim",
+    save_col_prefix: str = "match",
 ) -> None:
-    """Automatic labeling of motifs from a pfm file.
+    """Automatic labeling of motifs from a file containing PFMs.
 
-    For each motif in the MotifCompendium, computes the similarity between that motif
-      and all motifs in the PFM file, for max_submotif iterations. The highest similarity
-      and closest motif match for each iteration will be saved as columns
-      {save_col_prefix}_score and {save_col_prefix}_name in the MotifCompendium
-      metadata.
+    Given a reference file containing labeled PFMs, for each motif in the provided
+      MotifCompendium, find the closest match that appears in the PFM file. The match
+      score and the label of the best match are saved in the provided MotifCompendium's
+      metadata. Optionally, the logos of the matched motifs can be saved as images.
+      Composite matching can be enabled by setting max_submotifs > 1.
 
     Args:
-        mc: The MotifCompendium to analyze.
+        mc: The MotifCompendium whose motifs you want to assign labels to.
         pfm_file: The PFM file path.
-        save_col_prefix: The prefix to use for the saved columns.
-        max_submotifs: The maximum number of submotifs to consider in a match.
-        min_score: The minimum similarity score to consider as a match.
+        min_score: The minimum similarity score to consider a match.
+        max_submotifs: The maximum number of submotifs to consider in a match. If
+            max_submotifs = 1, only a single match is given to each motif. If
+            max_submotifs > 1, the best match for each motif can be from a combination
+            of multiple reference motifs.
+        save_images: Whether or not to save the logos of the matched motifs. If
+            True, the logos will appear as a saved image. If False, logos will not be
+            saved as saved images.
+        logo_trimming:  A string indicating how the motifs should be trimmed if logos
+            need to be generated. The options are "notrim" if you don't want trimming,
+            "zerotrim" if you only want to trim the positions with 0 importance, and
+            "trim" if you want to perform a standard level of trimming.
+        save_col_prefix: The prefix to use for the saved columns. All saved columns
+            and saved images generated from the labeling process will begin with
+            save_col_prefix. These columns will have the structure
+            f"{save_col_prefix}_{score/name/logo}{i}".
     """
     # Load PFM database, with same length as motifs
     L = mc.motifs.shape[1]
@@ -608,13 +651,93 @@ def assign_label_from_pfms(
         pfm_motifs, pfm_names = utils_loader.load_meme(pfm_file, L)
     else:
         raise ValueError("pfm_file must be a _pfm.txt, .meme, or .meme.txt file.")
-
     # Assign labels
     mc.assign_label_from_motifs(
         pfm_motifs,
         pfm_names,
-        save_col_prefix=save_col_prefix,
+        min_score,
         max_submotifs=max_submotifs,
-        min_score=min_score,
         save_images=save_images,
+        logo_trimming=logo_trimming,
+        save_col_prefix=save_col_prefix,
+    )
+
+
+def assign_label_from_other_compendium(
+    assign_to_mc: MotifCompendiumClass,
+    assign_from_mc: MotifCompendiumClass,
+    from_label_col: str = "name",
+    min_score: float = 0.0,
+    max_submotifs: int = 1,
+    save_images: bool = True,
+    logos_trimming: str = "trim",
+    save_col_prefix: str = "match",
+) -> None:
+    """Automatic labeling of motifs from another MotifCompendium.
+
+    Given a reference MotifCompendium containing labeled motifs, for each motif in the
+      unlabeled MotifCompendium, find the closest match that appears in the labeled
+      MotifCompendium. The match score and the label of the best match are saved in the
+      unlabeled MotifCompendium's metadata. Optionally, the logos of the matched motifs
+      can be saved as images. Composite matching can be enabled by setting max_submotifs > 1.
+
+    Args:
+        assign_to_mc: The MotifCompendium whose motifs you want to assign labels to.
+        assign_from_mc: The MotifCompendium to assign labels from.
+        from_label_col: The column in assign_from_mc to use as labels.
+        save_col_prefix: The name of the column in the metadata to save matches to.
+            Will be saved as f"{save_col_sim}_{score/name/logo}{i}".
+        max_submotifs: The maximum number of submotifs to consider in a match.
+        min_score: The minimum similarity score to consider as a match.
+        save_images: Whether or not to save the logos of the matched motifs.
+    Args:
+        assign_to_mc: The MotifCompendium whose motifs you want to assign labels to.
+        assign_from_mc: The MotifCompendium to assign labels from.
+        from_label_col: The column in assign_from_mc to use as labels.
+        min_score: The minimum similarity score to consider a match.
+        max_submotifs: The maximum number of submotifs to consider in a match. If
+            max_submotifs = 1, only a single match is given to each motif. If
+            max_submotifs > 1, the best match for each motif can be from a combination
+            of multiple reference motifs.
+        save_images: Whether or not to save the logos of the matched motifs. If
+            True, the logos will appear as a saved image. If False, logos will not be
+            saved as saved images. If True, the logos will come from
+            assign_from_mc.get_saved_images("logo (fwd)"), if available. If not, they
+            will be generated on the fly.
+        logo_trimming:  A string indicating how the motifs should be trimmed if logos
+            need to be generated. The options are "notrim" if you don't want trimming,
+            "zerotrim" if you only want to trim the positions with 0 importance, and
+            "trim" if you want to perform a standard level of trimming.
+        save_col_prefix: The prefix to use for the saved columns. All saved columns
+            and saved images generated from the labeling process will begin with
+            save_col_prefix. These columns will have the structure
+            f"{save_col_prefix}_{score/name/logo}{i}".
+    """
+    if not (
+        isinstance(assign_to_mc, MotifCompendiumClass)
+        and isinstance(assign_from_mc, MotifCompendiumClass)
+    ):
+        raise TypeError(
+            "Both assign_to_mc and assign_from_mc must be MotifCompendium instances."
+        )
+    # Check if other_col_match exists in other MotifCompendium
+    if from_label_col in assign_from_mc.metadata.columns:
+        labels = assign_from_mc.metadata[from_label_col].tolist()
+    else:
+        raise KeyError(f"{from_label_col} not in other metadata.")
+    # Check if forward logos in other MotifCompendium
+    if "logo (fwd)" in assign_from_mc.get_saved_images():
+        other_logos = assign_from_mc.get_images("logo (fwd)")
+    else:
+        other_logos = None
+    # Assign labels
+    assign_to_mc.assign_label_from_motifs(
+        assign_from_mc.motifs,
+        labels,
+        min_score,
+        max_submotifs=max_submotifs,
+        save_images=save_images,
+        logo_trimming=logos_trimming,
+        utf8_images=other_logos,
+        save_col_prefix=save_col_prefix,
     )

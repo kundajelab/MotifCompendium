@@ -1,3 +1,5 @@
+import warnings
+
 import igraph as ig
 import leidenalg as la
 import numpy as np
@@ -60,19 +62,17 @@ def cluster(
             weighted_adjacency_matrix = similarity_matrix * (
                 similarity_matrix >= similarity_threshold
             )
-            if utils_config.get_use_gpu():
-                print("Warning: GPU version not yet implemented. Falling back to CPU.")
-                return rb_leiden_clustering_cpu(weighted_adjacency_matrix, **kwargs)
-            else:
-                return rb_leiden_clustering_cpu(weighted_adjacency_matrix, **kwargs)
+            # if utils_config.get_use_gpu():
+            #     return modularity_leiden_clustering_gpu(weighted_adjacency_matrix, **kwargs)
+            return rb_leiden_clustering_cpu(weighted_adjacency_matrix, **kwargs)
         case "cpm" | "cpm_leiden" | "constant_potts_leiden":
             weighted_adjacency_matrix = similarity_matrix * (
                 similarity_matrix >= similarity_threshold
             )
             return cpm_leiden_clustering(weighted_adjacency_matrix, **kwargs)
         case "leiden" | "leidenalg":
-            print(
-                "Warning: Falling back to default Leiden algorithm: constant Potts model"
+            warnings.warn(
+                "Defaulting Leiden algorithm: Constant Potts model", UserWarning
             )
             weighted_adjacency_matrix = similarity_matrix * (
                 similarity_matrix >= similarity_threshold
@@ -179,7 +179,8 @@ def cpm_leiden_clustering(
           same cluster.
 
     Notes:
-        Uses the constant Potts model. See leidenalg.CPMVertexPartition for more details.
+        Uses the constant Potts model. See leidenalg.CPMVertexPartition for more
+          details.
     """
     # Create igraph object
     n_vertices = weighted_adjacency_matrix.shape[0]
@@ -236,11 +237,12 @@ def modularity_leiden_clustering_gpu(
           same cluster.
 
     Notes:
-        Uses Leiden method described in: Traag, V. A., Waltman, L., & van Eck, N. J. (2019).
-        From Louvain to Leiden: guaranteeing well-connected communities. Scientific reports,
-        9(1), 5233. doi: 10.1038/s41598-019-41695-z. See cugraph.leiden for more details.
+        Uses Leiden method described in: Traag, V. A., Waltman, L., & van Eck, N. J.
+          (2019). From Louvain to Leiden: guaranteeing well-connected communities.
+          Scientific reports, 9(1), 5233. doi: 10.1038/s41598-019-41695-z. See
+          cugraph.leiden for more details.
     """
-    ValueError("GPU version not yet implemented.")
+    raise NotImplementedError("GPU version not yet implemented.")
     """
     import cugraph
     import cudf
