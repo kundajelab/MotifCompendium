@@ -12,6 +12,7 @@ dependencies:
 - seaborn
 - scikit-learn
 - tqdm
+- jupyter
 - pip
 - pip:
     - beautifulsoup4
@@ -20,3 +21,4 @@ dependencies:
     - leidenalg
     - logomaker
     - upsetplot
+    - gdown

@@ -448,7 +448,7 @@ def export_full_compendium_meme(
                 raise ValueError("Motif names cannot have slashes (/) in them!")
             motif = motifs[i, :, :]
             # Remove empty flanks
-            motif = utils_motif.remove_zero_flanks(motif)
+            motif = utils_motif.trim_flanks(motif, 0)
             # Inverse IC scaling
             if inverse_ic:
                 motif = utils_motif.ic_scale(motif, invert=True)

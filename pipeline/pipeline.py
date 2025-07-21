@@ -495,6 +495,37 @@ def generate_quality_plots(
     # if args.time:
     #     logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
+def aggregate_weighted_avg(mc: MotifCompendium, mc_avg: MotifCompendium, 
+        cluster_col: str, agg_col: str, new_col: str, weight_col: str, ) -> None:
+    """
+    Aggregate the MotifCompendium object by weighted average.
+    
+    Args:
+        mc (MotifCompendium): The sub MotifCompendium object.
+        mc_avg (MotifCompendium): The cluster averaged MotifCompendium object.
+        cluster_col (str): The column name of clusterings.
+        agg_col (str): The column name to aggregate.
+        new_col (str): The column name to save the new weighted average.
+        weight_col (str): The column name to use for weights.
+        
+    Returns:
+        None
+    """
+    if agg_col not in mc.metadata.columns:
+        raise ValueError(f"Column {agg_col} not found in metadata.")
+
+    if weight_col not in mc.metadata.columns:
+        raise ValueError(f"Column {weight_col} not found in metadata.")
+    
+    weighted_avgs = []
+    for cluster_id in mc_avg["source_cluster"]:
+        mc_cluster = mc[mc[cluster_col] == cluster_id]
+        if len(mc_cluster) == 0:
+            weighted_avgs.append(np.nan)
+            continue
+        weighted_avg = (mc_cluster[agg_col] * mc_cluster[weight_col]).sum() / mc_cluster["num_motifs"].sum()
+        weighted_avgs.append(weighted_avg)
+    mc_avg[new_col] = weighted_avgs
 
 #### MAIN -----------------------------------------------------------------------
 if __name__ == "__main__":
@@ -1009,7 +1040,7 @@ if __name__ == "__main__":
                     logging.info(f"Time taken: {time.time() - start_time:.2f}s")
                 # Add to aggregate metadata
                 ClusterArgs.aggregate_metadata.append((cluster_col_name, "concat", cluster_col_name))
-                
+
 
                 ## Meta-cluster: Cluster on top of clusters
                 if args.sim_threshold_meta:
@@ -1076,7 +1107,7 @@ if __name__ == "__main__":
                         logging.info(f"Time taken: {time.time() - start_time:.2f}s")
                     # Add to aggregate metadata
                     ClusterArgs.aggregate_metadata.append((metacluster_col_name, "concat", metacluster_col_name))
-                    
+
 
                 ## Sub-cluster: Cluster motifs within clusters
                 if args.sim_threshold_sub:
@@ -1253,8 +1284,28 @@ if __name__ == "__main__":
                 logging.critical("Error averaging motifs per cluster. max_chunk has reached 0.")
                 raise ValueError("Error averaging motifs per cluster.")
 
+    # Metadata: 
     # Add positive/negative column
     mc_avg["posneg"] = utils_motif.motif_posneg_sum(mc_avg.get_standard_motif_stack())
+    # Add manual aggregation columns: avg_dist_summit, avg_contrib
+    if "avg_dist_summit" in mc.metadata.columns:
+        aggregate_weighted_avg(
+            mc=mc,
+            mc_avg=mc_avg,
+            cluster_col=cluster_col_name,
+            agg_col="avg_dist_summit",
+            new_col="avg_dist_summit",
+            weight_col=ClusterArgs.weight_col,
+        )
+    if "avg_contrib" in mc.metadata.columns:
+        aggregate_weighted_avg(
+            mc=mc,
+            mc_avg=mc_avg,
+            cluster_col=cluster_col_name,
+            agg_col="avg_contrib",
+            new_col="avg_contrib",
+            weight_col=ClusterArgs.weight_col,
+        )
 
     # Sort Average MotifCompendium object
     if args.cluster_sort:
@@ -1314,8 +1365,28 @@ if __name__ == "__main__":
         if args.time:
             start_time = time.time()
 
-        # Add positive/negative column
+        # Metadata: Add positive/negative column
         mc_metaavg["posneg"] = utils_motif.motif_posneg_sum(mc_metaavg.get_standard_motif_stack())
+        # Add manual aggregation columns: avg_dist_summit, avg_contrib
+        if "avg_dist_summit" in mc.metadata.columns:
+            aggregate_weighted_avg(
+                mc=mc_avg,
+                mc_avg=mc_metaavg,
+                cluster_col=metacluster_col_name,
+                agg_col="avg_dist_summit",
+                new_col="avg_dist_summit",
+                weight_col=ClusterArgs.weight_col,
+            )
+        if "avg_contrib" in mc.metadata.columns:
+            aggregate_weighted_avg(
+                mc=mc_avg,
+                mc_avg=mc_metaavg,
+                cluster_col=metacluster_col_name,
+                agg_col="avg_contrib",
+                new_col="avg_contrib",
+                weight_col=ClusterArgs.weight_col,
+            )
+
         # Sort Meta MotifCompendium object
         if args.cluster_sort:
             # Sort by cluster: Using same conditions
@@ -1375,6 +1446,26 @@ if __name__ == "__main__":
 
         # Add positive/negative column
         mc_subavg["posneg"] = utils_motif.motif_posneg_sum(mc_subavg.get_standard_motif_stack())
+        # Add manual aggregation columns: avg_dist_summit, avg_contrib
+        if "avg_dist_summit" in mc.metadata.columns:
+            aggregate_weighted_avg(
+                mc=mc,
+                mc_avg=mc_subavg,
+                cluster_col=subcluster_col_name,
+                agg_col="avg_dist_summit",
+                new_col="avg_dist_summit",
+                weight_col=ClusterArgs.weight_col,
+            )
+        if "avg_contrib" in mc.metadata.columns:
+            aggregate_weighted_avg(
+                mc=mc,
+                mc_avg=mc_subavg,
+                cluster_col=subcluster_col_name,
+                agg_col="avg_contrib",
+                new_col="avg_contrib",
+                weight_col=ClusterArgs.weight_col,
+            )
+
         # Sort Sub MotifCompendium object
         if args.cluster_sort:
             # Sort by cluster
