@@ -1893,12 +1893,25 @@ class MotifCompendium:
         """Adds a column to the metadata that is a string representation of each motif.
 
         Adds a "motif_string" column to the metadata that contains the motif as a string.
+
+        Args:
+            name: The name of the column to add to the metadata.
         """
         unsigned_motifs = np.abs(self.get_standard_motif_stack())
         motif_str_revstrs = utils_motif.motif_to_string(
             unsigned_motifs, specificity, importance
         )
         self.metadata[name] = [f"{x[0]}<br/>{x[1]}" for x in motif_str_revstrs]
+    
+    def symmetricness(self, name="symmetricness") -> None:
+        """Adds a column to the metadata that is the symmetricness of each motif.
+
+        The symmetricness of a motif is its similarity with its reverse complement.
+
+        Args:
+            name: The name of the column to add to the metadata.
+        """
+        self.metadata[name] = np.diag(utils_similarity.compute_similarities([self.motifs, utils_motif.reverse_complement(self.motifs)], [(0, 1)])[0][0])
 
     def extend(self):
         """Add new motifs to the current MotifCompendium."""
