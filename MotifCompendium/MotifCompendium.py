@@ -290,67 +290,38 @@ def build_from_modisco(
 
 
 def build_from_pfm(
-    pfm_files: list[str] | str,
+    pfm_dict: dict[str, str],
     ic: bool = True,
     safe: bool = True,
 ) -> MotifCompendium:
     """Builds a MotifCompendium object from a set of PFM files.
 
-    Loads motifs from all PFM files, in PFM or MEME format, then passes them to build().
+    Loads motifs and names from all PFM files then passes them to build().
 
     Args:
-        pfm_files: A path or list of paths to files containing PFM information, all in
-          PFM or MEME text formats.
-        ic: Whether or not to apply information content scaling to the PFMs.
+        pfm_dict: A dictionary mapping motif set name to PFM file path.
+        ic: Whether or not to apply information content scaling to the PFMs, effectively
+          making them PWMs.
         safe: Whether or not to construct the MotifCompendium safely.
 
     Returns:
         A MotifCompendium object containing all motifs in all PFM files.
 
     Notes:
-        Using information content scaling is highly recommended.
+        Only accepts files in the PFM or MEME file formats.
         Safe building validates object integrity but may take significantly longer for
           large objects.
     """
-    # Check inputs
-    if isinstance(pfm_files, str):
-        pfm_files = [pfm_files]
-    if not (
-        isinstance(pfm_files, list) and all([isinstance(x, str) for x in pfm_files])
-    ):
-        raise TypeError("pfm_files must be a list of strings or a single string.")
-    # Load motifs
-    motifs = []
-    motif_names = []
-    file_names = []
-    for pfm_file in pfm_files:
-        if "meme" in pfm_file:
-            motif, motif_name = utils_loader.load_meme(pfm_file)
-        elif "pfm" in pfm_file:
-            motif, motif_name = utils_loader.load_pfm(pfm_file)
-        else:
-            warnings.warn(
-                f"File {pfm_file} does not have a recognized format. Assuming PFM file format."
-            )
-            motif, motif_name = utils_loader.load_pfm(pfm_file)
-        if ic:
-            motif = utils_motif.ic_scale(motif)
-        motifs.append(motif)
-        motif_names.append(motif_name)
-        base_file_name = os.path.basename(pfm_file)
-        file_names.append(base_file_name[: base_file_name.rfind(".")])
-    # Motifs
-    motifs = np.stack(motifs, axis=0)
+    motifs, motif_names = utils_loader.load_pfms(pfm_dict, ic)
     # Convert motifs to normalized 8-channel motifs
+    posneg = utils_motif.motif_posneg_sum(motifs)
     motifs = utils_motif.motif_4_to_8(motifs)
     motifs /= np.sum(motifs, axis=(1, 2), keepdims=True)
-    # Metadata
-    posneg = utils_motif.motif_posneg_sum(motifs)
+    # Build metadata
     metadata = pd.DataFrame(
         {
             "name": motif_names,
-            "posneg": posneg,
-            "source_file": file_names,
+            "posneg": posneg
         }
     )
     return build(
@@ -491,6 +462,8 @@ class MotifCompendium:
         alignment_rc: A np.ndarray of bools containing the reverse complement
           relationship between two motifs. Of shape (N, N). alignment_rc[i, j] is True
           if motif i should be reverse complemented to best align with motif j.
+          alignment_rc[i] gives a vector of how motifs should be reverse complemented to
+          align with motif i.
         alignment_h: A np.ndarray of ints containing the horizontal shift information
           between two motifs. Of shape (N, N). alignment_h[i, j] represents how many
           bases to the right motif j should be shifted (after being reverse complemented
@@ -593,13 +566,15 @@ class MotifCompendium:
             and self.alignment_rc.dtype == np.bool_
         ):
             raise TypeError("self.alignment_rc must be a np.ndarray of bools.")
-        if not (
-            (len(self.alignment_rc.shape) == 2)
-            and (self.alignment_rc == self.alignment_rc.T).all()
-        ):
-            raise ValueError("self.alignment_rc must be a square transpose matrix.")
+        if len(self.alignment_rc.shape) != 2:
+            raise ValueError("self.alignment_rc must be a square matrix.")
         if not ((self.alignment_rc == 0) | (self.alignment_rc == 1)).all():
             raise ValueError("self.alignment_rc must have values being either 0 or 1.")
+        if not (self.alignment_rc == self.alignment_rc.T).all():
+            warnings.warn(
+                "self.alignment_rc is not symmetric. This may be due to numerical instability (especially if you have very symmetric motifs).",
+                RuntimeWarning
+            )
         # alignment_h
         if not (
             isinstance(self.alignment_h, np.ndarray)
@@ -616,8 +591,9 @@ class MotifCompendium:
                 )
             ).all()
         ):
-            raise ValueError(
-                "self.alignment_h is symmetric for reverse complement motifs and skew-symmetric for motifs that are already aligned."
+            warnings.warn(
+                "self.alignment_h should be symmetric for reverse complement motifs and skew-symmetric for motifs that are already aligned, but it is not. This is very rare and should not occur (unless you are working with PFMs, for which it happens often).",
+                RuntimeWarning
             )
         # metadata
         if not isinstance(self.metadata, pd.DataFrame):
