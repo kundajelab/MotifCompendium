@@ -77,6 +77,7 @@ class MotifMatchArgs:
     base_threshold: float = 0.88
     composite_threshold: float = 0.7
     sort_threshold: float = 0.7
+    logo_trimming: str = "trim"
 
 
 @dataclass
@@ -146,13 +147,17 @@ class VisualizeArgs:
 class MotifFilterArgs:
     # Motif metrics to be calculated
     motif_metrics: tuple = (
-        "motif_entropy",
-        "weighted_base_entropy",
-        "posbase_entropy_ratio",
-        "copair_entropy_ratio",
-        "dinuc_entropy_ratio",
-        "posneg_inverted",
-        "truncated",
+        'motif_entropy',
+        'weighted_base_entropy',
+        'weighted_position_entropy',
+        'posbase_entropy_score',
+        'copair_entropy_score',
+        'copair_composition',
+        'dinuc_entropy_score',
+        'dinuc_composition',
+        'dinuc_score',
+        'posneg_inverted',
+        'truncated',
     )
     # Motif filters to be applied
     motif_filters: tuple = (
@@ -169,7 +174,7 @@ class MotifFilterArgs:
             name="2_noisemix",
             metric="motif_entropy",
             operation=">",
-            threshold=0.73,
+            threshold=0.75,
             override=False,
             apply_motif=True,
             apply_cluster=True,
@@ -178,34 +183,70 @@ class MotifFilterArgs:
             name="3_noisypeaks",
             metric="weighted_base_entropy",
             operation=">",
+            threshold=0.6,
+            override=False,
+            apply_motif=True,
+            apply_cluster=True,
+        ),
+        _FilterArgs(
+            name="4_broadsingle_1",
+            metric="weighted_position_entropy",
+            operation=">",
+            threshold=0.85,
+            override=False,
+            apply_motif=True,
+            apply_cluster=True,
+        ),
+        _FilterArgs(
+            name="4_broadsingle_2",
+            metric="posbase_entropy_score",
+            operation=">",
             threshold=0.5,
             override=False,
             apply_motif=True,
             apply_cluster=True,
         ),
         _FilterArgs(
-            name="4_broadsingle",
-            metric="posbase_entropy_ratio",
+            name="5_gcbias_1",
+            metric="copair_entropy_score",
             operation=">",
-            threshold=1.4,
+            threshold=0.35,
             override=False,
             apply_motif=True,
             apply_cluster=True,
         ),
         _FilterArgs(
-            name="5_gcbias",
-            metric="copair_entropy_ratio",
+            name="5_gcbias_2",
+            metric="copair_composition",
             operation=">",
-            threshold=1.4,
+            threshold=0.45,
             override=False,
             apply_motif=True,
             apply_cluster=True,
         ),
         _FilterArgs(
-            name="6_dinucrepeat",
-            metric="dinuc_entropy_ratio",
+            name="6_dinucrepeat_1",
+            metric="dinuc_entropy_score",
             operation=">",
-            threshold=1.6,
+            threshold=0.5,
+            override=False,
+            apply_motif=True,
+            apply_cluster=True,
+        ),
+        _FilterArgs(
+            name="6_dinucrepeat_2",
+            metric="dinuc_composition",
+            operation=">",
+            threshold=0.875,
+            override=False,
+            apply_motif=True,
+            apply_cluster=True,
+        ),
+        _FilterArgs(
+            name="6_dinucrepeat_3",
+            metric="dinuc_score",
+            operation=">",
+            threshold=0.45,
             override=False,
             apply_motif=True,
             apply_cluster=True,
@@ -283,7 +324,7 @@ class MotifFilterArgs:
         ),
         _FilterArgs(
             name="4_broadsingle",
-            metric="posbase_entropy_ratio",
+            metric="posbase_entropy_score",
             operation=">",
             threshold=1.5,
             override=False,
@@ -292,7 +333,7 @@ class MotifFilterArgs:
         ),
         _FilterArgs(
             name="5_gcbias",
-            metric="copair_entropy_ratio",
+            metric="copair_entropy_score",
             operation=">",
             threshold=1.5,
             override=False,
@@ -301,7 +342,7 @@ class MotifFilterArgs:
         ),
         _FilterArgs(
             name="6_dinucrepeat",
-            metric="dinuc_entropy_ratio",
+            metric="dinuc_entropy_score",
             operation=">",
             threshold=2.0,
             override=False,

@@ -586,8 +586,11 @@ def minusxlogx(x: np.ndarray, base: int) -> np.ndarray:
 
 
 def normalized_last_axis_entropy(x: np.ndarray) -> np.ndarray:
-    """Computes the entropy on the last axis."""
-    x_normalized = x / np.sum(x, axis=-1, keepdims=True)
+    """Computes the entropy on the last axis assuming that x >= 0."""
+    x_sum = np.sum(x, axis=-1, keepdims=True)
+    x_normalized = np.divide(
+        x, x_sum, out=np.zeros_like(x, dtype=x.dtype), where=(x_sum != 0)
+    )
     return np.sum(minusxlogx(x_normalized, base=x.shape[-1]), axis=-1, keepdims=True)
 
 

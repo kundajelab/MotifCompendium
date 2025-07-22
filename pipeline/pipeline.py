@@ -132,11 +132,15 @@ def label_motifs(
     # Match reference motifs
     if reference.endswith(".mc"):
         ref_mc = MotifCompendium.load(reference, safe=args.safe)
-        mc.assign_label_from_other(
-            other=ref_mc,
+        utils_analysis.assign_label_from_other_compendium(
+            assign_to_mc=mc,
+            assign_from_mc=ref_mc,
             save_col_prefix=label_col,
             max_submotifs=max_submotifs,
             min_score=min_score,
+            logo_trimming=MotifMatchArgs.logo_trimming,
+            from_label_col="name",
+            save_images=True,
         )
 
     elif reference.endswith("pfm.txt") or reference.endswith("meme.txt") or reference.endswith(".meme"):
@@ -146,6 +150,8 @@ def label_motifs(
             save_col_prefix=label_col,
             max_submotifs=max_submotifs,
             min_score=min_score,
+            logo_trimming=MotifMatchArgs.logo_trimming,
+            save_images=True,
         )
 
     else:
@@ -158,7 +164,6 @@ def label_motifs(
 def filter_motifs(
     mc: MotifCompendium,
     MotifFilterArgs: configs.MotifFilterArgs,
-    MotifMatchArgs: configs.MotifMatchArgs,
     MetadataCols: configs.MetadataCols,
     args: argparse.Namespace,
 ) -> None:
@@ -285,7 +290,6 @@ def filter_clusters(
     mc: MotifCompendium,
     MotifFilterArgs: configs.MotifFilterArgs,
     MetadataCols: configs.MetadataCols,
-    MotifMatchArgs: configs.MotifMatchArgs,
     args: argparse.Namespace,
 ) -> None:
     """
@@ -511,10 +515,10 @@ def aggregate_weighted_avg(mc: MotifCompendium, mc_avg: MotifCompendium,
     Returns:
         None
     """
-    if agg_col not in mc.metadata.columns:
+    if agg_col not in mc.columns():
         raise ValueError(f"Column {agg_col} not found in metadata.")
 
-    if weight_col not in mc.metadata.columns:
+    if weight_col not in mc.columns():
         raise ValueError(f"Column {weight_col} not found in metadata.")
     
     weighted_avgs = []
@@ -591,7 +595,7 @@ if __name__ == "__main__":
             logging.info(
                 f"Completed loading MotifCompendium object:\n"
                 f"  Total number of motifs: {len(mc)}\n"
-                f"  Metadata columns: {mc.metadata.columns.tolist()}"
+                f"  Metadata columns: {mc.columns()}"
             )
         if args.time:
             logging.info(f"Time taken: {time.time() - start_time:.2f}s")
@@ -617,7 +621,7 @@ if __name__ == "__main__":
             logging.info(
                 f"Completed loading and rebuilding old MotifCompendium object:\n"
                 f"  Total number of motifs: {len(mc)}\n"
-                f"  Metadata columns: {mc.metadata.columns.tolist()}"
+                f"  Metadata columns: {mc.columns()}"
             )
         if args.time:
             logging.info(f"Time taken: {time.time() - start_time:.2f}s")
@@ -661,7 +665,7 @@ if __name__ == "__main__":
                     start_time = time.time()
                 mc = MotifCompendium.build_from_modisco(
                     modisco_dict=modisco_dict,
-                    use_subpatterns=args.input_subpatterns,
+                    load_subpatterns=args.input_subpatterns,
                     modisco_region_width=args.modisco_region_width,
                     ic=args.ic,
                     safe=args.safe,
@@ -670,7 +674,7 @@ if __name__ == "__main__":
                     logging.info(
                         f"Completed building MotifCompendium object:\n"
                         f"  Total number of motifs: {len(mc)}\n"
-                        f"  Metadata columns: {mc.metadata.columns.tolist()}"
+                        f"  Metadata columns: {mc.columns()}"
                     )
                 if args.time:
                     logging.info(f"Time taken: {time.time() - start_time:.2f}s")
@@ -723,7 +727,7 @@ if __name__ == "__main__":
             logging.info(
                 f"Completed building MotifCompendium object from PFMs:\n"
                 f"  Total number of motifs: {len(mc)}\n"
-                f"  Metadata columns: {mc.metadata.columns.tolist()}"
+                f"  Metadata columns: {mc.columns()}"
             )
         if args.time:
             logging.info(f"Time taken: {time.time() - start_time:.2f}s")
@@ -769,7 +773,7 @@ if __name__ == "__main__":
         mc.metadata = mc.metadata.loc[:, ~mc.metadata.columns.duplicated()]
 
         if args.verbose:
-            logging.info(f"Metadata columns: {mc.metadata.columns.tolist()}")
+            logging.info(f"Metadata columns: {mc.columns()}")
 
         # Update metadata aggregation
         aggregate_cols = [agg[0] for agg in ClusterArgs.aggregate_metadata]
@@ -833,13 +837,13 @@ if __name__ == "__main__":
             )
             if args.time:
                 logging.info(f"Time taken: {time.time() - start_time:.2f}s")
-        
+
             # Update HTML table columns
             html_addlabel_cols.extend([f"{label_col}_logo0", f"{label_col}_name0", f"{label_col}_score0"])
             if args.verbose:
                 logging.info(f"Adding the following columns to HTML table: {html_addlabel_cols}")
             VisualizeArgs.html_table_label_cols.extend(html_addlabel_cols)
-        
+
     ## Save MotifCompendium object
     mc_path = os.path.join(args.output_dir, OutputPaths.mc_labeled)
     if args.verbose:
@@ -854,7 +858,7 @@ if __name__ == "__main__":
     if args.filter:
         if args.reference is None:
             args.reference = MotifMatchArgs.reference_default
-        
+
         # Apply filters
         if args.verbose:
             logging.info(f"Applying filters to motifs...")
@@ -863,7 +867,6 @@ if __name__ == "__main__":
             mc=mc,
             MotifFilterArgs=MotifFilterArgs,
             MetadataCols=MetadataCols,
-            MotifMatchArgs=MotifMatchArgs,
             args=args,
         )
 
@@ -918,7 +921,7 @@ if __name__ == "__main__":
 
     # Weight column
     # Weight column
-    if ClusterArgs.weight_col not in mc.metadata.columns:
+    if ClusterArgs.weight_col not in mc.columns():
         logging.warning(f"Weight column '{ClusterArgs.weight_col}' not found in metadata. Using default value: None.")
         ClusterArgs.weight_col = None
 
@@ -1248,7 +1251,7 @@ if __name__ == "__main__":
     aggregate_metadata_avg = [
         (col, agg, new_col)
         for col, agg, new_col in ClusterArgs.aggregate_metadata
-        if col in mc.metadata.columns
+        if col in mc.columns()
     ]
     if args.verbose:
         logging.info(f"Aggregating the following metadata columns: {aggregate_metadata_avg}")
@@ -1266,7 +1269,7 @@ if __name__ == "__main__":
                 logging.info(
                     f"Completed averaging motifs per cluster:\n"
                     f"  Total number of clusters: {len(mc_avg)}\n"
-                    f"  Metadata columns: {mc_avg.metadata.columns.tolist()}"
+                    f"  Metadata columns: {mc_avg.columns()}"
                 )
             if args.time:
                 logging.info(f"Time taken: {time.time() - start_time:.2f}s")
@@ -1288,7 +1291,7 @@ if __name__ == "__main__":
     # Add positive/negative column
     mc_avg["posneg"] = utils_motif.motif_posneg_sum(mc_avg.get_standard_motif_stack())
     # Add manual aggregation columns: avg_dist_summit, avg_contrib
-    if "avg_dist_summit" in mc.metadata.columns:
+    if "avg_dist_summit" in mc.columns():
         aggregate_weighted_avg(
             mc=mc,
             mc_avg=mc_avg,
@@ -1297,7 +1300,7 @@ if __name__ == "__main__":
             new_col="avg_dist_summit",
             weight_col=ClusterArgs.weight_col,
         )
-    if "avg_contrib" in mc.metadata.columns:
+    if "avg_contrib" in mc.columns():
         aggregate_weighted_avg(
             mc=mc,
             mc_avg=mc_avg,
@@ -1346,7 +1349,7 @@ if __name__ == "__main__":
         aggregate_metadata_meta = [
             (col, agg, new_col)
             for col, agg, new_col in ClusterArgs.aggregate_metadata
-            if col in mc.metadata.columns
+            if col in mc.columns()
         ]
         if args.verbose:
             logging.info(f"Aggregating the following metadata columns: {aggregate_metadata_meta}")
@@ -1360,7 +1363,7 @@ if __name__ == "__main__":
             logging.info(
                 f"Completed averaging motifs per meta-cluster:\n"
                 f"  Total number of clusters: {len(mc_metaavg)}\n"
-                f"  Metadata columns: {mc_metaavg.metadata.columns.tolist()}"
+                f"  Metadata columns: {mc_metaavg.columns()}"
             )
         if args.time:
             start_time = time.time()
@@ -1368,7 +1371,7 @@ if __name__ == "__main__":
         # Metadata: Add positive/negative column
         mc_metaavg["posneg"] = utils_motif.motif_posneg_sum(mc_metaavg.get_standard_motif_stack())
         # Add manual aggregation columns: avg_dist_summit, avg_contrib
-        if "avg_dist_summit" in mc.metadata.columns:
+        if "avg_dist_summit" in mc.columns():
             aggregate_weighted_avg(
                 mc=mc_avg,
                 mc_avg=mc_metaavg,
@@ -1377,7 +1380,7 @@ if __name__ == "__main__":
                 new_col="avg_dist_summit",
                 weight_col=ClusterArgs.weight_col,
             )
-        if "avg_contrib" in mc.metadata.columns:
+        if "avg_contrib" in mc.columns():
             aggregate_weighted_avg(
                 mc=mc_avg,
                 mc_avg=mc_metaavg,
@@ -1425,7 +1428,7 @@ if __name__ == "__main__":
         aggregate_metadata_sub = [
             (col, agg, new_col)
             for col, agg, new_col in ClusterArgs.aggregate_metadata
-            if col in mc.metadata.columns
+            if col in mc.columns()
         ]
         if args.verbose:
             logging.info(f"Aggregating the following metadata columns: {aggregate_metadata_sub}")
@@ -1439,7 +1442,7 @@ if __name__ == "__main__":
             logging.info(
                 f"Completed averaging motifs per sub-cluster:\n"
                 f"  Total number of clusters: {len(mc_subavg)}\n"
-                f"  Metadata columns: {mc_subavg.metadata.columns.tolist()}"
+                f"  Metadata columns: {mc_subavg.columns()}"
             )
         if args.time:
             start_time = time.time()
@@ -1447,7 +1450,7 @@ if __name__ == "__main__":
         # Add positive/negative column
         mc_subavg["posneg"] = utils_motif.motif_posneg_sum(mc_subavg.get_standard_motif_stack())
         # Add manual aggregation columns: avg_dist_summit, avg_contrib
-        if "avg_dist_summit" in mc.metadata.columns:
+        if "avg_dist_summit" in mc.columns():
             aggregate_weighted_avg(
                 mc=mc,
                 mc_avg=mc_subavg,
@@ -1456,7 +1459,7 @@ if __name__ == "__main__":
                 new_col="avg_dist_summit",
                 weight_col=ClusterArgs.weight_col,
             )
-        if "avg_contrib" in mc.metadata.columns:
+        if "avg_contrib" in mc.columns():
             aggregate_weighted_avg(
                 mc=mc,
                 mc_avg=mc_subavg,
@@ -1642,7 +1645,6 @@ if __name__ == "__main__":
             mc=mc_avg,
             MotifFilterArgs=MotifFilterArgs,
             MetadataCols=MetadataCols,
-            MotifMatchArgs=MotifMatchArgs,
             args=args,
         )
 
@@ -1680,7 +1682,6 @@ if __name__ == "__main__":
                 mc=mc_metaavg,
                 MotifFilterArgs=MotifFilterArgs,
                 MetadataCols=MetadataCols,
-                MotifMatchArgs=MotifMatchArgs,
                 args=args,
             )
             # Remove flagged clusters
@@ -1716,7 +1717,6 @@ if __name__ == "__main__":
                 mc=mc_subavg,
                 MotifFilterArgs=MotifFilterArgs,
                 MetadataCols=MetadataCols,
-                MotifMatchArgs=MotifMatchArgs,
                 args=args,
             )
 
@@ -1788,7 +1788,7 @@ if __name__ == "__main__":
         # Check html table columns
         html_table_cols_motif = [
             col for col in html_table_cols
-            if col in mc.metadata.columns or col in mc.get_saved_images()
+            if col in mc.columns() or col in mc.images()
         ]
         if args.verbose:
             logging.info(f"Visualizing the following columns for motif table: {html_table_cols_motif}")
@@ -1817,7 +1817,7 @@ if __name__ == "__main__":
     # Visualize: Motifs removed
     if args.html_motif_removed and args.filter:
         # Visualize all metadata columns
-        html_motif_removed_cols = mc_removed.metadata.columns.tolist() + mc_removed.get_saved_images()
+        html_motif_removed_cols = mc_removed.columns() + mc_removed.images()
         if args.verbose:
             logging.info(f"Visualizing the following columns for removed motif table: {html_motif_removed_cols}")
 
@@ -1848,7 +1848,7 @@ if __name__ == "__main__":
         # Check html table columns
         html_table_cols_cluster = [
             col for col in html_table_cols
-            if col in mc_avg.metadata.columns or col in mc_avg.get_saved_images()
+            if col in mc_avg.columns() or col in mc_avg.images()
         ]
         if args.verbose:
             logging.info(f"Visualizing the following columns for cluster table: {html_table_cols_cluster}")
@@ -1923,7 +1923,7 @@ if __name__ == "__main__":
     # Visualize: Clusters removed
     if args.html_cluster_removed and args.filter:
         # Visualize all metadata columns
-        html_cluster_removed_cols = mc_avg_removed.metadata.columns.tolist() + mc_avg_removed.get_saved_images()
+        html_cluster_removed_cols = mc_avg_removed.columns() + mc_avg_removed.images()
         if args.verbose:
             logging.info(f"Visualizing the following columns for removed cluster table: {html_cluster_removed_cols}")
 

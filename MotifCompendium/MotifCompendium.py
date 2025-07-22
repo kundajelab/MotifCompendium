@@ -340,7 +340,7 @@ def build_from_pfm(
         base_file_name = os.path.basename(pfm_file)
         file_names.append(base_file_name[: base_file_name.rfind(".")])
     # Motifs
-    motifs = np.stack(motifs, axis=0)
+    motifs = np.concatenate(motifs, axis=0)
     # Convert motifs to normalized 8-channel motifs
     motifs = utils_motif.motif_4_to_8(motifs)
     motifs /= np.sum(motifs, axis=(1, 2), keepdims=True)
@@ -350,7 +350,7 @@ def build_from_pfm(
         {
             "name": motif_names,
             "posneg": posneg,
-            "source_file": file_names,
+            "source": file_names,
         }
     )
     return build(
@@ -411,11 +411,11 @@ def combine(
             "The metadata of each MotifCompendium must have the same columns."
             + "\n(Check mc.columns() for each MotifCompendium.)"
         )
-    image_columns = compendiums[0].get_saved_images()
-    if not all([x.get_saved_images() == image_columns for x in compendiums]):
+    image_columns = compendiums[0].images()
+    if not all([x.images() == image_columns for x in compendiums]):
         raise ValueError(
             "Each MotifCompendium must have the same saved images."
-            + "\n(Check mc.get_saved_images() for each MotifCompendium.)"
+            + "\n(Check mc.images() for each MotifCompendium.)"
         )
     n = len(compendiums)
     # Combine similarities
@@ -455,7 +455,7 @@ def combine(
     metadata = pd.concat([mc.metadata for mc in compendiums], ignore_index=True)
     # Images
     __images = pd.DataFrame()
-    for images in compendiums[0].get_saved_images():
+    for images in compendiums[0].images():
         __images[images] = pd.concat(
             [pd.Series(mc.get_images(images)) for mc in compendiums], ignore_index=True
         )
@@ -650,13 +650,13 @@ class MotifCompendium:
                 and self.metadata.equals(other.metadata)  # metadata equal
                 and (
                     (
-                        sorted(self.get_saved_images())
-                        == sorted(other.get_saved_images())
+                        sorted(self.images())
+                        == sorted(other.images())
                     )
                     and all(
                         [
                             self.get_images(x) == other.get_images(x)
-                            for x in self.get_saved_images()
+                            for x in self.images()
                         ]
                     )
                 )  # images equal (columns equal and each column value equal)
@@ -739,17 +739,17 @@ class MotifCompendium:
         return self.__images[image_name].tolist()
 
     def add_logos(
-        self, motifs: np.ndarray, image_name: str, trim: str = "trim"
+        self, motifs: np.ndarray, image_name: str, trim: float | None = 0.15,
     ) -> None:
         """Saves logos of the provided motifs as saved images.
 
         Args:
             motifs: The motifs to save logos for. Of shape (N, L, 4).
             image_name: The name of the images to save the logos as.
-            trim: A string indicating how the motifs should be trimmed. The options are
-              "notrim" if you don't want trimming, "zerotrim" if you only want to trim
-              the positions with 0 importance, and "trim" if you want to perform a
-              standard level of trimming.
+            trim: A float indicating how much the motifs should be trimmed. 
+              Options: [0, 1]: Proportion of max contribution, below which to trim flanks.
+              (0: Trim only zeros, 1: Trim all positions, default: 0.15)
+              None: No trimming.
         """
         # Check inputs
         utils_motif.validate_motif_stack_standard(motifs)
@@ -779,7 +779,7 @@ class MotifCompendium:
         """Renames the saved images in the MotifCompendium in a Pandas-like syntax."""
         if not isinstance(mapper, dict):
             raise TypeError("Renaming must be done with a dictionary.")
-        if not all([x in self.get_saved_images() for x in mapper.keys()]):
+        if not all([x in self.images() for x in mapper.keys()]):
             raise KeyError(
                 "All keys in the mapper must an existing set of saved images."
             )
@@ -1553,7 +1553,7 @@ class MotifCompendium:
             ]
             mc_avg_standard_motifs = mc_avg.get_standard_motif_stack()
             mc_avg.add_logos(
-                np.stack(
+                motifs=np.stack(
                     [
                         (
                             mc_avg_standard_motifs[x]
@@ -1565,8 +1565,7 @@ class MotifCompendium:
                         for i, x in enumerate(best_match_idx)
                     ]
                 ),
-                "best_match_cluster",
-                "trim",
+                image_name="best_match_cluster",
             )
             # Actual quality
             quality_df = self.clustering_quality(clustering, with_stats=True)
@@ -1579,14 +1578,12 @@ class MotifCompendium:
                 )
             ]
             mc_avg.add_logos(
-                np.stack(quality_df["lowest_internal_similarity_motif1_motif"]),
-                "lowest_internal_similarity_motif1",
-                "trim",
+                motifs=np.stack(quality_df["lowest_internal_similarity_motif1_motif"]),
+                image_name="lowest_internal_similarity_motif1",
             )
             mc_avg.add_logos(
-                np.stack(quality_df["lowest_internal_similarity_motif2_motif"]),
-                "lowest_internal_similarity_motif2",
-                "trim",
+                motifs=np.stack(quality_df["lowest_internal_similarity_motif2_motif"]),
+                image_name="lowest_internal_similarity_motif2",
             )
             mc_avg["highest_external_similarity"] = [
                 f"{x:.3} ({y}: {z})"
@@ -1603,7 +1600,7 @@ class MotifCompendium:
                 for i, c in enumerate(quality_df["highest_external_similarity_cluster"])
             ]
             mc_avg.add_logos(
-                np.stack(
+                motifs=np.stack(
                     [
                         (
                             mc_avg_standard_motifs[cluster_revcomp[x]]
@@ -1618,11 +1615,10 @@ class MotifCompendium:
                         )
                     ]
                 ),
-                "highest_external_similarity_cluster",
-                "trim",
+                image_name="highest_external_similarity_cluster",
             )
             mc_avg.add_logos(
-                np.stack(
+                motifs=np.stack(
                     [
                         x if not y else utils_motif.reverse_complement(x)
                         for x, y in zip(
@@ -1631,8 +1627,7 @@ class MotifCompendium:
                         )
                     ]
                 ),
-                "highest_external_similarity_motif",
-                "trim",
+                image_name="highest_external_similarity_motif",
             )
         return mc_avg
 
@@ -1735,7 +1730,7 @@ class MotifCompendium:
         utils_visualization.motif_collection_html(motif_groups, html_out)
 
     def summary_table_html(
-        self, html_out: str, columns: None | list[str] = None, editable=False
+        self, html_out: str, columns: None | list[str] = None, trim: float = 0.15, editable=False
     ) -> None:
         """Creates an html file summarizing all motifs and metadata about them.
 
@@ -1743,13 +1738,14 @@ class MotifCompendium:
           MotifCompendium. Each motif has one row in the summary table. Logos for the
           forward and reverse complement of each motif will be displayed in the first
           two columns. Columns from the current metadata as well as other images saved
-          in the object (which can be viewed with MotifCompendium.get_saved_images())
+          in the object (which can be viewed with MotifCompendium.images())
           can be displayed as columns in the summary table.
 
         Args:
             html_out: The path to save the html file.
             columns: The list of column names in the metadata or saved images to display
               as columns in the summary table. If None, uses all columns.
+            trim: The amount of trimming to apply to the logos. Defaults to 0.15.
             editable: Whether or not the table is editable.
 
         Notes:
@@ -1765,14 +1761,20 @@ class MotifCompendium:
             missing_columns = [c for c in columns if c not in all_columns]
             raise KeyError(f"{missing_columns} not in metadata or saved images.")
         # If forward and reverse logos aren't in __images, create and add them
-        if "logo (fwd)" not in self.get_saved_images():
-            self.add_logos(self.get_standard_motif_stack(), "logo (fwd)", "trim")
-        if "logo (rev)" not in self.get_saved_images():
+        if "logo (fwd)" not in self.images():
             self.add_logos(
-                utils_motif.reverse_complement(self.get_standard_motif_stack()),
-                "logo (rev)",
-                "trim",
+                motifs=self.get_standard_motif_stack(), image_name="logo (fwd)", trim=trim,
             )
+        else:
+            print("WARNING: Using existing forward logo image. Trim may not apply.")
+        if "logo (rev)" not in self.images():
+            self.add_logos(
+                motifs=utils_motif.reverse_complement(self.get_standard_motif_stack()),
+                image_name="logo (rev)",
+                trim=trim,
+            )
+        else:
+            print("WARNING: Using existing reverse complement logo image. Trim may not apply.")
         # Build table
         columns = ["logo (fwd)", "logo (rev)"] + columns
         table_columns = []
@@ -1935,7 +1937,7 @@ class MotifCompendium:
         min_score: float,
         max_submotifs: int = 1,
         save_images: bool = True,
-        logo_trimming: str = "trim",
+        logo_trim: float | None = 0.15,
         utf8_images: list[str] | None = None,
         save_col_prefix: str = "match",
     ) -> None:
@@ -1961,14 +1963,13 @@ class MotifCompendium:
             save_images: Whether or not to save the logos of the matched motifs. If
               True, the logos will appear as a saved image. If False, logos will not be
               saved as saved images.
-            logo_trimming:  A string indicating how the motifs should be trimmed if
-              logos need to be generated. The options are "notrim" if you don't want
-              trimming, "zerotrim" if you only want to trim the positions with 0
-              importance, and "trim" if you want to perform a standard level of
-              trimming.
+            logo_trim:  A float indicating how much the motifs should be trimmed. 
+              Options: [0, 1]: Proportion of max contribution, below which to trim flanks.
+              (0: Trim only zeros, 1: Trim all positions, default: 0.15)
+              None: No trimming.
             utf8_images: A list of utf8 images for each motif in reference_motifs. If
               saved_images is True and utf8_images is None, the logos will be generated
-              on the fly using the trimming option logo_trimming. If saved_images is
+              on the fly using the trimming option logo_trim. If saved_images is
               True and utf8_images is a list of utf8 images, these images will be used
               as the logos for the matched motifs.
             save_col_prefix: The prefix to use for the saved columns. All saved columns
@@ -2065,7 +2066,7 @@ class MotifCompendium:
                 if utf8_images is None:
                     # Generate forward logos if not provided
                     self.add_logos(
-                        match_motifs[i], f"{save_col_prefix}_logo{i}", logo_trimming
+                        match_motifs[i], f"{save_col_prefix}_logo{i}", logo_trim
                     )
                 else:
                     # Copy forward logos if provided

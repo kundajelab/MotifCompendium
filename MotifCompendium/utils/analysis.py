@@ -487,12 +487,14 @@ def calculate_filters(
         "motif_entropy",
         "weighted_base_entropy",
         "weighted_position_entropy",
-        "posbase_entropy_ratio",
-        "copair_entropy_ratio",
+        "posbase_entropy_score",
+        "copair_entropy_score",
         "copair_composition",
-        "dinuc_entropy_ratio",
+        "dinuc_entropy_score",
         "dinuc_composition",
         "dinuc_score",
+        "posneg_inverted",
+        "truncated",
     ],
 ) -> None:
     """Calculates filter metrics and stores them in the MotifCompendium metadata.
@@ -566,20 +568,20 @@ def calculate_filters(
                 mc["weighted_position_entropy"] = (
                     utils_motif.calculate_weighted_position_entropy(mc_motifs_abs)
                 )
-            case "posbase_entropy_ratio":
-                mc["posbase_entropy_ratio"] = (
+            case "posbase_entropy_score":
+                mc["posbase_entropy_score"] = (
                     utils_motif.calculate_position_versus_base_entropy(mc_motifs_abs)
                 )
-            case "copair_entropy_ratio":
-                mc["copair_entropy"] = utils_motif.calculate_copair_entropy(
+            case "copair_entropy_score":
+                mc["copair_entropy_score"] = utils_motif.calculate_copair_entropy(
                     mc_motifs_abs
                 )
             case "copair_composition":
                 mc["copair_composition"] = utils_motif.calculate_copair_composition(
                     mc_motifs_abs
                 )
-            case "dinuc_entropy_ratio":
-                mc["dinuc_entropy_ratio"] = utils_motif.calculate_dinucleotide_entropy(
+            case "dinuc_entropy_score":
+                mc["dinuc_entropy_score"] = utils_motif.calculate_dinucleotide_entropy(
                     mc_motifs_abs
                 )
             case "dinuc_composition":
@@ -589,7 +591,7 @@ def calculate_filters(
                     )
                 )
             case "dinuc_score":
-                mc["dinucleotide_score"] = utils_motif.calculate_dinucleotide_score(
+                mc["dinuc_score"] = utils_motif.calculate_dinucleotide_score(
                     mc_motifs_abs
                 )
             case "posneg_inverted":
@@ -597,7 +599,7 @@ def calculate_filters(
                     utils_motif.motif_posneg_max(mc_motifs) != mc["posneg"]
                 )
             case "truncated":
-                max_pos = mc_motifs.sum(axis=-1).argmax(axis=-1)  # (N,)
+                max_pos = np.abs(mc_motifs).sum(axis=-1).argmax(axis=-1)  # (N,)
                 mc["truncated"] = (max_pos < 2) | (max_pos > mc_motifs.shape[1] - 3)
             case _:
                 raise ValueError(f"Filter metric {filter_metric} is not implemented.")
@@ -612,7 +614,7 @@ def assign_label_from_pfms(
     min_score: float = 0.5,
     max_submotifs: int = 1,
     save_images: bool = True,
-    logo_trimming: str = "trim",
+    logo_trim: float | None = None,
     save_col_prefix: str = "match",
 ) -> None:
     """Automatic labeling of motifs from a file containing PFMs.
@@ -634,10 +636,10 @@ def assign_label_from_pfms(
         save_images: Whether or not to save the logos of the matched motifs. If
             True, the logos will appear as a saved image. If False, logos will not be
             saved as saved images.
-        logo_trimming:  A string indicating how the motifs should be trimmed if logos
-            need to be generated. The options are "notrim" if you don't want trimming,
-            "zerotrim" if you only want to trim the positions with 0 importance, and
-            "trim" if you want to perform a standard level of trimming.
+        logo_trim:  A float indicating how much the motifs should be trimmed. 
+            Options: [0, 1]: Proportion of max contribution, below which to trim flanks.
+            (0: Only trim zeros, 1: Trim all positions, default: 0.15)
+            None: No trimming.
         save_col_prefix: The prefix to use for the saved columns. All saved columns
             and saved images generated from the labeling process will begin with
             save_col_prefix. These columns will have the structure
@@ -658,7 +660,7 @@ def assign_label_from_pfms(
         min_score,
         max_submotifs=max_submotifs,
         save_images=save_images,
-        logo_trimming=logo_trimming,
+        logo_trim=logo_trim,
         save_col_prefix=save_col_prefix,
     )
 
@@ -670,7 +672,7 @@ def assign_label_from_other_compendium(
     min_score: float = 0.0,
     max_submotifs: int = 1,
     save_images: bool = True,
-    logos_trimming: str = "trim",
+    logo_trim: float | None = 0.15,
     save_col_prefix: str = "match",
 ) -> None:
     """Automatic labeling of motifs from another MotifCompendium.
@@ -704,10 +706,10 @@ def assign_label_from_other_compendium(
             saved as saved images. If True, the logos will come from
             assign_from_mc.get_saved_images("logo (fwd)"), if available. If not, they
             will be generated on the fly.
-        logo_trimming:  A string indicating how the motifs should be trimmed if logos
-            need to be generated. The options are "notrim" if you don't want trimming,
-            "zerotrim" if you only want to trim the positions with 0 importance, and
-            "trim" if you want to perform a standard level of trimming.
+        logo_trim:  A float indicating how much the motifs should be trimmed. 
+            Options: [0, 1]: Proportion of max contribution, below which to trim flanks.
+            (0: Only trim zeros, 1: Trim all positions, default: 0.15)
+            None: No trimming.
         save_col_prefix: The prefix to use for the saved columns. All saved columns
             and saved images generated from the labeling process will begin with
             save_col_prefix. These columns will have the structure
@@ -726,7 +728,7 @@ def assign_label_from_other_compendium(
     else:
         raise KeyError(f"{from_label_col} not in other metadata.")
     # Check if forward logos in other MotifCompendium
-    if "logo (fwd)" in assign_from_mc.get_saved_images():
+    if "logo (fwd)" in assign_from_mc.images():
         other_logos = assign_from_mc.get_images("logo (fwd)")
     else:
         other_logos = None
@@ -737,7 +739,7 @@ def assign_label_from_other_compendium(
         min_score,
         max_submotifs=max_submotifs,
         save_images=save_images,
-        logo_trimming=logos_trimming,
+        logo_trim=logo_trim,
         utf8_images=other_logos,
         save_col_prefix=save_col_prefix,
     )
