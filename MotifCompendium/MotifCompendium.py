@@ -728,8 +728,8 @@ class MotifCompendium:
         self.metadata.drop(column, axis=1, inplace=True)
 
     # IMAGES
-    def get_saved_images(self) -> list[str]:
-        """Returns a list of saved images in the MotifCompendium."""
+    def images(self) -> list[str]:
+        """Returns a list of the images saved in the MotifCompendium."""
         return list(self.__images.columns)
 
     def get_images(self, image_name: str) -> list[str]:
@@ -765,7 +765,7 @@ class MotifCompendium:
             )
         # Prepare plotting
         logo_plotting_inputs = [
-            utils_plotting.LogoPlottingInput(motif=m, trim="zerotrim") for m in motifs
+            utils_plotting.LogoPlottingInput(motif=m, trim=trim) for m in motifs
         ]
         # Plot and save
         self.__images[image_name] = [

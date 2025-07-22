@@ -224,7 +224,7 @@ def load_modisco(
                         ][()]
                         motif_sim = _sequence_importance_from_seqlets(seqlets, ic)
                         motifs.append(motif_sim)
-                        motif_names.append(f"{pattern_posneg}.{pattern}.{subpattern}")
+                        motif_names.append(f"{pattern_posneg}.{pattern}-{subpattern}")
                         seqlet_counts.append(seqlets.shape[0])
                         posnegs.append(pattern_posneg)
                         avgdist_summits.append(
