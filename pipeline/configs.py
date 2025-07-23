@@ -77,7 +77,6 @@ class MotifMatchArgs:
     base_threshold: float = 0.88
     composite_threshold: float = 0.7
     sort_threshold: float = 0.7
-    logo_trimming: str = "trim"
 
 
 @dataclass
@@ -122,6 +121,7 @@ class ClusterArgs:
 class VisualizeArgs:
     # Allow editable HTML table
     editable: bool = True
+    logo_trim: bool | float = True
 
     # Specify HTML table columns
     html_table_cols: List[str] = field(default_factory=lambda: ["name",
@@ -317,34 +317,61 @@ class MotifFilterArgs:
             name="3_noisypeaks",
             metric="weighted_base_entropy",
             operation=">",
-            threshold=0.55,
+            threshold=0.7,
             override=False,
             apply_motif=True,
             apply_cluster=True,
         ),
         _FilterArgs(
-            name="4_broadsingle",
+            name="4_broadsingle_1",
+            metric="weighted_position_entropy",
+            operation=">",
+            threshold=0.9,
+            override=False,
+            apply_motif=True,
+            apply_cluster=True,
+        ),
+        _FilterArgs(
+            name="4_broadsingle_2",
             metric="posbase_entropy_score",
             operation=">",
-            threshold=1.5,
+            threshold=0.7,
             override=False,
             apply_motif=True,
             apply_cluster=True,
         ),
         _FilterArgs(
-            name="5_gcbias",
+            name="5_gcbias_1",
             metric="copair_entropy_score",
             operation=">",
-            threshold=1.5,
+            threshold=0.65,
             override=False,
             apply_motif=True,
             apply_cluster=True,
         ),
         _FilterArgs(
-            name="6_dinucrepeat",
+            name="5_gcbias_2",
+            metric="copair_composition",
+            operation=">",
+            threshold=0.6,
+            override=False,
+            apply_motif=True,
+            apply_cluster=True,
+        ),
+        _FilterArgs(
+            name="6_dinucrepeat_1",
             metric="dinuc_entropy_score",
             operation=">",
-            threshold=2.0,
+            threshold=0.7,
+            override=False,
+            apply_motif=True,
+            apply_cluster=True,
+        ),
+        _FilterArgs(
+            name="6_dinucrepeat_2",
+            metric="dinuc_composition",
+            operation=">",
+            threshold=0.95,
             override=False,
             apply_motif=True,
             apply_cluster=True,
@@ -354,15 +381,6 @@ class MotifFilterArgs:
             metric="num_seqlets",
             operation="<",
             threshold=20,
-            override=False,
-            apply_motif=True,
-            apply_cluster=False,
-        ),
-        _FilterArgs(
-            name="8_posneg_inverted",
-            metric="posneg_inverted",
-            operation="==",
-            threshold=True,
             override=False,
             apply_motif=True,
             apply_cluster=False,

@@ -1005,7 +1005,7 @@ class MotifCompendium:
         cluster_on: str | None = None,
         cluster_within_on: tuple[str, str] | None = None,
         cluster_on_weight: str | None = None,
-        largest_clusters_first: bool = False,
+        largest_clusters_first: bool = True,
         **kwargs,
     ) -> None:
         """Cluster motifs.
@@ -1159,7 +1159,7 @@ class MotifCompendium:
                 # Identify motifs corresponding to cluster_within
                 c_condition = self.metadata[cluster_within] == c
                 c_idxs = list(c_condition[c_condition].index)
-                c_mc = self.metadata[c_condition]
+                c_mc = self[c_condition]
                 # Average for cluster_on
                 c_mc_average = c_mc.cluster_averages(
                     clustering=cluster_on, weight_col=cluster_on_weight
@@ -1545,6 +1545,7 @@ class MotifCompendium:
                     ]
                 ),
                 image_name="best_match_cluster",
+                trim=0,
             )
             # Actual quality
             quality_df = self.clustering_quality(clustering, with_stats=True)
@@ -1559,10 +1560,12 @@ class MotifCompendium:
             mc_avg.add_logos(
                 motifs=np.stack(quality_df["lowest_internal_similarity_motif1_motif"]),
                 image_name="lowest_internal_similarity_motif1",
+                trim=0,
             )
             mc_avg.add_logos(
                 motifs=np.stack(quality_df["lowest_internal_similarity_motif2_motif"]),
                 image_name="lowest_internal_similarity_motif2",
+                trim=0,
             )
             mc_avg["highest_external_similarity"] = [
                 f"{x:.3} ({y}: {z})"
@@ -1595,6 +1598,7 @@ class MotifCompendium:
                     ]
                 ),
                 image_name="highest_external_similarity_cluster",
+                trim=0,
             )
             mc_avg.add_logos(
                 motifs=np.stack(
@@ -1607,6 +1611,7 @@ class MotifCompendium:
                     ]
                 ),
                 image_name="highest_external_similarity_motif",
+                trim=0,
             )
         return mc_avg
 
@@ -1709,7 +1714,11 @@ class MotifCompendium:
         utils_visualization.motif_collection_html(motif_groups, html_out)
 
     def summary_table_html(
-        self, html_out: str, columns: None | list[str] = None, trim: bool | float = True, editable=False
+        self,
+        html_out: str,
+        columns: None | list[str] = None,
+        logo_trim: bool | float = True,
+        editable=False
     ) -> None:
         """Creates an html file summarizing all motifs and metadata about them.
 
@@ -1747,7 +1756,9 @@ class MotifCompendium:
         # If forward and reverse logos aren't in __images, create and add them
         if "logo (fwd)" not in self.images():
             self.add_logos(
-                motifs=self.get_standard_motif_stack(), image_name="logo (fwd)", trim=trim,
+                motifs=self.get_standard_motif_stack(),
+                image_name="logo (fwd)",
+                trim=logo_trim,
             )
         else:
             print("WARNING: Using existing forward logo image. Trim may not apply.")
@@ -1755,7 +1766,7 @@ class MotifCompendium:
             self.add_logos(
                 motifs=utils_motif.reverse_complement(self.get_standard_motif_stack()),
                 image_name="logo (rev)",
-                trim=trim,
+                trim=logo_trim,
             )
         else:
             print("WARNING: Using existing reverse complement logo image. Trim may not apply.")

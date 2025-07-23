@@ -350,6 +350,7 @@ def average_motifs(
     Returns:
         The average motif.
     """
+    validate_motif_stack(motif_stack)
     aligned_motifs = align_motifs(motif_stack, alignment_rc, alignment_h)
     if weights is None:
         weights = np.ones(aligned_motifs.shape[0])
@@ -361,7 +362,12 @@ def average_motifs(
         raise ValueError(
             "Weights must be a non-negative vector whose length matches that of the motif stack."
         )
+    # Convert to 4-channel, to ensure +/- channels align
+    if aligned_motifs.shape[2] == 8:
+        aligned_motifs = motif_8_to_4_signed(aligned_motifs)
     average_motif = np.average(aligned_motifs, axis=0, weights=weights)
+    if motif_stack.shape[2] == 8:
+        average_motif = motif_4_to_8(average_motif)
     if match_original_length:
         average_motif = resize_motif(average_motif, resize_to=motif_stack.shape[1])
     if l1_normalize:

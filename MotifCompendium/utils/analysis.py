@@ -653,7 +653,7 @@ def assign_label_from_pfms(
     """
     # Load PFM database, with same length as motifs
     L = mc.motifs.shape[1]
-    if pfm_file.endswith("pfms.txt") | pfm_file.endswith(".pfm") | pfm_file.endswith(".meme.txt") | pfm_file.endswith(".meme"):
+    if pfm_file.endswith("pfms.txt") or pfm_file.endswith(".pfm") or pfm_file.endswith(".meme.txt") or pfm_file.endswith(".meme"):
         pfm_motifs, pfm_names = utils_loader.load_pfm(pfm_file, ic=ic)
     else:
         raise ValueError("pfm_file must be a _pfm.txt, .meme, or .meme.txt file.")

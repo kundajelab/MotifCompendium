@@ -28,8 +28,8 @@ def setup_parser():
 
     parser.add_argument("-im", "--input-mc", type=str, default=None, help="Path to the input MotifCompendium object.")
     parser.add_argument("-io", "--input-old-mc", type=str, default=None, help="Path to the input old MotifCompendium object.")
+    parser.add_argument("-nh", "--input-names", nargs="+", type=str, default=None, help="Nickname(s) of the input file(s): TF-MoDISco (lite) H5, PFMs, MEME.")
     parser.add_argument("-ih", "--input-modisco-h5s", nargs="+", type=str, default=None, help="Path(s) to the input TF-MoDISco (lite) H5 file(s).")
-    parser.add_argument("-nh", "--input-names", nargs="+", type=str, default=None, help="Nickname(s) of the input TF-MoDISco (lite) H5 file(s).")
     parser.add_argument("-sh", "--input-subpatterns", action="store_true", help="Use subpatterns (instead of main patterns) when loading input TF-MoDISco (lite) H5 file(s).")
     parser.add_argument("-ip", "--input-pfms", nargs="+", type=str, default=None, help="Path(s) to the input motif PFM files, in PFM or MEME format.")
 
@@ -93,21 +93,21 @@ def set_default_options():
 
 
 #### FUNCTIONS -------------------------------------------------------------------
-def build_modisco_dict(h5_list: list, name_list: list | None) -> dict:
+def build_inputs_dict(input_list: list, name_list: list | None) -> dict:
     """
-    Build a dictionary of Modisco H5 files.
+    Build a dictionary of input files.
     
     Args:
-        h5_list (list): List of H5 files.
-        name_list (list | None): List of names for the H5 files. If None, use the base name of the H5 files.
-    
+        input_list (list): List of input files: TF-Modisco H5, PFM, MEME.
+        name_list (list | None): List of names for the input files. If None, use the base name of the input files.
+
     Returns:
-        dict: Dictionary of Modisco H5 files.
+        dict: Dictionary of input files: key: name, value: path.
     """
     if name_list is None:
-        name_list = [os.path.basename(h5) for h5 in h5_list]
-    modisco_dict = dict(zip(name_list, h5_list))
-    return modisco_dict
+        name_list = [os.path.basename(h5) for h5 in input_list]
+    inputs_dict = dict(zip(name_list, input_list))
+    return inputs_dict
 
 def label_motifs(
     mc: MotifCompendium,
@@ -135,23 +135,24 @@ def label_motifs(
         utils_analysis.assign_label_from_other_compendium(
             assign_to_mc=mc,
             assign_from_mc=ref_mc,
-            save_col_prefix=label_col,
-            max_submotifs=max_submotifs,
-            min_score=min_score,
-            logo_trimming=MotifMatchArgs.logo_trimming,
             from_label_col="name",
+            save_col_prefix=label_col,
+            min_score=min_score,
+            max_submotifs=max_submotifs,
             save_images=True,
+            logo_trim=VisualizeArgs.logo_trim,
         )
 
-    elif reference.endswith("pfm.txt") or reference.endswith("meme.txt") or reference.endswith(".meme"):
+    elif reference.endswith("pfm.txt") or reference.endswith("pfm") or reference.endswith("meme.txt") or reference.endswith(".meme"):
         utils_analysis.assign_label_from_pfms(
             mc=mc,
             pfm_file=reference,
+            ic=False,
             save_col_prefix=label_col,
-            max_submotifs=max_submotifs,
             min_score=min_score,
-            logo_trimming=MotifMatchArgs.logo_trimming,
+            max_submotifs=max_submotifs,
             save_images=True,
+            logo_trim=VisualizeArgs.logo_trim,
         )
 
     else:
@@ -527,7 +528,7 @@ def aggregate_weighted_avg(mc: MotifCompendium, mc_avg: MotifCompendium,
         if len(mc_cluster) == 0:
             weighted_avgs.append(np.nan)
             continue
-        weighted_avg = (mc_cluster[agg_col] * mc_cluster[weight_col]).sum() / mc_cluster["num_motifs"].sum()
+        weighted_avg = (mc_cluster[agg_col] * mc_cluster[weight_col]).sum() / mc_cluster[weight_col].sum()
         weighted_avgs.append(weighted_avg)
     mc_avg[new_col] = weighted_avgs
 
@@ -654,7 +655,7 @@ if __name__ == "__main__":
             raise ValueError(f"Failed to load the following H5 files: {', '.join(failed_h5s)}")
 
         # Build MotifCompendium object
-        modisco_dict = build_modisco_dict(args.input_modisco_h5s, args.input_names)
+        modisco_dict = build_inputs_dict(args.input_modisco_h5s, args.input_names)
         if args.verbose:
             logging.info("Loading input H5 files...")
         while True:
@@ -714,12 +715,13 @@ if __name__ == "__main__":
             raise ValueError(f"Failed to load the following PFM files: {', '.join(failed_pfms)}")
 
         # Build MotifCompendium object from PFMs
+        pfm_dict = build_inputs_dict(args.input_pfms, args.input_names)
         if args.verbose:
             logging.info("Loading input PFM files...")
         if args.time:
             start_time = time.time()
         mc = MotifCompendium.build_from_pfm(
-            pfm_files=args.input_pfms,
+            pfm_dict=pfm_dict,
             ic=args.ic,
             safe=args.safe,
         )
@@ -942,7 +944,7 @@ if __name__ == "__main__":
                         cluster_within_on=(args.cluster_within, args.cluster_on),
                         cluster_on_weight=ClusterArgs.weight_col,
                         save_name=cluster_col_name,
-                        sort=True,
+                        largest_clusters_first=True,
                         **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
                     )
                 elif args.cluster_on and not args.cluster_within: # Cluster ON only
@@ -952,7 +954,7 @@ if __name__ == "__main__":
                         cluster_on=args.cluster_on,
                         cluster_on_weight=ClusterArgs.weight_col,
                         save_name=cluster_col_name,
-                        sort=True,
+                        largest_clusters_first=True,
                         **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
                     )
                 elif not args.cluster_on and args.cluster_within: # Cluster WITHIN only
@@ -961,7 +963,7 @@ if __name__ == "__main__":
                         similarity_threshold=sim_threshold,
                         cluster_within=args.cluster_within,
                         save_name=cluster_col_name,
-                        sort=True,
+                        largest_clusters_first=True,
                         **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
                     )
                 else: # Cluster STANDARD
@@ -969,7 +971,7 @@ if __name__ == "__main__":
                         algorithm=ClusterArgs.algorithm,
                         similarity_threshold=sim_threshold,
                         save_name=cluster_col_name,
-                        sort=True,
+                        largest_clusters_first=True,
                         **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
                     )
                 # Recursive cluster
@@ -985,7 +987,7 @@ if __name__ == "__main__":
                                 cluster_within_on=(args.cluster_within, cluster_col_name),
                                 cluster_on_weight=ClusterArgs.weight_col,
                                 save_name=cluster_col_name,
-                                sort=True,
+                                largest_clusters_first=True,
                                 **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
                             )
                         else:
@@ -995,7 +997,7 @@ if __name__ == "__main__":
                                 cluster_on=cluster_col_name,
                                 cluster_on_weight=ClusterArgs.weight_col,
                                 save_name=cluster_col_name,
-                                sort=True,
+                                largest_clusters_first=True,
                                 **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
                             )
                         new_min_len = mc[cluster_col_name].nunique()
@@ -1015,7 +1017,7 @@ if __name__ == "__main__":
                                 cluster_within_on=(args.cluster_within, cluster_col_name),
                                 cluster_on_weight=ClusterArgs.weight_col,
                                 save_name=cluster_col_name,
-                                sort=True,
+                                largest_clusters_first=True,
                                 **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_force],
                             )
                         else:
@@ -1025,7 +1027,7 @@ if __name__ == "__main__":
                                 cluster_on=cluster_col_name,
                                 cluster_on_weight=ClusterArgs.weight_col,
                                 save_name=cluster_col_name,
-                                sort=True,
+                                largest_clusters_first=True,
                                 **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_force],
                             )
                         new_min_len = mc[cluster_col_name].nunique()
@@ -1058,7 +1060,7 @@ if __name__ == "__main__":
                         cluster_on=cluster_col_name,
                         cluster_on_weight=ClusterArgs.weight_col,
                         save_name=metacluster_col_name,
-                        sort=True,
+                        largest_clusters_first=True,
                         **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_meta],
                     )
                     # Recursive cluster:
@@ -1073,7 +1075,7 @@ if __name__ == "__main__":
                                 cluster_on=metacluster_col_name,
                                 cluster_on_weight=ClusterArgs.weight_col,
                                 save_name=metacluster_col_name,
-                                sort=True,
+                                largest_clusters_first=True,
                                 **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_meta],
                             )
                             new_min_len = mc[metacluster_col_name].nunique()
@@ -1092,7 +1094,7 @@ if __name__ == "__main__":
                                 cluster_on=metacluster_col_name,
                                 cluster_on_weight=ClusterArgs.weight_col,
                                 save_name=metacluster_col_name,
-                                sort=True,
+                                largest_clusters_first=True,
                                 **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_force],
                             )
                             new_min_len = mc[metacluster_col_name].nunique()
@@ -1124,7 +1126,7 @@ if __name__ == "__main__":
                         similarity_threshold=args.sim_threshold_sub,
                         cluster_within=cluster_col_name,
                         save_name=subcluster_col_name,
-                        sort=True,
+                        largest_clusters_first=True,
                         **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_sub],
                     )
                     # Recursive cluster:
@@ -1139,7 +1141,7 @@ if __name__ == "__main__":
                                 cluster_within_on=(cluster_col_name, subcluster_col_name),
                                 cluster_on_weight=ClusterArgs.weight_col,
                                 save_name=subcluster_col_name,
-                                sort=True,
+                                largest_clusters_first=True,
                                 **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_sub],
                             )
                             new_min_len = mc[subcluster_col_name].nunique()
@@ -1158,7 +1160,7 @@ if __name__ == "__main__":
                                 cluster_within_on=(cluster_col_name, subcluster_col_name),
                                 cluster_on_weight=ClusterArgs.weight_col,
                                 save_name=subcluster_col_name,
-                                sort=True,
+                                largest_clusters_first=True,
                                 **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_force],
                             )
                             new_min_len = mc[subcluster_col_name].nunique()
@@ -1322,7 +1324,7 @@ if __name__ == "__main__":
                 algorithm=ClusterArgs.algorithm,
                 similarity_threshold=MotifMatchArgs.sort_threshold,
                 save_name=metacluster_col_name,
-                sort=True,
+                largest_clusters_first=True,
                 **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
             )
         mc_avg.sort(by=["num_motifs"], ascending=False, inplace=True)
@@ -1400,7 +1402,7 @@ if __name__ == "__main__":
                 algorithm=ClusterArgs.algorithm,
                 similarity_threshold=MotifMatchArgs.sort_threshold,
                 save_name=metametacluster_col_name,
-                sort=True,
+                largest_clusters_first=True,
                 **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
             )
             mc_metaavg.sort(by=["num_motifs"], ascending=False, inplace=True)
@@ -1809,6 +1811,7 @@ if __name__ == "__main__":
         mc[max_rows_series].summary_table_html(
             html_out=html_motif_table_path,
             columns=html_table_cols_motif,
+            logo_trim=VisualizeArgs.logo_trim,
             editable=VisualizeArgs.editable,
         )
         if args.time:
@@ -1837,6 +1840,7 @@ if __name__ == "__main__":
         mc_removed[max_rows_series].summary_table_html(
             html_out=html_motif_removed_path,
             columns=html_motif_removed_cols,
+            logo_trim=VisualizeArgs.logo_trim,
             editable=VisualizeArgs.editable,
         )
         if args.time:
@@ -1869,6 +1873,7 @@ if __name__ == "__main__":
         mc_avg[max_rows_series].summary_table_html(
             html_out=html_cluster_table_path,
             columns=html_table_cols_cluster,
+            logo_trim=VisualizeArgs.logo_trim,
             editable=VisualizeArgs.editable,
         )
         if args.time:
@@ -1892,6 +1897,7 @@ if __name__ == "__main__":
             mc_metaavg[max_rows_series].summary_table_html(
                 html_out=html_metacluster_table_path,
                 columns=html_table_cols_cluster,
+                logo_trim=VisualizeArgs.logo_trim,
                 editable=VisualizeArgs.editable,
             )
             if args.time:
@@ -1915,6 +1921,7 @@ if __name__ == "__main__":
             mc_subavg[max_rows_series].summary_table_html(
                 html_out=html_subcluster_table_path,
                 columns=html_table_cols_cluster,
+                logo_trim=VisualizeArgs.logo_trim,
                 editable=VisualizeArgs.editable,
             )
             if args.time:
@@ -1943,6 +1950,7 @@ if __name__ == "__main__":
         mc_avg_removed[max_rows_series].summary_table_html(
             html_out=html_cluster_removed_path,
             columns=html_cluster_removed_cols,
+            logo_trim=VisualizeArgs.logo_trim,
             editable=VisualizeArgs.editable,
         )
         if args.time:
@@ -1966,6 +1974,7 @@ if __name__ == "__main__":
             mc_metaavg_removed[max_rows_series].summary_table_html(
                 html_out=html_metacluster_removed_path,
                 columns=html_cluster_removed_cols,
+                logo_trim=VisualizeArgs.logo_trim,
                 editable=VisualizeArgs.editable,
             )
             if args.time:
@@ -1989,6 +1998,7 @@ if __name__ == "__main__":
             mc_subavg_removed[max_rows_series].summary_table_html(
                 html_out=html_subcluster_removed_path,
                 columns=html_cluster_removed_cols,
+                logo_trim=VisualizeArgs.logo_trim,
                 editable=VisualizeArgs.editable,
             )
             if args.time:
