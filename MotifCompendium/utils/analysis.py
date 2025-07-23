@@ -108,6 +108,8 @@ def plot_clustering_similarity_mismatch(
             )
             similarity_slice_ij_df_stacked = similarity_slice_ij_df.stack()
             row_label, col_label = similarity_slice_ij_df_stacked.idxmax()
+            if label[row_label] or label[col_label]:
+                continue
             label[row_label] = (
                 f"High external similarity {ci} & {cj} ({quality.loc[ci, cj]:.3})"
             )
