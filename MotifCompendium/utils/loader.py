@@ -283,7 +283,7 @@ def load_modisco(
 def load_pfms(
     pfm_dict: dict[str, str],
     ic: bool = True,
-) -> tuple[np.ndarray, list[str]]:
+) -> tuple[np.ndarray, list[str], list[str]]:
     """Load motifs and names from multiple files containing PFMs.
 
     Motifs from each file containing Position Frequency Matrices (PFMs) are extracted

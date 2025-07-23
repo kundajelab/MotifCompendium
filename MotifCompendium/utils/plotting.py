@@ -35,11 +35,13 @@ class LogoPlottingInput:
           complement).
         xmin: An int representing the minimum value of the x-axis in the logo plot.
         xmax: An int representing the maximum value of the x-axis in the logo plot.
-        trim: A bool, float indicating how much the motifs should be trimmed. The options are:
-            - True: Trim flanks with contribution less than 1/L * max contribution.
-            - False: No trimming.
-            - [0, 1]: Trim flanks below select proportion * max contribution.
-              (where, 0: Trim only zeros, 1: Trim all positions, default: 0.15)
+        trim: A bool or float/int indicating how the motif should be trimmed when
+          plotting. If False, the motif will not be trimmed at all. If True, the motif
+          will be trimmed at the flanks with a standard threshold of 1/L. If a number is
+          provided, that number must be in [0, 1], and will define the trimming
+          threshold. At a value of 0, only zero positions are trimmed and at a value of
+          1, all positions would be trimmed. If trim is not False, then the motif is not
+          repositioned or reindexed.
         name: A str representing the name of the motif. Not plotted.
         encode: A bool representing whether the plot should be encoded as a UTF-8
           string.
@@ -56,7 +58,7 @@ class LogoPlottingInput:
         motif: np.ndarray,
         revcomp: bool = False,
         pos: int = 0,
-        trim: bool | float = False,
+        trim: bool | float | int = False,
         name: str = "motif",
         bgcolor: str = "white",
         encode: bool = True,
@@ -70,24 +72,28 @@ class LogoPlottingInput:
             motif: A np.ndarray that is assigned to self.motifs.
             revcomp: A bool that is assigned to self.revcomp.
             pos: An int that is assigned to self.pos.
-            trim: A float indicating how much the motifs should be trimmed. 
-              Options: [0, 1]: Proportion of max contribution, below which to trim flanks.
-              (0: Trim only zeros, 1: Trim all positions, default: 0.15)
-              None: No trimming.
-              (If "trim" is not None, the motif is not repositioned or reindexed using 
-              self.pos, self.xmin, and self.xmax.)
+            trim: A bool or float/int indicating how the motif should be trimmed when
+              plotting. If False, the motif will not be trimmed at all. If True, the
+              motif will be trimmed at the flanks with a standard threshold of 1/L. If a
+              number is provided, that number must be in [0, 1], and will define the
+              trimming threshold. At a value of 0, only zero positions are trimmed and
+              at a value of 1, all positions would be trimmed. If trim is not False,
+              then the motif is not repositioned or reindexed.
             name: A str that is assigned to self.name.
             bgcolor: A str that is assigned to self.bgcolor.
             encode: A bool that is assigned to self.encode.
             ax: A matplotlib.axes.Axes object that is assigned to self.ax.
         """
         # Motif
+        utils_motif.validate_motif_basic(motif)
+        if len(motif.shape) != 2:
+            raise ValueError("Can only plot a 2D motif.")
         self.motif = motif
         self.revcomp = revcomp
         self.pos = pos
         self.xmin = 0
         self.xmax = motif.shape[0] - 1
-        if not (isinstance(trim, bool) or (isinstance(trim, (int, float)) and 0 <= trim <= 1)):
+        if not (isinstance(trim, bool) or (isinstance(trim, (int, float)) and (0 <= trim <= 1))):
             raise ValueError("trim must be bool or a float between 0 and 1.")
         self.trim = trim
         self.name = name
@@ -105,12 +111,16 @@ class LogoPlottingInput:
 
     def get_motif_df(self) -> pd.DataFrame:
         """Returns a pd.DataFrame of the motif that can be passed to logomaker."""
-        if self.trim is False:
+        # Trim motif if needed
+        if ((isinstance(self.trim, bool) and not self.trim)):
             motif_to_plot = self.motif
-        elif self.trim is True:
+        elif ((isinstance(self.trim, bool) and self.trim)):
             motif_to_plot = utils_motif.trim_motif(self.motif, 1 / self.motif.shape[0])
         else:
             motif_to_plot = utils_motif.trim_motif(self.motif, self.trim)
+        # If trimming deletes motif, return None
+        if motif_to_plot is None:
+            return None
         # Reverse complement
         if self.revcomp:
             motif_df = utils_motif.motif_to_df(
@@ -118,8 +128,8 @@ class LogoPlottingInput:
             )
         else:
             motif_df = utils_motif.motif_to_df(motif_to_plot)
-        if self.trim is not False:
-            # Don't reposition if trimming
+        # If any trimming happening, don't reposition or reindex
+        if not ((isinstance(self.trim, bool) and not self.trim)):
             return motif_df
         # Then shift
         motif_df.index += self.pos
@@ -170,8 +180,8 @@ def plot_motif_stack(
     """Plots a stack of motifs.
 
     Plots a stack of motifs by calling plot_many_motif_logos(). If alignment information
-      is provided, the motifs are aligned accordingly. All motifs are plotted on the same
-      figure. If show is True, the figure is shown.
+      is provided, the motifs are aligned accordingly. All motifs are plotted on the
+      same figure. If show is True, the figure is shown.
 
     Args:
         motif_stack: A stack of motifs to be plotted.
@@ -351,7 +361,8 @@ def _plot_motif_logo(motif_info: LogoPlottingInput) -> LogoPlottingInput:
       motif_info.utf8_plot. Returns the updated LogoPlottingInput object.
 
     Args:
-        motif_info: A LogoPlottingInput object specifying how the motif should be plotted.
+        motif_info: A LogoPlottingInput object specifying how the motif should be
+          plotted.
 
     Returns:
         A LogoPlottingInput object containing the plot of the motif.
@@ -364,11 +375,12 @@ def _plot_motif_logo(motif_info: LogoPlottingInput) -> LogoPlottingInput:
         plot_ax = motif_info.ax
         fig = plot_ax.figure
     # Plot
-    if not (motif_info.motif == 0).all():  # Only plot if motif is not all zeros
+    motif_df = motif_info.get_motif_df()
+    if not ((motif_info.motif == 0).all() or (motif_df is None)):  # Only plot if motif is not all zeros
         if utils_config.get_fast_plotting():
-            _plot_logo_on_axis_fast(motif_info.get_motif_df(), plot_ax)
+            _plot_logo_on_axis_fast(motif_df, plot_ax)
         else:
-            logo = logomaker.Logo(motif_info.get_motif_df(), ax=plot_ax)
+            logo = logomaker.Logo(motif_df, ax=plot_ax)
     plot_ax.spines[["top", "right", "bottom", "left"]].set_visible(False)
     plot_ax.set_axis_off()
     # Encode image in UTF-8

@@ -5,20 +5,19 @@ channels:
 dependencies:
 - python=3.10
 - h5py
-- leidenalg
+- jupyter
 - numpy
 - pandas
 - pytables
 - seaborn
 - scikit-learn
 - tqdm
-- jupyter
 - pip
 - pip:
     - beautifulsoup4
+    - gdown
     - igraph
     - Jinja2
     - leidenalg
     - logomaker
     - upsetplot
-    - gdown

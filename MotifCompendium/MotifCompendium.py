@@ -539,10 +539,12 @@ class MotifCompendium:
     def validate(self) -> None:
         """Verifies the integrity of the MotifCompendium.
 
-        Checks the validity of each attribute (motifs, similarity, similarity_fb, similarity_h).
+        Checks the validity of each attribute (motifs, similarity, similarity_fb,
+          similarity_h).
 
         Notes:
-            This function can take a long time to run, especially for very large MotifCompendium.
+            This function can take a long time to run, especially for very large
+              MotifCompendium.
         """
         # motifs
         utils_motif.validate_motif_stack_compendium(self.motifs)
@@ -716,19 +718,19 @@ class MotifCompendium:
         return self.__images[image_name].tolist()
 
     def add_logos(
-        self, motifs: np.ndarray, image_name: str, trim: bool | float = False,
+        self, motifs: np.ndarray, image_name: str, trim: bool | float | int = False,
     ) -> None:
         """Saves logos of the provided motifs as saved images.
 
         Args:
             motifs: The motifs to save logos for. Of shape (N, L, 4).
             image_name: The name of the images to save the logos as.
-            trim: A float indicating how much the motifs should be trimmed. 
-              Options: 
-              True: Trim flanks with contribution less than 1/L * max contribution.
-              False: No trimming.
-              [0, 1]: Trim flanks below select proportion * max contribution.
-                (where, 0: Trim only zeros, 1: Trim all positions)
+            trim: A bool or float/int indicating how the motif should be trimmed when
+              plotting. If False, the motif will not be trimmed at all. If True, the
+              motif will be trimmed at the flanks with a standard threshold of 1/L. If a
+              number is provided, that number must be in [0, 1], and will define the
+              trimming threshold. At a value of 0, only zero positions are trimmed and
+              at a value of 1, all positions would be trimmed.
         """
         # Check inputs
         utils_motif.validate_motif_stack_standard(motifs)
@@ -856,7 +858,8 @@ class MotifCompendium:
 
         Args:
             by: The column or columns to sort by.
-            ascending: Whether or not to sort in ascending order. Must have one per column.
+            ascending: Whether or not to sort in ascending order. Must have one per
+              column.
             inplace: Whether or not to sort the MotifCompendium in place. If False,
               returns a new MotifCompendium. If True, the current MotifCompendium is
               reordered to be sorted.
@@ -1409,8 +1412,8 @@ class MotifCompendium:
                         source column for each cluster.
                     - "sum": This option sums the values in the source column for each
                         cluster.
-                    - "average" or "avg" or "mean": This option averages the values in the
-                        source column for each cluster.
+                    - "average" or "avg" or "mean": This option averages the values in
+                        the source column for each cluster.
                     - "concatenate" or "concat": This option lists all the unique values
                         in the source column for each cluster.
                     - "concat_counted": This option lists all the unique values and
@@ -1532,7 +1535,7 @@ class MotifCompendium:
             ]
             mc_avg_standard_motifs = mc_avg.get_standard_motif_stack()
             mc_avg.add_logos(
-                motifs=np.stack(
+                np.stack(
                     [
                         (
                             mc_avg_standard_motifs[x]
@@ -1544,8 +1547,8 @@ class MotifCompendium:
                         for i, x in enumerate(best_match_idx)
                     ]
                 ),
-                image_name="best_match_cluster",
-                trim=0,
+                "best_match_cluster",
+                0
             )
             # Actual quality
             quality_df = self.clustering_quality(clustering, with_stats=True)
@@ -1558,14 +1561,14 @@ class MotifCompendium:
                 )
             ]
             mc_avg.add_logos(
-                motifs=np.stack(quality_df["lowest_internal_similarity_motif1_motif"]),
-                image_name="lowest_internal_similarity_motif1",
-                trim=0,
+                np.stack(quality_df["lowest_internal_similarity_motif1_motif"]),
+                "lowest_internal_similarity_motif1",
+                0
             )
             mc_avg.add_logos(
-                motifs=np.stack(quality_df["lowest_internal_similarity_motif2_motif"]),
-                image_name="lowest_internal_similarity_motif2",
-                trim=0,
+                np.stack(quality_df["lowest_internal_similarity_motif2_motif"]),
+                "lowest_internal_similarity_motif2",
+                0
             )
             mc_avg["highest_external_similarity"] = [
                 f"{x:.3} ({y}: {z})"
@@ -1582,7 +1585,7 @@ class MotifCompendium:
                 for i, c in enumerate(quality_df["highest_external_similarity_cluster"])
             ]
             mc_avg.add_logos(
-                motifs=np.stack(
+                np.stack(
                     [
                         (
                             mc_avg_standard_motifs[cluster_revcomp[x]]
@@ -1597,11 +1600,11 @@ class MotifCompendium:
                         )
                     ]
                 ),
-                image_name="highest_external_similarity_cluster",
-                trim=0,
+                "highest_external_similarity_cluster",
+                0
             )
             mc_avg.add_logos(
-                motifs=np.stack(
+                np.stack(
                     [
                         x if not y else utils_motif.reverse_complement(x)
                         for x, y in zip(
@@ -1610,8 +1613,8 @@ class MotifCompendium:
                         )
                     ]
                 ),
-                image_name="highest_external_similarity_motif",
-                trim=0,
+                "highest_external_similarity_motif",
+                0
             )
         return mc_avg
 
@@ -1714,11 +1717,7 @@ class MotifCompendium:
         utils_visualization.motif_collection_html(motif_groups, html_out)
 
     def summary_table_html(
-        self,
-        html_out: str,
-        columns: None | list[str] = None,
-        logo_trim: bool | float = True,
-        editable=False
+        self, html_out: str, columns: None | list[str] = None, editable=False
     ) -> None:
         """Creates an html file summarizing all motifs and metadata about them.
 
@@ -1733,12 +1732,6 @@ class MotifCompendium:
             html_out: The path to save the html file.
             columns: The list of column names in the metadata or saved images to display
               as columns in the summary table. If None, uses all columns.
-            trim: A float indicating how much the motifs should be trimmed. 
-              Options: 
-              True: Trim flanks with contribution less than 1/L * max contribution.
-              False: No trimming.
-              [0, 1]: Trim flanks below select proportion * max contribution.
-                (where, 0: Trim only zeros, 1: Trim all positions)
             editable: Whether or not the table is editable.
 
         Notes:
@@ -1756,20 +1749,14 @@ class MotifCompendium:
         # If forward and reverse logos aren't in __images, create and add them
         if "logo (fwd)" not in self.images():
             self.add_logos(
-                motifs=self.get_standard_motif_stack(),
-                image_name="logo (fwd)",
-                trim=logo_trim,
+                self.get_standard_motif_stack(), "logo (fwd)", True,
             )
-        else:
-            print("WARNING: Using existing forward logo image. Trim may not apply.")
         if "logo (rev)" not in self.images():
             self.add_logos(
-                motifs=utils_motif.reverse_complement(self.get_standard_motif_stack()),
-                image_name="logo (rev)",
-                trim=logo_trim,
+                utils_motif.reverse_complement(self.get_standard_motif_stack()),
+                "logo (rev)",
+                True,
             )
-        else:
-            print("WARNING: Using existing reverse complement logo image. Trim may not apply.")
         # Build table
         columns = ["logo (fwd)", "logo (rev)"] + columns
         table_columns = []
@@ -1909,14 +1896,19 @@ class MotifCompendium:
     # ANALYSIS FUNCTIONS #
     ######################
     def add_motif_strings(
-        self, name="motif_string", specificity=0.7, importance=1 / 30
+        self, name: str = "motif_string", specificity: float = 0.7, importance: float = 1 / 30
     ) -> None:
         """Adds a column to the metadata that is a string representation of each motif.
 
-        Adds a "motif_string" column to the metadata that contains the motif as a string.
+        Adds a column to the metadata that contains a text version of the forward and
+          reverse complement of each motif in the MotifCompendium.
 
         Args:
             name: The name of the column to add to the metadata.
+            specificity: The percentage of importance a base must have at a position to
+              be included in the string.
+            importance: The minimum level of importance a position must have to be
+              included in the string.
         """
         unsigned_motifs = np.abs(self.get_standard_motif_stack())
         motif_str_revstrs = utils_motif.motif_to_string(
@@ -1924,7 +1916,7 @@ class MotifCompendium:
         )
         self.metadata[name] = [f"{x[0]}<br/>{x[1]}" for x in motif_str_revstrs]
     
-    def symmetricness(self, name="symmetricness") -> None:
+    def symmetricness(self, name: str = "symmetricness") -> None:
         """Adds a column to the metadata that is the symmetricness of each motif.
 
         The symmetricness of a motif is its similarity with its reverse complement.
@@ -1945,7 +1937,7 @@ class MotifCompendium:
         min_score: float,
         max_submotifs: int = 1,
         save_images: bool = True,
-        logo_trim: bool | float = True,
+        logo_trimming: bool | float | int = True,
         utf8_images: list[str] | None = None,
         save_col_prefix: str = "match",
     ) -> None:
@@ -1960,7 +1952,7 @@ class MotifCompendium:
           precomputed. Composite matching can be enabled by setting max_submotifs > 1.
 
         Args:
-            reference_motifs: A np.ndarray motif stack of shape (M, L, 4) to compare
+            reference_motifs: A np.ndarray motif stack of shape (M, L, 8/4) to compare
               against.
             labels: A list of labels for each motif in reference_motifs.
             min_score: The minimum similarity score to consider a match.
@@ -1971,14 +1963,16 @@ class MotifCompendium:
             save_images: Whether or not to save the logos of the matched motifs. If
               True, the logos will appear as a saved image. If False, logos will not be
               saved as saved images.
-            logo_trim: A float indicating how much the motifs should be trimmed. Options: 
-              True: Trim flanks with contribution less than 1/L * max contribution.
-              False: No trimming.
-              [0, 1]: Trim flanks below select proportion * max contribution.
-                (where, 0: Trim only zeros, 1: Trim all positions)
+            logo_trimming: This argument is only relevant if save_images is True. A bool
+              or float/int indicating how the motif should be trimmed when plotting. If
+              False, the motif will not be trimmed at all. If True, the motif will be
+              trimmed at the flanks with a standard threshold of 1/L. If a number is
+              provided, that number must be in [0, 1], and will define the trimming
+              threshold. At a value of 0, only zero positions are trimmed and at a value
+              of 1, all positions would be trimmed.
             utf8_images: A list of utf8 images for each motif in reference_motifs. If
               saved_images is True and utf8_images is None, the logos will be generated
-              on the fly using the trimming option logo_trim. If saved_images is
+              on the fly using the trimming option logo_trimming. If saved_images is
               True and utf8_images is a list of utf8 images, these images will be used
               as the logos for the matched motifs.
             save_col_prefix: The prefix to use for the saved columns. All saved columns
@@ -2075,7 +2069,7 @@ class MotifCompendium:
                 if utf8_images is None:
                     # Generate forward logos if not provided
                     self.add_logos(
-                        match_motifs[i], f"{save_col_prefix}_logo{i}", logo_trim
+                        match_motifs[i], f"{save_col_prefix}_logo{i}", logo_trimming
                     )
                 else:
                     # Copy forward logos if provided
