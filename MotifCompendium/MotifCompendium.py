@@ -312,7 +312,7 @@ def build_from_pfm(
         Safe building validates object integrity but may take significantly longer for
           large objects.
     """
-    motifs, motif_names = utils_loader.load_pfms(pfm_dict, ic)
+    motifs, motif_names, file_names = utils_loader.load_pfms(pfm_dict, ic)
     # Convert motifs to normalized 8-channel motifs
     posneg = utils_motif.motif_posneg_sum(motifs)
     motifs = utils_motif.motif_4_to_8(motifs)
@@ -322,7 +322,7 @@ def build_from_pfm(
         {
             "name": motif_names,
             "posneg": posneg,
-            "source_file": file_names,
+            "source": file_names,
         }
     )
     return build(
@@ -716,7 +716,7 @@ class MotifCompendium:
         return self.__images[image_name].tolist()
 
     def add_logos(
-        self, motifs: np.ndarray, image_name: str, trim: float | None = 0.15,
+        self, motifs: np.ndarray, image_name: str, trim: bool | float = False,
     ) -> None:
         """Saves logos of the provided motifs as saved images.
 
@@ -724,9 +724,11 @@ class MotifCompendium:
             motifs: The motifs to save logos for. Of shape (N, L, 4).
             image_name: The name of the images to save the logos as.
             trim: A float indicating how much the motifs should be trimmed. 
-              Options: [0, 1]: Proportion of max contribution, below which to trim flanks.
-              (0: Trim only zeros, 1: Trim all positions, default: 0.15)
-              None: No trimming.
+              Options: 
+              True: Trim flanks with contribution less than 1/L * max contribution.
+              False: No trimming.
+              [0, 1]: Trim flanks below select proportion * max contribution.
+                (where, 0: Trim only zeros, 1: Trim all positions)
         """
         # Check inputs
         utils_motif.validate_motif_stack_standard(motifs)
@@ -1707,7 +1709,7 @@ class MotifCompendium:
         utils_visualization.motif_collection_html(motif_groups, html_out)
 
     def summary_table_html(
-        self, html_out: str, columns: None | list[str] = None, trim: float = 0.15, editable=False
+        self, html_out: str, columns: None | list[str] = None, trim: bool | float = True, editable=False
     ) -> None:
         """Creates an html file summarizing all motifs and metadata about them.
 
@@ -1722,7 +1724,12 @@ class MotifCompendium:
             html_out: The path to save the html file.
             columns: The list of column names in the metadata or saved images to display
               as columns in the summary table. If None, uses all columns.
-            trim: The amount of trimming to apply to the logos. Defaults to 0.15.
+            trim: A float indicating how much the motifs should be trimmed. 
+              Options: 
+              True: Trim flanks with contribution less than 1/L * max contribution.
+              False: No trimming.
+              [0, 1]: Trim flanks below select proportion * max contribution.
+                (where, 0: Trim only zeros, 1: Trim all positions)
             editable: Whether or not the table is editable.
 
         Notes:
@@ -1927,7 +1934,7 @@ class MotifCompendium:
         min_score: float,
         max_submotifs: int = 1,
         save_images: bool = True,
-        logo_trim: float | None = 0.15,
+        logo_trim: bool | float = True,
         utf8_images: list[str] | None = None,
         save_col_prefix: str = "match",
     ) -> None:
@@ -1953,10 +1960,11 @@ class MotifCompendium:
             save_images: Whether or not to save the logos of the matched motifs. If
               True, the logos will appear as a saved image. If False, logos will not be
               saved as saved images.
-            logo_trim:  A float indicating how much the motifs should be trimmed. 
-              Options: [0, 1]: Proportion of max contribution, below which to trim flanks.
-              (0: Trim only zeros, 1: Trim all positions, default: 0.15)
-              None: No trimming.
+            logo_trim: A float indicating how much the motifs should be trimmed. Options: 
+              True: Trim flanks with contribution less than 1/L * max contribution.
+              False: No trimming.
+              [0, 1]: Trim flanks below select proportion * max contribution.
+                (where, 0: Trim only zeros, 1: Trim all positions)
             utf8_images: A list of utf8 images for each motif in reference_motifs. If
               saved_images is True and utf8_images is None, the logos will be generated
               on the fly using the trimming option logo_trim. If saved_images is

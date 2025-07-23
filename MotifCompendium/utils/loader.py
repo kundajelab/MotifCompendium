@@ -309,12 +309,13 @@ def load_pfms(
     )  # don't use more CPUs than available
     if num_processes == 1 or len(pfm_dict) == 1:
         # Load serially
-        motifs, motif_names = [], []
+        motifs, motif_names, file_names = [], [], []
         for p_name, p_loc in pfm_dict.items():
             p_motifs, p_motif_names = load_pfm(p_loc, ic=ic)
             p_motif_names = [f"{p_name}-{x}" for x in p_motif_names]
             motifs.append(p_motifs)
             motif_names += p_motif_names
+            file_names += [p_name] * len(p_motif_names)
         # Pad motifs to max length
         max_length = max(x.shape[1] for x in motifs)
         motifs = [utils_motif.pad_motif(x, pad_to=max_length) for x in motifs]
@@ -328,18 +329,19 @@ def load_pfms(
         payloads = [(p_loc, ic) for p_loc in p_locs]
         with multiprocessing.Pool(processes=num_processes) as p:
             results = p.starmap(load_pfm, payloads)
-        motifs, motif_names = [], []
+        motifs, motif_names, file_names = [], [], []
         for i, r in enumerate(results):
             p_motifs, p_motif_names = r
             p_motif_names = [f"{p_names[i]}-{x}" for x in p_motif_names]
             motifs.append(p_motifs)
             motif_names += p_motif_names
+            file_names += [p_names[i]] * len(p_motif_names)
         # Pad motifs to max length
         max_length = max(x.shape[1] for x in motifs)
         motifs = [utils_motif.pad_motif(x, pad_to=max_length) for x in motifs]
         # Concatenate motifs
         motifs = np.concatenate(motifs, axis=0)
-    return motifs, motif_names
+    return motifs, motif_names, file_names
 
 
 @which_file_load_failed

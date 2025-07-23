@@ -611,11 +611,12 @@ def calculate_filters(
 def assign_label_from_pfms(
     mc: MotifCompendiumClass,
     pfm_file: str,
+    ic: bool = False,
+    save_col_prefix: str = "match",
     min_score: float = 0.5,
     max_submotifs: int = 1,
     save_images: bool = True,
-    logo_trim: float | None = None,
-    save_col_prefix: str = "match",
+    logo_trim: bool | float = False,
 ) -> None:
     """Automatic labeling of motifs from a file containing PFMs.
 
@@ -628,6 +629,13 @@ def assign_label_from_pfms(
     Args:
         mc: The MotifCompendium whose motifs you want to assign labels to.
         pfm_file: The PFM file path.
+        save_col_prefix: The prefix to use for the saved columns. All saved columns
+            and saved images generated from the labeling process will begin with
+            save_col_prefix. These columns will have the structure
+            f"{save_col_prefix}_{score/name/logo}{i}".
+        ic: Whether or not to perform information content scaling on the motifs.
+            If True, the motifs will be scaled to have a maximum
+            information content of 1. If False, the motifs will not be scaled.
         min_score: The minimum similarity score to consider a match.
         max_submotifs: The maximum number of submotifs to consider in a match. If
             max_submotifs = 1, only a single match is given to each motif. If
@@ -636,21 +644,17 @@ def assign_label_from_pfms(
         save_images: Whether or not to save the logos of the matched motifs. If
             True, the logos will appear as a saved image. If False, logos will not be
             saved as saved images.
-        logo_trim:  A float indicating how much the motifs should be trimmed. 
-            Options: [0, 1]: Proportion of max contribution, below which to trim flanks.
-            (0: Only trim zeros, 1: Trim all positions, default: 0.15)
-            None: No trimming.
-        save_col_prefix: The prefix to use for the saved columns. All saved columns
-            and saved images generated from the labeling process will begin with
-            save_col_prefix. These columns will have the structure
-            f"{save_col_prefix}_{score/name/logo}{i}".
+        logo_trim: (If save_images is True) A float indicating how much the motifs should be trimmed. 
+        Options: 
+            True: Trim flanks with contribution less than 1/L * max contribution.
+            False: No trimming.
+            [0, 1]: Trim flanks below select proportion * max contribution.
+            (where, 0: Trim only zeros, 1: Trim all positions)
     """
     # Load PFM database, with same length as motifs
     L = mc.motifs.shape[1]
-    if pfm_file.endswith("pfms.txt"):
-        pfm_motifs, pfm_names = utils_loader.load_pfm(pfm_file, L)
-    elif pfm_file.endswith(".meme.txt") or pfm_file.endswith(".meme"):
-        pfm_motifs, pfm_names = utils_loader.load_meme(pfm_file, L)
+    if pfm_file.endswith("pfms.txt") | pfm_file.endswith(".pfm") | pfm_file.endswith(".meme.txt") | pfm_file.endswith(".meme"):
+        pfm_motifs, pfm_names = utils_loader.load_pfm(pfm_file, ic=ic)
     else:
         raise ValueError("pfm_file must be a _pfm.txt, .meme, or .meme.txt file.")
     # Assign labels
@@ -669,11 +673,11 @@ def assign_label_from_other_compendium(
     assign_to_mc: MotifCompendiumClass,
     assign_from_mc: MotifCompendiumClass,
     from_label_col: str = "name",
-    min_score: float = 0.0,
+    save_col_prefix: str = "match",
+    min_score: float = 0.5,
     max_submotifs: int = 1,
     save_images: bool = True,
-    logo_trim: float | None = 0.15,
-    save_col_prefix: str = "match",
+    logo_trim: bool | float = False,
 ) -> None:
     """Automatic labeling of motifs from another MotifCompendium.
 
@@ -684,8 +688,8 @@ def assign_label_from_other_compendium(
       can be saved as images. Composite matching can be enabled by setting max_submotifs > 1.
 
     Args:
-        assign_to_mc: The MotifCompendium whose motifs you want to assign labels to.
-        assign_from_mc: The MotifCompendium to assign labels from.
+        assign_to_mc: The target MotifCompendium to assign labels to.
+        assign_from_mc: The reference MotifCompendium to use labels from.
         from_label_col: The column in assign_from_mc to use as labels.
         save_col_prefix: The name of the column in the metadata to save matches to.
             Will be saved as f"{save_col_sim}_{score/name/logo}{i}".
@@ -696,6 +700,10 @@ def assign_label_from_other_compendium(
         assign_to_mc: The MotifCompendium whose motifs you want to assign labels to.
         assign_from_mc: The MotifCompendium to assign labels from.
         from_label_col: The column in assign_from_mc to use as labels.
+        save_col_prefix: The prefix to use for the saved columns. All saved columns
+            and saved images generated from the labeling process will begin with
+            save_col_prefix. These columns will have the structure
+            f"{save_col_prefix}_{score/name/logo}{i}".
         min_score: The minimum similarity score to consider a match.
         max_submotifs: The maximum number of submotifs to consider in a match. If
             max_submotifs = 1, only a single match is given to each motif. If
@@ -706,14 +714,12 @@ def assign_label_from_other_compendium(
             saved as saved images. If True, the logos will come from
             assign_from_mc.get_saved_images("logo (fwd)"), if available. If not, they
             will be generated on the fly.
-        logo_trim:  A float indicating how much the motifs should be trimmed. 
-            Options: [0, 1]: Proportion of max contribution, below which to trim flanks.
-            (0: Only trim zeros, 1: Trim all positions, default: 0.15)
-            None: No trimming.
-        save_col_prefix: The prefix to use for the saved columns. All saved columns
-            and saved images generated from the labeling process will begin with
-            save_col_prefix. These columns will have the structure
-            f"{save_col_prefix}_{score/name/logo}{i}".
+        logo_trim: (If save_images is True) A float indicating how much the motifs should be trimmed.
+        Options:
+            True: Trim flanks with contribution less than 1/L * max contribution.
+            False: No trimming.
+            [0, 1]: Trim flanks below select proportion * max contribution.
+            (where, 0: Trim only zeros, 1: Trim all positions)
     """
     if not (
         isinstance(assign_to_mc, MotifCompendiumClass)

@@ -35,10 +35,11 @@ class LogoPlottingInput:
           complement).
         xmin: An int representing the minimum value of the x-axis in the logo plot.
         xmax: An int representing the maximum value of the x-axis in the logo plot.
-        trim: A float indicating how much the motifs should be trimmed. The options are:
-            - [0, 1]: Proportion of max contribution, below which to trim flanks.
-              (0: Trim only zeros, 1: Trim all positions, default: 0.15)
-            - None: No trimming. 
+        trim: A bool, float indicating how much the motifs should be trimmed. The options are:
+            - True: Trim flanks with contribution less than 1/L * max contribution.
+            - False: No trimming.
+            - [0, 1]: Trim flanks below select proportion * max contribution.
+              (where, 0: Trim only zeros, 1: Trim all positions, default: 0.15)
         name: A str representing the name of the motif. Not plotted.
         encode: A bool representing whether the plot should be encoded as a UTF-8
           string.
@@ -55,7 +56,7 @@ class LogoPlottingInput:
         motif: np.ndarray,
         revcomp: bool = False,
         pos: int = 0,
-        trim: float | None = None,
+        trim: bool | float = False,
         name: str = "motif",
         bgcolor: str = "white",
         encode: bool = True,
@@ -86,8 +87,8 @@ class LogoPlottingInput:
         self.pos = pos
         self.xmin = 0
         self.xmax = motif.shape[0] - 1
-        if trim is not None and not (isinstance(trim, (int, float)) and 0 <= trim <= 1):
-            raise ValueError("trim must be None or a float between 0 and 1.")
+        if not (isinstance(trim, bool) or (isinstance(trim, (int, float)) and 0 <= trim <= 1)):
+            raise ValueError("trim must be bool or a float between 0 and 1.")
         self.trim = trim
         self.name = name
         # Plot options
@@ -104,10 +105,11 @@ class LogoPlottingInput:
 
     def get_motif_df(self) -> pd.DataFrame:
         """Returns a pd.DataFrame of the motif that can be passed to logomaker."""
-        if self.trim is None:
+        if self.trim is False:
             motif_to_plot = self.motif
+        elif self.trim is True:
+            motif_to_plot = utils_motif.trim_motif(self.motif, 1 / self.motif.shape[0])
         else:
-            # Trim motif
             motif_to_plot = utils_motif.trim_motif(self.motif, self.trim)
         # Reverse complement
         if self.revcomp:
@@ -116,7 +118,7 @@ class LogoPlottingInput:
             )
         else:
             motif_df = utils_motif.motif_to_df(motif_to_plot)
-        if self.trim is not None:
+        if self.trim is not False:
             # Don't reposition if trimming
             return motif_df
         # Then shift
