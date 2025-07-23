@@ -30,7 +30,7 @@ def plot_similarity_distribution(
         mc: The MotifCompendium to analyze.
         save_loc: The location where to save the output html file.
         vals: The list of similarity scores to display examples of.
-        tolerance: The tolerance of error with respect to target similarity values to 
+        tolerance: The tolerance of error with respect to target similarity values to
           display.
         n_per: The number of examples of each similarity score to display.
     """
@@ -654,14 +654,7 @@ def assign_label_from_pfms(
     """
     # Load PFM database, with same length as motifs
     L = mc.motifs.shape[1]
-<<<<<<< HEAD
-    if pfm_file.endswith("pfms.txt") or pfm_file.endswith(".pfm") or pfm_file.endswith(".meme.txt") or pfm_file.endswith(".meme"):
-        pfm_motifs, pfm_names = utils_loader.load_pfm(pfm_file, ic=ic)
-    else:
-        raise ValueError("pfm_file must be a _pfm.txt, .meme, or .meme.txt file.")
-=======
     pfm_motifs, pfm_names = utils_loader.load_pfm(pfm_file, ic=ic)
->>>>>>> 94d7f86 (reviewing changes + finalize tutorials 1/2)
     # Assign labels
     mc.assign_label_from_motifs(
         pfm_motifs,

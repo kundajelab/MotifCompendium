@@ -93,7 +93,10 @@ class LogoPlottingInput:
         self.pos = pos
         self.xmin = 0
         self.xmax = motif.shape[0] - 1
-        if not (isinstance(trim, bool) or (isinstance(trim, (int, float)) and (0 <= trim <= 1))):
+        if not (
+            isinstance(trim, bool)
+            or (isinstance(trim, (int, float)) and (0 <= trim <= 1))
+        ):
             raise ValueError("trim must be bool or a float between 0 and 1.")
         self.trim = trim
         self.name = name
@@ -112,9 +115,9 @@ class LogoPlottingInput:
     def get_motif_df(self) -> pd.DataFrame:
         """Returns a pd.DataFrame of the motif that can be passed to logomaker."""
         # Trim motif if needed
-        if ((isinstance(self.trim, bool) and not self.trim)):
+        if isinstance(self.trim, bool) and not self.trim:
             motif_to_plot = self.motif
-        elif ((isinstance(self.trim, bool) and self.trim)):
+        elif isinstance(self.trim, bool) and self.trim:
             motif_to_plot = utils_motif.trim_motif(self.motif, 1 / self.motif.shape[0])
         else:
             motif_to_plot = utils_motif.trim_motif(self.motif, self.trim)
@@ -376,7 +379,9 @@ def _plot_motif_logo(motif_info: LogoPlottingInput) -> LogoPlottingInput:
         fig = plot_ax.figure
     # Plot
     motif_df = motif_info.get_motif_df()
-    if not ((motif_info.motif == 0).all() or (motif_df is None)):  # Only plot if motif is not all zeros
+    if not (
+        (motif_info.motif == 0).all() or (motif_df is None)
+    ):  # Only plot if motif is not all zeros
         if utils_config.get_fast_plotting():
             _plot_logo_on_axis_fast(motif_df, plot_ax)
         else:

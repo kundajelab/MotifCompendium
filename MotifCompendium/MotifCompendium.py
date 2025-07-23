@@ -576,7 +576,7 @@ class MotifCompendium:
         if not (self.alignment_rc == self.alignment_rc.T).all():
             warnings.warn(
                 "self.alignment_rc is not symmetric. This may be due to numerical instability (especially if you have very symmetric motifs).",
-                RuntimeWarning
+                RuntimeWarning,
             )
         # alignment_h
         if not (
@@ -596,7 +596,7 @@ class MotifCompendium:
         ):
             warnings.warn(
                 "self.alignment_h should be symmetric for reverse complement motifs and skew-symmetric for motifs that are already aligned, but it is not. This is very rare and should not occur (unless you are working with PFMs, for which it happens often).",
-                RuntimeWarning
+                RuntimeWarning,
             )
         # metadata
         if not isinstance(self.metadata, pd.DataFrame):
@@ -628,10 +628,7 @@ class MotifCompendium:
                 and (self.alignment_h == other.alignment_h).all()  # alignment_h equal
                 and self.metadata.equals(other.metadata)  # metadata equal
                 and (
-                    (
-                        sorted(self.images())
-                        == sorted(other.images())
-                    )
+                    (sorted(self.images()) == sorted(other.images()))
                     and all(
                         [
                             self.get_images(x) == other.get_images(x)
@@ -718,7 +715,10 @@ class MotifCompendium:
         return self.__images[image_name].tolist()
 
     def add_logos(
-        self, motifs: np.ndarray, image_name: str, trim: bool | float | int = False,
+        self,
+        motifs: np.ndarray,
+        image_name: str,
+        trim: bool | float | int = False,
     ) -> None:
         """Saves logos of the provided motifs as saved images.
 
@@ -1548,7 +1548,7 @@ class MotifCompendium:
                     ]
                 ),
                 "best_match_cluster",
-                0
+                0,
             )
             # Actual quality
             quality_df = self.clustering_quality(clustering, with_stats=True)
@@ -1563,12 +1563,12 @@ class MotifCompendium:
             mc_avg.add_logos(
                 np.stack(quality_df["lowest_internal_similarity_motif1_motif"]),
                 "lowest_internal_similarity_motif1",
-                0
+                0,
             )
             mc_avg.add_logos(
                 np.stack(quality_df["lowest_internal_similarity_motif2_motif"]),
                 "lowest_internal_similarity_motif2",
-                0
+                0,
             )
             mc_avg["highest_external_similarity"] = [
                 f"{x:.3} ({y}: {z})"
@@ -1601,7 +1601,7 @@ class MotifCompendium:
                     ]
                 ),
                 "highest_external_similarity_cluster",
-                0
+                0,
             )
             mc_avg.add_logos(
                 np.stack(
@@ -1614,7 +1614,7 @@ class MotifCompendium:
                     ]
                 ),
                 "highest_external_similarity_motif",
-                0
+                0,
             )
         return mc_avg
 
@@ -1749,7 +1749,9 @@ class MotifCompendium:
         # If forward and reverse logos aren't in __images, create and add them
         if "logo (fwd)" not in self.images():
             self.add_logos(
-                self.get_standard_motif_stack(), "logo (fwd)", True,
+                self.get_standard_motif_stack(),
+                "logo (fwd)",
+                True,
             )
         if "logo (rev)" not in self.images():
             self.add_logos(
@@ -1896,7 +1898,10 @@ class MotifCompendium:
     # ANALYSIS FUNCTIONS #
     ######################
     def add_motif_strings(
-        self, name: str = "motif_string", specificity: float = 0.7, importance: float = 1 / 30
+        self,
+        name: str = "motif_string",
+        specificity: float = 0.7,
+        importance: float = 1 / 30,
     ) -> None:
         """Adds a column to the metadata that is a string representation of each motif.
 
@@ -1915,7 +1920,7 @@ class MotifCompendium:
             unsigned_motifs, specificity, importance
         )
         self.metadata[name] = [f"{x[0]}<br/>{x[1]}" for x in motif_str_revstrs]
-    
+
     def symmetricness(self, name: str = "symmetricness") -> None:
         """Adds a column to the metadata that is the symmetricness of each motif.
 
@@ -1924,7 +1929,11 @@ class MotifCompendium:
         Args:
             name: The name of the column to add to the metadata.
         """
-        self.metadata[name] = np.diag(utils_similarity.compute_similarities([self.motifs, utils_motif.reverse_complement(self.motifs)], [(0, 1)])[0][0])
+        self.metadata[name] = np.diag(
+            utils_similarity.compute_similarities(
+                [self.motifs, utils_motif.reverse_complement(self.motifs)], [(0, 1)]
+            )[0][0]
+        )
 
     def extend(self):
         """Add new motifs to the current MotifCompendium."""

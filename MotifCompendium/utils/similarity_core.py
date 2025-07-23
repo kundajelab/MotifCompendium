@@ -85,8 +85,8 @@ def _tensor3_matmul_tensor2(x, y, xp):
     """Multiplies a (N, L, K) tensor with a (K, M) tensor efficiently."""
     N, L, K = x.shape
     M = y.shape[1]
-    x_flat = xp.reshape(x, (N*L, K))  # (NL, K)
-    result = x_flat@y  # (NL, M)
+    x_flat = xp.reshape(x, (N * L, K))  # (NL, K)
+    result = x_flat @ y  # (NL, M)
     return xp.reshape(result, (N, L, M))  # (N, L, M)
 
 
@@ -114,7 +114,9 @@ def _compute_similarity(motif_set_1, motif_set_2, xp):
         left_side_matrix_i = _compute_similarity_left_side_i(
             motif_set_2[:, :, i], xp
         )  # (M, 2L-1, 3L-2)
-        sims.append(_tensor3_matmul_tensor2(left_side_matrix_i, right_side_matrices[i], xp))  # (M, 2L-1, N)
+        sims.append(
+            _tensor3_matmul_tensor2(left_side_matrix_i, right_side_matrices[i], xp)
+        )  # (M, 2L-1, N)
         del left_side_matrix_i  # Free up memory
     # Sum across ATCG
     total_sum = xp.zeros_like(sims[0], dtype=xp.float64)  # (M, 2L-1, N)
@@ -139,7 +141,9 @@ def _compute_similarity(motif_set_1, motif_set_2, xp):
 def _compute_similarity_left_side_i(motifs, xp):
     """Prepares the left side of the similarity calculation."""
     M, L = motifs.shape
-    left_side_matrix = _tensor3_matmul_tensor2(_LEFTTENSOR(L, xp), motifs.T, xp)  # (2L-1, 3L-2, M)
+    left_side_matrix = _tensor3_matmul_tensor2(
+        _LEFTTENSOR(L, xp), motifs.T, xp
+    )  # (2L-1, 3L-2, M)
     left_side_matrix = xp.transpose(left_side_matrix, axes=(2, 0, 1))  # (M, 2L-1, 3L-2)
     assert left_side_matrix.shape == (M, 2 * L - 1, 3 * L - 2)
     return left_side_matrix  # (M, 2L-1, 3L-2)
@@ -149,7 +153,9 @@ def _compute_similarity_right_side(motifs, xp):
     """Prepares the right side of the similarity calculation."""
     N, L, K = motifs.shape  # (N, L, K)
     motifs_pivot = xp.transpose(motifs, axes=(0, 2, 1))  # (N, K, L)
-    right_side_prepivot = _tensor3_matmul_tensor2(motifs_pivot, _RIGHTTENSOR(L, xp), xp)  # (N, K, 3L-2)
+    right_side_prepivot = _tensor3_matmul_tensor2(
+        motifs_pivot, _RIGHTTENSOR(L, xp), xp
+    )  # (N, K, 3L-2)
     del motifs_pivot  # Free up memory
     right_side_matrix = xp.transpose(
         right_side_prepivot, axes=(2, 0, 1)
@@ -170,7 +176,9 @@ def _LEFTTENSOR(L, xp):
         del _LEFT_TENSOR  # Free up memory
         create_tensor = True
     if create_tensor:
-        _LEFT_TENSOR = xp.zeros((2 * L - 1, 3 * L - 2, L), dtype=xp.float64)  # default (59, 88, 30)
+        _LEFT_TENSOR = xp.zeros(
+            (2 * L - 1, 3 * L - 2, L), dtype=xp.float64
+        )  # default (59, 88, 30)
         for i in range(2 * L - 1):  # default 59
             _LEFT_TENSOR[i, i : i + L, :] = xp.eye(L, dtype=xp.float64)  # default 30
     return _LEFT_TENSOR  # (2L-1, 3L-2, L)
@@ -187,5 +195,7 @@ def _RIGHTTENSOR(L, xp):
         create_tensor = True
     if create_tensor:
         _RIGHT_TENSOR = xp.zeros((L, 3 * L - 2), dtype=xp.float64)  # default (30, 88)
-        _RIGHT_TENSOR[:, L - 1 : 2 * L - 1] = xp.eye(L, dtype=xp.float64)  # default 29:59
+        _RIGHT_TENSOR[:, L - 1 : 2 * L - 1] = xp.eye(
+            L, dtype=xp.float64
+        )  # default 29:59
     return _RIGHT_TENSOR  # (L, 3L-2)

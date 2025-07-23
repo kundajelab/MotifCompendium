@@ -44,7 +44,9 @@ def load_modiscos(
     load_subpatterns: bool = False,
     modisco_region_width: int = 400,
     ic: bool = True,
-) -> tuple[np.ndarray, list[str], list[int], list[str], list[str], list[float], list[float]]:
+) -> tuple[
+    np.ndarray, list[str], list[int], list[str], list[str], list[float], list[float]
+]:
     """Load motifs, names, and other per-motif information from multiple Modisco files.
 
     Motifs from each Modisco file are extracted by calling load_modisco(). The results
@@ -345,9 +347,7 @@ def load_pfms(
 
 
 @which_file_load_failed
-def load_pfm(
-    pfm_file: str, ic: bool = True
-) -> tuple[np.ndarray, list[str]]:
+def load_pfm(pfm_file: str, ic: bool = True) -> tuple[np.ndarray, list[str]]:
     """Load motifs and names from a file containing PFMs.
 
     Each Position Frequency Matrix (PFM) from the PFM file is extracted, normalized, and
@@ -371,12 +371,16 @@ def load_pfm(
         try:
             return _load_pfm_file_pfm_format(pfm_file, ic)
         except Exception as e:
-            raise ValueError(f"Attempted to load {pfm_file} as a file in PFM format (due to 'pfm' in the file name), but failed.") from e
+            raise ValueError(
+                f"Attempted to load {pfm_file} as a file in PFM format (due to 'pfm' in the file name), but failed."
+            ) from e
     elif "meme" in pfm_file:
         try:
             return _load_meme_file_meme_format(pfm_file, ic)
         except Exception as e:
-            raise ValueError(f"Attempted to load {pfm_file} as a file in MEME format (due to 'meme' in the file name), but failed.") from e
+            raise ValueError(
+                f"Attempted to load {pfm_file} as a file in MEME format (due to 'meme' in the file name), but failed."
+            ) from e
     else:
         raise ValueError(
             f"Could not determine file format for {pfm_file}. Please have the file name include 'pfm' or 'meme'."
