@@ -34,7 +34,7 @@ def single_or_many_motifs(func):
 
 
 def validate_motif_basic(motifs: np.ndarray) -> None:
-    """Validate that motifs are np.ndarrays."""
+    """Validate that motifs are np.ndarrays with with a last channel size of 4 or 8."""
     if not (isinstance(motifs, np.ndarray) and (motifs.shape[-1] in [4, 8])):
         raise TypeError("Motifs must be a np.ndarray of 4 or 8 channels.")
 
