@@ -36,31 +36,31 @@ class OutputPaths:
     mc_removed: str = "motifcompendium_removed.mc"
     mc_clustered: str = "motifcompendium_clustered.mc"
 
-    mc_avg: str = "motifcompendium_avg.mc"
-    mc_avg_labeled: str = "motifcompendium_avg_labeled.mc"
-    mc_avg_filtered: str = "motifcompendium_avg_filtered.mc"
-    mc_avg_removed: str = "motifcompendium_avg_removed.mc"
+    mc_cluster: str = "motifcompendium_cluster.mc"
+    mc_cluster_labeled: str = "motifcompendium_cluster_labeled.mc"
+    mc_cluster_filtered: str = "motifcompendium_cluster_filtered.mc"
+    mc_cluster_removed: str = "motifcompendium_cluster_removed.mc"
 
-    mc_metaavg: str = "motifcompendium_metaavg.mc"
-    mc_metaavg_labeled: str = "motifcompendium_metaavg_labeled.mc"
-    mc_metaavg_filtered: str = "motifcompendium_metaavg_filtered.mc"
-    mc_metaavg_removed: str = "motifcompendium_metaavg_removed.mc"
+    mc_metacluster: str = "motifcompendium_metacluster.mc"
+    mc_metacluster_labeled: str = "motifcompendium_metacluster_labeled.mc"
+    mc_metacluster_filtered: str = "motifcompendium_metacluster_filtered.mc"
+    mc_metacluster_removed: str = "motifcompendium_metacluster_removed.mc"
 
-    mc_subavg: str = "motifcompendium_subavg.mc"
-    mc_subavg_labeled: str = "motifcompendium_subavg_labeled.mc"
-    mc_subavg_filtered: str = "motifcompendium_subavg_filtered.mc"
-    mc_subavg_removed: str = "motifcompendium_subavg_removed.mc"
+    mc_subcluster: str = "motifcompendium_subcluster.mc"
+    mc_subcluster_labeled: str = "motifcompendium_subcluster_labeled.mc"
+    mc_subcluster_filtered: str = "motifcompendium_subcluster_filtered.mc"
+    mc_subcluster_removed: str = "motifcompendium_subcluster_removed.mc"
 
     html_motif_collection: str = "motifcompendium_motif_collection.html"
+
     html_motif_table: str = "motifcompendium_motif_table.html"
     html_motif_removed: str = "motifcompendium_motif_removed_table.html"
-
-    html_cluster_table: str = "motifcompendium_avg_table.html"
-    html_cluster_removed: str = "motifcompendium_avg_removed_table.html"
-    html_metacluster_table: str = "motifcompendium_metaavg_table.html"
-    html_metacluster_removed: str = "motifcompendium_metaavg_removed_table.html"
-    html_subcluster_table: str = "motifcompendium_subavg_table.html"
-    html_subcluster_removed: str = "motifcompendium_subavg_removed_table.html"
+    html_cluster_table: str = "motifcompendium_cluster_table.html"
+    html_cluster_removed: str = "motifcompendium_cluster_removed_table.html"
+    html_metacluster_table: str = "motifcompendium_metacluster_table.html"
+    html_metacluster_removed: str = "motifcompendium_metacluster_removed_table.html"
+    html_subcluster_table: str = "motifcompendium_subcluster_table.html"
+    html_subcluster_removed: str = "motifcompendium_subcluster_removed_table.html"
 
 
 @dataclass
@@ -70,7 +70,7 @@ class MotifMatchArgs:
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "pipeline",
         "data",
-        "HUMAN-JASPAR2024-HOCOMOCOv13.meme.txt",
+        "MotifCompendium-Database-Human.meme.txt",
     )
     max_submotifs: int = 2
     min_score: float = 0.7
@@ -92,8 +92,6 @@ class ClusterArgs:
         ("name", "count", "num_motifs"),
         ("num_seqlets", "sum", "num_seqlets"),
         ("model", "concat", "model"),
-        # ("avg_dist_summit", "average", "avg_dist_summit"),
-        # ("avg_contrib", "average", "avg_contrib"),
         ("target", "concat", "target"),
         ("family", "concat", "family"),
         ("tissue", "concat", "tissue"),
@@ -121,14 +119,14 @@ class ClusterArgs:
 class VisualizeArgs:
     # Allow editable HTML table
     editable: bool = True
-    logo_trim: bool | float = True
+    logo_trim: bool | float = False
 
-    # Specify HTML table columns
-    html_table_cols: List[str] = field(default_factory=lambda: ["name",
+    # HTML table columns
+    html_table_cols_base: List[str] = field(default_factory=lambda: ["name",
         "posneg", "num_motifs", "num_seqlets", "avg_dist_summit", "avg_contrib",
          "invitro_cluster", "target", "tissue", "organ", "system", "source", "motifs", "biosample",
     ])
-    html_table_label_cols: List[str] = field(default_factory=lambda: [
+    html_table_cols_label: List[str] = field(default_factory=lambda: [
         col
         for iter in range(MotifMatchArgs.max_submotifs)
             for col in [
@@ -137,11 +135,21 @@ class VisualizeArgs:
                 f"{MetadataCols.label_column_prefix}_score{iter}",
             ]
         ])
-    html_table_quality_cols: List[str] = field(default_factory=lambda: [
+    html_table_cols_quality: List[str] = field(default_factory=lambda: [
         "best_match_similarity", "best_match_cluster",
         "highest_external_similarity", "highest_external_similarity_motif", "highest_external_similarity_cluster",
         "lowest_internal_similarity", "lowest_internal_similarity_motif1", "lowest_internal_similarity_motif2"
     ])
+
+    # HTML table columns per table
+    html_table_cols_motif: List[str] = field(default_factory=lambda: [])
+    html_table_cols_motif_removed: List[str] = field(default_factory=lambda: [])
+    html_table_cols_cluster: List[str] = field(default_factory=lambda: [])
+    html_table_cols_cluster_removed: List[str] = field(default_factory=lambda: [])
+    html_table_cols_metacluster: List[str] = field(default_factory=lambda: [])
+    html_table_cols_metacluster_removed: List[str] = field(default_factory=lambda: [])
+    html_table_cols_subcluster: List[str] = field(default_factory=lambda: [])
+    html_table_cols_subcluster_removed: List[str] = field(default_factory=lambda: [])
 
 @dataclass
 class MotifFilterArgs:
@@ -237,7 +245,7 @@ class MotifFilterArgs:
             name="6_dinucrepeat_2",
             metric="dinuc_composition",
             operation=">",
-            threshold=0.875,
+            threshold=0.85,
             override=False,
             apply_motif=True,
             apply_cluster=True,
@@ -246,7 +254,7 @@ class MotifFilterArgs:
             name="6_dinucrepeat_3",
             metric="dinuc_score",
             operation=">",
-            threshold=0.45,
+            threshold=0.4,
             override=False,
             apply_motif=True,
             apply_cluster=True,
@@ -308,7 +316,7 @@ class MotifFilterArgs:
             name="2_noisemix",
             metric="motif_entropy",
             operation=">",
-            threshold=0.75,
+            threshold=0.8,
             override=False,
             apply_motif=True,
             apply_cluster=True,
