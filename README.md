@@ -9,7 +9,7 @@ The MotifCompendium package provides a framework for clustering, annotating, and
 README sections:
 
 - [Installation](#installation)
-- [Getting started/usage](#getting-started)
+- [Getting started](#getting-started)
 - [Documentation/Usage](#documentationusage)
 - [Loading old versions of MotifCompendium](#working-with-old-versions-of-motifcompendium)
 - [Problems with MotifCompendium](#problems)
