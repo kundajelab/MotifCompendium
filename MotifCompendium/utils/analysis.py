@@ -212,7 +212,12 @@ def plot_unique_per_cluster(
 
 
 def cluster_grouping_upset_plot(
-    mc: MotifCompendiumClass, clustering: str, grouping: str, show: bool = False, save_loc: str | None = None, **kwargs
+    mc: MotifCompendiumClass,
+    clustering: str,
+    grouping: str,
+    show: bool = False,
+    save_loc: str | None = None,
+    **kwargs,
 ) -> None:
     """Creates an upset plot of how many motif clusters span across different groups.
 

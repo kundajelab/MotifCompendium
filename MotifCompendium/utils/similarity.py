@@ -41,7 +41,9 @@ def compute_similarities(
     for motif_stack in motif_stack_list[1:]:
         _, L, K = motif_stack.shape
         if L != L0 or K != K0:
-            raise ValueError("All motifs must have the same length and number of channels.")
+            raise ValueError(
+                "All motifs must have the same length and number of channels."
+            )
     if utils_config.get_max_chunk() != -1:
         (
             chunked_motif_stack_list,
