@@ -41,7 +41,6 @@ def setup_parser():
     
     parser.add_argument("--no-filter", action="store_false", dest="filter", help="Do not apply ANY filters to motifs, clusters, meta-clusters, sub-clusters. This will override all other filter options.")
     parser.add_argument("--strict-filter", action="store_true", help="Apply a strict filter, that does not add back motifs even when matched with a database.")
-    parser.add_argument("--rm-singletons", action="store_true", help="Remove singletons from the averaged MotifCompendium object.")
 
     parser.add_argument("--sim-scan", nargs="+", type=float, default=None, help="List of similarity thresholds to scan during clustering.")
     parser.add_argument("--sim-threshold", type=float, default=0.88, help="Similarity threshold to apply during clustering.")
@@ -51,7 +50,6 @@ def setup_parser():
     parser.add_argument("--cluster-on", type=str, default=None, help="Prior categorization to cluster on, provided as a column in the metadata. If not provided, will cluster each motif individually. CANNOT have cluster-on and cluster-within at the same time.")
     parser.add_argument("--cluster-within", type=str, default=None, help="Prior categorization to cluster within, provided as a column in the metadata. If not provided, will cluster each motif individually. CANNOT have cluster-on and cluster-within at the same time.")
     parser.add_argument("--cluster-recursive", action="store_true", help="Recursively cluster meta-clusters, and sub-clusters.")
-    parser.add_argument("--sort-similar", action="store_true", help="Sort by similar motifs, clusters, meta-clusters, sub-clusters.")
     parser.add_argument("--quality", action="store_true", help="Generate quality metrics and plots to check clustering quality.")
     
     parser.add_argument("--html-motif-collection", action="store_true", help="Generate HTML collection of motif constituents per cluster.")
@@ -60,14 +58,15 @@ def setup_parser():
     parser.add_argument("--html-cluster-table", action="store_true", help="Generate HTML summary table of clusters, meta-clusters, sub-clusters.")
     parser.add_argument("--html-cluster-removed", action="store_true", help="Generate HTML summary table of removed clusters, meta-clusters, sub-clusters.")
     parser.add_argument("--html-max-rows", type=int, default=None, help="Maximum number of rows to display in HTML tables.")
-    
-    parser.add_argument("-ch", "--max-chunk", type=int, default=1000, help="Maximum number of motifs to process at a time. Set to -1 to use no chunking.")
+    parser.add_argument("--logo-trim", type=bool_or_float, default=True, help="Trim flanks of logo images: True: Standard trimming; False: No trimming; [0, 1]: Trim flanks with contribution less than <logo-trim> * max contribution.")
+    parser.add_argument("--fast-plot", action="store_true", help="Reduce the resolution of logo images for faster plotting.")
+
+    parser.add_argument("-g", "--use-gpu", action="store_true", help="Use GPU for processing.")
     parser.add_argument("-cp", "--max-cpus", type=int, default=1, help="Maximum number of CPUs to use.")
-    parser.add_argument("--var-chunk", action="store_true", help="Use variable chunking, based on GPU memory usage.")
-    parser.add_argument("--no-ic", action="store_false", dest="ic", help="Do not compute information content.")
-    parser.add_argument("--unsafe", action="store_false", dest="safe", help="Disable safety checks.")
-    parser.add_argument("--use-gpu", action="store_true", help="Use GPU for processing.")
-    parser.add_argument("--fast-plot", action="store_true", help="Use fast plotting.")
+    parser.add_argument("-ch", "--max-chunk", type=int, default=1000, help="Maximum number of motifs to process at a time. Set to -1 to use no chunking.")
+    parser.add_argument("--var-chunk", action="store_true", help="Starting from max_chunk, dynamically reduce chunk size, based on available CPU/GPU memory.")
+    parser.add_argument("--unsafe", action="store_false", dest="safe", help="Do not check the validity of the MotifCompendium objects.")
+    parser.add_argument("--no-ic", action="store_false", dest="ic", help="Do not scale motifs by information content.")
     parser.add_argument("-t", "--time", action="store_true", help="Print time taken for each step.")
     parser.add_argument("-v", "--verbose", action="store_true", help="Print verbose output.")
 
@@ -93,6 +92,21 @@ def set_default_options():
 
 
 #### FUNCTIONS -------------------------------------------------------------------
+def bool_or_float(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, float):
+        return value
+    if isinstance(value, str):
+        if value.lower() in {'true', 'false'}:
+            return value.lower() == 'true'
+        try:
+            return float(value)
+        except ValueError:
+            pass
+    raise argparse.ArgumentTypeError(f"Invalid value for bool_or_float: {value}")
+
+
 def build_inputs_dict(input_list: list, name_list: list | None) -> dict:
     """
     Build a dictionary of input files.
@@ -140,7 +154,7 @@ def label_motifs(
             min_score=min_score,
             max_submotifs=max_submotifs,
             save_images=True,
-            logo_trim=VisualizeArgs.logo_trim,
+            logo_trim=args.logo_trim,
         )
 
     elif reference.endswith("pfm.txt") or reference.endswith("pfm") or reference.endswith("meme.txt") or reference.endswith(".meme"):
@@ -152,7 +166,7 @@ def label_motifs(
             min_score=min_score,
             max_submotifs=max_submotifs,
             save_images=True,
-            logo_trim=VisualizeArgs.logo_trim,
+            logo_trim=args.logo_trim,
         )
 
     else:
@@ -339,17 +353,17 @@ def filter_clusters(
         logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
 
-    # Filter #2: Flag singleton clusters
-    if args.rm_singletons:
-        if args.verbose:
-            logging.info(f"Flagging singleton clusters...")
-        if args.time:
-            start_time = time.time()
-        mc[MetadataCols.filter_col_flag] = mc["num_motifs"] == 1
-        if args.verbose:
-            logging.info(f"Number of singleton clusters: {len(mc[mc['num_motifs'] == 1])}")
-        if args.time:
-            logging.info(f"Time taken: {time.time() - start_time:.2f}s")
+    # # Filter #2: Flag singleton clusters
+    # if args.rm_singletons:
+    #     if args.verbose:
+    #         logging.info(f"Flagging singleton clusters...")
+    #     if args.time:
+    #         start_time = time.time()
+    #     mc[MetadataCols.filter_col_flag] = mc["num_motifs"] == 1
+    #     if args.verbose:
+    #         logging.info(f"Number of singleton clusters: {len(mc[mc['num_motifs'] == 1])}")
+    #     if args.time:
+    #         logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
 
     # Filter #3: Override flags, for good matches
@@ -1233,24 +1247,21 @@ if __name__ == "__main__":
                     raise ValueError("Error clustering motifs.")
     
     # Sort MotifCompendium object
-    if args.sort_similar:
-        # Sort by cluster
-        if args.sim_threshold_meta:
-            mc.metadata["sort_similar"] = mc.metadata[metacluster_col_name]
-        elif args.sim_threshold:
-            mc.metadata["sort_similar"] = mc.metadata[cluster_col_name]
-        else:
-            # Cluster: Using same conditions
-            if args.verbose:
-                logging.info(f"Sorting averages by clusters...")
-            mc.cluster(
-                algorithm=ClusterArgs.algorithm,
-                similarity_threshold=MotifMatchArgs.sort_threshold,
-                save_name="sort_similar",
-                largest_clusters_first=True,
-                **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
-            )
-        mc.sort(by=["sort_similar"], ascending=True, inplace=True)
+    if args.sim_threshold_meta:
+        mc.metadata["sort_cluster"] = mc.metadata[metacluster_col_name]
+    elif args.sim_threshold:
+        mc.metadata["sort_cluster"] = mc.metadata[cluster_col_name]
+    else:
+        # Cluster: Using same conditions
+        if args.verbose:
+            logging.info(f"Sorting averages by clusters...")
+        mc.cluster(
+            algorithm=ClusterArgs.algorithm,
+            similarity_threshold=MotifMatchArgs.sort_threshold,
+            save_name="sort_cluster",
+            largest_clusters_first=True,
+            **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
+        )
 
     # Save MotifCompendium object
     mc_path = os.path.join(args.output_dir, OutputPaths.mc_clustered)
@@ -1311,14 +1322,14 @@ if __name__ == "__main__":
     # Metadata:
     # Add positive/negative column
     mc_cluster["posneg"] = utils_motif.motif_posneg_sum(mc_cluster.get_standard_motif_stack())
-    # Add manual aggregation columns: avg_dist_summit, avg_contrib
-    if "avg_dist_summit" in mc.columns():
+    # Add manual aggregation columns: avg_dist_from_summit, avg_contrib
+    if "avg_dist_from_summit" in mc.columns():
         aggregate_weighted_avg(
             mc=mc,
             mc_cluster=mc_cluster,
             cluster_col=cluster_col_name,
-            agg_col="avg_dist_summit",
-            new_col="avg_dist_summit",
+            agg_col="avg_dist_from_summit",
+            new_col="avg_dist_from_summit",
             weight_col=ClusterArgs.weight_col,
         )
     if "avg_contrib" in mc.columns():
@@ -1331,30 +1342,26 @@ if __name__ == "__main__":
             weight_col=ClusterArgs.weight_col,
         )
 
-    # Sort Average MotifCompendium object
-    if args.sort_similar:
-        # Sort by cluster
-        if args.sim_threshold_meta:
-            mc_cluster.metadata.rename(
-                columns={metacluster_col_name: "sort_similar"},
-                inplace=True,
-            )
-        else:
-            # Cluster: Using same conditions
-            if args.verbose:
-                logging.info(f"Sorting averages by clusters...")
-            mc_cluster.cluster(
-                algorithm=ClusterArgs.algorithm,
-                similarity_threshold=MotifMatchArgs.sort_threshold,
-                save_name="sort_similar",
-                largest_clusters_first=True,
-                **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
-            )
-        mc_cluster.sort(by=["num_motifs"], ascending=False, inplace=True)
-        mc_cluster.sort(by=["sort_similar"], ascending=True, inplace=True)
+    # Sort by cluster
+    if args.sim_threshold_meta:
+        mc_cluster.metadata.rename(
+            columns={metacluster_col_name: "sort_cluster"},
+            inplace=True,
+        )
     else:
-        # Sort by positive, then negative clusters
-        mc_cluster.sort(by=["posneg", "num_motifs"], ascending=False, inplace=True)
+        # Cluster: Using same conditions
+        if args.verbose:
+            logging.info(f"Sorting averages by clusters...")
+        mc_cluster.cluster(
+            algorithm=ClusterArgs.algorithm,
+            similarity_threshold=MotifMatchArgs.sort_threshold,
+            save_name="sort_cluster",
+            largest_clusters_first=True,
+            **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
+        )
+
+    # Sort by positive, then negative clusters
+    mc_cluster.sort(by=["posneg", "num_motifs"], ascending=False, inplace=True)
 
     # Save Average MotifCompendium object
     mc_cluster_path = os.path.join(args.output_dir, OutputPaths.mc_cluster)
@@ -1395,14 +1402,14 @@ if __name__ == "__main__":
 
         # Metadata: Add positive/negative column
         mc_metacluster["posneg"] = utils_motif.motif_posneg_sum(mc_metacluster.get_standard_motif_stack())
-        # Add manual aggregation columns: avg_dist_summit, avg_contrib
-        if "avg_dist_summit" in mc.columns():
+        # Add manual aggregation columns: avg_dist_from_summit, avg_contrib
+        if "avg_dist_from_summit" in mc.columns():
             aggregate_weighted_avg(
                 mc=mc,
                 mc_cluster=mc_metacluster,
                 cluster_col=metacluster_col_name,
-                agg_col="avg_dist_summit",
-                new_col="avg_dist_summit",
+                agg_col="avg_dist_from_summit",
+                new_col="avg_dist_from_summit",
                 weight_col=ClusterArgs.weight_col,
             )
         if "avg_contrib" in mc.columns():
@@ -1415,23 +1422,19 @@ if __name__ == "__main__":
                 weight_col=ClusterArgs.weight_col,
             )
 
-        # Sort Meta MotifCompendium object
-        if args.sort_similar:
-            # Sort by cluster: Using same conditions
-            if args.verbose:
-                logging.info(f"Sorting averages by clusters...")
-            mc_metacluster.cluster(
-                algorithm=ClusterArgs.algorithm,
-                similarity_threshold=MotifMatchArgs.sort_threshold,
-                save_name="sort_similar",
-                largest_clusters_first=True,
-                **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
-            )
-            mc_metacluster.sort(by=["num_motifs"], ascending=False, inplace=True)
-            mc_metacluster.sort(by=["sort_similar"], ascending=True, inplace=True)
-        else:
-            # Sort by positive, then negative clusters
-            mc_metacluster.sort(by=["posneg", "num_motifs"], ascending=False, inplace=True)
+        # Sort by cluster
+        if args.verbose:
+            logging.info(f"Sorting averages by clusters...")
+        mc_metacluster.cluster(
+            algorithm=ClusterArgs.algorithm,
+            similarity_threshold=MotifMatchArgs.sort_threshold,
+            save_name="sort_cluster",
+            largest_clusters_first=True,
+            **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
+        )
+
+        # Sort by positive, then negative clusters
+        mc_metacluster.sort(by=["posneg", "num_motifs"], ascending=False, inplace=True)
 
         # Save Average MotifCompendium object (meta-cluster)
         mc_metacluster_path = os.path.join(args.output_dir, OutputPaths.mc_metacluster)
@@ -1473,14 +1476,14 @@ if __name__ == "__main__":
 
         # Add positive/negative column
         mc_subcluster["posneg"] = utils_motif.motif_posneg_sum(mc_subcluster.get_standard_motif_stack())
-        # Add manual aggregation columns: avg_dist_summit, avg_contrib
-        if "avg_dist_summit" in mc.columns():
+        # Add manual aggregation columns: avg_dist_from_summit, avg_contrib
+        if "avg_dist_from_summit" in mc.columns():
             aggregate_weighted_avg(
                 mc=mc,
                 mc_cluster=mc_subcluster,
                 cluster_col=subcluster_col_name,
-                agg_col="avg_dist_summit",
-                new_col="avg_dist_summit",
+                agg_col="avg_dist_from_summit",
+                new_col="avg_dist_from_summit",
                 weight_col=ClusterArgs.weight_col,
             )
         if "avg_contrib" in mc.columns():
@@ -1494,14 +1497,14 @@ if __name__ == "__main__":
             )
 
         # Sort Sub MotifCompendium object
-        if args.sort_similar:
+        if args.sort_cluster:
             # Sort by cluster
             mc_subcluster.metadata.rename(
-                columns={cluster_col_name: "sort_similar"},
+                columns={cluster_col_name: "sort_cluster"},
                 inplace=True,
             )
             mc_subcluster.sort(by=["num_motifs"], ascending=False, inplace=True)
-            mc_subcluster.sort(by=["sort_similar"], ascending=True, inplace=True)
+            mc_subcluster.sort(by=["sort_cluster"], ascending=True, inplace=True)
         else:
             # Sort by positive, then negative clusters
             mc_metacluster.sort(by=["posneg", "num_motifs"], ascending=False, inplace=True)
@@ -1825,6 +1828,21 @@ if __name__ == "__main__":
         if args.html_max_rows:
             html_max_rows = min(args.html_max_rows, len(mc))
             max_rows_series = pd.Series([True] * html_max_rows + [False] * (len(mc) - html_max_rows), index=mc.metadata.index)
+        mc_html = mc[max_rows_series]
+
+        # Add logos
+        if "logo (fwd)" not in mc_html.images():
+            mc_html.add_logos(
+                motifs=mc_html.get_standard_motif_stack(),
+                image_name="logo (fwd)",
+                trim=args.logo_trim,
+            )
+        if "logo (rev)" not in mc_html.images():
+            mc_html.add_logos(
+                motifs=utils_motif.reverse_complement(mc_html.get_standard_motif_stack()),
+                image_name="logo (rev)",
+                trim=args.logo_trim,
+            )
 
         # Create HTML table
         html_motif_table_path = os.path.join(html_dir, OutputPaths.html_motif_table)
@@ -1833,7 +1851,7 @@ if __name__ == "__main__":
                         f"Number of motifs: {len(mc)}")
         if args.time:
             start_time = time.time()
-        mc[max_rows_series].summary_table_html(
+        mc_html.summary_table_html(
             html_out=html_motif_table_path,
             columns=VisualizeArgs.html_table_cols_motif,
             editable=VisualizeArgs.editable,
@@ -1853,6 +1871,21 @@ if __name__ == "__main__":
         if args.html_max_rows:
             html_max_rows = min(args.html_max_rows, len(mc_removed))
             max_rows_series = pd.Series([True] * html_max_rows + [False] * (len(mc_removed) - html_max_rows), index=mc_removed.metadata.index)
+        mc_removed_html = mc_removed[max_rows_series]
+
+        # Add logos
+        if "logo (fwd)" not in mc_removed_html.images():
+            mc_removed_html.add_logos(
+                motifs=mc_removed_html.get_standard_motif_stack(),
+                image_name="logo (fwd)",
+                trim=args.logo_trim,
+            )
+        if "logo (rev)" not in mc_removed_html.images():
+            mc_removed_html.add_logos(
+                motifs=utils_motif.reverse_complement(mc_removed_html.get_standard_motif_stack()),
+                image_name="logo (rev)",
+                trim=args.logo_trim,
+            )
 
         # Create HTML table
         html_motif_removed_path = os.path.join(html_dir, OutputPaths.html_motif_removed)
@@ -1861,7 +1894,7 @@ if __name__ == "__main__":
                         f"Number of motifs removed: {len(mc_removed)}")
         if args.time:
             start_time = time.time()
-        mc_removed[max_rows_series].summary_table_html(
+        mc_removed_html.summary_table_html(
             html_out=html_motif_removed_path,
             columns=VisualizeArgs.html_table_cols_motif_removed,
             editable=VisualizeArgs.editable,
@@ -1885,6 +1918,21 @@ if __name__ == "__main__":
         if args.html_max_rows:
             html_max_rows = min(args.html_max_rows, len(mc_cluster))
             max_rows_series = pd.Series([True] * html_max_rows + [False] * (len(mc_cluster) - html_max_rows), index=mc_cluster.metadata.index)
+        mc_cluster_html = mc_cluster[max_rows_series]
+
+        # Add logos
+        if "logo (fwd)" not in mc_cluster_html.images():
+            mc_cluster_html.add_logos(
+                motifs=mc_cluster_html.get_standard_motif_stack(),
+                image_name="logo (fwd)",
+                trim=args.logo_trim,
+            )
+        if "logo (rev)" not in mc_cluster_html.images():
+            mc_cluster_html.add_logos(
+                motifs=utils_motif.reverse_complement(mc_cluster_html.get_standard_motif_stack()),
+                image_name="logo (rev)",
+                trim=args.logo_trim,
+            )
 
         # Cluster: Create HTML table
         html_cluster_table_path = os.path.join(html_dir, OutputPaths.html_cluster_table)
@@ -1893,7 +1941,7 @@ if __name__ == "__main__":
                         f"Number of clusters: {len(mc_cluster)}")
         if args.time:
             start_time = time.time()
-        mc_cluster[max_rows_series].summary_table_html(
+        mc_cluster_html.summary_table_html(
             html_out=html_cluster_table_path,
             columns=VisualizeArgs.html_table_cols_cluster,
             editable=VisualizeArgs.editable,
@@ -1916,7 +1964,22 @@ if __name__ == "__main__":
             if args.html_max_rows:
                 html_max_rows = min(args.html_max_rows, len(mc_metacluster))
                 max_rows_series = pd.Series([True] * html_max_rows + [False] * (len(mc_metacluster) - html_max_rows), index=mc_metacluster.metadata.index)
-            
+            mc_metacluster_html = mc_metacluster[max_rows_series]
+
+            # Add logos
+            if "logo (fwd)" not in mc_metacluster_html.images():
+                mc_metacluster_html.add_logos(
+                    motifs=mc_metacluster_html.get_standard_motif_stack(),
+                    image_name="logo (fwd)",
+                    trim=args.logo_trim,
+                )
+            if "logo (rev)" not in mc_metacluster_html.images():
+                mc_metacluster_html.add_logos(
+                    motifs=utils_motif.reverse_complement(mc_metacluster_html.get_standard_motif_stack()),
+                    image_name="logo (rev)",
+                    trim=args.logo_trim,
+                )
+
             # Create HTML table
             html_metacluster_table_path = os.path.join(html_dir, OutputPaths.html_metacluster_table)
             if args.verbose:
@@ -1924,14 +1987,14 @@ if __name__ == "__main__":
                              f"Number of meta-clusters: {len(mc_metacluster)}")
             if args.time:
                 start_time = time.time()
-            mc_metacluster[max_rows_series].summary_table_html(
+            mc_metacluster_html.summary_table_html(
                 html_out=html_metacluster_table_path,
                 columns=VisualizeArgs.html_table_cols_metacluster,
                 editable=VisualizeArgs.editable,
             )
             if args.time:
                 logging.info(f"Time taken: {time.time() - start_time:.2f}s")
-        
+
         # Sub-cluster: Create HTML table
         if args.sim_threshold_sub:
             # Check html table columns
@@ -1947,6 +2010,21 @@ if __name__ == "__main__":
             if args.html_max_rows:
                 html_max_rows = min(args.html_max_rows, len(mc_subcluster))
                 max_rows_series = pd.Series([True] * html_max_rows + [False] * (len(mc_subcluster) - html_max_rows), index=mc_subcluster.metadata.index)
+            mc_subcluster_html = mc_subcluster[max_rows_series]
+
+            # Add logos
+            if "logo (fwd)" not in mc_subcluster_html.images():
+                mc_subcluster_html.add_logos(
+                    motifs=mc_subcluster_html.get_standard_motif_stack(),
+                    image_name="logo (fwd)",
+                    trim=args.logo_trim,
+                )
+            if "logo (rev)" not in mc_subcluster_html.images():
+                mc_subcluster_html.add_logos(
+                    motifs=utils_motif.reverse_complement(mc_subcluster_html.get_standard_motif_stack()),
+                    image_name="logo (rev)",
+                    trim=args.logo_trim,
+                )
 
             # Create HTML table
             html_subcluster_table_path = os.path.join(html_dir, OutputPaths.html_subcluster_table)
@@ -1955,7 +2033,7 @@ if __name__ == "__main__":
                              f"Number of sub-clusters: {len(mc_subcluster)}")
             if args.time:
                 start_time = time.time()
-            mc_subcluster[max_rows_series].summary_table_html(
+            mc_subcluster_html.summary_table_html(
                 html_out=html_subcluster_table_path,
                 columns=VisualizeArgs.html_table_cols_subcluster,
                 editable=VisualizeArgs.editable,
@@ -1975,6 +2053,21 @@ if __name__ == "__main__":
         if args.html_max_rows:
             html_max_rows = min(args.html_max_rows, len(mc_cluster_removed))
             max_rows_series = pd.Series([True] * html_max_rows + [False] * (len(mc_cluster_removed) - html_max_rows), index=mc_cluster_removed.metadata.index)
+        mc_cluster_removed_html = mc_cluster_removed[max_rows_series]
+
+        # Add logos
+        if "logo (fwd)" not in mc_cluster_removed_html.images():
+            mc_cluster_removed_html.add_logos(
+                motifs=mc_cluster_removed_html.get_standard_motif_stack(),
+                image_name="logo (fwd)",
+                trim=args.logo_trim,
+            )
+        if "logo (rev)" not in mc_cluster_removed_html.images():
+            mc_cluster_removed_html.add_logos(
+                motifs=utils_motif.reverse_complement(mc_cluster_removed_html.get_standard_motif_stack()),
+                image_name="logo (rev)",
+                trim=args.logo_trim,
+            )
 
         # Cluster: Create HTML table
         html_cluster_removed_path = os.path.join(html_dir, OutputPaths.html_cluster_removed)
@@ -1983,7 +2076,7 @@ if __name__ == "__main__":
                             f"Number of clusters removed: {len(mc_cluster_removed)}")
         if args.time:
             start_time = time.time()
-        mc_cluster_removed[max_rows_series].summary_table_html(
+        mc_cluster_removed_html.summary_table_html(
             html_out=html_cluster_removed_path,
             columns=VisualizeArgs.html_table_cols_cluster_removed,
             editable=VisualizeArgs.editable,
@@ -2003,7 +2096,22 @@ if __name__ == "__main__":
             if args.html_max_rows:
                 html_max_rows = min(args.html_max_rows, len(mc_metacluster_removed))
                 max_rows_series = pd.Series([True] * html_max_rows + [False] * (len(mc_metacluster_removed) - html_max_rows), index=mc_metacluster_removed.metadata.index)
-            
+            mc_metacluster_removed_html = mc_metacluster_removed[max_rows_series]
+
+            # Add logos
+            if "logo (fwd)" not in mc_metacluster_removed_html.images():
+                mc_metacluster_removed_html.add_logos(
+                    motifs=mc_metacluster_removed_html.get_standard_motif_stack(),
+                    image_name="logo (fwd)",
+                    trim=args.logo_trim,
+                )
+            if "logo (rev)" not in mc_metacluster_removed_html.images():
+                mc_metacluster_removed_html.add_logos(
+                    motifs=utils_motif.reverse_complement(mc_metacluster_removed_html.get_standard_motif_stack()),
+                    image_name="logo (rev)",
+                    trim=args.logo_trim,
+                )
+
             # Create HTML table
             html_metacluster_removed_path = os.path.join(html_dir, OutputPaths.html_metacluster_removed)
             if args.verbose:
@@ -2011,7 +2119,7 @@ if __name__ == "__main__":
                              f"Number of meta-clusters removed: {len(mc_metacluster_removed)}")
             if args.time:
                 start_time = time.time()
-            mc_metacluster_removed[max_rows_series].summary_table_html(
+            mc_metacluster_removed_html.summary_table_html(
                 html_out=html_metacluster_removed_path,
                 columns=VisualizeArgs.html_table_cols_metacluster_removed,
                 editable=VisualizeArgs.editable,
@@ -2031,7 +2139,22 @@ if __name__ == "__main__":
             if args.html_max_rows:
                 html_max_rows = min(args.html_max_rows, len(mc_subcluster_removed))
                 max_rows_series = pd.Series([True] * html_max_rows + [False] * (len(mc_subcluster_removed) - html_max_rows), index=mc_subcluster_removed.metadata.index)
-            
+            mc_subcluster_removed_html = mc_subcluster_removed[max_rows_series]
+
+            # Add logos
+            if "logo (fwd)" not in mc_subcluster_removed_html.images():
+                mc_subcluster_removed_html.add_logos(
+                    motifs=mc_subcluster_removed_html.get_standard_motif_stack(),
+                    image_name="logo (fwd)",
+                    trim=args.logo_trim,
+                )
+            if "logo (rev)" not in mc_subcluster_removed_html.images():
+                mc_subcluster_removed_html.add_logos(
+                    motifs=utils_motif.reverse_complement(mc_subcluster_removed_html.get_standard_motif_stack()),
+                    image_name="logo (rev)",
+                    trim=args.logo_trim,
+                )
+
             # Create HTML table
             html_subcluster_removed_path = os.path.join(html_dir, OutputPaths.html_subcluster_removed)
             if args.verbose:
@@ -2039,7 +2162,7 @@ if __name__ == "__main__":
                              f"Number of sub-clusters removed: {len(mc_subcluster_removed)}")
             if args.time:
                 start_time = time.time()
-            mc_subcluster_removed[max_rows_series].summary_table_html(
+            mc_subcluster_removed_html.summary_table_html(
                 html_out=html_subcluster_removed_path,
                 columns=VisualizeArgs.html_table_cols_subcluster_removed,
                 editable=VisualizeArgs.editable,

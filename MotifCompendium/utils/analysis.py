@@ -619,7 +619,7 @@ def assign_label_from_pfms(
     min_score: float = 0.5,
     max_submotifs: int = 1,
     save_images: bool = True,
-    logo_trimming: bool | float | int = False,
+    logo_trim: bool | float | int = False,
 ) -> None:
     """Automatic labeling of motifs from a file containing PFMs.
 
@@ -646,7 +646,7 @@ def assign_label_from_pfms(
         save_images: Whether or not to save the logos of the matched motifs. If True,
           the logos will appear as a saved image. If False, logos will not be saved as
           saved images.
-        logo_trimming: This argument is only relevant if save_images is True. A bool or
+        logo_trim: This argument is only relevant if save_images is True. A bool or
           float/int indicating how the motif should be trimmed when plotting. If False,
           the motif will not be trimmed at all. If True, the motif will be trimmed at
           the flanks with a standard threshold of 1/L. If a number is provided, that
@@ -664,7 +664,7 @@ def assign_label_from_pfms(
         min_score,
         max_submotifs=max_submotifs,
         save_images=save_images,
-        logo_trimming=logo_trimming,
+        logo_trim=logo_trim,
         save_col_prefix=save_col_prefix,
     )
 
@@ -677,7 +677,7 @@ def assign_label_from_other_compendium(
     min_score: float = 0.5,
     max_submotifs: int = 1,
     save_images: bool = True,
-    logo_trimming: bool | float | int = True,
+    logo_trim: bool | float | int = True,
 ) -> None:
     """Automatic labeling of motifs from another MotifCompendium.
 
@@ -706,7 +706,7 @@ def assign_label_from_other_compendium(
           saved images. The logos will come from
           assign_from_mc.get_saved_images("logo (fwd)"), if available. If not, they will
           be generated on the fly.
-        logo_trimming: This argument is only relevant if save_images is True. A bool or
+        logo_trim: This argument is only relevant if save_images is True. A bool or
           float/int indicating how the motif should be trimmed when plotting. If False,
           the motif will not be trimmed at all. If True, the motif will be trimmed at
           the flanks with a standard threshold of 1/L. If a number is provided, that
@@ -738,7 +738,7 @@ def assign_label_from_other_compendium(
         min_score,
         max_submotifs=max_submotifs,
         save_images=save_images,
-        logo_trimming=logo_trimming,
+        logo_trim=logo_trim,
         utf8_images=other_logos,
         save_col_prefix=save_col_prefix,
     )

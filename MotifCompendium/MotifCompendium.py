@@ -1946,7 +1946,7 @@ class MotifCompendium:
         min_score: float,
         max_submotifs: int = 1,
         save_images: bool = True,
-        logo_trimming: bool | float | int = True,
+        logo_trim: bool | float | int = True,
         utf8_images: list[str] | None = None,
         save_col_prefix: str = "match",
     ) -> None:
@@ -1972,7 +1972,7 @@ class MotifCompendium:
             save_images: Whether or not to save the logos of the matched motifs. If
               True, the logos will appear as a saved image. If False, logos will not be
               saved as saved images.
-            logo_trimming: This argument is only relevant if save_images is True. A bool
+            logo_trim: This argument is only relevant if save_images is True. A bool
               or float/int indicating how the motif should be trimmed when plotting. If
               False, the motif will not be trimmed at all. If True, the motif will be
               trimmed at the flanks with a standard threshold of 1/L. If a number is
@@ -1981,7 +1981,7 @@ class MotifCompendium:
               of 1, all positions would be trimmed.
             utf8_images: A list of utf8 images for each motif in reference_motifs. If
               saved_images is True and utf8_images is None, the logos will be generated
-              on the fly using the trimming option logo_trimming. If saved_images is
+              on the fly using the trimming option logo_trim. If saved_images is
               True and utf8_images is a list of utf8 images, these images will be used
               as the logos for the matched motifs.
             save_col_prefix: The prefix to use for the saved columns. All saved columns
@@ -2078,7 +2078,7 @@ class MotifCompendium:
                 if utf8_images is None:
                     # Generate forward logos if not provided
                     self.add_logos(
-                        match_motifs[i], f"{save_col_prefix}_logo{i}", logo_trimming
+                        match_motifs[i], f"{save_col_prefix}_logo{i}", logo_trim
                     )
                 else:
                     # Copy forward logos if provided

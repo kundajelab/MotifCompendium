@@ -119,11 +119,10 @@ class ClusterArgs:
 class VisualizeArgs:
     # Allow editable HTML table
     editable: bool = True
-    logo_trim: bool | float = False
 
     # HTML table columns
-    html_table_cols_base: List[str] = field(default_factory=lambda: ["name",
-        "posneg", "num_motifs", "num_seqlets", "avg_dist_summit", "avg_contrib",
+    html_table_cols_base: List[str] = field(default_factory=lambda: ["name", "sort_cluster",
+        "posneg", "num_motifs", "num_seqlets", "avg_dist_from_summit", "avg_contrib",
          "invitro_cluster", "target", "tissue", "organ", "system", "source", "motifs", "biosample",
     ])
     html_table_cols_label: List[str] = field(default_factory=lambda: [
@@ -379,7 +378,16 @@ class MotifFilterArgs:
             name="6_dinucrepeat_2",
             metric="dinuc_composition",
             operation=">",
-            threshold=0.95,
+            threshold=0.9,
+            override=False,
+            apply_motif=True,
+            apply_cluster=True,
+        ),
+        _FilterArgs(
+            name="6_dinucrepeat_3",
+            metric="dinuc_score",
+            operation=">",
+            threshold=0.45,
             override=False,
             apply_motif=True,
             apply_cluster=True,
