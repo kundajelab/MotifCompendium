@@ -136,19 +136,6 @@ def motif_8_to_4_unsigned(x: np.ndarray) -> np.ndarray:
     return x_4
 
 
-_MOTIF_4_TO_COPAIR6_MASK = np.triu(np.ones(4), k=1).astype(np.bool_)
-
-
-@single_or_many_motifs
-def motif4_to_copair6(x: np.ndarray) -> np.ndarray:
-    """Converts a 4 channel motif(s) into a 6 channel co-pair motif(s)."""
-    if not (x.shape[2] == 4):
-        raise ValueError("Input motif(s) must have 4 channels.")
-    x_cross = x[:, :, :, np.newaxis] @ x[:, :, np.newaxis, :]  # (N, L, 4, 4)
-    x_copair = x_cross[:, :, _MOTIF_4_TO_COPAIR6_MASK]  # (N, L, 6)
-    return 4 * x_copair  # Renormalize because max value is 0.25
-
-
 def align_motifs(
     motif_stack: np.ndarray, alignment_rc: np.ndarray, alignment_h: np.ndarray
 ) -> np.ndarray:
@@ -579,9 +566,6 @@ def remove_motif_component(
 ########################
 # ENTROPY CALCULATIONS #
 ########################
-import inspect
-
-
 def minusxlogx(x: np.ndarray, base: int) -> np.ndarray:
     """Compute -x*logb(x) with support in x >= 0."""
     return (

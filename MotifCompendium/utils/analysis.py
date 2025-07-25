@@ -212,7 +212,12 @@ def plot_unique_per_cluster(
 
 
 def cluster_grouping_upset_plot(
-    mc: MotifCompendiumClass, clustering: str, grouping: str, save_loc: str, **kwargs
+    mc: MotifCompendiumClass,
+    clustering: str,
+    grouping: str,
+    show: bool = False,
+    save_loc: str | None = None,
+    **kwargs,
 ) -> None:
     """Creates an upset plot of how many motif clusters span across different groups.
 
@@ -224,7 +229,8 @@ def cluster_grouping_upset_plot(
         mc: The MotifCompendium to analyze.
         clustering: The motif clustering to consider.
         grouping: The grouping to compute cluster source intersections with respect to.
-        save_loc: The file to save the Upset Plot to.
+        show: Whether or not to show the Upset Plot with plt.show().
+        save_loc: The file to save the Upset Plot to. If None, the heatmap is not saved.
         **kwargs: Additional named arguments that usetplot.UpSet() takes.
 
     Notes:
@@ -234,11 +240,14 @@ def cluster_grouping_upset_plot(
     membership_lists = [
         list(set(mc[mc[clustering] == c][grouping])) for c in set(mc[clustering])
     ]
-
     clusters_by_grouping = upsetplot.from_memberships(membership_lists)
     fig = plt.figure()
     upsetplot.UpSet(clusters_by_grouping, subset_size="count", **kwargs).plot(fig=fig)
-    plt.savefig(save_loc, bbox_inches="tight")
+    # Save/show/close
+    if save_loc is not None:
+        plt.savefig(save_loc, bbox_inches="tight")
+    if show:
+        plt.show()
     plt.close(fig=fig)
 
 
@@ -275,7 +284,7 @@ def export_compendium_modisco(
     with h5py.File(save_loc, "w") as f:
         f.attrs["window_size"] = mc.motifs.shape[1]
         # Positive
-        if "pos" in pos_neg:
+        if "pos" in pos_neg.values:
             pos_group = f.create_group("pos_patterns")
             mc_pos = mc[pos_neg == "pos"]
             motifs_pos = mc_pos.get_standard_motif_stack()
@@ -290,7 +299,7 @@ def export_compendium_modisco(
                 pos_cluster = pos_group.create_group(name)
                 pos_cluster.create_dataset("contrib_scores", data=motif)
         # Negative
-        if "neg" in pos_neg:
+        if "neg" in pos_neg.values:
             neg_group = f.create_group("neg_patterns")
             mc_neg = mc[pos_neg == "neg"]
             motifs_neg = mc_neg.get_standard_motif_stack()
@@ -358,7 +367,7 @@ def export_compendium_clustered_modisco(
     with h5py.File(save_loc, "w") as f:
         f.attrs["window_size"] = mc_avg.motifs.shape[1]
         # Positive
-        if "pos" in pos_neg:
+        if "pos" in pos_neg.values:
             pos_group = f.create_group("pos_patterns")
             mc_avg_pos = mc_avg[pos_neg == "pos"]
             avg_motifs_pos = mc_avg_pos.get_standard_motif_stack()
@@ -393,7 +402,7 @@ def export_compendium_clustered_modisco(
                             "contrib_scores", data=motif
                         )
         # Negative
-        if "neg" in pos_neg:
+        if "neg" in pos_neg.values:
             neg_group = f.create_group("neg_patterns")
             mc_avg_neg = mc_avg[pos_neg == "neg"]
             avg_motifs_neg = mc_avg_neg.get_standard_motif_stack()
