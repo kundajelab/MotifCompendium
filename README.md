@@ -4,7 +4,7 @@
 
 The MotifCompendium package provides a framework for clustering, annotating, and analyzing motifs efficiently at large scales.
 
-(7/25/2025) The main branch of MotifCompendium has been updated! It is highly recommended to upgrade to the current version of the package. Please only work off of the main branch, which will contain the most stable build of MotifCompendium.
+**(7/25/2025)** The main branch of MotifCompendium has been updated! It is highly recommended to upgrade to the current version of the package. Please only work off of the main branch, which will contain the most stable build of MotifCompendium.
 
 README sections:
 
@@ -13,6 +13,7 @@ README sections:
 - [Loading old versions of MotifCompendium](#working-with-old-versions-of-motifcompendium)
 - [Documentation](#documentation)
 - [Problems with MotifCompendium](#problems)
+- [Developers](#developers)
 
 ## Installation
 
@@ -38,7 +39,7 @@ Please go through the [tutorials](tutorials/README.md) to learn how to get start
 
 ## Working with old versions of MotifCompendium
 
-(7/25/2025) **Old MotifCompendium objects may not be compatible with the current version of the package!** If possible, rerun your MotifCompendium code with the current version of the package. If that is not possible, you may need to upgrade your MotifCompendium object in order for it to be compatible with the newest version of the package. To check if your MotifCompendium object needs upgrading, try loading the object. If the load fails, try loading with `safe=False` and saving the object; the saved version will be compatible with the package. If that also fails, try loading your object with the `load_old_compendium()` function. And if all of that still fails, please reach out on Slack for assistance.
+**(7/25/2025)** **Old MotifCompendium objects may not be compatible with the current version of the package!** If possible, rerun your MotifCompendium code with the current version of the package. If that is not possible, you may need to upgrade your MotifCompendium object in order for it to be compatible with the newest version of the package. To check if your MotifCompendium object needs upgrading, try loading the object. If the load fails, try loading with `safe=False` and saving the object; the saved version will be compatible with the package. If that also fails, try loading your object with the `load_old_compendium()` function. And if all of that still fails, please reach out on Slack for assistance.
 
 ## Documentation
 
@@ -47,3 +48,7 @@ A Read The Docs will be released when the package is publically released. Until 
 ## Problems
 
 If you run into an issue with MotifCompendium, please file a GitHub issue. And concurrently, please post a message to the #motif-compendium channel on Slack.
+
+## Developers
+
+Developed by Salil Deshpande and Chang Yun.
