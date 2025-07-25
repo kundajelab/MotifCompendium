@@ -34,18 +34,14 @@ def compute_similarities(
           tuple for each calculation specification tuple in calculations. Each motif
           calculation result tuple consists of a similarity matrix, an alignemnt_fr
           matrix, and an alignment_h matrix.
-        The maximum size of a motif stack to perform similarity calculations
-          on. All motif stacks larger than max_chunk will be chunked into smaller motif
-          stacks of size <= max_chunk by _chunk_motif_stacks_and_calcs(). Calculations
-          will occur on the smaller chunks and then the results will be reassembled with
-          _reassemble_results().
-        Whether or not to use GPUs to accelerate computing similarity. If True,
-          similarity calculations are carried out by the functions in utils file
-          .similarity_core_gpu.py. If False, they will be carried out by the function in
-          utils file .similarity_core_cpu.py.
     """
     for motif_stack in motif_stack_list:
         utils_motif.validate_motif_stack_similarity(motif_stack)
+    _, L0, K0 = motif_stack_list[0].shape
+    for motif_stack in motif_stack_list[1:]:
+        _, L, K = motif_stack.shape
+        if L != L0 or K != K0:
+            raise ValueError("All motifs must have the same length and number of channels.")
     if utils_config.get_max_chunk() != -1:
         (
             chunked_motif_stack_list,
@@ -66,33 +62,6 @@ def compute_similarities(
             motif_stack_list,
             calculations,
         )
-
-
-def find_most_similar_motif(
-    motifs_of_interest: np.ndarray, reference_motifs: np.ndarray
-) -> tuple[list[float], list[int]]:
-    """Finds the most similar motif given a set of reference motifs.
-
-    For a set of motifs of interest and a set of reference motifs, this function
-      calls compute_similarities() to compute the similarity between the two sets of
-      motifs. Then, for each motif of interest, it finds the most similar reference
-      motif.
-
-    Args:
-        motifs_of_interest: A np.ndarray representing a stack of motifs of interest.
-        reference_motifs: A np.ndarray representing a stack of reference motifs.
-
-    Returns:
-        A tuple of two lists. The first list contains the maximum similarity score
-          for each motif of interest. The second list contains the index of the most
-          similar reference motif for each motif.
-    """
-    similarity, _, _ = compute_similarities(
-        [motifs_of_interest, reference_motifs], [(0, 1)]
-    )[0]
-    max_similarity = np.max(similarity, axis=1).tolist()
-    max_similarity_idx = np.argmax(similarity, axis=1).tolist()
-    return max_similarity, max_similarity_idx
 
 
 #####################
