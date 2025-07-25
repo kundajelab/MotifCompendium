@@ -1,6 +1,8 @@
 # Tutorials
 
-The following tutorials are designed to help you learn how to make the most out MotifCompendium. The first tutorial gives a minimal example of using the package. Subsequent tutorials aim to highlight additional features and utilities available in MotifCompendium. While it is sufficient to run MotifCompendium by simply following tutorial 1 exactly, **it is highly recommended to run also run through tutorials 2-5 before using the package** in order to most effectively use MotifCompendium. Tutorials 6-8 contain more advanced topics and may be a useful reference depending on your use case.
+The following tutorials are designed to help you learn how to make the most out MotifCompendium. The first tutorial gives a minimal example of using the package. Subsequent tutorials aim to highlight additional features and utilities available in MotifCompendium. While it is sufficient to run MotifCompendium by simply following tutorial 1 exactly, **it is highly recommended to run also run through tutorials 2-5 before using the package** in order to most effectively use MotifCompendium. Tutorials 6-8 contain more advanced topics, and may be a useful reference depending on your use case.
+
+When going through the tutorials, *please read the text in between the code*! The tutorials are supposed to represent a very thorough documentation of MotifCompendium functionality and usage suggestions. The text between the code is intended to help communicate usage suggestions and best practices.
 
 ## Introductory Tutorial
 
@@ -16,5 +18,5 @@ The following tutorials are designed to help you learn how to make the most out 
 ## Advanced Topics
 
 1) [Tutorial 6 - Motif Filtering](6_motif_filtering.ipynb): Describes options and best practices for filtering low quality motifs using entropy filters.
-2) [Tutorial 7 - Additional Analyses](7_additional_analyses.ipynb): Gives examples of more advanced analyses that can be performed using MotifCompendium, including exporting motifs to FiNeMo for hit calling and identifying celltype-specific motifs.
-3) [Tutorial 8 - ENCODE Pipeline](8_encode_pipeline.ipynb): Includes the pipeline used to perform motif clustering on all ENCODE motifs. **This tutorial is meant to demonstrate an extremely advanced use-case of MotifCompendium and should not be followed blindly.**
+2) [Tutorial 7 - Additional Analyses](7_additional_analyses.ipynb): Gives examples of downstream analyses that can be performed using MotifCompendium, including **exporting motifs to FiNeMo for hit calling** and identifying celltype-specific motifs.
+3) [Tutorial 8 - ENCODE Pipeline](8_encode_pipeline.ipynb): The pipeline used to perform motif clustering on all ENCODE motifs. **This tutorial is meant to demonstrate an extremely advanced use-case of MotifCompendium and should not be followed blindly.**

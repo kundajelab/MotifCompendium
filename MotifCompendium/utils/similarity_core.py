@@ -1,3 +1,5 @@
+# DEVELOPED BY SALIL DESHPANDE
+
 import numpy as np
 
 import MotifCompendium.utils.config as utils_config
