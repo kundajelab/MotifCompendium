@@ -628,7 +628,7 @@ def assign_label_from_pfms(
     min_score: float = 0.5,
     max_submotifs: int = 1,
     save_images: bool = True,
-    logo_trimming: bool | float | int = False,
+    logo_trimming: bool | float | int = 0,
 ) -> None:
     """Automatic labeling of motifs from a file containing PFMs.
 
