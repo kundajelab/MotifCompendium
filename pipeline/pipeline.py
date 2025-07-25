@@ -2189,4 +2189,5 @@ if __name__ == "__main__":
         json.dump(all_args, f, indent=4)
 
     ## END ----------------------------------------------------------------
-    print(f"MotifCompendium pipeline completed successfully. Output saved to {args.output_dir}.")
+    print(f"MotifCompendium pipeline completed successfully. Outputs saved to {args.output_dir}.")
+    
