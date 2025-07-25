@@ -154,7 +154,7 @@ def label_motifs(
             min_score=min_score,
             max_submotifs=max_submotifs,
             save_images=True,
-            logo_trim=args.logo_trim,
+            logo_trimming=args.logo_trimming,
         )
 
     elif reference.endswith("pfm.txt") or reference.endswith("pfm") or reference.endswith("meme.txt") or reference.endswith(".meme"):
@@ -166,7 +166,7 @@ def label_motifs(
             min_score=min_score,
             max_submotifs=max_submotifs,
             save_images=True,
-            logo_trim=args.logo_trim,
+            logo_trimming=args.logo_trimming,
         )
 
     else:
@@ -1835,13 +1835,13 @@ if __name__ == "__main__":
             mc_html.add_logos(
                 motifs=mc_html.get_standard_motif_stack(),
                 image_name="logo (fwd)",
-                trim=args.logo_trim,
+                trim=args.logo_trimming,
             )
         if "logo (rev)" not in mc_html.images():
             mc_html.add_logos(
                 motifs=utils_motif.reverse_complement(mc_html.get_standard_motif_stack()),
                 image_name="logo (rev)",
-                trim=args.logo_trim,
+                trim=args.logo_trimming,
             )
 
         # Create HTML table
@@ -1878,13 +1878,13 @@ if __name__ == "__main__":
             mc_removed_html.add_logos(
                 motifs=mc_removed_html.get_standard_motif_stack(),
                 image_name="logo (fwd)",
-                trim=args.logo_trim,
+                trim=args.logo_trimming,
             )
         if "logo (rev)" not in mc_removed_html.images():
             mc_removed_html.add_logos(
                 motifs=utils_motif.reverse_complement(mc_removed_html.get_standard_motif_stack()),
                 image_name="logo (rev)",
-                trim=args.logo_trim,
+                trim=args.logo_trimming,
             )
 
         # Create HTML table
@@ -1925,13 +1925,13 @@ if __name__ == "__main__":
             mc_cluster_html.add_logos(
                 motifs=mc_cluster_html.get_standard_motif_stack(),
                 image_name="logo (fwd)",
-                trim=args.logo_trim,
+                trim=args.logo_trimming,
             )
         if "logo (rev)" not in mc_cluster_html.images():
             mc_cluster_html.add_logos(
                 motifs=utils_motif.reverse_complement(mc_cluster_html.get_standard_motif_stack()),
                 image_name="logo (rev)",
-                trim=args.logo_trim,
+                trim=args.logo_trimming,
             )
 
         # Cluster: Create HTML table
@@ -1971,13 +1971,13 @@ if __name__ == "__main__":
                 mc_metacluster_html.add_logos(
                     motifs=mc_metacluster_html.get_standard_motif_stack(),
                     image_name="logo (fwd)",
-                    trim=args.logo_trim,
+                    trim=args.logo_trimming,
                 )
             if "logo (rev)" not in mc_metacluster_html.images():
                 mc_metacluster_html.add_logos(
                     motifs=utils_motif.reverse_complement(mc_metacluster_html.get_standard_motif_stack()),
                     image_name="logo (rev)",
-                    trim=args.logo_trim,
+                    trim=args.logo_trimming,
                 )
 
             # Create HTML table
@@ -2017,13 +2017,13 @@ if __name__ == "__main__":
                 mc_subcluster_html.add_logos(
                     motifs=mc_subcluster_html.get_standard_motif_stack(),
                     image_name="logo (fwd)",
-                    trim=args.logo_trim,
+                    trim=args.logo_trimming,
                 )
             if "logo (rev)" not in mc_subcluster_html.images():
                 mc_subcluster_html.add_logos(
                     motifs=utils_motif.reverse_complement(mc_subcluster_html.get_standard_motif_stack()),
                     image_name="logo (rev)",
-                    trim=args.logo_trim,
+                    trim=args.logo_trimming,
                 )
 
             # Create HTML table
@@ -2060,13 +2060,13 @@ if __name__ == "__main__":
             mc_cluster_removed_html.add_logos(
                 motifs=mc_cluster_removed_html.get_standard_motif_stack(),
                 image_name="logo (fwd)",
-                trim=args.logo_trim,
+                trim=args.logo_trimming,
             )
         if "logo (rev)" not in mc_cluster_removed_html.images():
             mc_cluster_removed_html.add_logos(
                 motifs=utils_motif.reverse_complement(mc_cluster_removed_html.get_standard_motif_stack()),
                 image_name="logo (rev)",
-                trim=args.logo_trim,
+                trim=args.logo_trimming,
             )
 
         # Cluster: Create HTML table
@@ -2103,13 +2103,13 @@ if __name__ == "__main__":
                 mc_metacluster_removed_html.add_logos(
                     motifs=mc_metacluster_removed_html.get_standard_motif_stack(),
                     image_name="logo (fwd)",
-                    trim=args.logo_trim,
+                    trim=args.logo_trimming,
                 )
             if "logo (rev)" not in mc_metacluster_removed_html.images():
                 mc_metacluster_removed_html.add_logos(
                     motifs=utils_motif.reverse_complement(mc_metacluster_removed_html.get_standard_motif_stack()),
                     image_name="logo (rev)",
-                    trim=args.logo_trim,
+                    trim=args.logo_trimming,
                 )
 
             # Create HTML table
@@ -2146,13 +2146,13 @@ if __name__ == "__main__":
                 mc_subcluster_removed_html.add_logos(
                     motifs=mc_subcluster_removed_html.get_standard_motif_stack(),
                     image_name="logo (fwd)",
-                    trim=args.logo_trim,
+                    trim=args.logo_trimming,
                 )
             if "logo (rev)" not in mc_subcluster_removed_html.images():
                 mc_subcluster_removed_html.add_logos(
                     motifs=utils_motif.reverse_complement(mc_subcluster_removed_html.get_standard_motif_stack()),
                     image_name="logo (rev)",
-                    trim=args.logo_trim,
+                    trim=args.logo_trimming,
                 )
 
             # Create HTML table
