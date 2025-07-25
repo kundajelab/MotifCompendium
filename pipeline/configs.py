@@ -208,7 +208,7 @@ class MotifFilterArgs:
             name="4_broadsingle_2",
             metric="posbase_entropy_score",
             operation=">",
-            threshold=0.5,
+            threshold=0.55,
             override=False,
             apply_motif=True,
             apply_cluster=True,

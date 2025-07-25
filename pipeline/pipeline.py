@@ -58,7 +58,7 @@ def setup_parser():
     parser.add_argument("--html-cluster-table", action="store_true", help="Generate HTML summary table of clusters, meta-clusters, sub-clusters.")
     parser.add_argument("--html-cluster-removed", action="store_true", help="Generate HTML summary table of removed clusters, meta-clusters, sub-clusters.")
     parser.add_argument("--html-max-rows", type=int, default=None, help="Maximum number of rows to display in HTML tables.")
-    parser.add_argument("--logo-trim", type=bool_or_float, default=True, help="Trim flanks of logo images: True: Standard trimming; False: No trimming; [0, 1]: Trim flanks with contribution less than <logo-trim> * max contribution.")
+    parser.add_argument("--logo-trimming", type=bool_or_float, default=True, help="Trim flanks of logo images: True: Standard trimming; False: No trimming; [0, 1]: Trim flanks with contribution less than <logo-trimming> * max contribution.")
     parser.add_argument("--fast-plot", action="store_true", help="Reduce the resolution of logo images for faster plotting.")
 
     parser.add_argument("-g", "--use-gpu", action="store_true", help="Use GPU for processing.")
