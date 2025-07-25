@@ -1,191 +1,495 @@
+import functools
 import multiprocessing
+import os
 
 import h5py
 import numpy as np
 import pandas as pd
 
-from .motif import ic_scale, motif_4_to_8, resize_motif
+import MotifCompendium.utils.config as utils_config
+import MotifCompendium.utils.motif as utils_motif
 
 
 ####################
 # PUBLIC FUNCTIONS #
 ####################
+def which_file_load_failed(func):
+    """Decorator to say which file failed to load.
+
+    Helps identify which file load failed. Helps in multiprocessing settings.
+    """
+
+    @functools.wraps(func)
+    def wrapper(file_loc, *args, **kwargs):
+        if not os.path.exists(file_loc):
+            raise FileNotFoundError(f"File {file_loc} not found.")
+        file_size = os.path.getsize(file_loc)
+        if file_loc.endswith(".h5") and file_size < 2000:
+            raise ValueError(
+                f"File {file_loc} is likely empty (size: {file_size} bytes)."
+            )
+        elif file_size <= 0:
+            raise ValueError(f"File {file_loc} is empty (size: {file_size} bytes).")
+        try:
+            result = func(file_loc, *args, **kwargs)
+            return result
+        except Exception as e:
+            raise ValueError(f"Failed to load file {file_loc}.") from e
+
+    return wrapper
+
+
 def load_modiscos(
-    modisco_dict: dict[str, str], ic: bool = True, max_cpus: int | None = None
-) -> tuple[np.ndarray, list[str], list[int]]:
-    """Load motifs, names, seqlet counts, and model names from multiple Modisco file.
+    modisco_dict: dict[str, str],
+    load_subpatterns: bool = False,
+    modisco_region_width: int = 400,
+    ic: bool = True,
+) -> tuple[
+    np.ndarray, list[str], list[int], list[str], list[str], list[float], list[float]
+]:
+    """Load motifs, names, and other per-motif information from multiple Modisco files.
 
     Motifs from each Modisco file are extracted by calling load_modisco(). The results
-      are then concatenated. Loading can be parallelized across Modisco files.
+      are then concatenated. Parallelizes the loading if config.get_max_cpus() > 1.
 
     Args:
         modisco_dict: A dictionary from model name to Modisco file path.
+        load_subpatterns: Whether or not to load subpatterns from the Modisco file. If
+          True, motifs will be loaded at the subpattern level. If False, motifs will be
+          loaded at the pattern level.
+        modisco_region_width: The region width used during Modisco. This argument only
+          needs to be specified if using a non-standard region width.
         ic: Whether or not to apply information content scaling to Modisco motifs.
-        max_cpus: The maximum number of processes to use for loading motifs from
-          Modisco files. If None, Modisco files will be loaded serially.
 
     Returns:
-        A tuple of motifs, motif names, number of seqlets per motifs, and model names.
+        A tuple of motifs, motif names, number of seqlets per motifs, model names,
+          whether the motifs were positive or negative patterns, the mean seqlet
+          distance with respect to the Modisco region start position, and the mean
+          seqlet contribution.
 
     Notes:
-        For parallel loading, the number of processes used will be the minimum of
-          max_cpus and multiprocessing.cpu_count().
         Assumes that all motifs are stored within "pos_patterns" or "neg_patterns".
-        Motifs are returned as an (N, 30, 8) motif stack.
+        Motifs are returned as a normalized (N, 30, 4) 4 channel motif stack.
         Using ic scaling is highly recommended.
     """
-    if max_cpus is None:
+    # Determine the number of processes to use
+    num_processes = min(
+        utils_config.get_max_cpus(), multiprocessing.cpu_count()
+    )  # don't use more CPUs than available
+    if num_processes == 1 or len(modisco_dict) == 1:
         # Load serially
-        sims, motif_names, seqlet_counts, model_names = [], [], [], []
+        (
+            motifs,
+            motif_names,
+            seqlet_counts,
+            model_names,
+            posnegs,
+            avgdist_summits,
+            avg_contribs,
+        ) = ([], [], [], [], [], [], [])
         for m_name, m_loc in modisco_dict.items():
-            m_sims, m_motif_names, m_seqlet_counts = load_modisco(m_loc, ic=ic)
+            (
+                m_motifs,
+                m_motif_names,
+                m_seqlet_counts,
+                m_posnegs,
+                m_avgdist_summits,
+                m_avg_contribs,
+            ) = load_modisco(
+                m_loc,
+                subpattern=load_subpatterns,
+                modisco_region_width=modisco_region_width,
+                ic=ic,
+            )
             m_motif_names = [f"{m_name}-{x}" for x in m_motif_names]
-            sims.append(m_sims)
+            motifs.append(m_motifs)
             motif_names += m_motif_names
             seqlet_counts += m_seqlet_counts
             model_names += [m_name] * len(m_motif_names)
-        sims = np.concatenate(sims, axis=0)
+            posnegs += m_posnegs
+            avgdist_summits += m_avgdist_summits
+            avg_contribs += m_avg_contribs
+        # Pad motifs to max length
+        max_length = max(x.shape[1] for x in motifs)
+        motifs = [utils_motif.pad_motif(x, pad_to=max_length) for x in motifs]
+        # Concatenate motifs
+        motifs = np.concatenate(motifs, axis=0)
     else:
-        # Load in parallel
-        num_processes = min(
-            max_cpus, multiprocessing.cpu_count()
-        )  # don't use more CPUs than available
         m_names, m_locs = [], []
         for m_name, m_loc in modisco_dict.items():
             m_names.append(m_name)
             m_locs.append(m_loc)
-        payloads = [(m_loc, ic) for m_loc in m_locs]
+        payloads = [
+            (m_loc, load_subpatterns, modisco_region_width, ic) for m_loc in m_locs
+        ]
         with multiprocessing.Pool(processes=num_processes) as p:
             results = p.starmap(load_modisco, payloads)
-        sims, motif_names, seqlet_counts, model_names = [], [], [], []
+        (
+            motifs,
+            motif_names,
+            seqlet_counts,
+            model_names,
+            posnegs,
+            avgdist_summits,
+            avg_contribs,
+        ) = ([], [], [], [], [], [], [])
         for i, r in enumerate(results):
-            m_sims, m_motif_names, m_seqlet_counts = r
+            (
+                m_motifs,
+                m_motif_names,
+                m_seqlet_counts,
+                m_posnegs,
+                m_avgdist_summits,
+                m_avg_contribs,
+            ) = r
             m_motif_names = [f"{m_names[i]}-{x}" for x in m_motif_names]
-            sims.append(m_sims)
+            motifs.append(m_motifs)
             motif_names += m_motif_names
             seqlet_counts += m_seqlet_counts
             model_names += [m_names[i]] * len(m_motif_names)
-        sims = np.concatenate(sims, axis=0)
-    return sims, motif_names, seqlet_counts, model_names
+            posnegs += m_posnegs
+            avgdist_summits += m_avgdist_summits
+            avg_contribs += m_avg_contribs
+        # Pad motifs to max length
+        max_length = max(x.shape[1] for x in motifs)
+        motifs = [utils_motif.pad_motif(x, pad_to=max_length) for x in motifs]
+        # Concatenate motifs
+        motifs = np.concatenate(motifs, axis=0)
+    return (
+        motifs,
+        motif_names,
+        seqlet_counts,
+        model_names,
+        posnegs,
+        avgdist_summits,
+        avg_contribs,
+    )
 
 
+@which_file_load_failed
 def load_modisco(
-    modisco_file: str, ic: bool = True
-) -> tuple[np.ndarray, list[str], list[int]]:
-    """Load motifs, names, and seqlet counts from a Modisco file.
+    modisco_file: str,
+    load_subpatterns: bool = False,
+    modisco_region_width: int = 400,
+    ic: bool = True,
+) -> tuple[np.ndarray, list[str], list[int], list[str], list[float], list[float]]:
+    """Load motifs, names, and other per-motif information from a single Modisco file.
 
     Each motif from a Modisco results file is extracted, normalized, and optionally has
-      ic scaling applied. The name and number of seqlets for each motif are also
-      extracted.
+      ic scaling applied. The motif names, number of seqlets per motif, whether the
+      motifs are positive or negative patterns, the mean seqlet distance with respect to
+      the Modisco region start position, and the mean seqlet contribution are also
+      returned.
 
     Args:
         modisco_file: A Modisco file path.
+        load_subpatterns: Whether or not to load subpatterns from the Modisco file. If
+          True, motifs will be loaded at the subpattern level. If False, motifs will be
+          loaded at the pattern level.
+        modisco_region_width: The region width used during Modisco. This argument only
+          needs to be specified if using a non-standard region width.
         ic: Whether or not to apply information content scaling to Modisco motifs.
 
     Returns:
-        A tuple of motifs, motif names, and number of seqlets per motifs.
+        A tuple of motifs, motif names, number of seqlets per motifs, model names,
+          whether the motifs were positive or negative patterns, the mean seqlet
+          distance with respect to the Modisco region start position, and the mean
+          seqlet contribution.
 
     Notes:
         Assumes that all motifs are stored within "pos_patterns" or "neg_patterns".
-        Motifs are returned as an (N, 30, 8) 8 channel motif stack.
+        Motifs are returned as a normalized (N, 30, 4) 4 channel motif stack.
         Using ic scaling is highly recommended.
     """
-    sims, motif_names, seqlet_counts = [], [], []
+    motifs, motif_names, seqlet_counts, posnegs, avgdist_summits, avg_contribs = (
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+    )
     with h5py.File(modisco_file, "r") as f:
-        if "pos_patterns" in f:
-            for pattern in list(f["pos_patterns"]):
-                seqlets = f["pos_patterns"][pattern]["seqlets"]["contrib_scores"][()]
-                motif_sim = _sequence_importance_from_seqlets(seqlets, ic)
-                sims.append(motif_sim)
-                motif_names.append(f"pos.{pattern}")
-                seqlet_counts.append(seqlets.shape[0])
-        if "neg_patterns" in f:
-            for pattern in list(f["neg_patterns"]):
-                seqlets = f["neg_patterns"][pattern]["seqlets"]["contrib_scores"][()]
-                motif_sim = _sequence_importance_from_seqlets(seqlets, ic)
-                sims.append(motif_sim)
-                motif_names.append(f"neg.{pattern}")
-                seqlet_counts.append(seqlets.shape[0])
-    sims = np.stack(sims, axis=0)
-    return sims, motif_names, seqlet_counts
+        for pattern_type in ["pos_patterns", "neg_patterns"]:
+            pattern_posneg = pattern_type.split("_")[0]
+            if not pattern_type in f:
+                continue
+            for pattern in list(f[pattern_type]):
+                # Subpatterns
+                if load_subpatterns:
+                    for subpattern in [
+                        key
+                        for key in list(f[pattern_type][pattern])
+                        if "subpattern" in key
+                    ]:
+                        seqlets = f[pattern_type][pattern][subpattern]["seqlets"][
+                            "contrib_scores"
+                        ][()]
+                        motif_sim = _sequence_importance_from_seqlets(seqlets, ic)
+                        motifs.append(motif_sim)
+                        motif_names.append(f"{pattern_posneg}.{pattern}-{subpattern}")
+                        seqlet_counts.append(seqlets.shape[0])
+                        posnegs.append(pattern_posneg)
+                        avgdist_summits.append(
+                            np.mean(
+                                np.abs(
+                                    f[pattern_type][pattern][subpattern]["seqlets"][
+                                        "start"
+                                    ][
+                                        :
+                                    ]  # Start position
+                                    - (
+                                        modisco_region_width // 2
+                                    )  # Modisco region half-width
+                                    + np.unravel_index(
+                                        np.abs(motif_sim).argmax(), motif_sim.shape
+                                    )[
+                                        0
+                                    ]  # Motif peak
+                                )
+                            )
+                        )
+                        avg_contribs.append(
+                            np.mean(np.sum(seqlets, axis=(1, 2)), axis=0)
+                        )
+                # Main patterns
+                else:
+                    seqlets = f[pattern_type][pattern]["seqlets"]["contrib_scores"][()]
+                    motif_sim = _sequence_importance_from_seqlets(seqlets, ic)
+                    motifs.append(motif_sim)
+                    motif_names.append(f"{pattern_posneg}.{pattern}")
+                    seqlet_counts.append(seqlets.shape[0])
+                    posnegs.append(pattern_posneg)
+                    avgdist_summits.append(
+                        np.mean(
+                            np.abs(
+                                f[pattern_type][pattern]["seqlets"]["start"][
+                                    :
+                                ]  # Start position
+                                - (
+                                    modisco_region_width // 2
+                                )  # Modisco region half-width
+                                + np.unravel_index(
+                                    np.abs(motif_sim).argmax(), motif_sim.shape
+                                )[
+                                    0
+                                ]  # Motif peak
+                            )
+                        )
+                    )
+                    avg_contribs.append(np.mean(np.sum(seqlets, axis=(1, 2)), axis=0))
+    motifs = np.stack(motifs, axis=0)
+    return motifs, motif_names, seqlet_counts, posnegs, avgdist_summits, avg_contribs
 
 
-def load_pfm(pfm_file: str) -> tuple[np.ndarray, list[str]]:
-    """Load motifs and names from a PFM file.
-    Each PFM from the PFM file is extracted. Then, the PFMs are transformed into a PWM
-      using per position information content scaling.
+def load_pfms(
+    pfm_dict: dict[str, str],
+    ic: bool = True,
+) -> tuple[np.ndarray, list[str], list[str]]:
+    """Load motifs and names from multiple files containing PFMs.
+
+    Motifs from each file containing Position Frequency Matrices (PFMs) are extracted
+      by calling load_pfm(). The results are then concatenated. Files in PFM or MEME
+      format are supported. Parallelizes the loading if config.get_max_cpus() > 1.
 
     Args:
-        pfm_file: The PFM file path.
+        pfm_dict: A dictionary from model name to path of file specyfing PFMs in PFM or
+          MEME format.
+        ic: Whether or not to apply information content scaling to the PFMs, effectively
+          making them PWMs.
 
     Returns:
         A tuple of motifs and motif names.
 
     Notes:
-        Assumes a standard PFM file format.
-        Motifs are returned as (N, 30, 4) 4 channel motif stack.
+        Only accepts files in the PFM or MEME file formats.
+        Motifs are returned as a normalized (N, 30, 4) 4 channel motif stack.
     """
+    # Determine the number of processes to use
+    num_processes = min(
+        utils_config.get_max_cpus(), multiprocessing.cpu_count()
+    )  # don't use more CPUs than available
+    if num_processes == 1 or len(pfm_dict) == 1:
+        # Load serially
+        motifs, motif_names, file_names = [], [], []
+        for p_name, p_loc in pfm_dict.items():
+            p_motifs, p_motif_names = load_pfm(p_loc, ic=ic)
+            p_motif_names = [f"{p_name}-{x}" for x in p_motif_names]
+            motifs.append(p_motifs)
+            motif_names += p_motif_names
+            file_names += [p_name] * len(p_motif_names)
+        # Pad motifs to max length
+        max_length = max(x.shape[1] for x in motifs)
+        motifs = [utils_motif.pad_motif(x, pad_to=max_length) for x in motifs]
+        # Concatenate motifs
+        motifs = np.concatenate(motifs, axis=0)
+    else:
+        p_names, p_locs = [], []
+        for p_name, p_loc in pfm_dict.items():
+            p_names.append(p_name)
+            p_locs.append(p_loc)
+        payloads = [(p_loc, ic) for p_loc in p_locs]
+        with multiprocessing.Pool(processes=num_processes) as p:
+            results = p.starmap(load_pfm, payloads)
+        motifs, motif_names, file_names = [], [], []
+        for i, r in enumerate(results):
+            p_motifs, p_motif_names = r
+            p_motif_names = [f"{p_names[i]}-{x}" for x in p_motif_names]
+            motifs.append(p_motifs)
+            motif_names += p_motif_names
+            file_names += [p_names[i]] * len(p_motif_names)
+        # Pad motifs to max length
+        max_length = max(x.shape[1] for x in motifs)
+        motifs = [utils_motif.pad_motif(x, pad_to=max_length) for x in motifs]
+        # Concatenate motifs
+        motifs = np.concatenate(motifs, axis=0)
+    return motifs, motif_names, file_names
+
+
+@which_file_load_failed
+def load_pfm(pfm_file: str, ic: bool = True) -> tuple[np.ndarray, list[str]]:
+    """Load motifs and names from a file containing PFMs.
+
+    Each Position Frequency Matrix (PFM) from the PFM file is extracted, normalized, and
+      optionally has ic scaling applied. The motif names are also returned. Files in PFM
+      or MEME format are supported.
+
+    Args:
+        pfm_file: The PFM file path. The file must be in PFM or MEME format.
+        ic: Whether or not to apply information content scaling to the PFMs, effectively
+          making them PWMs.
+
+    Returns:
+        A tuple of motifs and motif names.
+
+    Notes:
+        Only accepts files in the PFM or MEME file formats.
+        Motifs are returned as a normalized (N, 30, 4) 4 channel motif stack.
+    """
+    file_basename = os.path.basename(pfm_file)
+    if "pfm" in file_basename:
+        try:
+            return _load_pfm_file_pfm_format(pfm_file, ic)
+        except Exception as e:
+            raise ValueError(
+                f"Attempted to load {pfm_file} as a file in PFM format (due to 'pfm' in the file name), but failed."
+            ) from e
+    elif "meme" in pfm_file:
+        try:
+            return _load_meme_file_meme_format(pfm_file, ic)
+        except Exception as e:
+            raise ValueError(
+                f"Attempted to load {pfm_file} as a file in MEME format (due to 'meme' in the file name), but failed."
+            ) from e
+    else:
+        raise ValueError(
+            f"Could not determine file format for {pfm_file}. Please have the file name include 'pfm' or 'meme'."
+        )
+
+
+#####################
+# PRIVATE FUNCTIONS #
+#####################
+def _sequence_importance_from_seqlets(seqlets: np.ndarray, ic: bool) -> np.ndarray:
+    """Compute a sequence importance matrix representation of a motif from seqlets.
+
+    Seqlets are normalized, averaged, optionally information content scaled, and then renormalized.
+
+    Args:
+        x: An (N, L, 4) stack of N seqlets.
+
+    Returns:
+        An (L, 4) sequence importance matrix.
+
+    Note:
+        The returned motif will be non-negative and have a sum equal to 1.
+    """
+    # INPUT = (N, L, 4)
+    # Normalize
+    seqlet_sums = np.sum(np.abs(seqlets), axis=(1, 2), keepdims=True)
+    if np.any(seqlet_sums == 0) or np.isnan(seqlet_sums).any():
+        raise ValueError("Seqlets contain zero or NaN values.")
+    seqlets_normalized = seqlets / seqlet_sums
+    # Average and normalize
+    seqlets_avg = np.mean(seqlets_normalized, axis=0)
+    seqlets_avg = seqlets_avg / np.sum(np.abs(seqlets_avg))
+    # Information content scaling
+    if ic:
+        seqlets_avg = utils_motif.ic_scale(seqlets_avg)
+        seqlets_avg = seqlets_avg / np.sum(np.abs(seqlets_avg))
+    return seqlets_avg
+
+
+@which_file_load_failed
+def _load_pfm_file_pfm_format(
+    pfm_file: str, ic: bool = True
+) -> tuple[np.ndarray, list[str]]:
+    """Load motifs and names from a file in PFM format."""
+    # Check file
     names = []
-    pfms = []
-    active_pfm = False
+    pwms = []
+    active_pwm = False
+    longest_motif_length = -1
     with open(pfm_file, "r") as f:
         for line in f:
             x = line.strip()
-            if active_pfm:
+            if active_pwm:
                 if x.startswith(">"):
                     # submit
-                    current_pfm_np = pd.DataFrame(current_pfm).to_numpy()
-                    current_pfm_np = resize_motif(current_pfm_np)
-                    pfms.append(pd.DataFrame(current_pfm_np))
-                    names.append(current_pfm_name)
+                    current_pwm_np = pd.DataFrame(current_pwm).to_numpy()
+                    longest_motif_length = max(
+                        longest_motif_length, current_pwm_np.shape[0]
+                    )
+                    pwms.append(current_pwm_np)
+                    names.append(current_pwm_name)
                     # restart
-                    current_pfm_name = x[1:]
-                    current_pfm = {"A": [], "C": [], "G": [], "T": []}
+                    current_pwm_name = x[1:]
+                    current_pwm = {"A": [], "C": [], "G": [], "T": []}
                 else:
                     a, c, g, t = x.split()
                     a, c, g, t = float(a), float(c), float(g), float(t)
                     acgt = np.asarray([[a, c, g, t]])  # (1, 4)
-                    acgt_ic = ic_scale(acgt)
-                    current_pfm["A"].append(acgt_ic[0, 0])
-                    current_pfm["C"].append(acgt_ic[0, 1])
-                    current_pfm["G"].append(acgt_ic[0, 2])
-                    current_pfm["T"].append(acgt_ic[0, 3])
+                    acgt_ic = utils_motif.ic_scale(acgt)
+                    current_pwm["A"].append(acgt_ic[0, 0])
+                    current_pwm["C"].append(acgt_ic[0, 1])
+                    current_pwm["G"].append(acgt_ic[0, 2])
+                    current_pwm["T"].append(acgt_ic[0, 3])
             else:
                 assert x.startswith(">")
-                active_pfm = True
-                current_pfm_name = x[1:]
-                current_pfm = {"A": [], "C": [], "G": [], "T": []}
-    pfms_mtx = np.stack(pfms, axis=0)
-    pfms_mtx /= np.sum(pfms_mtx, axis=(1, 2), keepdims=True)
-    return pfms_mtx, names
+                active_pwm = True
+                current_pwm_name = x[1:]
+                current_pwm = {"A": [], "C": [], "G": [], "T": []}
+    # Resize
+    pwms = [utils_motif.pad_motif(x, longest_motif_length) for x in pwms]
+    pwms = np.stack(pwms, axis=0)
+    # Normalize
+    pwms /= np.sum(pwms, axis=(1, 2), keepdims=True)
+    # IC Scale
+    if ic:
+        pwms = utils_motif.ic_scale(pwms)
+        pwms /= np.sum(pwms, axis=(1, 2), keepdims=True)
+    return pwms, names
 
 
-def load_meme(meme_file: str) -> tuple[np.ndarray, list[str]]:
-    """Load motifs and names from a MEME file.
-
-    Each PFM from the MEME file is extracted. Then, the PFMs are transformed into a PWM
-      using per position information content scaling.
-
-    Args:
-        meme_file: The MEME file path.
-
-    Returns:
-        A tuple of motifs and motif names.
-
-    Notes:
-        Assumes a standard MEME file format.
-        Motifs are returned as (N, 30, 4) 4 channel motif stack.
-    """
+@which_file_load_failed
+def _load_meme_file_meme_format(
+    meme_file: str, ic: bool = True
+) -> tuple[np.ndarray, list[str]]:
+    """Load motifs and names from a file in MEME format."""
+    # Check file
     names = []
     pwms = []
     active_pwm = False
+    longest_motif_length = -1
     with open(meme_file, "r") as f:
         for line in f:
             x = line.strip()
             if not active_pwm:
                 if x.startswith("MOTIF"):
                     active_pwm = True
-                    current_pwm_name = x.split(" ")[-1]  # MEME ALLOWS FOR ALTERNATE NAMES IN [2]
+                    current_pwm_name = x.split(" ")[
+                        -1
+                    ]  # MEME ALLOWS FOR ALTERNATE NAMES IN [2]
                     looking_for_motif_info = True
             else:
                 if looking_for_motif_info:
@@ -210,7 +514,7 @@ def load_meme(meme_file: str) -> tuple[np.ndarray, list[str]]:
                     a, c, g, t = x.split()
                     a, c, g, t = float(a), float(c), float(g), float(t)
                     acgt = np.asarray([[a, c, g, t]])  # (1, 4)
-                    acgt_ic = ic_scale(acgt)
+                    acgt_ic = utils_motif.ic_scale(acgt)
                     current_pwm["A"].append(acgt_ic[0, 0])
                     current_pwm["C"].append(acgt_ic[0, 1])
                     current_pwm["G"].append(acgt_ic[0, 2])
@@ -219,47 +523,21 @@ def load_meme(meme_file: str) -> tuple[np.ndarray, list[str]]:
                     # if motif over --> submit and restart
                     if num_bases_remaining == 0:
                         # submit
-                        current_pwm_df = pd.DataFrame(current_pwm)
-                        current_pwm_np = current_pwm_df.to_numpy()
-                        current_pwm_np = resize_motif(current_pwm_np)
-                        pwms.append(pd.DataFrame(current_pwm_np))
+                        current_pwm_np = pd.DataFrame(current_pwm).to_numpy()
+                        longest_motif_length = max(
+                            longest_motif_length, current_pwm_np.shape[0]
+                        )
+                        pwms.append(current_pwm_np)
                         names.append(current_pwm_name)
                         # restart
                         active_pwm = False
-    pwms_mtx = np.stack([x.to_numpy() for x in pwms], axis=0)
-    pwms_mtx /= np.sum(pwms_mtx, axis=(1, 2), keepdims=True)
-
-    return pwms_mtx, names
-
-
-#####################
-# PRIVATE FUNCTIONS #
-#####################
-def _sequence_importance_from_seqlets(seqlets: np.ndarray, ic: bool) -> np.ndarray:
-    """Compute a sequence importance matrix representation of a motif from seqlets.
-
-    Seqlets are normalized, averaged, optionally information content scaled, transformed
-      to 8 channel motifs, and then renormalized.
-
-    Args:
-        x: An (N, L, 4) stack of N seqlets.
-
-    Returns:
-        An (L, 8) sequence importance matrix.
-
-    Note:
-        The returned sim will be non-negative and have a sum equal to 1.
-    """
-    # INPUT = (N, L, 4)
+    # Resize
+    pwms = [utils_motif.pad_motif(x, longest_motif_length) for x in pwms]
+    pwms = np.stack(pwms, axis=0)
     # Normalize
-    seqlets_normalized = seqlets / np.sum(np.abs(seqlets), axis=(1, 2), keepdims=True)
-    # Average and normalize
-    seqlets_avg = np.mean(seqlets_normalized, axis=0)
-    seqlets_avg = seqlets_avg / np.sum(np.abs(seqlets_avg))
-    # Information content scaling
+    pwms /= np.sum(pwms, axis=(1, 2), keepdims=True)
+    # IC Scale
     if ic:
-        seqlets_avg = ic_scale(seqlets_avg)
-    # Create sim
-    sim = motif_4_to_8(seqlets_avg)
-    sim /= np.sum(sim)
-    return sim
+        pwms = utils_motif.ic_scale(pwms)
+        pwms /= np.sum(pwms, axis=(1, 2), keepdims=True)
+    return pwms, names

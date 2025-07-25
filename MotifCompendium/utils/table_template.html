@@ -4,9 +4,17 @@
     <meta charset="UTF-8">
     <title>DataFrame Table</title>
     <style>
+        .table-container {
+            height: 100vh;
+            overflow-y: auto;
+            border-left: 1px solid black;
+            border-right: 1px solid black;
+        }
         table {
             width: 100%;
-            border-collapse: collapse;
+            border-collapse: separate;
+            border-spacing: 0;
+            position: relative;
         }
         th, td {
             border: 1px solid black;
@@ -15,6 +23,12 @@
         }
         th {
             font-weight: bold;
+            position: sticky;
+            top: 0;
+            background-color: #e1e3e6;
+            z-index: 1;
+            border-top: 2px solid black;
+
         }
         button {
             background: none;
@@ -26,17 +40,55 @@
             padding: 0 5px;
             margin-left: 5px;
         }
+        .filterInput {
+            width: 100%;
+            box-sizing: border-box;
+            min-width: 40px;
+        }
+        tr:nth-child(2) td {
+            position: sticky;
+            background-color: #e1e3e6;
+            z-index: 1;
+            border-bottom: 2px solid black;
+
+        }
+        .cell-edited {
+            background-color: #d3a279;
+        }
     </style>
+    
     <script>
+        window.onload = function() {
+            // Get the height of the first row (header row)
+            const headerHeight = document.querySelector('#DataTable tr:first-child').offsetHeight;
+            
+            // Set the top position of the filter row cells
+            const filterCells = document.querySelectorAll('#DataTable tr:nth-child(2) td');
+            for(let cell of filterCells) {
+                cell.style.top = headerHeight + 'px';
+            }
+        };
+
+        // Also update on window resize to handle dynamic changes
+        window.onresize = function() {
+            const headerHeight = document.querySelector('#DataTable tr:first-child').offsetHeight;
+            const filterCells = document.querySelectorAll('#DataTable tr:nth-child(2) td');
+            for(let cell of filterCells) {
+                cell.style.top = headerHeight + 'px';
+            }
+        };
+
         function sortTable(columnIndex, ascending) {
             // Load rows
-            table = document.getElementById("dataTable");
-            trs = table.getElementsByTagName("tr");
-            rows = Array.from(trs).slice(2);
+            let table = document.getElementById("DataTable");
+            let trs = table.getElementsByTagName("tr");
+            const headerRow = trs[0];
+            const filterRow = trs[1];
+            let rows = Array.from(trs).slice(2);
             // Sort with custom row-sorting function
             rows.sort((a, b) => {
-                aVal = a.cells[columnIndex].innerText.trim();
-                bVal = b.cells[columnIndex].innerText.trim();
+                let aVal = a.cells[columnIndex].innerText.trim();
+                let bVal = b.cells[columnIndex].innerText.trim();
                 if (!isNaN(aVal) && !isNaN(bVal)) {
                     aVal = parseFloat(aVal);
                     bVal = parseFloat(bVal);
@@ -45,94 +97,146 @@
                     bVal = bVal.toLowerCase();
                 }
                 if (aVal < bVal) {
-                    return ascending ? -1 : 1;
+                    return ascending ? 1 : -1;
                 }
                 if (aVal > bVal) {
-                    return ascending ? 1 : -1;
+                    return ascending ? -1 : 1;
                 }
                 return 0;
             });
             // Rebuild rows with new order
+            while (table.firstChild) {
+                table.removeChild(table.firstChild);
+            }
+            table.appendChild(headerRow);
+            table.appendChild(filterRow);
             rows.forEach(row => table.appendChild(row));
         }
 
-        function filterTable() {
-            // Load rows
-            table = document.getElementById("dataTable");
-            trs = table.getElementsByTagName("tr");
+        function filterRow(row) {
             // Check if there are any active filters
-            inputs = document.getElementsByClassName("filterInput");
-            anyFilters = false;
-            for (z = 0; z < inputs.length; z++) {
+            let inputs = document.getElementsByClassName("filterInput");
+            let anyFilters = false;
+            for (let z = 0; z < inputs.length; z++) {
                 if (inputs[z].value != "") {
                     anyFilters = true;
                     break;
                 }
             }
-            // Turn rows on or off
+            // If no filters, display row
+            if (!anyFilters) {
+                row.style.display = "";
+                return;
+            }
+            // Otherwise, there are filters
+            let showRow = true;
+            let tds = row.getElementsByTagName("td");
+            // Check each filter
+            for (let z = 0; z < inputs.length; z++) {
+                let filter = inputs[z].value;
+                // Skip empty filters
+                if (filter == "")
+                    continue;
+                // For non-empty filters, check if row matches
+                let col_idx = inputs[z].getAttribute("data-columnindex");
+                let txtValue = tds[col_idx].textContent.trim();
+                // Non-case-sensitive search
+                filter = filter.toLowerCase();
+                txtValue = txtValue.toLowerCase();
+                // Filter
+                if (!txtValue.includes(filter)) {
+                    showRow = false;
+                    break;
+                }
+            }
+            row.style.display = showRow ? "" : "none";
+        }
+
+        function filterTable() {
+            // Load rows
+            let table = document.getElementById("DataTable");
+            let trs = table.getElementsByTagName("tr");
+            // Check if there are any active filters
+            let inputs = document.getElementsByClassName("filterInput");
+            let anyFilters = false;
+            for (let z = 0; z < inputs.length; z++) {
+                if (inputs[z].value != "") {
+                    anyFilters = true;
+                    break;
+                }
+            }
+            // If filters, filter rows
             if (anyFilters) {
-                // If filters, only display rows that match all current filters
-                for (i = 2; i < trs.length; i++) {
-                    showRow = true;
-                    tds = trs[i].getElementsByTagName("td");
-                    for (j = 2; j < tds.length; j++) {
-                        txtValue = tds[j].textContent;
-                        filter = inputs[j-2].value; // j-2 because image columns have no filter
-                        if (filter != "" && !txtValue.includes(filter)) {
-                            showRow = false;
-                            break;
-                        }
-                    }
-                    trs[i].style.display = showRow ? "" : "none";
+                // Filter each row
+                for (let i = 2; i < trs.length; i++) {
+                    filterRow(trs[i]);
                 }
             } else {
                 // If no filters, display every row
-                for (i = 2; i < trs.length; i++) {
+                for (let i = 2; i < trs.length; i++) {
                     trs[i].style.display = "";
                 }
             }
         }
+
+        function checkCellEdited(cell) {
+            const originalValue = cell.getAttribute('data-originalvalue');
+            const currentValue = cell.textContent.trim();
+            if (currentValue !== originalValue) {
+                cell.classList.add('cell-edited');
+            } else {
+                cell.classList.remove('cell-edited');
+            }
+            // Filter this row
+            const row = cell.parentNode;
+            filterRow(row);
+        }
     </script>
 </head>
+
 <body>
-
-<h2>DataFrame Table</h2>
-
-<table id="dataTable">
-    <tr>
-        {% for col in columns %}
-            {% if loop.index0 == 0 or loop.index0 == 1 %}
-	    <th>{{ col }}</th>
-	    {% else %}
-                <th>
-                    {{ col }}
-		    <button class="sort-button" onclick="sortTable({{ loop.index0 }}, true)">&uarr;</button>
-		    <button class="sort-button" onclick="sortTable({{ loop.index0 }}, false)">&darr;</button>
-                </th>
-	    {% endif %}
-        {% endfor %}
-    </tr>
-    <tr>
-        {% for col in columns %}
-            {% if loop.index0 == 0 or loop.index0 == 1 %}
-	        <td></td>
-	    {% else %}
-	        <td><input type="text" class="filterInput" onkeyup="filterTable()"></td>
-	    {% endif %}
-        {% endfor %}
-    </tr>
-    {% for row in rows %}
-        <tr>
-            {% for col in columns %}
-                {% if loop.index0 == 0 or loop.index0 == 1 %}
-                    <td><img src="data:image/png;base64,{{ row[col] }}" class="plot-image"></td>
-                {% else %}
-                    <td>{{ row[col] }}</td>
-                {% endif %}
+    <div class="table-container">
+        <table id="DataTable">
+            <tr>
+                {% for col in columns %}
+                    {% if image_column[loop.index0] or loop.index0 == 0 %}
+                        <th>{{ col }}</th>
+                    {% else %}
+                        <th>
+                            {{ col }}
+                            <br></br>
+                            <button class="sort-button" onclick="sortTable({{ loop.index0 }}, true)">&uarr;</button>
+                            <button class="sort-button" onclick="sortTable({{ loop.index0 }}, false)">&darr;</button>
+                        </th>
+                    {% endif %}
+                {% endfor %}
+            </tr>
+            <tr>
+                {% for col in columns %}
+                    {% if image_column[loop.index0] or loop.index0 == 0 %}
+                        <td></td>
+                    {% else %}
+                        <td><input type="text" class="filterInput" onkeyup="filterTable()" data-columnindex="{{ loop.index0 }}"></td>
+                    {% endif %}
+                {% endfor %}
+            </tr>
+            {% for row in rows %}
+                <tr>
+                    {% for col in columns %}
+                        {% if image_column[loop.index0] %}
+                            <td><img src="data:image/png;base64,{{ row[col] }}" class="plot-image"></td>
+                        {% else %}
+                            {% if not editable or loop.index0 == 0 %}
+                                <td>{{ row[col] }}</td>
+                            {% else %}
+                                <td contenteditable="true" oninput="checkCellEdited(this)" data-originalvalue="{{ row[col] }}">{{ row[col] }}</td>
+                            {% endif %}
+                        {% endif %}
+                    {% endfor %}
+                </tr>
             {% endfor %}
-        </tr>
-    {% endfor %}
-</table>
-
+        </table>
+    </div>
 </body>
+
 </html>

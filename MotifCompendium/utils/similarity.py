@@ -1,9 +1,13 @@
+# DEVELOPED BY SALIL DESHPANDE
+
 import multiprocessing
 
 import numpy as np
+from tqdm import tqdm
 
-from .motif import validate_motif_stack
-from .similarity_core_cpu import compute_similarity_and_align
+import MotifCompendium.utils.config as utils_config
+import MotifCompendium.utils.motif as utils_motif
+from MotifCompendium.utils.similarity_core import compute_similarity_and_align
 
 
 ####################
@@ -12,10 +16,6 @@ from .similarity_core_cpu import compute_similarity_and_align
 def compute_similarities(
     motif_stack_list: list[np.ndarray],
     calculations: list[tuple[int, int]],
-    max_chunk: int | None,
-    max_cpus: int | None,
-    use_gpu: bool | None,
-    l2: bool | None,
 ) -> list[tuple[np.ndarray, np.ndarray, np.ndarray]]:
     """Performs similarity and calculations between sets of motif stacks.
 
@@ -30,18 +30,6 @@ def compute_similarities(
           the index of a motif stack in the motif_stack_list. For example, the
           calculation (i, j) says to compute the pairwise similarity between all motifs
           in motif stack i and motif stack j.
-        max_chunk: The maximum size of a motif stack to perform similarity calculations
-          on. All motif stacks larger than max_chunk will be chunked into smaller motif
-          stacks of size <= max_chunk by _chunk_motif_stacks_and_calcs(). Calculations
-          will occur on the smaller chunks and then the results will be reassembled with
-          _reassemble_results().
-        max_cpus: The maximum number of CPUs to use for computing similarity.
-        use_gpu: Whether or not to use GPUs to accelerate computing similarity. If True,
-          similarity calculations are carried out by the functions in utils file
-          .similarity_core_gpu.py. If False, they will be carried out by the function in
-          utils file .similarity_core_cpu.py.
-        l2: Whether or not to use L2 normalization (instead of sqrt normalization) when
-          computing motif similarity.
 
     Returns:
         A list of motif calculation result tuples. There is one motif calculation result
@@ -49,34 +37,34 @@ def compute_similarities(
           calculation result tuple consists of a similarity matrix, an alignemnt_fr
           matrix, and an alignment_h matrix.
     """
-    if max_chunk is None:
-        max_chunk = DEFAULT_MAX_CHUNK
-    if max_cpus is None:
-        max_cpus = DEFAULT_MAX_CPUS
-    if use_gpu is None:
-        use_gpu = DEFAULT_USE_GPU
-    if l2 is None:
-        l2 = DEFAULT_L2
-    # TODO: FIX EDGE CASE THAT HAS ARISEN DUE TO DEFAULTS
-    if use_gpu:
-        max_cpus = None
     for motif_stack in motif_stack_list:
-        validate_motif_stack(motif_stack)
-    if max_chunk is not None:
+        utils_motif.validate_motif_stack_similarity(motif_stack)
+    _, L0, K0 = motif_stack_list[0].shape
+    for motif_stack in motif_stack_list[1:]:
+        _, L, K = motif_stack.shape
+        if L != L0 or K != K0:
+            raise ValueError(
+                "All motifs must have the same length and number of channels."
+            )
+    if utils_config.get_max_chunk() != -1:
         (
             chunked_motif_stack_list,
             chunked_calculations,
             chunk_map,
-        ) = _chunk_motif_stacks_and_calcs(motif_stack_list, calculations, max_chunk)
+        ) = _chunk_motif_stacks_and_calcs(
+            motif_stack_list, calculations, utils_config.get_max_chunk()
+        )
         chunked_results = _compute_similarity_and_align_parallel(
-            chunked_motif_stack_list, chunked_calculations, max_cpus, use_gpu, l2
+            chunked_motif_stack_list,
+            chunked_calculations,
         )
         return _reassemble_results(
             calculations, chunked_calculations, chunked_results, chunk_map
         )
     else:
         return _compute_similarity_and_align_parallel(
-            motif_stack_list, calculations, max_cpus, use_gpu, l2
+            motif_stack_list,
+            calculations,
         )
 
 
@@ -130,43 +118,42 @@ def _chunk_axis_0(X: np.ndarray, chunk_size: int) -> list[np.ndarray]:
 def _compute_similarity_and_align_parallel(
     motif_stack_list: list[np.ndarray],
     calculations: list[tuple[int, int]],
-    max_cpus: int | None,
-    use_gpu: bool,
-    l2: bool,
 ) -> list[tuple[np.ndarray, np.ndarray, np.ndarray]]:
     """Compute similarities and alignments."""
-    if max_cpus is None:
-        if use_gpu:
-            # SINGLE GPU CALCULATIONS
-            from .similarity_core_gpu import gpu_compute_similarity_and_align
-
-            return [
-                gpu_compute_similarity_and_align(
-                    motif_stack_list[c[0]], motif_stack_list[c[1]], l2
+    if utils_config.get_use_gpu():
+        # SINGLE GPU CALCULATIONS
+        if utils_config.get_progress_bar():
+            results = []
+            for c in tqdm(calculations, desc="computing similarities on GPU..."):
+                results.append(
+                    compute_similarity_and_align(
+                        motif_stack_list[c[0]], motif_stack_list[c[1]]
+                    )
                 )
-                for c in calculations
-            ]
+            return results
         else:
-            # SINGLE CPU CALCULATIONS
             return [
                 compute_similarity_and_align(
-                    motif_stack_list[c[0]], motif_stack_list[c[1]], l2
+                    motif_stack_list[c[0]], motif_stack_list[c[1]]
                 )
                 for c in calculations
             ]
     else:
-        if use_gpu:
-            # MULTI-GPU CALCULATIONS
-            print("max_cpu and use_gpu are incompatible options")
-            assert False
+        if utils_config.get_max_cpus() == 1 or len(calculations) == 1:
+            # SINGLE CPU CALCULATIONS
+            return [
+                compute_similarity_and_align(
+                    motif_stack_list[c[0]], motif_stack_list[c[1]]
+                )
+                for c in calculations
+            ]
         else:
             # MULTI-CPU CALCULATIONS
             inputs = [
-                (motif_stack_list[c[0]], motif_stack_list[c[1]], l2)
-                for c in calculations
+                (motif_stack_list[c[0]], motif_stack_list[c[1]]) for c in calculations
             ]
             num_processes = min(
-                max_cpus, multiprocessing.cpu_count()
+                utils_config.get_max_cpus(), multiprocessing.cpu_count()
             )  # don't use more CPUs than available
             with multiprocessing.Pool(processes=num_processes) as p:
                 return p.starmap(compute_similarity_and_align, inputs)
@@ -183,51 +170,25 @@ def _reassemble_results(
     results = []
     for c0, c1 in calculations:
         sim_block = []
-        fb_block = []
+        rc_block = []
         ali_block = []
         for c0_chunk in chunk_map[c0]:
             sim_block_row = []
-            fb_block_row = []
+            rc_block_row = []
             ali_block_row = []
             for c1_chunk in chunk_map[c1]:
-                sim, fb, ali = chunked_results[
+                sim, rc, ali = chunked_results[
                     chunked_calculations_revmap[(c0_chunk, c1_chunk)]
                 ]
                 sim_block_row.append(sim)
-                fb_block_row.append(fb)
+                rc_block_row.append(rc)
                 ali_block_row.append(ali)
             sim_block.append(sim_block_row)
-            fb_block.append(fb_block_row)
+            rc_block.append(rc_block_row)
             ali_block.append(ali_block_row)
         sim = np.block(sim_block)
-        fb = np.block(fb_block)
+        rc = np.block(rc_block)
         ali = np.block(ali_block)
-        results.append((sim, fb, ali))
+        results.append((sim, rc, ali))
     assert len(results) == len(calculations)
     return results
-
-
-############
-# SETTINGS #
-############
-DEFAULT_MAX_CHUNK = None
-DEFAULT_MAX_CPUS = None
-DEFAULT_USE_GPU = False
-DEFAULT_L2 = True
-
-
-def set_default_options(
-    max_chunk: int | None = None,
-    max_cpus: int | None = None,
-    use_gpu: bool | None = None,
-    l2: bool | None = None,
-):
-    """Set default values for max_chunk, max_cpus, use_gpu, and l2."""
-    if max_chunk is not None:
-        DEFAULT_MAX_CHUNK = max_chunk
-    if max_cpus is not None:
-        DEFAULT_MAX_CPUS = max_cpus
-    if use_gpu is not None:
-        DEFAULT_USE_GPU = use_gpu
-    if l2 is not None:
-        DEFAULT_L2 = l2
