@@ -428,7 +428,7 @@ def combine(
     # Metadata
     metadata = pd.concat([mc.metadata for mc in compendiums], ignore_index=True)
     # Images
-    __images = pd.DataFrame()
+    __images = pd.DataFrame(index=metadata.index)
     for images in compendiums[0].images():
         __images[images] = pd.concat(
             [pd.Series(mc.get_images(images)) for mc in compendiums], ignore_index=True

@@ -78,6 +78,10 @@ class MotifMatchArgs:
     composite_threshold: float = 0.7
     sort_threshold: float = 0.7
 
+    save_images_motif: bool = False
+    save_images_cluster: bool = True
+    save_images_metacluster: bool = True
+    save_images_subcluster: bool = True
 
 @dataclass
 class ClusterArgs:
@@ -244,7 +248,7 @@ class MotifFilterArgs:
             name="6_dinucrepeat_2",
             metric="dinuc_composition",
             operation=">",
-            threshold=0.85,
+            threshold=0.8,
             override=False,
             apply_motif=True,
             apply_cluster=True,
