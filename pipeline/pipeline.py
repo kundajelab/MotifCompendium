@@ -129,6 +129,7 @@ def label_motifs(
     label_col: str,
     max_submotifs: int,
     min_score: float,
+    save_images: bool,
     args: argparse.Namespace,
 ) -> None:
     """
@@ -153,7 +154,7 @@ def label_motifs(
             save_col_prefix=label_col,
             min_score=min_score,
             max_submotifs=max_submotifs,
-            save_images=True,
+            save_images=save_images,
             logo_trimming=args.logo_trimming,
         )
 
@@ -165,7 +166,7 @@ def label_motifs(
             save_col_prefix=label_col,
             min_score=min_score,
             max_submotifs=max_submotifs,
-            save_images=True,
+            save_images=save_images,
             logo_trimming=args.logo_trimming,
         )
 
@@ -193,7 +194,7 @@ def filter_motifs(
     Returns:
         None
     """
-    # Filter #1: Calculate and apply filter metrics
+    # Filter #1: Calculate filter metrics
     if args.verbose:
         logging.info(f"Calculating filter metrics:\n"
                 f"  {MotifFilterArgs.motif_metrics}\n"
@@ -207,6 +208,7 @@ def filter_motifs(
     if args.time:
         logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
+    # Filter #2: Apply filters as flag
     if args.verbose:
         logging.info(f"Applying filters as flag:\n"
                 f"  {MotifFilterArgs.motif_filters}\n"
@@ -791,14 +793,15 @@ if __name__ == "__main__":
         if args.verbose:
             logging.info(f"Metadata columns: {mc.columns()}")
 
-        # Add metadata aggregation
+        # Add metadata columns
         aggregate_cols = [agg[0] for agg in ClusterArgs.aggregate_metadata]
         for col in metadata_df.columns:
+            # Aggregate
             if col not in aggregate_cols:
                 ClusterArgs.aggregate_metadata.append((col, "concat", f"{col}"))
-
-        # Update HTML table columns
-        VisualizeArgs.html_table_cols_base.extend([f"{col}" for col in metadata_df.columns])
+            # HTML table columns
+            if col not in VisualizeArgs.html_table_cols_base:
+                VisualizeArgs.html_table_cols_base.append(col)
 
     # Save MotifCompendium object
     mc_path = os.path.join(args.output_dir, OutputPaths.mc_full)
@@ -810,7 +813,7 @@ if __name__ == "__main__":
     if args.time:
         logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
-    ### LABEL: MODISCO -----------------------------------------------------------
+    ### LABEL: MOTIFS -----------------------------------------------------------
     if args.reference is None:
         args.reference = MotifMatchArgs.reference_default
 
@@ -827,18 +830,17 @@ if __name__ == "__main__":
         label_col=MetadataCols.label_column_prefix,
         max_submotifs=MotifMatchArgs.max_submotifs,
         min_score=MotifMatchArgs.min_score,
+        save_images=MotifMatchArgs.save_images_motif,
         args=args,
     )
     if args.time:
         logging.info(f"Time taken: {time.time() - start_time:.2f}s")
-    
+
     ## Additional labels
     if args.add_reference:
         html_addlabel_cols = []
         for reference in args.add_reference:
             label_col = os.path.splitext(os.path.basename(reference))[0]
-
-            ## Label: Cluster
             if args.verbose:
                 logging.info(f"Adding labels to clusters, from reference file: {reference}...")
             if args.time:
@@ -849,6 +851,7 @@ if __name__ == "__main__":
                 label_col=label_col,
                 max_submotifs=1,
                 min_score=MotifMatchArgs.min_score,
+                save_images=MotifMatchArgs.save_images_motif,
                 args=args,
             )
             if args.time:
@@ -870,7 +873,7 @@ if __name__ == "__main__":
     if args.time:
         logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
-    ### FILTER: MODISCO ----------------------------------------------------------
+    ### FILTER: MOTIFS ----------------------------------------------------------
     if args.filter:
         if args.reference is None:
             args.reference = MotifMatchArgs.reference_default
@@ -1533,6 +1536,7 @@ if __name__ == "__main__":
         label_col=MetadataCols.label_column_prefix,
         max_submotifs=MotifMatchArgs.max_submotifs,
         min_score=MotifMatchArgs.min_score,
+        save_images=MotifMatchArgs.save_images_cluster,
         args=args,
     )
     if args.time:
@@ -1552,6 +1556,7 @@ if __name__ == "__main__":
             label_col=MetadataCols.label_column_prefix,
             max_submotifs=MotifMatchArgs.max_submotifs,
             min_score=MotifMatchArgs.min_score,
+            save_images=MotifMatchArgs.save_images_metacluster,
             args=args,
         )
         if args.time:
@@ -1571,6 +1576,7 @@ if __name__ == "__main__":
             label_col=MetadataCols.label_column_prefix,
             max_submotifs=MotifMatchArgs.max_submotifs,
             min_score=MotifMatchArgs.min_score,
+            save_images=MotifMatchArgs.save_images_subcluster,
             args=args,
         )
         if args.time:
@@ -1593,6 +1599,7 @@ if __name__ == "__main__":
                 label_col=label_col,
                 max_submotifs=1,
                 min_score=MotifMatchArgs.min_score,
+                save_images=MotifMatchArgs.save_images_cluster,
                 args=args,
             )
             if args.time:
@@ -1610,6 +1617,7 @@ if __name__ == "__main__":
                     label_col=label_col,
                     max_submotifs=1,
                     min_score=MotifMatchArgs.min_score,
+                    save_images=MotifMatchArgs.save_images_metacluster,
                     args=args,
                 )
                 if args.time:
@@ -1627,6 +1635,7 @@ if __name__ == "__main__":
                     label_col=label_col,
                     max_submotifs=1,
                     min_score=MotifMatchArgs.min_score,
+                    save_images=MotifMatchArgs.save_images_subcluster,
                     args=args,
                 )
                 if args.time:
