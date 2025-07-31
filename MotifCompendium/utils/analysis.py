@@ -440,8 +440,8 @@ def export_compendium_clustered_modisco(
 
 def export_compendium_meme(
     mc: MotifCompendiumClass,
-    name_col: str,
     save_loc: str,
+    name_col: str = "name",
     inverse_ic: bool = False,
 ) -> None:
     """Exports MotifCompendium in the MEME file format.
@@ -465,7 +465,10 @@ def export_compendium_meme(
     # Validate motifs
     motifs = mc.get_standard_motif_stack()
     motif_names = mc[name_col].tolist()
-    num_seqlets = mc.metadata["num_seqlets"].tolist()
+    if "num_seqlets" in mc.columns():
+        num_seqlets = mc["num_seqlets"].tolist()
+    else:
+        num_seqlets = None
     # Write MEME file
     with open(save_loc, "w") as f:
         f.write("MEME version 4\n")
@@ -483,9 +486,14 @@ def export_compendium_meme(
                 motif = utils_motif.ic_scale(motif, invert=True)
             # Write motif
             f.write(f"\nMOTIF {name}\n")
-            f.write(
-                f"letter-probability matrix: alength= {motif.shape[1]} w= {motif.shape[0]} nsites= {num_seqlets[i]} E= 0\n"
-            )
+            if num_seqlets:
+                f.write(
+                    f"letter-probability matrix: alength= {motif.shape[1]} w= {motif.shape[0]} nsites= {num_seqlets[i]}\n"
+                )
+            else:
+                f.write(
+                    f"letter-probability matrix: alength= {motif.shape[1]} w= {motif.shape[0]}\n"
+                )
             for j in range(motif.shape[0]):
                 f.write(" ".join([f"{x:.6f}" for x in motif[j, :]]) + "\n")
 
@@ -736,7 +744,7 @@ def assign_label_from_other_compendium(
     else:
         raise KeyError(f"{from_label_col} not in other metadata.")
     # Check if forward logos in other MotifCompendium
-    if "logo (fwd)" in assign_from_mc.images():
+    if save_images and "logo (fwd)" in assign_from_mc.images():
         other_logos = assign_from_mc.get_images("logo (fwd)")
     else:
         other_logos = None

@@ -449,11 +449,10 @@ def _load_pfm_file_pfm_format(
                     a, c, g, t = x.split()
                     a, c, g, t = float(a), float(c), float(g), float(t)
                     acgt = np.asarray([[a, c, g, t]])  # (1, 4)
-                    acgt_ic = utils_motif.ic_scale(acgt)
-                    current_pwm["A"].append(acgt_ic[0, 0])
-                    current_pwm["C"].append(acgt_ic[0, 1])
-                    current_pwm["G"].append(acgt_ic[0, 2])
-                    current_pwm["T"].append(acgt_ic[0, 3])
+                    current_pwm["A"].append(acgt[0, 0])
+                    current_pwm["C"].append(acgt[0, 1])
+                    current_pwm["G"].append(acgt[0, 2])
+                    current_pwm["T"].append(acgt[0, 3])
             else:
                 assert x.startswith(">")
                 active_pwm = True
@@ -514,11 +513,10 @@ def _load_meme_file_meme_format(
                     a, c, g, t = x.split()
                     a, c, g, t = float(a), float(c), float(g), float(t)
                     acgt = np.asarray([[a, c, g, t]])  # (1, 4)
-                    acgt_ic = utils_motif.ic_scale(acgt)
-                    current_pwm["A"].append(acgt_ic[0, 0])
-                    current_pwm["C"].append(acgt_ic[0, 1])
-                    current_pwm["G"].append(acgt_ic[0, 2])
-                    current_pwm["T"].append(acgt_ic[0, 3])
+                    current_pwm["A"].append(acgt[0, 0])
+                    current_pwm["C"].append(acgt[0, 1])
+                    current_pwm["G"].append(acgt[0, 2])
+                    current_pwm["T"].append(acgt[0, 3])
                     num_bases_remaining -= 1
                     # if motif over --> submit and restart
                     if num_bases_remaining == 0:
