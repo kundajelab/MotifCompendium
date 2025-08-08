@@ -97,7 +97,7 @@ def load_modiscos(
                 m_avg_contribs,
             ) = load_modisco(
                 m_loc,
-                subpattern=load_subpatterns,
+                load_subpatterns=load_subpatterns,
                 modisco_region_width=modisco_region_width,
                 ic=ic,
             )
@@ -285,6 +285,7 @@ def load_modisco(
 def load_pfms(
     pfm_dict: dict[str, str],
     ic: bool = True,
+    motif_length: int | None = None,
 ) -> tuple[np.ndarray, list[str], list[str]]:
     """Load motifs and names from multiple files containing PFMs.
 
@@ -297,6 +298,9 @@ def load_pfms(
           MEME format.
         ic: Whether or not to apply information content scaling to the PFMs, effectively
           making them PWMs.
+        motif_length: If specified, all motifs will be set to this length using
+          utils_motif.resize_motif(). If None, the motifs will be resized to match the
+          length of the longest motif.
 
     Returns:
         A tuple of motifs and motif names.
@@ -313,7 +317,7 @@ def load_pfms(
         # Load serially
         motifs, motif_names, file_names = [], [], []
         for p_name, p_loc in pfm_dict.items():
-            p_motifs, p_motif_names = load_pfm(p_loc, ic=ic)
+            p_motifs, p_motif_names = load_pfm(p_loc, ic=ic, motif_length=motif_length)
             p_motif_names = [f"{p_name}-{x}" for x in p_motif_names]
             motifs.append(p_motifs)
             motif_names += p_motif_names
@@ -328,7 +332,7 @@ def load_pfms(
         for p_name, p_loc in pfm_dict.items():
             p_names.append(p_name)
             p_locs.append(p_loc)
-        payloads = [(p_loc, ic) for p_loc in p_locs]
+        payloads = [(p_loc, ic, motif_length) for p_loc in p_locs]
         with multiprocessing.Pool(processes=num_processes) as p:
             results = p.starmap(load_pfm, payloads)
         motifs, motif_names, file_names = [], [], []
@@ -347,7 +351,9 @@ def load_pfms(
 
 
 @which_file_load_failed
-def load_pfm(pfm_file: str, ic: bool = True) -> tuple[np.ndarray, list[str]]:
+def load_pfm(
+    pfm_file: str, ic: bool = True, motif_length: int | None = None
+) -> tuple[np.ndarray, list[str]]:
     """Load motifs and names from a file containing PFMs.
 
     Each Position Frequency Matrix (PFM) from the PFM file is extracted, normalized, and
@@ -358,6 +364,9 @@ def load_pfm(pfm_file: str, ic: bool = True) -> tuple[np.ndarray, list[str]]:
         pfm_file: The PFM file path. The file must be in PFM or MEME format.
         ic: Whether or not to apply information content scaling to the PFMs, effectively
           making them PWMs.
+        motif_length: If specified, all motifs will be set to this length using
+          utils_motif.resize_motif(). If None, the motifs will be resized to match the
+          length of the longest motif.
 
     Returns:
         A tuple of motifs and motif names.
@@ -369,14 +378,14 @@ def load_pfm(pfm_file: str, ic: bool = True) -> tuple[np.ndarray, list[str]]:
     file_basename = os.path.basename(pfm_file)
     if "pfm" in file_basename:
         try:
-            return _load_pfm_file_pfm_format(pfm_file, ic)
+            return _load_pfm_file_pfm_format(pfm_file, ic, motif_length)
         except Exception as e:
             raise ValueError(
                 f"Attempted to load {pfm_file} as a file in PFM format (due to 'pfm' in the file name), but failed."
             ) from e
     elif "meme" in pfm_file:
         try:
-            return _load_meme_file_meme_format(pfm_file, ic)
+            return _load_meme_file_meme_format(pfm_file, ic, motif_length)
         except Exception as e:
             raise ValueError(
                 f"Attempted to load {pfm_file} as a file in MEME format (due to 'meme' in the file name), but failed."
@@ -422,7 +431,7 @@ def _sequence_importance_from_seqlets(seqlets: np.ndarray, ic: bool) -> np.ndarr
 
 @which_file_load_failed
 def _load_pfm_file_pfm_format(
-    pfm_file: str, ic: bool = True
+    pfm_file: str, ic: bool, motif_length: int | None
 ) -> tuple[np.ndarray, list[str]]:
     """Load motifs and names from a file in PFM format."""
     # Check file
@@ -437,6 +446,10 @@ def _load_pfm_file_pfm_format(
                 if x.startswith(">"):
                     # submit
                     current_pwm_np = pd.DataFrame(current_pwm).to_numpy()
+                    if motif_length is not None:
+                        current_pwm_np = utils_motif.resize_motif(
+                            current_pwm_np, motif_length
+                        )
                     longest_motif_length = max(
                         longest_motif_length, current_pwm_np.shape[0]
                     )
@@ -472,7 +485,7 @@ def _load_pfm_file_pfm_format(
 
 @which_file_load_failed
 def _load_meme_file_meme_format(
-    meme_file: str, ic: bool = True
+    meme_file: str, ic: bool, motif_length: int | None
 ) -> tuple[np.ndarray, list[str]]:
     """Load motifs and names from a file in MEME format."""
     # Check file
@@ -522,6 +535,10 @@ def _load_meme_file_meme_format(
                     if num_bases_remaining == 0:
                         # submit
                         current_pwm_np = pd.DataFrame(current_pwm).to_numpy()
+                        if motif_length is not None:
+                            current_pwm_np = utils_motif.resize_motif(
+                                current_pwm_np, motif_length
+                            )
                         longest_motif_length = max(
                             longest_motif_length, current_pwm_np.shape[0]
                         )
