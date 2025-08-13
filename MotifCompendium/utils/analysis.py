@@ -426,10 +426,9 @@ def export_compendium_meme(
     # Validate motifs
     motifs = mc.get_standard_motif_stack()
     motif_names = mc[name_col].tolist()
+    num_seqlets = None
     if "num_seqlets" in mc.columns():
         num_seqlets = mc["num_seqlets"].tolist()
-    else:
-        num_seqlets = None
     # Write MEME file
     with open(save_loc, "w") as f:
         f.write("MEME version 4\n")
@@ -447,14 +446,12 @@ def export_compendium_meme(
                 motif = utils_motif.ic_scale(motif, invert=True)
             # Write motif
             f.write(f"\nMOTIF {name}\n")
-            if num_seqlets:
-                f.write(
-                    f"letter-probability matrix: alength= {motif.shape[1]} w= {motif.shape[0]} nsites= {num_seqlets[i]}\n"
-                )
+            motif_size_line = f"letter-probability matrix: alength= {motif.shape[1]} w= {motif.shape[0]}"
+            if num_seqlets is not None:
+                motif_size_line += f" nsites= {num_seqlets[i]}\n"
             else:
-                f.write(
-                    f"letter-probability matrix: alength= {motif.shape[1]} w= {motif.shape[0]}\n"
-                )
+                motif_size_line += "\n"
+            f.write(motif_size_line)
             for j in range(motif.shape[0]):
                 f.write(" ".join([f"{x:.6f}" for x in motif[j, :]]) + "\n")
 
