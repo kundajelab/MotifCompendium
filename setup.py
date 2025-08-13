@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="MotifCompendium",
-    version="1.0.3",
+    version="1.0.5",
     packages=find_packages(),
     package_data={
         "MotifCompendium": ["utils/*"],
