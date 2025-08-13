@@ -280,39 +280,29 @@ def export_compendium_modisco(
           scaled but you don't want to revert the IC scaling, you may need to adjust the
           default trimming threshold during finemo call-hits with option -t 0.15.
     """
-    pos_neg = pd.Series(utils_motif.motif_posneg_sum(mc.get_standard_motif_stack()))
+    # Check name cols are unique
+    if len(mc) != len(mc[name_col].unique()):
+        raise ValueError("Motif names must be unique!")
+    pos_neg_series = pd.Series(utils_motif.motif_posneg_sum(mc.get_standard_motif_stack()))
     with h5py.File(save_loc, "w") as f:
         f.attrs["window_size"] = mc.motifs.shape[1]
-        # Positive
-        if "pos" in pos_neg.values:
-            pos_group = f.create_group("pos_patterns")
-            mc_pos = mc[pos_neg == "pos"]
-            motifs_pos = mc_pos.get_standard_motif_stack()
-            pos_names = mc_pos[name_col].tolist()
-            for i in range(len(mc_pos)):
-                name = f"{pos_names[i]}_{i}"
-                if "/" in name:
-                    raise ValueError("Motif names cannot have slashes (/) in them!")
-                motif = motifs_pos[i]
-                if inverse_ic:
-                    motif = utils_motif.ic_scale(motif, invert=True)
-                pos_cluster = pos_group.create_group(name)
-                pos_cluster.create_dataset("contrib_scores", data=motif)
-        # Negative
-        if "neg" in pos_neg.values:
-            neg_group = f.create_group("neg_patterns")
-            mc_neg = mc[pos_neg == "neg"]
-            motifs_neg = mc_neg.get_standard_motif_stack()
-            neg_names = mc_neg[name_col].tolist()
-            for i in range(len(mc_neg)):
-                name = f"{neg_names[i]}_{i}"
-                if "/" in name:
-                    raise ValueError("Motif names cannot have slashes (/) in them!")
-                motif = motifs_neg[i]
-                if inverse_ic:
-                    motif = utils_motif.ic_scale(motif, invert=True)
-                neg_cluster = neg_group.create_group(name)
-                neg_cluster.create_dataset("contrib_scores", data=motif)
+        for pos_neg in ["pos", "neg"]:
+            if pos_neg in pos_neg_series.values:
+                # Metapattern: Pos, Neg
+                metapattern_group = f.create_group(f"{pos_neg}_patterns")
+                mc_posneg = mc[pos_neg_series == pos_neg]
+                motifs_posneg = mc_posneg.get_standard_motif_stack()
+                pattern_names = mc_posneg[name_col].tolist()
+                # Pattern
+                for i in range(len(mc_posneg)):
+                    name = f"{pattern_names[i]}"
+                    if "/" in name:
+                        raise ValueError("Motif names cannot have slashes (/) in them!")
+                    motif = motifs_posneg[i]
+                    if inverse_ic:
+                        motif = utils_motif.ic_scale(motif, invert=True)
+                    pattern_group = metapattern_group.create_group(name)
+                    pattern_group.create_dataset("contrib_scores", data=motif)
 
 
 def export_compendium_clustered_modisco(
@@ -363,79 +353,50 @@ def export_compendium_clustered_modisco(
         weight_col=weight_col,
     )
     mc_avg.sort("source_cluster", inplace=True)
-    pos_neg = pd.Series(utils_motif.motif_posneg_sum(mc_avg.get_standard_motif_stack()))
+    pos_neg_series = pd.Series(utils_motif.motif_posneg_sum(mc_avg.get_standard_motif_stack()))
     with h5py.File(save_loc, "w") as f:
         f.attrs["window_size"] = mc_avg.motifs.shape[1]
-        # Positive
-        if "pos" in pos_neg.values:
-            pos_group = f.create_group("pos_patterns")
-            mc_avg_pos = mc_avg[pos_neg == "pos"]
-            avg_motifs_pos = mc_avg_pos.get_standard_motif_stack()
-            pos_pattern_names = mc_avg_pos["source_cluster"].tolist()
-            for i in range(len(mc_avg_pos)):
-                pattern_name = f"{pos_pattern_names[i]}_{i}"
-                if "/" in pattern_name:
-                    raise ValueError("Cluster names cannot have slashes (/) in them!")
-                avg_motif = avg_motifs_pos[i]
-                if inverse_ic:
-                    avg_motif = utils_motif.ic_scale(avg_motif, invert=True)
-                pos_pattern = pos_group.create_group(pattern_name)
-                pos_pattern.create_dataset("contrib_scores", data=avg_motif)
-                # Subpatterns
-                if export_subpatterns:
-                    mc_i = mc[mc[cluster_name] == pattern_name]
-                    motifs_i = mc_i.get_standard_motif_stack()
-                    subpattern_names_i = mc_i["name"].tolist()
-                    for j in range(len(mc_i)):
-                        subpattern_name = f"{subpattern_names_i[j]}_{j}"
-                        if "/" in subpattern_name:
-                            raise ValueError(
-                                "Motif names cannot have slashes (/) in them!"
+        for pos_neg in ["pos", "neg"]:
+            if pos_neg in pos_neg_series.values:
+                # Metapattern: Pos, Neg
+                metapattern_group = f.create_group(f"{pos_neg}_patterns")
+                mc_avg_posneg = mc_avg[pos_neg_series == pos_neg]
+                avg_motifs = mc_avg_posneg.get_standard_motif_stack()
+                pattern_names = mc_avg_posneg["source_cluster"].tolist()
+                if len(pattern_names) != len(set(pattern_names)):
+                    raise ValueError("Cluster names must be unique!")
+                # Pattern
+                for i in range(len(mc_avg_posneg)):
+                    pattern_name = f"{pattern_names[i]}"
+                    if "/" in pattern_name:
+                        raise ValueError("Cluster names cannot have slashes (/) in them!")
+                    avg_motif = avg_motifs[i]
+                    if inverse_ic:
+                        avg_motif = utils_motif.ic_scale(avg_motif, invert=True)
+                    pattern_group = metapattern_group.create_group(pattern_name)
+                    pattern_group.create_dataset("contrib_scores", data=avg_motif)
+                    # Subpatterns
+                    if export_subpatterns:
+                        mc_i = mc[mc[cluster_name] == pattern_name]
+                        motifs_i = mc_i.get_standard_motif_stack()
+                        subpattern_names_i = mc_i["name"].tolist()
+                        if len(subpattern_names_i) != len(set(subpattern_names_i)):
+                            raise ValueError("Motif names must be unique!")
+                        for j in range(len(mc_i)):
+                            subpattern_name = f"{subpattern_names_i[j]}"
+                            if "/" in subpattern_name:
+                                raise ValueError(
+                                    "Motif names cannot have slashes (/) in them!"
+                                )
+                            subpattern_group = pattern_group.create_group(
+                                subpattern_name
                             )
-                        pos_pattern_subpattern = pos_pattern.create_group(
-                            subpattern_name
-                        )
-                        motif = motifs_i[j]
-                        if inverse_ic:
-                            motif = utils_motif.ic_scale(motif, invert=True)
-                        pos_pattern_subpattern.create_dataset(
-                            "contrib_scores", data=motif
-                        )
-        # Negative
-        if "neg" in pos_neg.values:
-            neg_group = f.create_group("neg_patterns")
-            mc_avg_neg = mc_avg[pos_neg == "neg"]
-            avg_motifs_neg = mc_avg_neg.get_standard_motif_stack()
-            neg_pattern_names = mc_avg_neg["source_cluster"].tolist()
-            for i in range(len(mc_avg_neg)):
-                pattern_name = f"{neg_pattern_names[i]}_{i}"
-                if "/" in pattern_name:
-                    raise ValueError("Cluster names cannot have slashes (/) in them!")
-                avg_motif = avg_motifs_neg[i]
-                if inverse_ic:
-                    avg_motif = utils_motif.ic_scale(avg_motif, invert=True)
-                neg_pattern = neg_group.create_group(pattern_name)
-                neg_pattern.create_dataset("contrib_scores", data=avg_motif)
-                # Subpatterns
-                if export_subpatterns:
-                    mc_i = mc[mc[cluster_name] == pattern_name]
-                    motifs_i = mc_i.get_standard_motif_stack()
-                    subpattern_names_i = mc_i["name"].tolist()
-                    for j in range(len(mc_i)):
-                        subpattern_name = f"{subpattern_names_i[j]}_{j}"
-                        if "/" in subpattern_name:
-                            raise ValueError(
-                                "Motif names cannot have slashes (/) in them!"
+                            motif = motifs_i[j]
+                            if inverse_ic:
+                                motif = utils_motif.ic_scale(motif, invert=True)
+                            subpattern_group.create_dataset(
+                                "contrib_scores", data=motif
                             )
-                        neg_pattern_subpattern = neg_pattern.create_group(
-                            subpattern_name
-                        )
-                        motif = motifs_i[j]
-                        if inverse_ic:
-                            motif = utils_motif.ic_scale(motif, invert=True)
-                        neg_pattern_subpattern.create_dataset(
-                            "contrib_scores", data=motif
-                        )
 
 
 def export_compendium_meme(
@@ -635,6 +596,7 @@ def assign_label_from_pfms(
     ic: bool = False,
     min_score: float = 0.5,
     max_submotifs: int = 1,
+    label_unsigned: bool = True,
     save_images: bool = True,
     logo_trimming: bool | float | int = 0,
 ) -> None:
@@ -660,6 +622,8 @@ def assign_label_from_pfms(
           max_submotifs = 1, only a single match is given to each motif. If
           max_submotifs > 1, the best match for each motif can be from a combination of
           multiple reference motifs.
+        label_unsigned: Whether or not to label indifferent of positive and negative
+          signs. E.g., If True: Negative motif can be labeled by a positive reference motif.
         save_images: Whether or not to save the logos of the matched motifs. If True,
           the logos will appear as a saved image. If False, logos will not be saved as
           saved images.
@@ -672,8 +636,14 @@ def assign_label_from_pfms(
           be trimmed.
     """
     # Load PFM database, with same length as motifs
-    L = mc.motifs.shape[1]
-    pfm_motifs, pfm_names = utils_loader.load_pfm(pfm_file, ic=ic)
+    pfm_motifs, pfm_names = utils_loader.load_pfm(
+        pfm_file, ic=ic, motif_length=mc.motifs.shape[1]
+    )
+    # Label: Signed vs. Unsigned
+    if label_unsigned:
+        pfm_motifs = np.abs(pfm_motifs)
+    else:
+        pfm_motifs = utils_motif.motif_4_to_8(pfm_motifs)
     # Assign labels
     mc.assign_label_from_motifs(
         pfm_motifs,
@@ -693,6 +663,7 @@ def assign_label_from_other_compendium(
     save_col_prefix: str = "match",
     min_score: float = 0.5,
     max_submotifs: int = 1,
+    label_unsigned: bool = True,
     save_images: bool = True,
     logo_trimming: bool | float | int = True,
 ) -> None:
@@ -718,6 +689,8 @@ def assign_label_from_other_compendium(
           max_submotifs = 1, only a single match is given to each motif. If
           max_submotifs > 1, the best match for each motif can be from a combination of
           multiple reference motifs.
+        label_unsigned: Whether or not to label indifferent of positive and negative
+          signs. E.g., If True: Negative motif can be labeled by a positive reference motif.
         save_images: Whether or not to save the logos of the matched motifs. If True,
           the logos will appear as a saved image. If False, logos will not be saved as
           saved images. The logos will come from
@@ -743,6 +716,13 @@ def assign_label_from_other_compendium(
         labels = assign_from_mc.metadata[from_label_col].tolist()
     else:
         raise KeyError(f"{from_label_col} not in other metadata.")
+    # Label: Signed vs. Unsigned
+    reference_motifs = assign_from_mc.motifs
+    if label_unsigned:
+        if reference_motifs.shape[2] == 8:
+            reference_motifs = utils_motif.motif_8_to_4_unsigned(reference_motifs)
+        else:
+            reference_motifs = np.abs(reference_motifs)
     # Check if forward logos in other MotifCompendium
     if save_images and "logo (fwd)" in assign_from_mc.images():
         other_logos = assign_from_mc.get_images("logo (fwd)")
@@ -750,7 +730,7 @@ def assign_label_from_other_compendium(
         other_logos = None
     # Assign labels
     assign_to_mc.assign_label_from_motifs(
-        assign_from_mc.motifs,
+        reference_motifs,
         labels,
         min_score,
         max_submotifs=max_submotifs,

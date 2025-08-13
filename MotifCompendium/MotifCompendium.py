@@ -379,14 +379,14 @@ def combine(
             "The motifs of the MotifCompendium objects must have the same channels."
         )
     # Confirm that the metadata and __images of each MotifCompendium has the same columns
-    metadata_columns = compendiums[0].columns()
-    if not all([x.columns() == metadata_columns for x in compendiums]):
+    metadata_columns = set(compendiums[0].columns())
+    if not all(set(x.columns()) == metadata_columns for x in compendiums):
         raise ValueError(
             "The metadata of each MotifCompendium must have the same columns."
             + "\n(Check mc.columns() for each MotifCompendium.)"
         )
-    image_columns = compendiums[0].images()
-    if not all([x.images() == image_columns for x in compendiums]):
+    image_columns = set(compendiums[0].images())
+    if not all([set(x.images()) == image_columns for x in compendiums]):
         raise ValueError(
             "Each MotifCompendium must have the same saved images."
             + "\n(Check mc.images() for each MotifCompendium.)"
@@ -930,6 +930,18 @@ class MotifCompendium:
                 __images_sorted,
                 safe=False,
             )
+
+    def copy(self) -> MotifCompendium:
+        """Creates a copy of the MotifCompendium object."""
+        return MotifCompendium(
+            self.motifs.copy(),
+            self.similarity.copy(),
+            self.alignment_rc.copy(),
+            self.alignment_h.copy(),
+            self.metadata.copy(deep=True),
+            self.__images.copy(deep=True),
+            safe=False,
+        )
 
     def get_similarity_slice(
         self,
