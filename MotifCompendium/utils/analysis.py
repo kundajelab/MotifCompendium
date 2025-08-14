@@ -619,8 +619,9 @@ def assign_label_from_pfms(
           max_submotifs = 1, only a single match is given to each motif. If
           max_submotifs > 1, the best match for each motif can be from a combination of
           multiple reference motifs.
-        label_unsigned: Whether or not to label indifferent of positive and negative
-          signs. E.g., If True: Negative motif can be labeled by a positive reference motif.
+        label_unsigned: Whether or not to label indifferent of positive and negative signs. 
+          If True, negative motifs can be labeled by a positive reference motif. 
+          If False, negative motifs can only labeled by negative reference motifs.
         save_images: Whether or not to save the logos of the matched motifs. If True,
           the logos will appear as a saved image. If False, logos will not be saved as
           saved images.
@@ -686,8 +687,9 @@ def assign_label_from_other_compendium(
           max_submotifs = 1, only a single match is given to each motif. If
           max_submotifs > 1, the best match for each motif can be from a combination of
           multiple reference motifs.
-        label_unsigned: Whether or not to label indifferent of positive and negative
-          signs. E.g., If True: Negative motif can be labeled by a positive reference motif.
+        label_unsigned: Whether or not to label indifferent of positive and negative signs. 
+          If True, negative motifs can be labeled by a positive reference motif. 
+          If False, negative motifs can only labeled by negative reference motifs.
         save_images: Whether or not to save the logos of the matched motifs. If True,
           the logos will appear as a saved image. If False, logos will not be saved as
           saved images. The logos will come from
@@ -713,13 +715,11 @@ def assign_label_from_other_compendium(
         labels = assign_from_mc.metadata[from_label_col].tolist()
     else:
         raise KeyError(f"{from_label_col} not in other metadata.")
-    # Label: Signed vs. Unsigned
-    reference_motifs = assign_from_mc.motifs
+    # Label unsigned vs signed
     if label_unsigned:
-        if reference_motifs.shape[2] == 8:
-            reference_motifs = utils_motif.motif_8_to_4_unsigned(reference_motifs)
-        else:
-            reference_motifs = np.abs(reference_motifs)
+        reference_motifs = np.abs(assign_from_mc.get_standard_motifs())
+    else:
+        reference_motifs = assign_from_mc.motifs
     # Check if forward logos in other MotifCompendium
     if save_images and "logo (fwd)" in assign_from_mc.images():
         other_logos = assign_from_mc.get_images("logo (fwd)")
