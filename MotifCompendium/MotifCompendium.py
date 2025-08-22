@@ -1731,7 +1731,10 @@ class MotifCompendium:
         utils_visualization.motif_collection_html(motif_groups, html_out)
 
     def summary_table_html(
-        self, html_out: str, columns: None | list[str] = None, editable=False
+        self, html_out: str, 
+        columns: None | list[str] = None,
+        logo_trimming: bool | float | int = True,
+        editable=False,
     ) -> None:
         """Creates an html file summarizing all motifs and metadata about them.
 
@@ -1746,6 +1749,14 @@ class MotifCompendium:
             html_out: The path to save the html file.
             columns: The list of column names in the metadata or saved images to display
               as columns in the summary table. If None, uses all columns.
+            logo_trimming: This argument is only relevant if there is no pre-existing logo. 
+                (i.e., "logo (fwd)" or "logo (rev)" are not present.) A bool or
+                float/int indicating how the motif should be trimmed when plotting. If False,
+                the motif will not be trimmed at all. If True, the motif will be trimmed at
+                the flanks with a standard threshold of 1/L. If a number is provided, that
+                number must be in [0, 1], and will define the trimming threshold. At a value
+                of 0, only zero positions are trimmed and at a value of 1, all positions would
+                be trimmed.
             editable: Whether or not the table is editable.
 
         Notes:
@@ -1765,13 +1776,13 @@ class MotifCompendium:
             self.add_logos(
                 self.get_standard_motif_stack(),
                 "logo (fwd)",
-                True,
+                logo_trimming,
             )
         if "logo (rev)" not in self.images():
             self.add_logos(
                 utils_motif.reverse_complement(self.get_standard_motif_stack()),
                 "logo (rev)",
-                True,
+                logo_trimming,
             )
         # Build table
         columns = ["logo (fwd)", "logo (rev)"] + columns

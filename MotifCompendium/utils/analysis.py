@@ -717,7 +717,7 @@ def assign_label_from_other_compendium(
         raise KeyError(f"{from_label_col} not in other metadata.")
     # Label unsigned vs signed
     if label_unsigned:
-        reference_motifs = np.abs(assign_from_mc.get_standard_motifs())
+        reference_motifs = np.abs(assign_from_mc.get_standard_motif_stack())
     else:
         reference_motifs = assign_from_mc.motifs
     # Check if forward logos in other MotifCompendium
