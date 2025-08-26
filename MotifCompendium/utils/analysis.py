@@ -283,7 +283,9 @@ def export_compendium_modisco(
     # Check name cols are unique
     if len(mc) != len(mc[name_col].unique()):
         raise ValueError("Motif names must be unique!")
-    pos_neg_series = pd.Series(utils_motif.motif_posneg_sum(mc.get_standard_motif_stack()))
+    pos_neg_series = pd.Series(
+        utils_motif.motif_posneg_sum(mc.get_standard_motif_stack())
+    )
     with h5py.File(save_loc, "w") as f:
         f.attrs["window_size"] = mc.motifs.shape[1]
         for pos_neg in ["pos", "neg"]:
@@ -353,7 +355,9 @@ def export_compendium_clustered_modisco(
         weight_col=weight_col,
     )
     mc_avg.sort("source_cluster", inplace=True)
-    pos_neg_series = pd.Series(utils_motif.motif_posneg_sum(mc_avg.get_standard_motif_stack()))
+    pos_neg_series = pd.Series(
+        utils_motif.motif_posneg_sum(mc_avg.get_standard_motif_stack())
+    )
     with h5py.File(save_loc, "w") as f:
         f.attrs["window_size"] = mc_avg.motifs.shape[1]
         for pos_neg in ["pos", "neg"]:
@@ -369,7 +373,9 @@ def export_compendium_clustered_modisco(
                 for i in range(len(mc_avg_posneg)):
                     pattern_name = f"{pattern_names[i]}"
                     if "/" in pattern_name:
-                        raise ValueError("Cluster names cannot have slashes (/) in them!")
+                        raise ValueError(
+                            "Cluster names cannot have slashes (/) in them!"
+                        )
                     avg_motif = avg_motifs[i]
                     if inverse_ic:
                         avg_motif = utils_motif.ic_scale(avg_motif, invert=True)
@@ -619,8 +625,8 @@ def assign_label_from_pfms(
           max_submotifs = 1, only a single match is given to each motif. If
           max_submotifs > 1, the best match for each motif can be from a combination of
           multiple reference motifs.
-        label_unsigned: Whether or not to label indifferent of positive and negative signs. 
-          If True, negative motifs can be labeled by a positive reference motif. 
+        label_unsigned: Whether or not to label indifferent of positive and negative
+          signs. If True, negative motifs can be labeled by a positive reference motif.
           If False, negative motifs can only labeled by negative reference motifs.
         save_images: Whether or not to save the logos of the matched motifs. If True,
           the logos will appear as a saved image. If False, logos will not be saved as
@@ -687,8 +693,8 @@ def assign_label_from_other_compendium(
           max_submotifs = 1, only a single match is given to each motif. If
           max_submotifs > 1, the best match for each motif can be from a combination of
           multiple reference motifs.
-        label_unsigned: Whether or not to label indifferent of positive and negative signs. 
-          If True, negative motifs can be labeled by a positive reference motif. 
+        label_unsigned: Whether or not to label indifferent of positive and negative
+          signs. If True, negative motifs can be labeled by a positive reference motif.
           If False, negative motifs can only labeled by negative reference motifs.
         save_images: Whether or not to save the logos of the matched motifs. If True,
           the logos will appear as a saved image. If False, logos will not be saved as
