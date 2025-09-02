@@ -274,15 +274,20 @@ def build_from_modisco(
     )
     # Convert motifs to normalized 8-channel motifs
     motifs = utils_motif.motif_4_to_8(motifs)
-    motifs /= np.sum(motifs, axis=(1, 2), keepdims=True)
+    motif_scale = np.sum(motifs, axis=(1, 2), keepdims=True)
+    motifs /= motif_scale
     # Build metadata
-    metadata = pd.DataFrame()
-    metadata["name"] = motif_names
-    metadata["num_seqlets"] = seqlet_counts
-    metadata["model"] = model_names
-    metadata["posneg"] = posnegs
-    metadata["avg_contrib"] = avg_contribs
-    metadata["avg_dist_from_summit"] = avgdist_summits
+    metadata = pd.DataFrame(
+        {
+            "name": motif_names,
+            "num_seqlets": seqlet_counts,
+            "model": model_names,
+            "posneg": posnegs,
+            "avg_contrib": avg_contribs,
+            "avg_dist_from_summit": avgdist_summits,
+            "motif_scale": motif_scale.squeeze(),
+        }
+    )
     # Construct object
     return build(
         motifs,
@@ -318,13 +323,15 @@ def build_from_pfm(
     # Convert motifs to normalized 8-channel motifs
     posneg = utils_motif.motif_posneg_sum(motifs)
     motifs = utils_motif.motif_4_to_8(motifs)
-    motifs /= np.sum(motifs, axis=(1, 2), keepdims=True)
+    motif_scale = np.sum(motifs, axis=(1, 2), keepdims=True)
+    motifs /= motif_scale
     # Build metadata
     metadata = pd.DataFrame(
         {
             "name": motif_names,
             "posneg": posneg,
             "source": file_names,
+            "motif_scale": motif_scale.squeeze(),
         }
     )
     return build(
@@ -1551,7 +1558,7 @@ class MotifCompendium:
                     case "sum":
                         agg_dict["values"].append(np.sum(agg_c_data))
                     case "average" | "avg" | "mean":
-                        agg_dict["values"].append(np.mean(agg_c_data))
+                            agg_dict["values"].append(np.average(agg_c_data, weights=weights_c))
                     case "concatenate" | "concat":
                         agg_dict["values"].append(
                             ",".join(sorted(set(map(str, agg_c_data))))

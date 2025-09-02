@@ -225,7 +225,10 @@ def load_modisco(
                         seqlets = f[pattern_type][pattern][subpattern]["seqlets"][
                             "contrib_scores"
                         ][()]
-                        motif_sim = _sequence_importance_from_seqlets(seqlets, ic)
+                        # motif_sim = _sequence_importance_from_seqlets(seqlets, ic)
+                        motif_sim = np.mean(seqlets, axis=0)
+                        if ic:
+                            motif_sim = utils_motif.ic_scale(motif_sim)
                         motifs.append(motif_sim)
                         motif_names.append(f"{pattern_posneg}.{pattern}-{subpattern}")
                         seqlet_counts.append(seqlets.shape[0])
@@ -255,7 +258,10 @@ def load_modisco(
                 # Main patterns
                 else:
                     seqlets = f[pattern_type][pattern]["seqlets"]["contrib_scores"][()]
-                    motif_sim = _sequence_importance_from_seqlets(seqlets, ic)
+                    # motif_sim = _sequence_importance_from_seqlets(seqlets, ic)
+                    motif_sim = np.mean(seqlets, axis=0)
+                    if ic:
+                        motif_sim = utils_motif.ic_scale(motif_sim)
                     motifs.append(motif_sim)
                     motif_names.append(f"{pattern_posneg}.{pattern}")
                     seqlet_counts.append(seqlets.shape[0])

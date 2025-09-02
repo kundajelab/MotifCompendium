@@ -26,6 +26,8 @@ class MetadataCols:
     # INTERNAL: Metadata columns for MotifCompendium
     label_column_prefix: str = "reference"
     filter_col_flag: str = "flag_remove"
+    ic_col: str = "ic-scaled"
+    motif_string_col: str = "motif_string"
 
 @dataclass
 class OutputPaths:
@@ -90,13 +92,24 @@ class ClusterArgs:
     algorithm_meta: str = "cpm_leiden"
     algorithm_sub: str = "cpm_leiden"
     algorithm_force: str = "dcc"
-    weight_col: str = "num_seqlets"
-    max_iter: int = 100
+    
+    select_weight_col: str = "num_seqlets"
+    select_scale_col: str = "motif_scale"
+    scaled_weight_col: str = "scaled_weight"
+
+    max_iter: int = 50
     aggregate_metadata: List[Tuple[str, str, str]] = field(default_factory=lambda: [
         ("name", "count", "num_motifs"),
         ("num_seqlets", "sum", "num_seqlets"),
+        ("num_hits", "sum", "num_hits"),
+        ("avg_dist_from_summit", "mean", "avg_dist_from_summit"),
+        ("avg_contrib", "mean", "avg_contrib"),
+        ("ic-scaled", "concat", "ic-scaled"),
+        ("assay", "concat", "assay"),
         ("model", "concat", "model"),
+        ("ID", "concat", "ID"),
         ("target", "concat", "target"),
+        ("TF", "concat", "TF"),
         ("family", "concat", "family"),
         ("tissue", "concat", "tissue"),
         ("organ", "concat", "organ"),
@@ -125,9 +138,10 @@ class VisualizeArgs:
     editable: bool = True
 
     # HTML table columns
-    html_table_cols_base: List[str] = field(default_factory=lambda: ["name", "sort_cluster",
-        "posneg", "num_motifs", "num_seqlets", "avg_dist_from_summit", "avg_contrib",
-         "invitro_cluster", "target", "tissue", "organ", "system", "source", "motifs", "biosample",
+    html_table_cols_base: List[str] = field(default_factory=lambda: ["name", "motif_string", "sort_cluster",
+        "posneg", "num_motifs", "num_seqlets", "avg_dist_from_summit", "avg_contrib", "motif_scale", "ic-scaled",
+        "invitro_cluster", "assay", "target", "TF", "tissue", "organ", "system", "source", "motifs", "biosample",
+        "model", "ID",
     ])
     html_table_cols_label: List[str] = field(default_factory=lambda: [
         col
@@ -144,7 +158,7 @@ class VisualizeArgs:
         "lowest_internal_similarity", "lowest_internal_similarity_motif1", "lowest_internal_similarity_motif2"
     ])
 
-    # HTML table columns per table
+    # HTML table columns per table (automatically filled in)
     html_table_cols_motif: List[str] = field(default_factory=lambda: [])
     html_table_cols_motif_removed: List[str] = field(default_factory=lambda: [])
     html_table_cols_cluster: List[str] = field(default_factory=lambda: [])
