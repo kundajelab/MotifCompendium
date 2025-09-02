@@ -336,6 +336,7 @@ def build_from_pfm(
 
 def combine(
     compendiums: list[MotifCompendium],
+    compendium_names: list[str] | None = None,
     safe: bool = True,
 ) -> MotifCompendium:
     """Combines multiple MotifCompendium into one MotifCompendium.
@@ -348,6 +349,9 @@ def combine(
 
     Args:
         compendiums: A list of MotifCompendium objects to combine.
+        compendium_names: A list of names for each MotifCompendium. These names will be
+          added as metadata to the combined MotifCompendium object in the
+          'source_compendium' field.
         safe: Whether or not to construct the MotifCompendium safely.
 
     Returns:
@@ -355,6 +359,8 @@ def combine(
           MotifCompendium.
 
     Notes:
+        The 'source_compendium' column may not exist in any of the MotifCompendium
+          objects passed into this function.
         The metadata and __images of each MotifCompendium must contain the same columns.
         Safe building validates object integrity but may take significantly longer for
           large objects.
@@ -367,12 +373,24 @@ def combine(
         raise TypeError("The input must be a list of MotifCompendium objects.")
     if len(compendiums) == 0:
         raise ValueError("The input list must contain at least one MotifCompendium.")
+    if compendium_names is not None:
+        if not (
+            isinstance(compendium_names, list)
+            and all([isinstance(x, str) for x in compendium_names])
+        ):
+            raise TypeError("compendium_names must be a list of strings.")
+        if len(compendium_names) != len(compendiums):
+            raise ValueError(
+                "compendium_names must have the same length as compendiums."
+            )
+    else:
+        compendium_names = [f"compendium_{i}" for i in range(len(compendiums))]
     # Confirm that the motifs from each MotifCompendium are compatible
-    motifs_length = compendiums[0].motifs.shape[1]
-    if not all([x.motifs.shape[1] == motifs_length for x in compendiums]):
-        raise ValueError(
-            "The motifs of the MotifCompendium objects must have the same length."
-        )
+    # motifs_length = compendiums[0].motifs.shape[1]
+    # if not all([x.motifs.shape[1] == motifs_length for x in compendiums]):
+    #     raise ValueError(
+    #         "The motifs of the MotifCompendium objects must have the same length."
+    #     )
     motifs_channels = compendiums[0].motifs.shape[2]
     if not all([x.motifs.shape[2] == motifs_channels for x in compendiums]):
         raise ValueError(
@@ -392,8 +410,16 @@ def combine(
             + "\n(Check mc.images() for each MotifCompendium.)"
         )
     n = len(compendiums)
+    # MotifCompendium cannot already have a "source_compendium" column
+    if "source_compendium" in metadata_columns:
+        raise KeyError(
+            "The 'source_compendium' column may not already exist in the source MotifCompendium."
+        )
+    # Prepare motifs
+    motif_lengths = [mc.motifs.shape[1] for mc in compendiums]
+    max_length = max(motif_lengths)
+    motifs_list = [utils_motif.pad_motif(mc.motifs, max_length) for mc in compendiums]
     # Combine similarities
-    motifs_list = [mc.motifs for mc in compendiums]
     calculations = []
     for i in range(n):
         for j in range(i + 1, n):
@@ -409,7 +435,12 @@ def combine(
             if i == j:
                 similarity_block[i][j] = compendiums[i].similarity
                 alignment_rc_block[i][j] = compendiums[i].alignment_rc
-                alignment_h_block[i][j] = compendiums[i].alignment_h
+                alignment_h_delta = (
+                    compendiums[i].alignment_rc * -(max_length - motif_lengths[i])
+                ).astype(
+                    compendiums[i].alignment_h.dtype
+                )  # To account for motif resizing
+                alignment_h_block[i][j] = compendiums[i].alignment_h + alignment_h_delta
             elif i < j:
                 (
                     similarity_block[i][j],
@@ -419,7 +450,11 @@ def combine(
             elif i > j:
                 similarity_block[i][j] = similarity_block[j][i].T
                 alignment_rc_block[i][j] = alignment_rc_block[j][i].T
-                alignment_h_block[i][j] = alignment_h_block[j][i].T
+                alignment_h_block[i][j] = np.where(
+                    alignment_rc_block[j][i].T == 0,
+                    -alignment_h_block[j][i].T,
+                    alignment_h_block[j][i].T,
+                )
     similarity = np.block(similarity_block)
     alignment_rc = np.block(alignment_rc_block)
     alignment_h = np.block(alignment_h_block)
@@ -427,6 +462,10 @@ def combine(
     motifs = np.concatenate(motifs_list, axis=0)
     # Metadata
     metadata = pd.concat([mc.metadata for mc in compendiums], ignore_index=True)
+    source_compendium = []
+    for i, mc in enumerate(compendiums):
+        source_compendium.extend([compendium_names[i]] * len(mc))
+    metadata["source_compendium"] = source_compendium
     # Images
     __images = pd.DataFrame(index=metadata.index)
     for images in compendiums[0].images():
@@ -1731,7 +1770,8 @@ class MotifCompendium:
         utils_visualization.motif_collection_html(motif_groups, html_out)
 
     def summary_table_html(
-        self, html_out: str, 
+        self,
+        html_out: str,
         columns: None | list[str] = None,
         logo_trimming: bool | float | int = True,
         editable=False,
@@ -1749,14 +1789,13 @@ class MotifCompendium:
             html_out: The path to save the html file.
             columns: The list of column names in the metadata or saved images to display
               as columns in the summary table. If None, uses all columns.
-            logo_trimming: This argument is only relevant if there is no pre-existing logo. 
-                (i.e., "logo (fwd)" or "logo (rev)" are not present.) A bool or
-                float/int indicating how the motif should be trimmed when plotting. If False,
-                the motif will not be trimmed at all. If True, the motif will be trimmed at
-                the flanks with a standard threshold of 1/L. If a number is provided, that
-                number must be in [0, 1], and will define the trimming threshold. At a value
-                of 0, only zero positions are trimmed and at a value of 1, all positions would
-                be trimmed.
+            logo_trimming: This argument is only relevant if save_images is True. A bool
+              or float/int indicating how the motif should be trimmed when plotting. If
+              False, the motif will not be trimmed at all. If True, the motif will be
+              trimmed at the flanks with a standard threshold of 1/L. If a number is
+              provided, that number must be in [0, 1], and will define the trimming
+              threshold. At a value of 0, only zero positions are trimmed and at a value
+              of 1, all positions would be trimmed.
             editable: Whether or not the table is editable.
 
         Notes:

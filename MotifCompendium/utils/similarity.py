@@ -120,43 +120,94 @@ def _compute_similarity_and_align_parallel(
     calculations: list[tuple[int, int]],
 ) -> list[tuple[np.ndarray, np.ndarray, np.ndarray]]:
     """Compute similarities and alignments."""
+    # Identify calculations that must be done and calculations that are just copies of other calcs
+    to_do_calculations = []
+    skipped_calcs = []
+    for c0, c1 in calculations:
+        if (c1, c0) in to_do_calculations:
+            skipped_calcs.append((c0, c1))
+        else:
+            to_do_calculations.append((c0, c1))
+    to_do_calculations_revdict = {v: k for k, v in enumerate(to_do_calculations)}
+    skipped_calcs = set(skipped_calcs)
+    # Perform to_do_calculations
     if utils_config.get_use_gpu():
         # SINGLE GPU CALCULATIONS
         if utils_config.get_progress_bar():
-            results = []
-            for c in tqdm(calculations, desc="computing similarities on GPU..."):
-                results.append(
+            to_do_results = []
+            for c in tqdm(to_do_calculations, desc="computing similarities on GPU..."):
+                to_do_results.append(
                     compute_similarity_and_align(
                         motif_stack_list[c[0]], motif_stack_list[c[1]]
                     )
                 )
-            return results
+            # results = []
+            # for c in tqdm(calculations, desc="computing similarities on GPU..."):
+            #     results.append(
+            #         compute_similarity_and_align(
+            #             motif_stack_list[c[0]], motif_stack_list[c[1]]
+            #         )
+            #     )
+            # return results
         else:
-            return [
+            to_do_results = [
                 compute_similarity_and_align(
                     motif_stack_list[c[0]], motif_stack_list[c[1]]
                 )
-                for c in calculations
+                for c in to_do_calculations
             ]
+            # return [
+            #     compute_similarity_and_align(
+            #         motif_stack_list[c[0]], motif_stack_list[c[1]]
+            #     )
+            #     for c in calculations
+            # ]
     else:
         if utils_config.get_max_cpus() == 1 or len(calculations) == 1:
             # SINGLE CPU CALCULATIONS
-            return [
+            to_do_results = [
                 compute_similarity_and_align(
                     motif_stack_list[c[0]], motif_stack_list[c[1]]
                 )
-                for c in calculations
+                for c in to_do_calculations
             ]
+            # return [
+            #     compute_similarity_and_align(
+            #         motif_stack_list[c[0]], motif_stack_list[c[1]]
+            #     )
+            #     for c in calculations
+            # ]
         else:
             # MULTI-CPU CALCULATIONS
             inputs = [
-                (motif_stack_list[c[0]], motif_stack_list[c[1]]) for c in calculations
+                (motif_stack_list[c[0]], motif_stack_list[c[1]])
+                for c in to_do_calculations
             ]
             num_processes = min(
                 utils_config.get_max_cpus(), multiprocessing.cpu_count()
             )  # don't use more CPUs than available
             with multiprocessing.Pool(processes=num_processes) as p:
-                return p.starmap(compute_similarity_and_align, inputs)
+                to_do_results = p.starmap(compute_similarity_and_align, inputs)
+            # inputs = [
+            #     (motif_stack_list[c[0]], motif_stack_list[c[1]]) for c in calculations
+            # ]
+            # num_processes = min(
+            #     utils_config.get_max_cpus(), multiprocessing.cpu_count()
+            # )  # don't use more CPUs than available
+            # with multiprocessing.Pool(processes=num_processes) as p:
+            #     return p.starmap(compute_similarity_and_align, inputs)
+    # Build full results
+    results = []
+    for c0, c1 in calculations:
+        if (c0, c1) in skipped_calcs:
+            r_sim, r_rc, r_h = to_do_results[to_do_calculations_revdict[(c1, c0)]]
+            r_sim_skip = r_sim.T
+            r_rc_skip = r_rc.T
+            r_h_skip = np.where(r_rc_skip == 0, -r_h.T, r_h.T)
+            results.append((r_sim_skip, r_rc_skip, r_h_skip))
+        else:
+            results.append(to_do_results[to_do_calculations_revdict[(c0, c1)]])
+    return results
 
 
 def _reassemble_results(
