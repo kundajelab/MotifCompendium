@@ -7,9 +7,17 @@ from tqdm import tqdm
 
 import MotifCompendium.utils.config as utils_config
 import MotifCompendium.utils.motif as utils_motif
-from MotifCompendium.utils.similarity_core import compute_similarity_and_align
+# from MotifCompendium.utils.similarity_core_timed_4 import compute_similarity_and_align
+# from MotifCompendium.utils.similarity_core_timed_2 import compute_similarity_and_align
+# # from MotifCompendium.utils.similarity_core_timed import compute_similarity_and_align
+# from MotifCompendium.utils.similarity_core import compute_similarity_and_align
 
+# from MotifCompendium.utils.similarity_core_timed_tiled_singlenumba import compute_similarity_and_align
+from MotifCompendium.utils.similarity_core_timed_tiled_multinumba import compute_similarity_and_align
+# from MotifCompendium.utils.similarity_core_timed_grid_singlenumba import compute_similarity_and_align
+# from MotifCompendium.utils.similarity_core_timed_grid_multinumba import compute_similarity_and_align
 
+# 
 ####################
 # PUBLIC FUNCTIONS #
 ####################
@@ -178,6 +186,20 @@ def _compute_similarity_and_align_parallel(
             #     for c in calculations
             # ]
         else:
+            # inputs = [
+            #     (motif_stack_list[c[0]], motif_stack_list[c[1]])
+            #     for c in to_do_calculations
+            # ]
+            # results_to_do = []
+            # import time
+            # for c in to_do_calculations:
+            #     start = time.time()
+            #     results_to_do.append(compute_similarity_and_align_asdfdsa(motif_stack_list[c[0]], motif_stack_list[c[1]]))
+            #     end = time.time()
+            #     print(f"{end - start}")
+            # assert(False)
+            # results_to_do = [compute_similarity_and_align_asdfdsa(motif_stack_list[c[0]], motif_stack_list[c[1]]) for c in to_do_calculations]
+
             # MULTI-CPU CALCULATIONS
             inputs = [
                 (motif_stack_list[c[0]], motif_stack_list[c[1]])
