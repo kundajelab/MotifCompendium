@@ -166,7 +166,6 @@ def label_motifs(
         utils_analysis.assign_label_from_pfms(
             mc=mc,
             pfm_file=reference,
-            ic=False,
             save_col_prefix=label_col,
             min_score=min_score,
             max_submotifs=max_submotifs,
@@ -184,7 +183,7 @@ def label_motifs(
 def filter_motifs(
     mc: MotifCompendium,
     MotifFilterArgs: configs.MotifFilterArgs,
-    MetadataCols: configs.MetadataCols,
+    filter_flag_col: str,
     args: argparse.Namespace,
 ) -> None:
     """
@@ -193,6 +192,7 @@ def filter_motifs(
     Args:
         mc (MotifCompendium): The MotifCompendium object.
         MotifFilterArgs (configs.MotifFilterArgs): The filter arguments.
+        filter_flag_col (str): The column name to use for the filter flag.
         args (argparse.Namespace): The command line arguments.
         
     Returns:
@@ -223,14 +223,14 @@ def filter_motifs(
         if filter_args.apply_motif:
             apply_filter_threshold(
                 mc=mc,
-                flag_col=MetadataCols.filter_col_flag,
+                flag_col=filter_flag_col,
                 metric=filter_args.metric,
                 operation=filter_args.operation,
                 threshold=filter_args.threshold,
                 override=filter_args.override,
             )
     if args.verbose:
-        logging.info(f"Total number of motifs flagged: {len(mc[mc[MetadataCols.filter_col_flag]])}")
+        logging.info(f"Total number of motifs flagged: {len(mc[mc[filter_flag_col]])}")
     if args.time:
         logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
@@ -246,14 +246,14 @@ def filter_motifs(
         if override_filter_args.apply_motif:
             apply_filter_threshold(
                 mc=mc,
-                flag_col=MetadataCols.filter_col_flag,
+                flag_col=filter_flag_col,
                 metric=override_filter_args.metric,
                 operation=override_filter_args.operation,
                 threshold=override_filter_args.threshold,
                 override=override_filter_args.override,
             )
     if args.verbose:
-        logging.info(f"Total number of motifs flagged: {len(mc[mc[MetadataCols.filter_col_flag]])}")
+        logging.info(f"Total number of motifs flagged: {len(mc[mc[filter_flag_col]])}")
     if args.time:
         logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
@@ -261,9 +261,9 @@ def filter_motifs(
     # if args.first_posmotif:
     #     if args.verbose:
     #         logging.info(f"Overriding flags for first positive motif...")
-    #     mc[MetadataCols.filter_col_flag] = (mc[MetadataCols.filter_col_flag] & 
-    #                                                     ((~mc["name"].str.contains("pattern_0")) |
-    #                                                     (mc["posneg"] != "pos")))
+    #     mc[filter_flag_col] = (mc[filter_flag_col] & 
+    #         ((~mc["name"].str.contains("pattern_0")) |
+    #          (mc["posneg"] != "pos")))
     # if args.verbose:
     #     logging.info(f"Total number of first positive motifs: {len(mc[mc['name'].str.contains('pattern_0') & (mc['posneg'] == 'pos')])}")
 
@@ -280,14 +280,14 @@ def filter_motifs(
             if strict_filter_args.apply_motif:
                 apply_filter_threshold(
                     mc=mc,
-                    flag_col=MetadataCols.filter_col_flag,
+                    flag_col=filter_flag_col,
                     metric=strict_filter_args.metric,
                     operation=strict_filter_args.operation,
                     threshold=strict_filter_args.threshold,
                     override=strict_filter_args.override,
                 )
         if args.verbose:
-            logging.info(f"Total number of motifs flagged: {len(mc[mc[MetadataCols.filter_col_flag]])}")
+            logging.info(f"Total number of motifs flagged: {len(mc[mc[filter_flag_col]])}")
         if args.time:
             logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
@@ -297,10 +297,10 @@ def filter_motifs(
     #         logging.info(f"Selecting first positive motif only...")
     #     if args.time:
     #         start_time = time.time()
-    #     mc[MetadataCols.filter_col_flag] = True
-    #     mc[MetadataCols.filter_col_flag] = (mc[MetadataCols.filter_col_flag] & 
-    #                                                     ((~mc["name"].str.contains("pattern_0")) |
-    #                                                     (mc["posneg"] != "pos")))
+    #     mc[filter_flag_col] = True
+    #     mc[filter_flag_col] = (mc[filter_flag_col] & 
+    #         ((~mc["name"].str.contains("pattern_0")) |
+    #          (mc["posneg"] != "pos")))
     #     if args.verbose:
     #         logging.info(f"Total number of first positive motifs: {len(mc[mc['name'].str.contains('pattern_0') & (mc['posneg'] == 'pos')])}")
     #     if args.time:
@@ -310,7 +310,7 @@ def filter_motifs(
 def filter_clusters(
     mc: MotifCompendium,
     MotifFilterArgs: configs.MotifFilterArgs,
-    MetadataCols: configs.MetadataCols,
+    filter_flag_col: str,
     args: argparse.Namespace,
 ) -> None:
     """
@@ -318,6 +318,8 @@ def filter_clusters(
 
     Args:
         mc (MotifCompendium): The MotifCompendium object.
+        MotifFilterArgs (configs.MotifFilterArgs): The filter arguments.
+        filter_flag_col (str): The column name to use for the filter flag.
         args (argparse.Namespace): The command line arguments.
 
     Returns:
@@ -347,14 +349,14 @@ def filter_clusters(
         if filter_args.apply_cluster:
             apply_filter_threshold(
                 mc=mc,
-                flag_col=MetadataCols.filter_col_flag,
+                flag_col=filter_flag_col,
                 metric=filter_args.metric,
                 operation=filter_args.operation,
                 threshold=filter_args.threshold,
                 override=filter_args.override,
             )
     if args.verbose:
-        logging.info(f"Number of flagged motifs: {len(mc[mc[MetadataCols.filter_col_flag]])}")
+        logging.info(f"Number of flagged motifs: {len(mc[mc[filter_flag_col]])}")
     if args.time:
         logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
@@ -365,7 +367,7 @@ def filter_clusters(
     #         logging.info(f"Flagging singleton clusters...")
     #     if args.time:
     #         start_time = time.time()
-    #     mc[MetadataCols.filter_col_flag] = mc["num_motifs"] == 1
+    #     mc[filter_flag_col] = mc["num_motifs"] == 1
     #     if args.verbose:
     #         logging.info(f"Number of singleton clusters: {len(mc[mc['num_motifs'] == 1])}")
     #     if args.time:
@@ -384,7 +386,7 @@ def filter_clusters(
         if override_filter_args.apply_cluster:
             apply_filter_threshold(
                 mc=mc,
-                flag_col=MetadataCols.filter_col_flag,
+                flag_col=filter_flag_col,
                 metric=override_filter_args.metric,
                 operation=override_filter_args.operation,
                 threshold=override_filter_args.threshold,
@@ -406,7 +408,7 @@ def filter_clusters(
             if strict_filter_args.apply_cluster:
                 apply_filter_threshold(
                     mc=mc,
-                    flag_col=MetadataCols.filter_col_flag,
+                    flag_col=filter_flag_col,
                     metric=strict_filter_args.metric,
                     operation=strict_filter_args.operation,
                     threshold=strict_filter_args.threshold,
@@ -587,6 +589,7 @@ if __name__ == "__main__":
         max_chunk=args.max_chunk,
         max_cpus=args.max_cpus,
         use_gpu=args.use_gpu,
+        ic_scale=args.ic,
         fast_plotting=args.fast_plot,
     )
 
@@ -691,7 +694,6 @@ if __name__ == "__main__":
                     modisco_dict=modisco_dict,
                     load_subpatterns=args.input_subpatterns,
                     modisco_region_width=args.modisco_region_width,
-                    ic=args.ic,
                     safe=args.safe,
                 )
                 if args.verbose:
@@ -745,7 +747,6 @@ if __name__ == "__main__":
             start_time = time.time()
         mc = MotifCompendium.build_from_pfm(
             pfm_dict=pfm_dict,
-            ic=args.ic,
             safe=args.safe,
         )
         if args.verbose:
@@ -811,8 +812,6 @@ if __name__ == "__main__":
                 VisualizeArgs.html_table_cols_base.append(col)
 
     # Add default columns
-    if args.ic:
-        mc.metadata[MetadataCols.ic_col] = args.ic
     mc.add_motif_strings(
         name=MetadataCols.motif_string_col,
     )
@@ -895,19 +894,19 @@ if __name__ == "__main__":
         # Apply filters
         if args.verbose:
             logging.info(f"Applying filters to motifs...")
-        mc[MetadataCols.filter_col_flag] = False
+        mc[MetadataCols.filter_flag_col] = False
         filter_motifs(
             mc=mc,
             MotifFilterArgs=MotifFilterArgs,
-            MetadataCols=MetadataCols,
+            filter_flag_col=MetadataCols.filter_flag_col,
             args=args,
         )
 
         # Remove flagged motifs
         if args.verbose:
             logging.info(f"Removing flagged motifs...")
-        mc_removed = mc[mc[MetadataCols.filter_col_flag]]
-        mc = mc[~mc[MetadataCols.filter_col_flag]]
+        mc_removed = mc[mc[MetadataCols.filter_flag_col]]
+        mc = mc[~mc[MetadataCols.filter_flag_col]]
         if args.verbose:
             logging.info(f"Number of motifs after removing flagged motifs: {len(mc)}\n"
                         f"Number of motifs removed: {len(mc_removed)}")
@@ -1277,9 +1276,9 @@ if __name__ == "__main__":
     
     # Sort MotifCompendium object
     if args.sim_threshold_meta:
-        mc.metadata["sort_cluster"] = mc.metadata[metacluster_col_name]
+        mc.metadata[MetadataCols.sort_cluster_col] = mc.metadata[metacluster_col_name]
     elif args.sim_threshold:
-        mc.metadata["sort_cluster"] = mc.metadata[cluster_col_name]
+        mc.metadata[MetadataCols.sort_cluster_col] = mc.metadata[cluster_col_name]
     else:
         # Cluster: Using same conditions
         if args.verbose:
@@ -1287,7 +1286,7 @@ if __name__ == "__main__":
         mc.cluster(
             algorithm=ClusterArgs.algorithm,
             similarity_threshold=MotifMatchArgs.sort_threshold,
-            save_name="sort_cluster",
+            save_name=MetadataCols.sort_cluster_col,
             largest_clusters_first=True,
             **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
         )
@@ -1367,7 +1366,7 @@ if __name__ == "__main__":
     # Sort by cluster
     if args.sim_threshold_meta:
         mc_cluster.metadata.rename(
-            columns={metacluster_col_name: "sort_cluster"},
+            columns={metacluster_col_name: MetadataCols.sort_cluster_col},
             inplace=True,
         )
     else:
@@ -1377,7 +1376,7 @@ if __name__ == "__main__":
         mc_cluster.cluster(
             algorithm=ClusterArgs.algorithm,
             similarity_threshold=MotifMatchArgs.sort_threshold,
-            save_name="sort_cluster",
+            save_name=MetadataCols.sort_cluster_col,
             largest_clusters_first=True,
             **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
         )
@@ -1444,7 +1443,7 @@ if __name__ == "__main__":
         mc_metacluster.cluster(
             algorithm=ClusterArgs.algorithm,
             similarity_threshold=MotifMatchArgs.sort_threshold,
-            save_name="sort_cluster",
+            save_name=MetadataCols.sort_cluster_col,
             largest_clusters_first=True,
             **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
         )
@@ -1510,11 +1509,11 @@ if __name__ == "__main__":
         if args.sort_cluster:
             # Sort by cluster
             mc_subcluster.metadata.rename(
-                columns={cluster_col_name: "sort_cluster"},
+                columns={cluster_col_name: MetadataCols.sort_cluster_col},
                 inplace=True,
             )
             mc_subcluster.sort(by=["num_motifs"], ascending=False, inplace=True)
-            mc_subcluster.sort(by=["sort_cluster"], ascending=True, inplace=True)
+            mc_subcluster.sort(by=[MetadataCols.sort_cluster_col], ascending=True, inplace=True)
         else:
             # Sort by positive, then negative clusters
             mc_metacluster.sort(by=["posneg", "num_motifs"], ascending=False, inplace=True)
@@ -1687,19 +1686,19 @@ if __name__ == "__main__":
         ## Cluster: Apply filters
         if args.verbose:
             logging.info(f"Applying filters to clusters...")
-        mc_cluster[MetadataCols.filter_col_flag] = False
+        mc_cluster[MetadataCols.filter_flag_col] = False
         filter_clusters(
             mc=mc_cluster,
             MotifFilterArgs=MotifFilterArgs,
-            MetadataCols=MetadataCols,
+            filter_flag_col=MetadataCols.filter_flag_col,
             args=args,
         )
 
         # Remove flagged clusters
         if args.verbose:
             logging.info(f"Removing flagged clusters...")
-        mc_cluster_removed = mc_cluster[mc_cluster[MetadataCols.filter_col_flag]]
-        mc_cluster = mc_cluster[~mc_cluster[MetadataCols.filter_col_flag]]
+        mc_cluster_removed = mc_cluster[mc_cluster[MetadataCols.filter_flag_col]]
+        mc_cluster = mc_cluster[~mc_cluster[MetadataCols.filter_flag_col]]
         if args.verbose:
             logging.info(f"Number of clusters after removing flagged: {len(mc_cluster)}\n"
                         f"Number of clusters removed: {len(mc_cluster_removed)}")
@@ -1724,18 +1723,18 @@ if __name__ == "__main__":
         if args.sim_threshold_meta:
             if args.verbose:
                 logging.info(f"Applying filters to meta-clusters...")
-            mc_metacluster[MetadataCols.filter_col_flag] = False
+            mc_metacluster[MetadataCols.filter_flag_col] = False
             filter_clusters(
                 mc=mc_metacluster,
                 MotifFilterArgs=MotifFilterArgs,
-                MetadataCols=MetadataCols,
+                filter_flag_col=MetadataCols.filter_flag_col,
                 args=args,
             )
             # Remove flagged clusters
             if args.verbose:
                 logging.info(f"Removing flagged meta-clusters...")
-            mc_metacluster_removed = mc_metacluster[mc_metacluster[MetadataCols.filter_col_flag]]
-            mc_metacluster = mc_metacluster[~mc_metacluster[MetadataCols.filter_col_flag]]
+            mc_metacluster_removed = mc_metacluster[mc_metacluster[MetadataCols.filter_flag_col]]
+            mc_metacluster = mc_metacluster[~mc_metacluster[MetadataCols.filter_flag_col]]
             if args.verbose:
                 logging.info(f"Number of meta-clusters after removing flagged: {len(mc_metacluster)}\n"
                             f"Number of meta-clusters removed: {len(mc_metacluster_removed)}")
@@ -1759,19 +1758,19 @@ if __name__ == "__main__":
         if args.sim_threshold_sub:
             if args.verbose:
                 logging.info(f"Applying filters to sub-clusters...")
-            mc_subcluster[MetadataCols.filter_col_flag] = False
+            mc_subcluster[MetadataCols.filter_flag_col] = False
             filter_clusters(
                 mc=mc_subcluster,
                 MotifFilterArgs=MotifFilterArgs,
-                MetadataCols=MetadataCols,
+                filter_flag_col=MetadataCols.filter_flag_col,
                 args=args,
             )
 
             # Remove flagged motifs
             if args.verbose:
                 logging.info(f"Removing flagged sub-clusters...")
-            mc_subcluster_removed = mc_subcluster[mc_subcluster[MetadataCols.filter_col_flag]]
-            mc_subcluster = mc_subcluster[~mc_subcluster[MetadataCols.filter_col_flag]]
+            mc_subcluster_removed = mc_subcluster[mc_subcluster[MetadataCols.filter_flag_col]]
+            mc_subcluster = mc_subcluster[~mc_subcluster[MetadataCols.filter_flag_col]]
             if args.verbose:
                 logging.info(f"Number of sub-clusters after removing flagged: {len(mc_subcluster)}\n"
                             f"Number of sub-clusters removed: {len(mc_subcluster_removed)}")

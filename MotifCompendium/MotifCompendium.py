@@ -26,6 +26,7 @@ def set_compute_options(
     max_cpus: int | None = None,
     use_gpu: bool | None = None,
     max_chunk: int | None = None,
+    ic_scale: bool | None = None,
     fast_plotting: bool | None = None,
     progress_bar: bool | None = None,
 ):
@@ -57,6 +58,8 @@ def set_compute_options(
         utils_config.set_use_gpu(use_gpu)
     if max_chunk is not None:
         utils_config.set_max_chunk(max_chunk)
+    if ic_scale is not None:
+        utils_config.set_ic_scale(ic_scale)
     if fast_plotting is not None:
         utils_config.set_fast_plotting(fast_plotting)
     if progress_bar is not None:
@@ -206,7 +209,7 @@ def build(
           large objects.
     """
     # Check motifs
-    utils_motif.validate_motif_stack_compendium(motifs)
+    # utils_motif.validate_motif_stack_compendium(motifs)
     # Metadata
     if metadata is None:
         metadata = pd.DataFrame()
@@ -229,9 +232,9 @@ def build(
 
 def build_from_modisco(
     modisco_dict: dict[str, str],
+    score_type: str = "contrib_scores",
     load_subpatterns: bool = False,
     modisco_region_width: int = 400,
-    ic: bool = True,
     safe: bool = True,
 ) -> MotifCompendium:
     """Builds a MotifCompendium object from a set of Modisco outputs.
@@ -245,7 +248,6 @@ def build_from_modisco(
           loaded at the pattern level.
         modisco_region_width: The region width used during Modisco. This argument only
           needs to be specified if using a non-standard region width.
-        ic: Whether or not to apply information content scaling to Modisco motifs.
         safe: Whether or not to construct the MotifCompendium safely.
 
     Returns:
@@ -258,24 +260,18 @@ def build_from_modisco(
           large objects.
     """
     # Load from Modisco
-    (
-        motifs,
+    (   motifs,
         motif_names,
         seqlet_counts,
         model_names,
         posnegs,
         avgdist_summits,
-        avg_contribs,
     ) = utils_loader.load_modiscos(
         modisco_dict,
+        score_type=score_type,
         load_subpatterns=load_subpatterns,
         modisco_region_width=modisco_region_width,
-        ic=ic,
     )
-    # Convert motifs to normalized 8-channel motifs
-    motifs = utils_motif.motif_4_to_8(motifs)
-    motif_scale = np.sum(motifs, axis=(1, 2), keepdims=True)
-    motifs /= motif_scale
     # Build metadata
     metadata = pd.DataFrame(
         {
@@ -283,9 +279,7 @@ def build_from_modisco(
             "num_seqlets": seqlet_counts,
             "model": model_names,
             "posneg": posnegs,
-            "avg_contrib": avg_contribs,
             "avg_dist_from_summit": avgdist_summits,
-            "motif_scale": motif_scale.squeeze(),
         }
     )
     # Construct object
@@ -298,7 +292,6 @@ def build_from_modisco(
 
 def build_from_pfm(
     pfm_dict: dict[str, str],
-    ic: bool = True,
     safe: bool = True,
 ) -> MotifCompendium:
     """Builds a MotifCompendium object from a set of PFM files.
@@ -307,8 +300,6 @@ def build_from_pfm(
 
     Args:
         pfm_dict: A dictionary mapping motif set name to PFM file path.
-        ic: Whether or not to apply information content scaling to the PFMs, effectively
-          making them PWMs.
         safe: Whether or not to construct the MotifCompendium safely.
 
     Returns:
@@ -319,19 +310,14 @@ def build_from_pfm(
         Safe building validates object integrity but may take significantly longer for
           large objects.
     """
-    motifs, motif_names, file_names = utils_loader.load_pfms(pfm_dict, ic)
-    # Convert motifs to normalized 8-channel motifs
+    motifs, motif_names, file_names = utils_loader.load_pfms(pfm_dict)
     posneg = utils_motif.motif_posneg_sum(motifs)
-    motifs = utils_motif.motif_4_to_8(motifs)
-    motif_scale = np.sum(motifs, axis=(1, 2), keepdims=True)
-    motifs /= motif_scale
     # Build metadata
     metadata = pd.DataFrame(
         {
             "name": motif_names,
             "posneg": posneg,
             "source": file_names,
-            "motif_scale": motif_scale.squeeze(),
         }
     )
     return build(
@@ -390,8 +376,8 @@ def combine(
             raise ValueError(
                 "compendium_names must have the same length as compendiums."
             )
-    else:
-        compendium_names = [f"compendium_{i}" for i in range(len(compendiums))]
+    # else:
+    #     compendium_names = [f"compendium_{i}" for i in range(len(compendiums))]
     # Confirm that the motifs from each MotifCompendium are compatible
     # motifs_length = compendiums[0].motifs.shape[1]
     # if not all([x.motifs.shape[1] == motifs_length for x in compendiums]):
@@ -417,11 +403,6 @@ def combine(
             + "\n(Check mc.images() for each MotifCompendium.)"
         )
     n = len(compendiums)
-    # MotifCompendium cannot already have a "source_compendium" column
-    if "source_compendium" in metadata_columns:
-        raise KeyError(
-            "The 'source_compendium' column may not already exist in the source MotifCompendium."
-        )
     # Prepare motifs
     motif_lengths = [mc.motifs.shape[1] for mc in compendiums]
     max_length = max(motif_lengths)
@@ -470,9 +451,10 @@ def combine(
     # Metadata
     metadata = pd.concat([mc.metadata for mc in compendiums], ignore_index=True)
     source_compendium = []
-    for i, mc in enumerate(compendiums):
-        source_compendium.extend([compendium_names[i]] * len(mc))
-    metadata["source_compendium"] = source_compendium
+    if compendium_names is not None:
+        for i, mc in enumerate(compendiums):
+            source_compendium.extend([compendium_names[i]] * len(mc))
+        metadata["source_compendium"] = source_compendium
     # Images
     __images = pd.DataFrame(index=metadata.index)
     for images in compendiums[0].images():
@@ -595,7 +577,7 @@ class MotifCompendium:
               MotifCompendium.
         """
         # motifs
-        utils_motif.validate_motif_stack_compendium(self.motifs)
+        # utils_motif.validate_motif_stack_compendium(self.motifs)
         # similarity
         if not (
             isinstance(self.similarity, np.ndarray)
@@ -827,7 +809,7 @@ class MotifCompendium:
         self.__images.drop(image_name, axis=1, inplace=True)
 
     # SLICING AND SORTING
-    def __getitem__(self, key: str | pd.Series) -> pd.Series | MotifCompendium:
+    def __getitem__(self, key: str | pd.Series | slice | list[int]) -> pd.Series | MotifCompendium:
         """Get columns or subsets of the MotifCompendium.
 
         Allows indexing into the MotifCompendium with the same syntax as a Pandas
@@ -849,28 +831,33 @@ class MotifCompendium:
         if isinstance(key, str):
             return self.metadata[key]
         elif isinstance(key, pd.Series) and key.dtype == bool:
-            # metadata
-            metadata_slice = self.metadata[key]
-            keep_idxs = list(metadata_slice.index)
-            metadata_slice = metadata_slice.reset_index(drop=True)
-            # __images
-            __images_slice = self.__images.iloc[keep_idxs].reset_index(drop=True)
-            # matrices
-            motifs_slice = self.motifs[keep_idxs, :, :]
-            similarity_slice = self.similarity[keep_idxs, :][:, keep_idxs]
-            alignment_rc_slice = self.alignment_rc[keep_idxs, :][:, keep_idxs]
-            alignment_h_slice = self.alignment_h[keep_idxs, :][:, keep_idxs]
-            return MotifCompendium(
-                motifs_slice,
-                similarity_slice,
-                alignment_rc_slice,
-                alignment_h_slice,
-                metadata_slice,
-                __images_slice,
-                safe=False,
-            )
+            keep_idxs = list(self.metadata[key].index)
+        elif isinstance(key, slice):
+            keep_idxs = list(range(*key.indices(len(self.metadata))))
+        elif isinstance(key, list) and all(isinstance(i, int) for i in key):
+            keep_idxs = key
         else:
             raise TypeError("MotifCompendium cannot be indexed by this.")
+
+        # metadata
+        metadata_slice = self.metadata.iloc[keep_idxs].reset_index(drop=True)
+        # __images
+        __images_slice = self.__images.iloc[keep_idxs].reset_index(drop=True)
+        # matrices
+        motifs_slice = self.motifs[keep_idxs, :, :]
+        similarity_slice = self.similarity[keep_idxs, :][:, keep_idxs]
+        alignment_rc_slice = self.alignment_rc[keep_idxs, :][:, keep_idxs]
+        alignment_h_slice = self.alignment_h[keep_idxs, :][:, keep_idxs]
+
+        return MotifCompendium(
+            motifs_slice,
+            similarity_slice,
+            alignment_rc_slice,
+            alignment_h_slice,
+            metadata_slice,
+            __images_slice,
+            safe=False,
+        )
 
     def __setitem__(self, key: str, value) -> None:
         """Set the value of a column in the metadata.
@@ -2087,8 +2074,12 @@ class MotifCompendium:
         elif self.motifs.shape[2] == 4 and reference_motifs.shape[2] == 8:
             reference_motifs = utils_motif.motif_8_to_4_unsigned(reference_motifs)
         # L2 normalize once
-        my_motifs /= np.linalg.norm(my_motifs, axis=(1, 2), keepdims=True)
-        reference_motifs /= np.linalg.norm(reference_motifs, axis=(1, 2), keepdims=True)
+        l2_norms = np.linalg.norm(my_motifs, axis=(1, 2), keepdims=True)
+        l2_norms[l2_norms == 0] = 1
+        my_motifs /= l2_norms
+        l2_norms = np.linalg.norm(reference_motifs, axis=(1, 2), keepdims=True)
+        l2_norms[l2_norms == 0] = 1
+        reference_motifs /= l2_norms
         # Find best match, per iteration
         match_scores = []
         match_labels = []

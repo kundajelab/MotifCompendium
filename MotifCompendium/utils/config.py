@@ -6,6 +6,7 @@ _MAX_CPUS = 1
 _USE_GPU = False
 _FAST_PLOTTING = False
 _PROGRESS_BAR = False
+_IC_SCALE = True
 
 
 def get_max_cpus() -> int:
@@ -26,6 +27,10 @@ def get_fast_plotting() -> bool:
 
 def get_progress_bar() -> bool:
     return _PROGRESS_BAR
+
+
+def get_ic_scale() -> bool:
+    return _IC_SCALE
 
 
 def set_max_cpus(max_cpus: int) -> None:
@@ -65,3 +70,9 @@ def set_progress_bar(progress_bar: bool) -> None:
         raise TypeError("Progress bar must be a boolean.")
     global _PROGRESS_BAR
     _PROGRESS_BAR = progress_bar
+
+def set_ic_scale(ic_scale: bool) -> None:
+    if not isinstance(ic_scale, bool):
+        raise TypeError("IC scale must be a boolean.")
+    global _IC_SCALE
+    _IC_SCALE = ic_scale

@@ -3,6 +3,7 @@ import functools
 import numpy as np
 import pandas as pd
 
+import MotifCompendium.utils.config as utils_config
 
 ##################
 # MOTIF CHECKING #
@@ -949,3 +950,45 @@ def calculate_dinucleotide_score(x: np.ndarray) -> float | np.ndarray:
         1 - np.eye(x.shape[2])[np.newaxis, np.newaxis, :, :]
     )  # Remove diagonal (self-pairs)
     return np.max(np.sum(dinucleotide_scores, axis=1), axis=(1, 2))  # (N, )
+
+
+@single_or_many_motifs
+def l1_norm_motif(motifs: np.ndarray) -> np.ndarray:
+    """L1 normalize by motif.
+
+    Each motif is normalized such that the sum of the absolute values of all elements
+      in the motif is equal to 1.
+
+    Args:
+        x: A (L, K) motif or (N, L, 4) motif stack.
+
+    Returns:
+        The L1 normalized motif or motif stack.
+    """
+    # L1 normalize by motif
+    norm = np.sum(motifs, axis=(1, 2), keepdims=True)
+    motifs = np.divide(
+        motifs, norm, out=np.zeros_like(motifs, dtype=motifs.dtype), where=norm!=0
+    )
+    return motifs
+
+
+@single_or_many_motifs
+def l1_norm_position(motifs: np.ndarray) -> np.ndarray:
+    """L1 normalize by position.
+
+    Each motif is normalized such that the sum of the absolute values of all elements
+      in the motif is equal to 1.
+
+    Args:
+        x: A (L, K) motif or (N, L, 4) motif stack.
+
+    Returns:
+        The L1 normalized motif or motif stack.
+    """
+    # L1 normalize by position
+    norm = np.sum(motifs, axis=(-1), keepdims=True)
+    motifs = np.divide(
+        motifs, norm, out=np.zeros_like(motifs, dtype=motifs.dtype), where=norm!=0
+    )
+    return motifs

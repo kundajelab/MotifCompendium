@@ -25,9 +25,9 @@ class _FilterArgs:
 class MetadataCols:
     # INTERNAL: Metadata columns for MotifCompendium
     label_column_prefix: str = "reference"
-    filter_col_flag: str = "flag_remove"
-    ic_col: str = "ic-scaled"
+    filter_flag_col: str = "flag_remove"
     motif_string_col: str = "motif_string"
+    sort_cluster_col: str = "sort_cluster"
 
 @dataclass
 class OutputPaths:
@@ -63,7 +63,6 @@ class OutputPaths:
     html_metacluster_removed: str = "motifcompendium_metacluster_removed_table.html"
     html_subcluster_table: str = "motifcompendium_subcluster_table.html"
     html_subcluster_removed: str = "motifcompendium_subcluster_removed_table.html"
-
 
 @dataclass
 class MotifMatchArgs:
@@ -304,7 +303,7 @@ class MotifFilterArgs:
             apply_cluster=False,
         ),
     )
-    # Override: filter_col_flag AND apply_filter_threshold must both be True, to keep flag True
+    # Override: filter_flag_col AND apply_filter_threshold must both be True, to keep flag True
     override_filters: tuple = (
         _FilterArgs(
             name="base_match",

@@ -37,8 +37,13 @@ def compute_similarities(
           calculation result tuple consists of a similarity matrix, an alignemnt_fr
           matrix, and an alignment_h matrix.
     """
-    for motif_stack in motif_stack_list:
-        utils_motif.validate_motif_stack_similarity(motif_stack)
+    motif_stack_list_modified = []
+    for i, motif_stack in enumerate(motif_stack_list):
+        if utils_config.get_ic_scale():
+            motif_stack = utils_motif.ic_scale(motif_stack)  # IC-scale
+        motif_stack = utils_motif.motif_4_to_8(motif_stack)  # Convert to 8-channel
+        motif_stack_list_modified.append(motif_stack)
+    motif_stack_list = motif_stack_list_modified
     _, L0, K0 = motif_stack_list[0].shape
     for motif_stack in motif_stack_list[1:]:
         _, L, K = motif_stack.shape
