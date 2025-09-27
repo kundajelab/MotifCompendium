@@ -1,11 +1,12 @@
 ####################
 # COMPUTE SETTINGS #
 ####################
-_MAX_CHUNK = -1
 _MAX_CPUS = 1
 _USE_GPU = False
-_FAST_PLOTTING = False
+_IC_SCALED_SIMILARITY = True
+_MAX_CHUNK = -1
 _PROGRESS_BAR = False
+_FAST_PLOTTING = False
 
 
 def get_max_cpus() -> int:
@@ -16,16 +17,20 @@ def get_use_gpu() -> bool:
     return _USE_GPU
 
 
+def get_ic_scaled_similarity() -> bool:
+    return _IC_SCALED_SIMILARITY
+
+
 def get_max_chunk() -> int:
     return _MAX_CHUNK
 
 
-def get_fast_plotting() -> bool:
-    return _FAST_PLOTTING
-
-
 def get_progress_bar() -> bool:
     return _PROGRESS_BAR
+
+
+def get_fast_plotting() -> bool:
+    return _FAST_PLOTTING
 
 
 def set_max_cpus(max_cpus: int) -> None:
@@ -44,6 +49,13 @@ def set_use_gpu(use_gpu: bool) -> None:
     _USE_GPU = use_gpu
 
 
+def set_ic_scaled_similarity(ic_scaled_similarity: bool) -> None:
+    if not isinstance(ic_scaled_similarity, bool):
+        raise TypeError("IC scaled similarity must be a boolean.")
+    global _IC_SCALED_SIMILARITY
+    _IC_SCALED_SIMILARITY = ic_scaled_similarity
+
+
 def set_max_chunk(max_chunk: int) -> None:
     if not isinstance(max_chunk, int):
         raise TypeError("Max chunk must be an integer.")
@@ -53,15 +65,15 @@ def set_max_chunk(max_chunk: int) -> None:
     _MAX_CHUNK = max_chunk
 
 
-def set_fast_plotting(fast_plotting: bool) -> None:
-    if not isinstance(fast_plotting, bool):
-        raise TypeError("Fast plotting must be a boolean.")
-    global _FAST_PLOTTING
-    _FAST_PLOTTING = fast_plotting
-
-
 def set_progress_bar(progress_bar: bool) -> None:
     if not isinstance(progress_bar, bool):
         raise TypeError("Progress bar must be a boolean.")
     global _PROGRESS_BAR
     _PROGRESS_BAR = progress_bar
+
+
+def set_fast_plotting(fast_plotting: bool) -> None:
+    if not isinstance(fast_plotting, bool):
+        raise TypeError("Fast plotting must be a boolean.")
+    global _FAST_PLOTTING
+    _FAST_PLOTTING = fast_plotting

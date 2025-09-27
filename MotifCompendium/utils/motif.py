@@ -34,44 +34,47 @@ def single_or_many_motifs(func):
 
 
 def validate_motif_basic(motifs: np.ndarray) -> None:
-    """Validate that motifs are np.ndarrays with with a last channel size of 4 or 8."""
-    if not (isinstance(motifs, np.ndarray) and (motifs.shape[-1] in [4, 8])):
-        raise TypeError("Motifs must be a np.ndarray of 4 or 8 channels.")
+    """Validate that motifs are np.ndarrays with 2/3 dimensions and 4/8 channels."""
+    if not isinstance(motifs, np.ndarray):
+        raise TypeError("Motifs must be a np.ndarray.")
+    if not ((len(motifs.shape) in [2, 3]) and (motifs.shape[-1] in [4, 8])):
+        raise ValueError("Must be a single motif or motif stack with either 4/8 channels.")
+
+
+def validate_motif_standard(motifs: np.ndarray) -> None:
+    """Validate that motifs are in a standard 4 channel representation."""
+    validate_motif_basic(motifs)
+    if not motifs.shape[-1] == 4:
+        raise ValueError("Must have 4 channels.")
+
+
+def validate_single_motif(motif: np.ndarray) -> None:
+    """Validate that motifs are a single (L, 4) motif."""
+    validate_motif_standard(motif)
+    if not len(motif.shape) == 2:
+        raise ValueError("Must be of shape (L, 4).")
 
 
 def validate_motif_stack(motifs: np.ndarray) -> None:
     """Validate that motifs are a motif stack."""
     validate_motif_basic(motifs)
     if not len(motifs.shape) == 3:
-        raise ValueError("Motif stack must be of shape (N, L, 4/8).")
+        raise ValueError("Must be of shape (N, L, 4).")
 
 
 def validate_motif_stack_standard(motifs: np.ndarray) -> None:
     """Validate that motifs are a standard (N, L, 4) shape."""
     validate_motif_stack(motifs)
-    if not motifs.shape[2] == 4:
-        raise ValueError("Motif stack must be of shape (N, L, 4).")
+    validate_motif_standard(motifs)
 
 
 def validate_motif_stack_similarity(motifs: np.ndarray) -> None:
-    """Validate that motifs are fit for similarity calculations."""
+    """Validate that motifs are fit for the core similarity calculation."""
     validate_motif_stack(motifs)
-    if not (motifs >= 0).all():
+    if not motifs.shape[2] == 8:
+        raise ValueError("Must be of shape (N, L, 8).")
+    if not np.all(motifs >= 0):
         raise ValueError("Motifs must be non-negative.")
-
-
-def validate_motif_stack_compendium(motifs: np.ndarray) -> None:
-    """Validate that motifs belong in a MotifCompendium."""
-    validate_motif_stack_similarity(motifs)
-    if not np.allclose(motifs.sum(axis=(1, 2)), 1):
-        raise ValueError("Motifs must sum to 1.")
-
-
-def validate_motif_stack_entropy(motifs: np.ndarray) -> None:
-    """Validate that motifs are fit for entropy calculations."""
-    validate_motif_stack_compendium(motifs)
-    if not motifs.shape[2] == 4:
-        raise ValueError("Motif stack must be of shape (N, L, 4).")
 
 
 #######################

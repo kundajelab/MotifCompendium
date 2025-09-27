@@ -16,6 +16,7 @@ from MotifCompendium.utils.similarity_core import compute_similarity_and_align
 def compute_similarities(
     motif_stack_list: list[np.ndarray],
     calculations: list[tuple[int, int]],
+    unsigned: bool = False,
 ) -> list[tuple[np.ndarray, np.ndarray, np.ndarray]]:
     """Performs similarity and calculations between sets of motif stacks.
 
@@ -30,6 +31,8 @@ def compute_similarities(
           the index of a motif stack in the motif_stack_list. For example, the
           calculation (i, j) says to compute the pairwise similarity between all motifs
           in motif stack i and motif stack j.
+        unsigned: If True, compute similarity on unsigned motifs, ignoring negative
+          values. If False, compute similarity on motifs as provided.
 
     Returns:
         A list of motif calculation result tuples. There is one motif calculation result
@@ -37,15 +40,22 @@ def compute_similarities(
           calculation result tuple consists of a similarity matrix, an alignemnt_fr
           matrix, and an alignment_h matrix.
     """
+    # VALIDATE
     for motif_stack in motif_stack_list:
-        utils_motif.validate_motif_stack_similarity(motif_stack)
-    _, L0, K0 = motif_stack_list[0].shape
+        utils_motif.validate_motif_stack_standard(motif_stack)
+    L0 = motif_stack_list[0].shape[1]
     for motif_stack in motif_stack_list[1:]:
-        _, L, K = motif_stack.shape
-        if L != L0 or K != K0:
-            raise ValueError(
-                "All motifs must have the same length and number of channels."
-            )
+        L = motif_stack.shape[1]
+        if L != L0:
+            raise ValueError("All motifs must have the same length.")
+    # PREPROCESS
+    if unsigned:
+        motif_stack_list = [np.abs(motif_stack) for motif_stack in motif_stack_list] # Unsigned
+    if utils_config.get_ic_scaled_similarity():
+        motif_stack_list = [utils_motif.ic_scale(motif_stack) for motif_stack in motif_stack_list] # IC scale
+    motif_stack_list = [utils_motif.motif_4_to_8(motif_stack) for motif_stack in motif_stack_list] # 8 channel
+    motif_stack_list = [motif_stack/np.linalg.norm(motif_stack, axis=(1,2), keepdims=True) for motif_stack in motif_stack_list] # L2 normalize
+    # COMPUTE
     if utils_config.get_max_chunk() != -1:
         (
             chunked_motif_stack_list,
@@ -141,14 +151,6 @@ def _compute_similarity_and_align_parallel(
                         motif_stack_list[c[0]], motif_stack_list[c[1]]
                     )
                 )
-            # results = []
-            # for c in tqdm(calculations, desc="computing similarities on GPU..."):
-            #     results.append(
-            #         compute_similarity_and_align(
-            #             motif_stack_list[c[0]], motif_stack_list[c[1]]
-            #         )
-            #     )
-            # return results
         else:
             to_do_results = [
                 compute_similarity_and_align(
@@ -156,12 +158,6 @@ def _compute_similarity_and_align_parallel(
                 )
                 for c in to_do_calculations
             ]
-            # return [
-            #     compute_similarity_and_align(
-            #         motif_stack_list[c[0]], motif_stack_list[c[1]]
-            #     )
-            #     for c in calculations
-            # ]
     else:
         if utils_config.get_max_cpus() == 1 or len(calculations) == 1:
             # SINGLE CPU CALCULATIONS
@@ -171,12 +167,6 @@ def _compute_similarity_and_align_parallel(
                 )
                 for c in to_do_calculations
             ]
-            # return [
-            #     compute_similarity_and_align(
-            #         motif_stack_list[c[0]], motif_stack_list[c[1]]
-            #     )
-            #     for c in calculations
-            # ]
         else:
             # MULTI-CPU CALCULATIONS
             inputs = [
@@ -188,14 +178,6 @@ def _compute_similarity_and_align_parallel(
             )  # don't use more CPUs than available
             with multiprocessing.Pool(processes=num_processes) as p:
                 to_do_results = p.starmap(compute_similarity_and_align, inputs)
-            # inputs = [
-            #     (motif_stack_list[c[0]], motif_stack_list[c[1]]) for c in calculations
-            # ]
-            # num_processes = min(
-            #     utils_config.get_max_cpus(), multiprocessing.cpu_count()
-            # )  # don't use more CPUs than available
-            # with multiprocessing.Pool(processes=num_processes) as p:
-            #     return p.starmap(compute_similarity_and_align, inputs)
     # Build full results
     results = []
     for c0, c1 in calculations:

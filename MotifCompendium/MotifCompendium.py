@@ -503,11 +503,11 @@ class MotifCompendium:
       EX: mc_neural = mc[mc["organ"] == "brain"].
 
     Attributes:
-        motifs: A np.ndarray representing the motifs. Of shape (N, 30, 8/4).
-          motifs[i, :, :] represents motif i.
+        motifs: A np.ndarray representing the motifs. Of shape (N, L, 4). motifs[i]
+          represents motif i.
         similarity: A np.ndarray of floats containing the pairwise similarity scores
           between each motif. Of shape (N, N). similarity[i, j] is the similarity
-          between motif i and motif j and can be within [0, 1].
+          between motif i and motif j and is within [0, 1].
         alignment_rc: A np.ndarray of bools containing the reverse complement
           relationship between two motifs. Of shape (N, N). alignment_rc[i, j] is True
           if motif i should be reverse complemented to best align with motif j.
@@ -577,6 +577,7 @@ class MotifCompendium:
         if not save_loc.endswith(".mc"):
             save_loc += ".mc"
         with h5py.File(save_loc, "w") as f:
+            f.attrs["version"] = "1.1.0"
             f.create_dataset("motifs", data=self.motifs)
             f.create_dataset("similarity", data=self.similarity.astype(np.single))
             f.create_dataset("alignment_rc", data=self.alignment_rc.astype(np.bool_))
@@ -1558,7 +1559,9 @@ class MotifCompendium:
                     case "sum":
                         agg_dict["values"].append(np.sum(agg_c_data))
                     case "average" | "avg" | "mean":
-                            agg_dict["values"].append(np.average(agg_c_data, weights=weights_c))
+                        agg_dict["values"].append(
+                            np.average(agg_c_data, weights=weights_c)
+                        )
                     case "concatenate" | "concat":
                         agg_dict["values"].append(
                             ",".join(sorted(set(map(str, agg_c_data))))
