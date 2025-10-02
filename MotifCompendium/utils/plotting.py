@@ -31,6 +31,8 @@ class LogoPlottingInput:
           plotted.
         revcomp: A boolean indicating whether the motif needs to be reverse
           complemented.
+        ic_scale: A boolean indicating whether the motif should be IC scaled when
+          plotting.
         pos: An int representing the position of the motif (shifted post-reverse
           complement).
         xmin: An int representing the minimum value of the x-axis in the logo plot.
@@ -57,6 +59,7 @@ class LogoPlottingInput:
         self,
         motif: np.ndarray,
         revcomp: bool = False,
+        ic_scale: bool = True,
         pos: int = 0,
         trim: bool | float | int = False,
         name: str = "motif",
@@ -72,6 +75,7 @@ class LogoPlottingInput:
             motif: A np.ndarray that is assigned to self.motifs.
             revcomp: A bool that is assigned to self.revcomp.
             pos: An int that is assigned to self.pos.
+            ic_scale: A bool that is assigned to self.ic_scale.
             trim: A bool or float/int indicating how the motif should be trimmed when
               plotting. If False, the motif will not be trimmed at all. If True, the
               motif will be trimmed at the flanks with a standard threshold of 1/L. If a
@@ -85,11 +89,10 @@ class LogoPlottingInput:
             ax: A matplotlib.axes.Axes object that is assigned to self.ax.
         """
         # Motif
-        utils_motif.validate_motif_basic(motif)
-        if len(motif.shape) != 2:
-            raise ValueError("Can only plot a 2D motif.")
+        utils_motif.validate_single_motif_standard(motif)
         self.motif = motif
         self.revcomp = revcomp
+        self.ic_scale = ic_scale
         self.pos = pos
         self.xmin = 0
         self.xmax = motif.shape[0] - 1
@@ -114,29 +117,29 @@ class LogoPlottingInput:
 
     def get_motif_df(self) -> pd.DataFrame:
         """Returns a pd.DataFrame of the motif that can be passed to logomaker."""
+        # Transform motif representation
+        motif_to_plot = self.motif
+        if self.revcomp:
+            motif_to_plot = utils_motif.reverse_complement(motif_to_plot)
+        if self.ic_scale:
+            motif_to_plot = utils_motif.ic_scale(motif_to_plot)
         # Trim motif if needed
-        if isinstance(self.trim, bool) and not self.trim:
-            motif_to_plot = self.motif
-        elif isinstance(self.trim, bool) and self.trim:
-            motif_to_plot = utils_motif.trim_motif(self.motif, 1 / self.motif.shape[0])
-        else:
-            motif_to_plot = utils_motif.trim_motif(self.motif, self.trim)
+        if isinstance(self.trim, bool) and self.trim:
+            motif_to_plot = utils_motif.trim_motif(
+                motif_to_plot, 1 / motif_to_plot.shape[0]
+            )
+        elif isinstance(self.trim, (int, float)):
+            motif_to_plot = utils_motif.trim_motif(motif_to_plot, self.trim)
         # If trimming deletes motif, return None
         if motif_to_plot is None:
             return None
-        # Reverse complement
-        if self.revcomp:
-            motif_df = utils_motif.motif_to_df(
-                utils_motif.reverse_complement(motif_to_plot)
-            )
-        else:
-            motif_df = utils_motif.motif_to_df(motif_to_plot)
-        # If any trimming happening, don't reposition or reindex
+        # Create df
+        motif_df = utils_motif.motif_to_df(motif_to_plot)
+        # If any trimming happened, don't reposition or index
         if not ((isinstance(self.trim, bool) and not self.trim)):
             return motif_df
-        # Then shift
+        # Shift and set bounds
         motif_df.index += self.pos
-        # Then set bounds
         return motif_df.reindex(range(self.xmin, self.xmax + 1), fill_value=0)
 
 
@@ -145,6 +148,7 @@ class LogoPlottingInput:
 ###########################
 def plot_motif(
     motif: np.ndarray,
+    ic_scale: bool = True,
     show: bool = True,
     save_loc: str | None = None,
 ) -> None:
@@ -155,16 +159,15 @@ def plot_motif(
 
     Args:
         motif: A np.ndarray of shape (L, 4) representing the motif to be plotted.
+        ic_scale: Whether or not the motif should be IC scaled when plotting.
         show: Whether or not to show the heatmap with plt.show().
         save_loc: Where to save the motif plot to. If None, the motif plot is not saved.
     """
     # Check inputs
-    utils_motif.validate_motif_basic(motif)
-    if not len(motif.shape) == 2 and motif.shape[1] == 4:
-        raise TypeError("motif must be a 2D array with shape (L, 4).")
+    utils_motif.validate_single_motif_standard(motif)
     # Plot
     fig, ax = plt.subplots(figsize=(6, 2))
-    motif_logo = LogoPlottingInput(motif, ax=ax, encode=False)
+    motif_logo = LogoPlottingInput(motif, ic_scale=ic_scale, ax=ax, encode=False)
     _plot_motif_logo(motif_logo)
     # Output
     if save_loc is not None:
@@ -177,6 +180,7 @@ def plot_motif_stack(
     motif_stack: np.ndarray,
     alignment_rc: np.ndarray | None = None,
     alignment_h: np.ndarray | None = None,
+    ic_scale: bool = True,
     show: bool = False,
     save_loc: str | None = None,
 ) -> None:
@@ -192,6 +196,7 @@ def plot_motif_stack(
           alignment is performed.
         alignment_h: A (N, ) horizontal alignment vector. If None, no alignment is
           performed.
+        ic_scale: Whether or not the motifs should be IC scaled when plotting.
         show: Whether or not to show the heatmap with plt.show().
         save_loc: Where to save the motif plot to. If None, the motif plot is not saved.
     """
@@ -224,6 +229,7 @@ def plot_motif_stack(
             LogoPlottingInput(
                 motif_stack[i],
                 revcomp=alignment_rc[i],
+                ic_scale=ic_scale,
                 pos=alignment_h[i],
                 encode=False,
                 ax=ax,

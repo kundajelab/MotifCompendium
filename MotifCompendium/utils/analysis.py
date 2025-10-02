@@ -255,7 +255,6 @@ def export_compendium_modisco(
     mc: MotifCompendiumClass,
     name_col: str,
     save_loc: str,
-    inverse_ic: bool = False,
 ) -> None:
     """Exports MotifCompendium in the Modisco file format.
 
@@ -267,11 +266,6 @@ def export_compendium_modisco(
         mc: The MotifCompendium to export.
         name_col: The column in the MotifCompendium to name the motifs by.
         save_loc: The location to save the Modisco h5py to.
-        inverse_ic: Whether or not to perform inverse information content scaling on
-          motifs. This should only be set to True if you want to revert previous IC
-          scaling. If you built your MotifCompendium from Modisco motifs and did not
-          explicitly turn off IC scaling, then your motifs were IC scaled and you may
-          want to perform inverse IC scaling before exporting them.
 
     Notes:
         Motif names cannot have slashes (/) in them!
@@ -283,9 +277,7 @@ def export_compendium_modisco(
     # Check name cols are unique
     if len(mc) != len(mc[name_col].unique()):
         raise ValueError("Motif names must be unique!")
-    pos_neg_series = pd.Series(
-        utils_motif.motif_posneg_sum(mc.get_standard_motif_stack())
-    )
+    pos_neg_series = pd.Series(utils_motif.motif_posneg_sum(mc.motifs))
     with h5py.File(save_loc, "w") as f:
         f.attrs["window_size"] = mc.motifs.shape[1]
         for pos_neg in ["pos", "neg"]:
@@ -293,7 +285,7 @@ def export_compendium_modisco(
                 # Metapattern: Pos, Neg
                 metapattern_group = f.create_group(f"{pos_neg}_patterns")
                 mc_posneg = mc[pos_neg_series == pos_neg]
-                motifs_posneg = mc_posneg.get_standard_motif_stack()
+                motifs_posneg = mc_posneg.motifs
                 pattern_names = mc_posneg[name_col].tolist()
                 # Pattern
                 for i in range(len(mc_posneg)):
@@ -301,8 +293,6 @@ def export_compendium_modisco(
                     if "/" in name:
                         raise ValueError("Motif names cannot have slashes (/) in them!")
                     motif = motifs_posneg[i]
-                    if inverse_ic:
-                        motif = utils_motif.ic_scale(motif, invert=True)
                     pattern_group = metapattern_group.create_group(name)
                     pattern_group.create_dataset("contrib_scores", data=motif)
 
@@ -311,7 +301,6 @@ def export_compendium_clustered_modisco(
     mc: MotifCompendiumClass,
     cluster_name: str,
     save_loc: str,
-    inverse_ic: bool = False,
     weight_col: str | None = None,
     export_subpatterns: bool = False,
 ) -> None:
@@ -326,11 +315,6 @@ def export_compendium_clustered_modisco(
         mc: The MotifCompendium to export.
         cluster_name: The motif clustering to group motifs by.
         save_loc: The location to save the Modisco h5py to.
-        inverse_ic: Whether or not to perform inverse information content scaling on
-          motifs. This should only be set to True if you want to revert previous IC
-          scaling. If you built your MotifCompendium from Modisco motifs and did not
-          explicitly turn off IC scaling, then your motifs were IC scaled and you may
-          want to perform inverse IC scaling before exporting them.
         weight_col: The name of the metadata column to be used to weight motifs when
           computing motif averages. The data in the weight_col should be numeric.
         export_subpatterns: Whether or not to export the individual motifs as
@@ -355,9 +339,7 @@ def export_compendium_clustered_modisco(
         weight_col=weight_col,
     )
     mc_avg.sort("source_cluster", inplace=True)
-    pos_neg_series = pd.Series(
-        utils_motif.motif_posneg_sum(mc_avg.get_standard_motif_stack())
-    )
+    pos_neg_series = pd.Series(utils_motif.motif_posneg_sum(mc_avg.motifs))
     with h5py.File(save_loc, "w") as f:
         f.attrs["window_size"] = mc_avg.motifs.shape[1]
         for pos_neg in ["pos", "neg"]:
@@ -365,7 +347,6 @@ def export_compendium_clustered_modisco(
                 # Metapattern: Pos, Neg
                 metapattern_group = f.create_group(f"{pos_neg}_patterns")
                 mc_avg_posneg = mc_avg[pos_neg_series == pos_neg]
-                avg_motifs = mc_avg_posneg.get_standard_motif_stack()
                 pattern_names = mc_avg_posneg["source_cluster"].tolist()
                 if len(pattern_names) != len(set(pattern_names)):
                     raise ValueError("Cluster names must be unique!")
@@ -376,15 +357,12 @@ def export_compendium_clustered_modisco(
                         raise ValueError(
                             "Cluster names cannot have slashes (/) in them!"
                         )
-                    avg_motif = avg_motifs[i]
-                    if inverse_ic:
-                        avg_motif = utils_motif.ic_scale(avg_motif, invert=True)
+                    avg_motif = mc_avg_posneg.motifs[i]
                     pattern_group = metapattern_group.create_group(pattern_name)
                     pattern_group.create_dataset("contrib_scores", data=avg_motif)
                     # Subpatterns
                     if export_subpatterns:
                         mc_i = mc[mc[cluster_name] == pattern_name]
-                        motifs_i = mc_i.get_standard_motif_stack()
                         subpattern_names_i = mc_i["name"].tolist()
                         if len(subpattern_names_i) != len(set(subpattern_names_i)):
                             raise ValueError("Motif names must be unique!")
@@ -397,19 +375,14 @@ def export_compendium_clustered_modisco(
                             subpattern_group = pattern_group.create_group(
                                 subpattern_name
                             )
-                            motif = motifs_i[j]
-                            if inverse_ic:
-                                motif = utils_motif.ic_scale(motif, invert=True)
+                            motif = mc_i.motifs[j]
                             subpattern_group.create_dataset(
                                 "contrib_scores", data=motif
                             )
 
 
 def export_compendium_meme(
-    mc: MotifCompendiumClass,
-    save_loc: str,
-    name_col: str = "name",
-    inverse_ic: bool = False,
+    mc: MotifCompendiumClass, save_loc: str, name_col: str = "name"
 ) -> None:
     """Exports MotifCompendium in the MEME file format.
 
@@ -420,17 +393,10 @@ def export_compendium_meme(
         mc: The MotifCompendium to export.
         name_col: The column in the MotifCompendium to name the motifs by.
         save_loc: The location to save the MEME file to.
-        inverse_ic: Whether or not to perform inverse information content scaling on
-          motifs. This should only be set to True if you want to revert previous IC
-          scaling. If you built your MotifCompendium from Modisco motifs and did not
-          explicitly turn off IC scaling, then your motifs were IC scaled and you may
-          want to perform inverse IC scaling before exporting them.
 
     Notes:
         Assumes that there is a "num_seqlets" column in the MotifCompendium.
     """
-    # Validate motifs
-    motifs = mc.get_standard_motif_stack()
     motif_names = mc[name_col].tolist()
     num_seqlets = None
     if "num_seqlets" in mc.columns():
@@ -444,12 +410,9 @@ def export_compendium_meme(
         f.write("A 0.25 C 0.25 G 0.25 T 0.25\n")
         for i in range(len(mc)):
             name = motif_names[i]
-            motif = motifs[i]
+            motif = mc.motifs[i]
             # Remove empty flanks
             motif = utils_motif.trim_motif(motif, 0)  # Remove zero flanks
-            # Inverse IC scaling
-            if inverse_ic:
-                motif = utils_motif.ic_scale(motif, invert=True)
             # Write motif
             f.write(f"\nMOTIF {name}\n")
             motif_size_line = f"letter-probability matrix: alength= {motif.shape[1]} w= {motif.shape[0]}"
@@ -536,55 +499,51 @@ def calculate_filters(
           value of thresholds to use, see MotifCompendium Tutorial 6 - Motif Filtering.
     """
     # Calculate filter metrics
-    mc_motifs = mc.get_standard_motif_stack()
-    mc_motifs_abs = np.abs(mc_motifs)
     for filter_metric in metric_list:
         match filter_metric:
             case "motif_entropy":
                 mc["motif_entropy"] = utils_motif.calculate_full_motif_entropy(
-                    mc_motifs_abs
+                    mc.motifs
                 )
             case "weighted_base_entropy":
                 mc["weighted_base_entropy"] = (
-                    utils_motif.calculate_weighted_base_entropy(mc_motifs_abs)
+                    utils_motif.calculate_weighted_base_entropy(mc.motifs)
                 )
             case "weighted_position_entropy":
                 mc["weighted_position_entropy"] = (
-                    utils_motif.calculate_weighted_position_entropy(mc_motifs_abs)
+                    utils_motif.calculate_weighted_position_entropy(mc.motifs)
                 )
             case "posbase_entropy_score":
                 mc["posbase_entropy_score"] = (
-                    utils_motif.calculate_position_versus_base_entropy(mc_motifs_abs)
+                    utils_motif.calculate_position_versus_base_entropy(mc.motifs)
                 )
             case "copair_entropy_score":
                 mc["copair_entropy_score"] = utils_motif.calculate_copair_entropy(
-                    mc_motifs_abs
+                    mc.motifs
                 )
             case "copair_composition":
                 mc["copair_composition"] = utils_motif.calculate_copair_composition(
-                    mc_motifs_abs
+                    mc.motifs
                 )
             case "dinuc_entropy_score":
                 mc["dinuc_entropy_score"] = utils_motif.calculate_dinucleotide_entropy(
-                    mc_motifs_abs
+                    mc.motifs
                 )
             case "dinuc_composition":
                 mc["dinuc_composition"] = (
                     utils_motif.calculate_dinucleotide_alternating_composition(
-                        mc_motifs_abs
+                        mc.motifs
                     )
                 )
             case "dinuc_score":
-                mc["dinuc_score"] = utils_motif.calculate_dinucleotide_score(
-                    mc_motifs_abs
-                )
+                mc["dinuc_score"] = utils_motif.calculate_dinucleotide_score(mc.motifs)
             case "posneg_inverted":
                 mc["posneg_inverted"] = (
-                    utils_motif.motif_posneg_max(mc_motifs) != mc["posneg"]
+                    utils_motif.motif_posneg_max(mc.motifs) != mc["posneg"]
                 )
             case "truncated":
-                max_pos = mc_motifs_abs.sum(axis=-1).argmax(axis=-1)  # (N,)
-                mc["truncated"] = (max_pos < 2) | (max_pos > mc_motifs.shape[1] - 3)
+                max_pos = np.argmax(np.sum(np.abs(mc.motifs), axis=-1), axis=-1)  # (N,
+                mc["truncated"] = (max_pos < 2) | (max_pos > mc.motifs.shape[1] - 3)
             case _:
                 raise ValueError(f"Filter metric {filter_metric} is not implemented.")
 
@@ -596,7 +555,6 @@ def assign_label_from_pfms(
     mc: MotifCompendiumClass,
     pfm_file: str,
     save_col_prefix: str = "match",
-    ic: bool = False,
     min_score: float = 0.5,
     max_submotifs: int = 1,
     label_unsigned: bool = True,
@@ -618,16 +576,13 @@ def assign_label_from_pfms(
           saved images generated from the labeling process will begin with
           save_col_prefix. These columns will have the structure
           f"{save_col_prefix}_{score/name/logo}{i}".
-        ic: Whether or not to apply information content scaling to the PFMs, effectively
-          making them PWMs.
         min_score: The minimum similarity score to consider a match.
         max_submotifs: The maximum number of submotifs to consider in a match. If
           max_submotifs = 1, only a single match is given to each motif. If
           max_submotifs > 1, the best match for each motif can be from a combination of
           multiple reference motifs.
-        label_unsigned: Whether or not to label indifferent of positive and negative
-          signs. If True, negative motifs can be labeled by a positive reference motif.
-          If False, negative motifs can only labeled by negative reference motifs.
+        label_unsigned: Whether or not to perform an unsigned similarity calculation,
+          allowing negative motifs to be matched with positive counterparts.
         save_images: Whether or not to save the logos of the matched motifs. If True,
           the logos will appear as a saved image. If False, logos will not be saved as
           saved images.
@@ -641,18 +596,14 @@ def assign_label_from_pfms(
     """
     # Load PFM database, with same length as motifs
     pfm_motifs, pfm_names = utils_loader.load_pfm(
-        pfm_file, ic=ic, motif_length=mc.motifs.shape[1]
+        pfm_file, motif_length=mc.motifs.shape[1]
     )
-    # Label: Signed vs. Unsigned
-    if label_unsigned:
-        pfm_motifs = np.abs(pfm_motifs)
-    else:
-        pfm_motifs = utils_motif.motif_4_to_8(pfm_motifs)
     # Assign labels
     mc.assign_label_from_motifs(
         pfm_motifs,
         pfm_names,
         min_score,
+        label_unsigned=label_unsigned,
         max_submotifs=max_submotifs,
         save_images=save_images,
         logo_trimming=logo_trimming,
@@ -693,9 +644,8 @@ def assign_label_from_other_compendium(
           max_submotifs = 1, only a single match is given to each motif. If
           max_submotifs > 1, the best match for each motif can be from a combination of
           multiple reference motifs.
-        label_unsigned: Whether or not to label indifferent of positive and negative
-          signs. If True, negative motifs can be labeled by a positive reference motif.
-          If False, negative motifs can only labeled by negative reference motifs.
+        label_unsigned: Whether or not to perform an unsigned similarity calculation,
+          allowing negative motifs to be matched with positive counterparts.
         save_images: Whether or not to save the logos of the matched motifs. If True,
           the logos will appear as a saved image. If False, logos will not be saved as
           saved images. The logos will come from
@@ -721,11 +671,6 @@ def assign_label_from_other_compendium(
         labels = assign_from_mc.metadata[from_label_col].tolist()
     else:
         raise KeyError(f"{from_label_col} not in other metadata.")
-    # Label unsigned vs signed
-    if label_unsigned:
-        reference_motifs = np.abs(assign_from_mc.get_standard_motif_stack())
-    else:
-        reference_motifs = assign_from_mc.motifs
     # Check if forward logos in other MotifCompendium
     if save_images and "logo (fwd)" in assign_from_mc.images():
         other_logos = assign_from_mc.get_images("logo (fwd)")
@@ -733,9 +678,10 @@ def assign_label_from_other_compendium(
         other_logos = None
     # Assign labels
     assign_to_mc.assign_label_from_motifs(
-        reference_motifs,
+        assign_from_mc.motifs,
         labels,
         min_score,
+        label_unsigned=label_unsigned,
         max_submotifs=max_submotifs,
         save_images=save_images,
         logo_trimming=logo_trimming,

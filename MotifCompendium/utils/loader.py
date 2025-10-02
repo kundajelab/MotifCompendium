@@ -42,7 +42,7 @@ def which_file_load_failed(func):
 def load_modiscos(
     modisco_dict: dict[str, str],
     load_subpatterns: bool = False,
-    normalize_over_seqlets: bool = True,
+    normalize_over_seqlets: bool = False,
     modisco_region_width: int = 400,
 ) -> tuple[np.ndarray, pd.DataFrame]:
     """Load motifs, names, and other per-motif metadata from multiple Modisco files.
@@ -121,7 +121,7 @@ def load_modiscos(
 def load_modisco(
     modisco_file: str,
     load_subpatterns: bool = False,
-    normalize_over_seqlets: bool = True,
+    normalize_over_seqlets: bool = False,
     modisco_region_width: int = 400,
 ) -> tuple[np.ndarray, pd.DataFrame]:
     """Load motifs, names, and other per-motif metadata from a single Modisco file.

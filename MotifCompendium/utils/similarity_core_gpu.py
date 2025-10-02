@@ -76,7 +76,7 @@ def _tensor3_matmul_tensor2(x, y):
     M = y.shape[1]
     x_flat = x.reshape(N * L, K)  # (NL, K)
     result = x_flat @ y  # (NL, M)
-    return result.reshape(N, L, M) # (N, L, M)
+    return result.reshape(N, L, M)  # (N, L, M)
 
 
 def _compute_similarity(motif_set_1, motif_set_2):
@@ -161,7 +161,7 @@ def _LEFTTENSOR(L):
     create_tensor = False
     if _LEFT_TENSOR_GPU is None:
         create_tensor = True
-    if (_LEFT_TENSOR_GPU.shape[2] != L):
+    if _LEFT_TENSOR_GPU.shape[2] != L:
         del _LEFT_TENSOR_GPU  # Free up memory
         create_tensor = True
     if create_tensor:
@@ -169,7 +169,9 @@ def _LEFTTENSOR(L):
             (2 * L - 1, 3 * L - 2, L), dtype=cp.float64
         )  # default (59, 88, 30)
         for i in range(2 * L - 1):  # default 59
-            _LEFT_TENSOR_GPU[i, i : i + L, :] = cp.eye(L, dtype=cp.float64)  # default 30
+            _LEFT_TENSOR_GPU[i, i : i + L, :] = cp.eye(
+                L, dtype=cp.float64
+            )  # default 30
     return _LEFT_TENSOR_GPU  # (2L-1, 3L-2, L)
 
 
@@ -179,11 +181,13 @@ def _RIGHTTENSOR(L):
     create_tensor = False
     if _RIGHT_TENSOR_GPU is None:
         create_tensor = True
-    if (_RIGHT_TENSOR_GPU.shape[0] != L):
+    if _RIGHT_TENSOR_GPU.shape[0] != L:
         del _RIGHT_TENSOR_GPU  # Free up memory
         create_tensor = True
     if create_tensor:
-        _RIGHT_TENSOR_GPU = cp.zeros((L, 3 * L - 2), dtype=cp.float64)  # default (30, 88)
+        _RIGHT_TENSOR_GPU = cp.zeros(
+            (L, 3 * L - 2), dtype=cp.float64
+        )  # default (30, 88)
         _RIGHT_TENSOR_GPU[:, L - 1 : 2 * L - 1] = cp.eye(
             L, dtype=cp.float64
         )  # default 29:59

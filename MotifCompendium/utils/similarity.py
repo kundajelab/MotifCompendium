@@ -7,7 +7,7 @@ from tqdm import tqdm
 
 import MotifCompendium.utils.config as utils_config
 import MotifCompendium.utils.motif as utils_motif
-from MotifCompendium.utils.similarity_core import compute_similarity_and_align
+from MotifCompendium.utils.similarity_core_cpu import compute_similarity_and_align
 
 
 ####################
@@ -50,11 +50,20 @@ def compute_similarities(
             raise ValueError("All motifs must have the same length.")
     # PREPROCESS
     if unsigned:
-        motif_stack_list = [np.abs(motif_stack) for motif_stack in motif_stack_list] # Unsigned
+        motif_stack_list = [
+            np.abs(motif_stack) for motif_stack in motif_stack_list
+        ]  # Unsigned
     if utils_config.get_ic_scaled_similarity():
-        motif_stack_list = [utils_motif.ic_scale(motif_stack) for motif_stack in motif_stack_list] # IC scale
-    motif_stack_list = [utils_motif.motif_4_to_8(motif_stack) for motif_stack in motif_stack_list] # 8 channel
-    motif_stack_list = [motif_stack/np.linalg.norm(motif_stack, axis=(1,2), keepdims=True) for motif_stack in motif_stack_list] # L2 normalize
+        motif_stack_list = [
+            utils_motif.ic_scale(motif_stack) for motif_stack in motif_stack_list
+        ]  # IC scale
+    motif_stack_list = [
+        utils_motif.motif_4_to_8(motif_stack) for motif_stack in motif_stack_list
+    ]  # 8 channel
+    motif_stack_list = [
+        motif_stack / np.linalg.norm(motif_stack, axis=(1, 2), keepdims=True)
+        for motif_stack in motif_stack_list
+    ]  # L2 normalize
     # COMPUTE
     if utils_config.get_max_chunk() != -1:
         (
@@ -143,17 +152,21 @@ def _compute_similarity_and_align_parallel(
     # Perform to_do_calculations
     if utils_config.get_use_gpu():
         # SINGLE GPU CALCULATIONS
+        from MotifCompendium.utils.similarity_core_gpu import (
+            compute_similarity_and_align as compute_similarity_and_align_gpu,
+        )
+
         if utils_config.get_progress_bar():
             to_do_results = []
             for c in tqdm(to_do_calculations, desc="computing similarities on GPU..."):
                 to_do_results.append(
-                    compute_similarity_and_align(
+                    compute_similarity_and_align_gpu(
                         motif_stack_list[c[0]], motif_stack_list[c[1]]
                     )
                 )
         else:
             to_do_results = [
-                compute_similarity_and_align(
+                compute_similarity_and_align_gpu(
                     motif_stack_list[c[0]], motif_stack_list[c[1]]
                 )
                 for c in to_do_calculations
