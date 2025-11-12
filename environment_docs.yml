@@ -1,0 +1,29 @@
+name: motifcompendium-docs
+channels:
+- conda-forge
+- defaults
+dependencies:
+- python=3.10
+- h5py
+- jupyter
+- numba
+- numpy
+- pandas
+- pytables
+- seaborn
+- scikit-learn
+- tqdm
+- pip
+- pip:
+    - beautifulsoup4
+    - black
+    - cupy-cuda11x
+    - gdown
+    - igraph
+    - Jinja2
+    - leidenalg
+    - logomaker
+    - myst-nb
+    - sphinx
+    - sphinx-rtd-theme
+    - upsetplot

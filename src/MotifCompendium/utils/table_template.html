@@ -97,10 +97,10 @@
                     bVal = bVal.toLowerCase();
                 }
                 if (aVal < bVal) {
-                    return ascending ? 1 : -1;
+                    return ascending ? -1 : 1;
                 }
                 if (aVal > bVal) {
-                    return ascending ? -1 : 1;
+                    return ascending ? 1 : -1;
                 }
                 return 0;
             });
@@ -113,40 +113,78 @@
             rows.forEach(row => table.appendChild(row));
         }
 
-        function filterRow(row) {
-            // Check if there are any active filters
-            let inputs = document.getElementsByClassName("filterInput");
-            let anyFilters = false;
-            for (let z = 0; z < inputs.length; z++) {
-                if (inputs[z].value != "") {
-                    anyFilters = true;
-                    break;
-                }
-            }
-            // If no filters, display row
-            if (!anyFilters) {
-                row.style.display = "";
-                return;
-            }
-            // Otherwise, there are filters
+        function filterRow(row, filters) {
             let showRow = true;
-            let tds = row.getElementsByTagName("td");
+            const tds = row.getElementsByTagName("td");
             // Check each filter
-            for (let z = 0; z < inputs.length; z++) {
-                let filter = inputs[z].value;
+            for (let z = 0; z < filters.length; z++) {
+                let filter = filters[z].value;
                 // Skip empty filters
                 if (filter == "")
                     continue;
                 // For non-empty filters, check if row matches
-                let col_idx = inputs[z].getAttribute("data-columnindex");
+                let col_idx = filters[z].getAttribute("data-columnindex");
                 let txtValue = tds[col_idx].textContent.trim();
-                // Non-case-sensitive search
-                filter = filter.toLowerCase();
-                txtValue = txtValue.toLowerCase();
-                // Filter
-                if (!txtValue.includes(filter)) {
-                    showRow = false;
-                    break;
+                // Filters
+                if (filter.startsWith("n[" ) && filter.endsWith("]")) {
+                    // Filter 1 - numeric range filter n[lower,upper]
+                    let inside = filter.slice(2, -1); // get content between n[ and ]
+                    // If no comma, don't do any filtering
+                    if (inside.indexOf(",") === -1) {
+                        continue;
+                    }
+                    // Get upper/lower limits
+                    let limits = inside.split(",");
+                    if (limits.length != 2) {
+                        continue;
+                    }
+                    const lowerStr = limits[0].trim();
+                    const upperStr = limits[1].trim();
+                    // Try lower bound if it's a valid number
+                    if (lowerStr !== "" && !isNaN(parseFloat(lowerStr))) {
+                        const lower = parseFloat(lowerStr);
+                        const txtNum = parseFloat(txtValue);
+                        if (!isNaN(txtNum)) {
+                            if (txtNum < lower) {
+                                showRow = false;
+                                break;
+                            }
+                        }
+                        // if txtValue is not numeric, do not apply lower-bound numeric check
+                    }
+                    // Try upper bound if it's a valid number
+                    if (upperStr !== "" && !isNaN(parseFloat(upperStr))) {
+                        const upper = parseFloat(upperStr);
+                        const txtNum = parseFloat(txtValue);
+                        if (!isNaN(txtNum)) {
+                            if (txtNum > upper) {
+                                showRow = false;
+                                break;
+                            }
+                        }
+                        // if txtValue is not numeric, do not apply upper-bound numeric check
+                    }
+                } else if (filter.startsWith("r[") && filter.endsWith("]")) {
+                    // Filter 2 - regex filter r[regex]
+                    let inside = filter.slice(2, -1);
+                    // Double backslash for RegExp
+                    const doubledPattern = inside.replace(/\\/g, "\\\\");
+                    try {
+                        const regex = new RegExp(doubledPattern, "i");
+                        if (!regex.test(txtValue)) {
+                            showRow = false;
+                            break;
+                        }
+                    } catch (e) {
+                        // If regex is invalid, skip filtering
+                        continue;
+                    }
+                } else {
+                    // Filter 3 - default substring filter
+                    if (!txtValue.toLowerCase().includes(filter.toLowerCase())) {
+                        showRow = false;
+                        break;
+                    }
                 }
             }
             row.style.display = showRow ? "" : "none";
@@ -157,19 +195,13 @@
             let table = document.getElementById("DataTable");
             let trs = table.getElementsByTagName("tr");
             // Check if there are any active filters
-            let inputs = document.getElementsByClassName("filterInput");
-            let anyFilters = false;
-            for (let z = 0; z < inputs.length; z++) {
-                if (inputs[z].value != "") {
-                    anyFilters = true;
-                    break;
-                }
-            }
-            // If filters, filter rows
-            if (anyFilters) {
-                // Filter each row
+            let filters = document.getElementsByClassName("filterInput");
+            // Build activeFilters = all filters with non-empty value
+            let activeFilters = Array.from(filters).filter(f => f.value != "");
+            // If there are active filters, filter rows using activeFilters
+            if (activeFilters.length > 0) {
                 for (let i = 2; i < trs.length; i++) {
-                    filterRow(trs[i]);
+                    filterRow(trs[i], activeFilters);
                 }
             } else {
                 // If no filters, display every row
@@ -187,9 +219,13 @@
             } else {
                 cell.classList.remove('cell-edited');
             }
-            // Filter this row
+            // Filter this row using the same active-filters logic as filterTable
             const row = cell.parentNode;
-            filterRow(row);
+            const filters = document.getElementsByClassName("filterInput");
+            const activeFilters = Array.from(filters).filter(f => f.value != "");
+            if (activeFilters.length > 0) {
+                filterRow(row, activeFilters);
+            }
         }
     </script>
 </head>
@@ -199,7 +235,7 @@
         <table id="DataTable">
             <tr>
                 {% for col in columns %}
-                    {% if image_column[loop.index0] or loop.index0 == 0 %}
+                    {% if image_column[loop.index0] %}
                         <th>{{ col }}</th>
                     {% else %}
                         <th>
@@ -213,7 +249,7 @@
             </tr>
             <tr>
                 {% for col in columns %}
-                    {% if image_column[loop.index0] or loop.index0 == 0 %}
+                    {% if image_column[loop.index0] %}
                         <td></td>
                     {% else %}
                         <td><input type="text" class="filterInput" onkeyup="filterTable()" data-columnindex="{{ loop.index0 }}"></td>

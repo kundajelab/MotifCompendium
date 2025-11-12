@@ -1,6 +1,10 @@
+import base64
+import io
 import os
 
 from jinja2 import Environment, FileSystemLoader
+from openpyxl import Workbook
+from openpyxl.drawing.image import Image as XLImage
 import pandas as pd
 
 import MotifCompendium.utils.plotting as utils_plotting
@@ -72,11 +76,13 @@ def table_html(
         raise TypeError("table must be a pd.DataFrame")
     if not html_out.endswith(".html"):
         html_out += ".html"
+    columns = table.columns.tolist()
+    if len(image_column) != len(columns):
+        raise ValueError("image_column length must match number of table columns")
     # Add index column
     table.insert(0, "index", table.index)
     image_column.insert(0, False)
     # Prepare data for rendering
-    columns = table.columns.tolist()
     rows = table.to_dict(orient="records")
     # Create Jinja2 environment
     current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -90,3 +96,45 @@ def table_html(
     # Write HTML to file
     with open(html_out, "w") as f:
         f.write(rendered_html)
+
+
+def df_to_xlsx(
+    df: pd.DataFrame, image_column: list[bool], xlsx_out: str
+) -> None:
+    """Creates an xlsx file displaying the values in a pd.DataFrame.
+
+    Creates an xlsx file of the values in a pd.DataFrame. Some of the columns can have
+      images, in which case the corresponding DataFrame column is expected to be a UTF-8
+      encoded image.
+
+    Args:
+        df: A pd.DataFrame to export to .xlsx format.
+        image_column: A list of booleans indicating which columns contain UTF-8 encoded
+          images.
+        xlsx_out: The path to save he xlsx file.
+    """
+    # Check inputs
+    if not isinstance(df, pd.DataFrame):
+        raise TypeError("df must be a pd.DataFrame")
+    if not xlsx_out.endswith(".xlsx"):
+        xlsx_out += ".xlsx"
+    columns = df.columns.tolist()
+    if len(image_column) != len(columns):
+        raise ValueError("image_column length must match number of DataFrame columns")
+    # Create file
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "motif summary"
+    # Write header row
+    for c_idx, col_name in enumerate(columns, start=1):
+        ws.cell(row=1, column=c_idx, value=str(col_name))
+    # Write data rows
+    for r_idx, (_, row) in enumerate(df.iterrows(), start=2):
+        for c_idx, col_name in enumerate(columns, start=1):
+            val = row[col_name]
+            if image_column[c_idx - 1]:
+                ws.add_image(XLImage(io.BytesIO(base64.b64decode(val))), anchor=ws.cell(row=r_idx, column=c_idx).coordinate)
+            else:
+                ws.cell(row=r_idx, column=c_idx, value=val)
+    # Save workbook
+    wb.save(xlsx_out)

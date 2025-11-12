@@ -161,7 +161,7 @@ def _LEFTTENSOR(L):
     create_tensor = False
     if _LEFT_TENSOR_GPU is None:
         create_tensor = True
-    if _LEFT_TENSOR_GPU.shape[2] != L:
+    elif _LEFT_TENSOR_GPU.shape[2] != L:
         del _LEFT_TENSOR_GPU  # Free up memory
         create_tensor = True
     if create_tensor:
@@ -181,7 +181,7 @@ def _RIGHTTENSOR(L):
     create_tensor = False
     if _RIGHT_TENSOR_GPU is None:
         create_tensor = True
-    if _RIGHT_TENSOR_GPU.shape[0] != L:
+    elif _RIGHT_TENSOR_GPU.shape[0] != L:
         del _RIGHT_TENSOR_GPU  # Free up memory
         create_tensor = True
     if create_tensor:

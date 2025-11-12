@@ -43,7 +43,7 @@ def cluster(
           corresponds to. All elements with the same value have been assigned to the
           same cluster.
 
-    Notes:
+    Note:
         Please look through the possible clustering algorithm options in this function.
     """
     # Check arguments
@@ -122,7 +122,7 @@ def rb_leiden_clustering_cpu(
           corresponds to. All elements with the same value have been assigned to the
           same cluster.
 
-    Notes:
+    Note:
         Uses Reichardt & Bornholdt's quality function with a configuration model as a
           a null. See leidenalg.RBConfigurationVertexPartition for more details.
     """
@@ -178,7 +178,7 @@ def cpm_leiden_clustering(
           corresponds to. All elements with the same value have been assigned to the
           same cluster.
 
-    Notes:
+    Note:
         Uses the constant Potts model. See leidenalg.CPMVertexPartition for more
           details.
     """
@@ -236,7 +236,7 @@ def modularity_leiden_clustering_gpu(
           corresponds to. All elements with the same value have been assigned to the
           same cluster.
 
-    Notes:
+    Note:
         Uses Leiden method described in: Traag, V. A., Waltman, L., & van Eck, N. J.
           (2019). From Louvain to Leiden: guaranteeing well-connected communities.
           Scientific reports, 9(1), 5233. doi: 10.1038/s41598-019-41695-z. See

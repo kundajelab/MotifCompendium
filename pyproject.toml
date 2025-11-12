@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "MotifCompendium"
+version = "1.1.0"
+description = "A comprehensive framework for DNA motif analysis"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Salil Deshpande", email = "salil512@stanford.edu" }
+]
+dependencies = [
+    "beautifulsoup4",
+    "h5py",
+    "igraph",
+    "jinja2",
+    "leidenalg",
+    "logomaker",
+    "numba",
+    "numpy",
+    "pandas",
+    "pooch",
+    "seaborn",
+    "scikit-learn",
+    "tables",
+    "tqdm",
+    "upsetplot"
+]
+
+[project.urls]
+Homepage = "https://github.com/kundajelab/MotifCompendium"
+Repository = "https://github.com/kundajelab/MotifCompendium"
+Issues = "https://github.com/kundajelab/MotifCompendium/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"MotifCompendium" = ["utils/*"]

@@ -71,7 +71,7 @@ def load_modiscos(
           average contribution score of the motif, and the average distance of the motif
           from the center of Modisco regions.
 
-    Notes:
+    Note:
         Assumes that all motifs are stored within "pos_patterns" or "neg_patterns".
     """
     # Set up return lists
@@ -88,6 +88,7 @@ def load_modiscos(
                 m_loc, load_subpatterns, normalize_over_seqlets, modisco_region_width
             )
             motifs.append(m_motifs)
+            m_metadata["name"] = [f"{m_name}-{x}" for x in m_metadata["name"]]
             m_metadata["model"] = m_name
             metadatas.append(m_metadata)
     else:
@@ -105,6 +106,7 @@ def load_modiscos(
         for i, r in enumerate(results):
             m_motifs, m_metadata = r
             motifs.append(m_motifs)
+            m_metadata["name"] = [f"{m_names[i]}-{x}" for x in m_metadata["name"]]
             m_metadata["model"] = m_names[i]
             metadatas.append(m_metadata)
     # Pad motifs to max length
@@ -150,7 +152,7 @@ def load_modisco(
           average contribution score of the motif, and the average distance of the motif
           from the center of Modisco regions.
 
-    Notes:
+    Note:
         Assumes that all motifs are stored within "pos_patterns" or "neg_patterns".
     """
     # Set up return lists
@@ -235,7 +237,7 @@ def load_modisco(
                         )
                     )
     # Concatenate motifs and create metadata
-    motifs = np.stack(motifs, axis=0)
+    motifs = np.stack(motifs, axis=0) if len(motifs) > 1 else motifs[0][np.newaxis, :, :]
     metadata = pd.DataFrame(
         {
             "name": motif_names,
@@ -271,7 +273,7 @@ def load_pfms(
           stack where L is motif_length if specified or the length of the longest motif
           otherwise.
 
-    Notes:
+    Note:
         Only accepts files in the PFM or MEME file formats.
     """
     # Setup return lists
@@ -332,7 +334,7 @@ def load_pfm(
         Motifs and a metadata pd.DataFrame. The motifs are returned as a (N, L, 4) motif
           stack.
 
-    Notes:
+    Note:
         Only accepts files in the PFM or MEME file formats.
     """
     file_basename = os.path.basename(pfm_file)
@@ -425,7 +427,7 @@ def _load_pfm_file_pfm_format(
                 current_motif = {"A": [], "C": [], "G": [], "T": []}
     # Concatenate motifs and create metadata
     motifs = [utils_motif.pad_motif(x, longest_motif_length) for x in motifs]
-    motifs = np.stack(motifs, axis=0)
+    motifs = np.stack(motifs, axis=0) if len(motifs) > 1 else motifs[0][np.newaxis, :, :]
     metadata = pd.DataFrame({"name": names})
     # Return
     return motifs, metadata
@@ -433,7 +435,7 @@ def _load_pfm_file_pfm_format(
 
 @which_file_load_failed
 def _load_meme_file_meme_format(
-    meme_file: str, ic: bool, motif_length: int | None
+    meme_file: str, motif_length: int | None
 ) -> tuple[np.ndarray, list[str]]:
     """Load motifs and names from a file in MEME format."""
     # Set up return lists
@@ -498,7 +500,7 @@ def _load_meme_file_meme_format(
                         active_motif = False
     # Concatenate motifs and create metadata
     motifs = [utils_motif.pad_motif(x, longest_motif_length) for x in motifs]
-    motifs = np.stack(motifs, axis=0)
+    motifs = np.stack(motifs, axis=0) if len(motifs) > 1 else motifs[0][np.newaxis, :, :]
     metadata = pd.DataFrame({"name": names})
     # Return
     return motifs, metadata

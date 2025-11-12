@@ -191,7 +191,7 @@ def plot_unique_per_cluster(
         group_by: The grouping to find unique clusters within.
         save_loc: The path to save the unique clusters html to.
 
-    Notes:
+    Note:
         The most unique motif is defined as the motif within a cluster whose
           maximal similarity with all motifs not in that cluster is the lowest.
     """
@@ -233,7 +233,7 @@ def cluster_grouping_upset_plot(
         save_loc: The file to save the Upset Plot to. If None, the heatmap is not saved.
         **kwargs: Additional named arguments that usetplot.UpSet() takes.
 
-    Notes:
+    Note:
         Requires package upsetplot to run.
         Consider running with argument min_subset_size.
     """
@@ -267,7 +267,7 @@ def export_compendium_modisco(
         name_col: The column in the MotifCompendium to name the motifs by.
         save_loc: The location to save the Modisco h5py to.
 
-    Notes:
+    Note:
         Motif names cannot have slashes (/) in them!
         The resultant h5py file can be fed directly into FiNeMo.
         If you are exporting your motifs to FiNeMo and your motifs were previously IC
@@ -320,7 +320,7 @@ def export_compendium_clustered_modisco(
         export_subpatterns: Whether or not to export the individual motifs as
           subpatterns under the cluster average patterns.
 
-    Notes:
+    Note:
         Cluster names cannot have slashes (/) in them!
         If export_subpatterns is True, then motif names cannot have slashes (/) in them!
           Also, motif names will be taken from the "name" column in the MotifCompendium.
@@ -394,7 +394,7 @@ def export_compendium_meme(
         name_col: The column in the MotifCompendium to name the motifs by.
         save_loc: The location to save the MEME file to.
 
-    Notes:
+    Note:
         Assumes that there is a "num_seqlets" column in the MotifCompendium.
     """
     motif_names = mc[name_col].tolist()
@@ -493,7 +493,7 @@ def calculate_filters(
               extending beyond the edge of the motif length.
               When True: A truncated motif that has been cut off by the window size.
 
-    Notes:
+    Note:
         After these filters are calculated, they can be thresholded to identify and
           filter out low quality or low information content motifs. For guidance on the
           value of thresholds to use, see MotifCompendium Tutorial 6 - Motif Filtering.

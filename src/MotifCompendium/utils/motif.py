@@ -484,7 +484,7 @@ def compute_motif_scalar_projection(
         A np.ndarray of scalar projections. If keepdims is True, the shape will be
           (N, L, K). If keepdims is False, the shape will be (N,).
 
-    Notes:
+    Note:
         The scalar projection of u onto v is uTv/vTv. Motifs are treated as vectors for
           the purposes of this calculation, so the dot product between motif1 and motif2
           would be computed as np.sum(motif1*motif2).
@@ -604,7 +604,7 @@ def ic_scale(x: np.ndarray, invert: bool = False) -> float | np.ndarray:
     Returns:
         An information content scaled (L, 4) motif or (N, L, 4) motif stack.
 
-    Notes:
+    Note:
         If a position only has one base at a position, it will not change. If only two
           bases are present but are represented equally, their weights will be halved.
           And if all bases are present and represented equally, the weights will for all
@@ -645,7 +645,7 @@ def calculate_full_motif_entropy(x: np.ndarray) -> float | np.ndarray:
         The full motif entropy as a float for a single motif or an array of floats for a
           motif stack. The values are bounded in [0, 1].
 
-    Notes:
+    Note:
         When the entropy is too low, the motif is likely a single nucleotide motif and
           you may want to filter it out. You will need to tune the threshold for
           identifying these low entropy motifs for your particular setting, but you may
@@ -676,7 +676,7 @@ def calculate_weighted_base_entropy(x: np.ndarray) -> float | np.ndarray:
         The weighted base entropy as a float for a single motif or an array of floats
           for a motif stack. The values are bounded in [0, 1].
 
-    Notes:
+    Note:
         When the entropy is too high, the motif is likely noise and you may want to
           filter it out. You will need to tune the threshold for identifying these high
           entropy motifs for your particular setting, but you may want to start with a
@@ -704,7 +704,7 @@ def calculate_weighted_position_entropy(x: np.ndarray) -> float | np.ndarray:
         The weighted position entropy as a float for a single motif or an array of
           floats for a motif stack. The values are bounded in [0, 1].
 
-    Notes:
+    Note:
         When the entropy is too high, the motif is a broad, noisy motif, and you may
           want to filter it out. You will need to tune the threshold for identifying
           these high entropy motifs for your particular setting, but you may want to
@@ -736,7 +736,7 @@ def calculate_position_versus_base_entropy(x: np.ndarray) -> float | np.ndarray:
         The position versus base entropy ratio as a float for a single motif or an array
           of floats for a motif stack. The values are bounded in [0, 1].
 
-    Notes:
+    Note:
         When the entropy is too high, the motif is a broad, noisy motif, and you may
           want to filter it out. You will need to tune the threshold for identifying
           these high entropy motifs for your particular setting, but you may want to
@@ -770,7 +770,7 @@ def calculate_copair_entropy(x: np.ndarray) -> float | np.ndarray:
         The copair entropy as a float for a single motif or an array of floats for a
           motif stack. The values are bounded in [0, 1].
 
-    Notes:
+    Note:
         When the entropy is too high, the motif is likely noise and you may want to
           filter it out. You will need to tune the threshold for identifying these high
           entropy motifs for your particular setting, but you may want to start with a
@@ -809,7 +809,7 @@ def calculate_copair_composition(x: np.ndarray) -> float | np.ndarray:
         The copair entropy as a float for a single motif or an array of floats for a
           motif stack. The values are bounded in [0, 1].
 
-    Notes:
+    Note:
         When the composition is too high, the motif is likely noise, and you may want to
           filter it out. You will need to tune the threshold for identifying these high
           composition motifs for your particular setting, but you may want to start with a
@@ -848,7 +848,7 @@ def calculate_dinucleotide_entropy(x: np.ndarray) -> float | np.ndarray:
         The dinucleotide entropy as a float for a single motif or an array of floats for
           a motif stack. The values are bounded in [0, 1].
 
-    Notes:
+    Note:
         When the entropy is too high, the motif is likely a repeat or GC content, and
           you may want to filter it out. You will need to tune the threshold for
           identifying these high entropy motifs for your particular setting, but you may
@@ -899,7 +899,7 @@ def calculate_dinucleotide_alternating_composition(x: np.ndarray) -> float | np.
         The dinucleotide composition as a float for a single motif or an array of floats for
           a motif stack. The values are bounded in [0, 1].
 
-    Notes:
+    Note:
         When the composition is too high, the motif is likely a repeat or GC content,
           and you may want to filter it out. You will need to tune the threshold for
           identifying these high composition motifs for your particular setting, but you
@@ -949,7 +949,7 @@ def calculate_dinucleotide_score(x: np.ndarray) -> float | np.ndarray:
         The dinucleotide score as a float for a single motif or an array of floats for
           a motif stack. The values are bounded in [0, 1].
 
-    Notes:
+    Note:
         When the composition is too high, the motif is likely a repeat or GC content,
           and you may want to filter it out. You will need to tune the threshold for
           identifying these high composition motifs for your particular setting, but you

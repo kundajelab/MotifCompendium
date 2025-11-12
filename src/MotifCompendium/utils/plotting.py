@@ -118,16 +118,15 @@ class LogoPlottingInput:
     def get_motif_df(self) -> pd.DataFrame:
         """Returns a pd.DataFrame of the motif that can be passed to logomaker."""
         # Transform motif representation
-        motif_to_plot = self.motif
+        motif_to_plot = self.motif.copy()
         if self.revcomp:
             motif_to_plot = utils_motif.reverse_complement(motif_to_plot)
         if self.ic_scale:
             motif_to_plot = utils_motif.ic_scale(motif_to_plot)
         # Trim motif if needed
-        if isinstance(self.trim, bool) and self.trim:
-            motif_to_plot = utils_motif.trim_motif(
-                motif_to_plot, 1 / motif_to_plot.shape[0]
-            )
+        if isinstance(self.trim, bool):
+            if self.trim:
+                motif_to_plot = utils_motif.trim_motif(motif_to_plot, 1 / motif_to_plot.shape[0])
         elif isinstance(self.trim, (int, float)):
             motif_to_plot = utils_motif.trim_motif(motif_to_plot, self.trim)
         # If trimming deletes motif, return None

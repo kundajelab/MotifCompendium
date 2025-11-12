@@ -45,7 +45,7 @@ def set_compute_options(
         fast_plotting: Whether or not to use fast plotting instead of logomaker when
           generating motif plots.
 
-    Notes:
+    Note:
         It is HIGHLY recommended to set ic_scaled_similarity to True.
         Use GPU if possible to accelerate calculation (CuPy required.) Otherwise,
           parallelize across CPUs by setting max_cpus to the number of available
@@ -82,10 +82,10 @@ def load(file_loc: str, safe: bool = True) -> MotifCompendium:
     Returns:
         The corresponding MotifCompendium object.
 
-    Notes:
+    Note:
         Assumes the file is an h5py file with datasets 'motifs', 'similarity',
           'alignment_rc', and 'alignment_h', as well as a DataFrame called 'metadata'
-          and another DataFrame called '__images'.
+          and another DataFrame called '_images'.
         Old objects may be incompatable with the newest version of the load function.
         Safe loading validates object integrity but may take significantly longer for
           large objects.
@@ -103,7 +103,7 @@ def load(file_loc: str, safe: bool = True) -> MotifCompendium:
                         alignment_rc = f["alignment_rc"][()]
                         alignment_h = f["alignment_h"][()]
                         metadata = pd.read_hdf(file_loc, key="metadata")
-                        __images = pd.read_hdf(file_loc, key="__images")
+                        _images = pd.read_hdf(file_loc, key="_images")
                     except:
                         raise ValueError(
                             f"File does not specify a valid MotifCompendium."
@@ -114,7 +114,7 @@ def load(file_loc: str, safe: bool = True) -> MotifCompendium:
                         alignment_rc,
                         alignment_h,
                         metadata,
-                        __images,
+                        _images,
                         safe,
                     )
                 else:
@@ -132,7 +132,7 @@ def load(file_loc: str, safe: bool = True) -> MotifCompendium:
                     alignment_rc = f["alignment_rc"][()]
                     alignment_h = f["alignment_h"][()]
                     metadata = pd.read_hdf(file_loc, key="metadata")
-                    __images = pd.read_hdf(file_loc, key="__images")
+                    _images = pd.read_hdf(file_loc, key="__images") # old variable used to be double underscore
                 except:
                     raise ValueError(f"Failed backup load. Manual load needed.")
                 return MotifCompendium(
@@ -141,7 +141,7 @@ def load(file_loc: str, safe: bool = True) -> MotifCompendium:
                     alignment_rc,
                     alignment_h,
                     metadata,
-                    __images,
+                    _images,
                     True,
                 )
     except Exception as e:
@@ -157,7 +157,7 @@ def inspect(file_loc: str) -> pd.DataFrame:
     Returns:
         The corresponding MotifCompendium object.
 
-    Notes:
+    Note:
         Does not ever explicitly load the object, just the metadata from the object.
     """
     if not os.path.exists(file_loc):
@@ -166,14 +166,14 @@ def inspect(file_loc: str) -> pd.DataFrame:
         with h5py.File(file_loc, "r") as f:
             motifs_shape = f["motifs"][()].shape
         metadata = pd.read_hdf(file_loc, key="metadata")
-        __images = pd.read_hdf(file_loc, key="__images")
+        _images = pd.read_hdf(file_loc, key="_images")
     except:
         raise ValueError("File does not specify a MotifCompendium.")
     print(
         f"MotifCompendium with {len(metadata)} motifs."
         + f"\n--- Motifs = {motifs_shape} ---\n"
         + f"\n--- Metadata ---\n{metadata}"
-        + f"\n--- Images ---\n{list(__images.columns)}"
+        + f"\n--- Images ---\n{list(_images.columns)}"
     )
     return metadata
 
@@ -197,7 +197,7 @@ def build(
     Returns:
         A MotifCompendium object containing all motifs in motifs.
 
-    Notes:
+    Note:
         Motifs are assumed to be in ACGT order.
         Safe building validates object integrity but may take significantly longer for
           large objects.
@@ -217,10 +217,10 @@ def build(
     np.fill_diagonal(similarity, 1)  # Sometimes diagonal is 0.999... but should be 1
     similarity = (similarity + similarity.T) / 2  # Ensure symmetric
     # Images
-    __images = pd.DataFrame(index=metadata.index)
+    _images = pd.DataFrame(index=metadata.index)
     # Construct object
     return MotifCompendium(
-        motifs, similarity, alignment_rc, alignment_h, metadata, __images, safe
+        motifs, similarity, alignment_rc, alignment_h, metadata, _images, safe
     )
 
 
@@ -253,7 +253,7 @@ def build_from_modisco(
     Returns:
         A MotifCompendium object containing all motifs in all Modisco objects.
 
-    Notes:
+    Note:
         Safe building validates object integrity but may take significantly longer for
           large objects.
     """
@@ -284,7 +284,7 @@ def build_from_pfm(
     Returns:
         A MotifCompendium object containing all motifs in all PFM files.
 
-    Notes:
+    Note:
         Only accepts files in the PFM or MEME file formats.
         Safe building validates object integrity but may take significantly longer for
           large objects.
@@ -322,10 +322,10 @@ def combine(
         A MotifCompendium object containing all motifs from all individual
           MotifCompendium.
 
-    Notes:
+    Note:
         The 'source_compendium' column may not exist in any of the MotifCompendium
           objects passed into this function.
-        The metadata and __images of each MotifCompendium must contain the same columns.
+        The metadata and _images of each MotifCompendium must contain the same columns.
         Safe building validates object integrity but may take significantly longer for
           large objects.
     """
@@ -349,7 +349,7 @@ def combine(
             )
     else:
         compendium_names = [f"compendium_{i}" for i in range(len(compendiums))]
-    # Confirm that the metadata and __images of each MotifCompendium has the same columns
+    # Confirm that the metadata and _images of each MotifCompendium has the same columns
     metadata_columns = set(compendiums[0].columns())
     if not all(set(x.columns()) == metadata_columns for x in compendiums):
         raise ValueError(
@@ -420,9 +420,9 @@ def combine(
         source_compendium.extend([compendium_names[i]] * len(mc))
     metadata["source_compendium"] = source_compendium
     # Images
-    __images = pd.DataFrame(index=metadata.index)
+    _images = pd.DataFrame(index=metadata.index)
     for images in compendiums[0].images():
-        __images[images] = pd.concat(
+        _images[images] = pd.concat(
             [pd.Series(mc.get_images(images)) for mc in compendiums], ignore_index=True
         )
     # Construct object
@@ -432,7 +432,7 @@ def combine(
         alignment_rc,
         alignment_h,
         metadata,
-        __images,
+        _images,
         safe,
     )
 
@@ -466,7 +466,7 @@ class MotifCompendium:
           motifs should be shifted to align with motif i.
         metadata: A pd.DataFrame containing metadata for each motif. Of length N.
           metadata.iloc[i, :] contains metadata about motif i.
-        __images: A pd.DataFrame containing UTF-8 embedded images related to each motif.
+        _images: A pd.DataFrame containing UTF-8 embedded images related to each motif.
           Private. Not meant to be modified by the user.
     """
 
@@ -480,7 +480,7 @@ class MotifCompendium:
         alignment_rc: np.ndarray,
         alignment_h: np.ndarray,
         metadata: pd.DataFrame,
-        __images: pd.DataFrame,
+        _images: pd.DataFrame,
         safe: bool,
     ) -> None:
         """MotifCompendium constructor.
@@ -494,10 +494,10 @@ class MotifCompendium:
             alignment_rc: A np.ndarray that is assigned to self.alignment_rc.
             alignment_h: A np.ndarray that is assigned to self.alignment_h.
             metadata: A pd.DataFrame that is assigned to self.metadata.
-            __images: A pd.DataFrame that is assigned to self.__images.
+            _images: A pd.DataFrame that is assigned to self._images.
             safe: Whether or not to construct the MotifCompendium safely.
 
-        Notes:
+        Note:
             In general, users should use factory functions and not access this
               constructor directly.
             Safe construction validates object integrity but may take significantly
@@ -508,7 +508,7 @@ class MotifCompendium:
         self.alignment_rc = alignment_rc
         self.alignment_h = alignment_h
         self.metadata = metadata
-        self.__images = __images
+        self._images = _images
         if safe:
             self.validate()
 
@@ -529,7 +529,7 @@ class MotifCompendium:
             f.create_dataset("alignment_rc", data=self.alignment_rc.astype(np.bool_))
             f.create_dataset("alignment_h", data=self.alignment_h.astype(np.short))
             self.metadata.to_hdf(save_loc, key="metadata", mode="a")
-            self.__images.to_hdf(save_loc, key="__images", mode="a")
+            self._images.to_hdf(save_loc, key="_images", mode="a")
 
     def validate(self) -> None:
         """Verifies the integrity of the MotifCompendium.
@@ -537,7 +537,7 @@ class MotifCompendium:
         Checks the validity of each attribute (motifs, similarity, similarity_fb,
           similarity_h).
 
-        Notes:
+        Note:
             This function can take a long time to run, especially for very large
               MotifCompendium.
         """
@@ -554,7 +554,7 @@ class MotifCompendium:
             and (self.similarity == self.similarity.T).all()
         ):
             raise ValueError("self.similarity must be a square transpose matrix.")
-        if not (np.max(self.similarity) <= 1) and (np.min(self.similarity) >= 0):
+        if not ((np.max(self.similarity) <= 1) and (np.min(self.similarity) >= 0)):
             raise ValueError("self.similarity must have similarities between [0, 1].")
         if not (np.diag(self.similarity) == 1).all():
             raise ValueError("self.similarity must have 1s on the diagonal.")
@@ -596,18 +596,18 @@ class MotifCompendium:
         # metadata
         if not isinstance(self.metadata, pd.DataFrame):
             raise TypeError("self.metadata must be a pd.DataFrame.")
-        # __images
-        if not isinstance(self.__images, pd.DataFrame):
-            raise TypeError("self.__images must be a pd.DataFrame.")
-        if not set(self.metadata.columns).isdisjoint(self.__images.columns):
-            raise ValueError("self.metadata and self.__images must share no columns.")
+        # _images
+        if not isinstance(self._images, pd.DataFrame):
+            raise TypeError("self._images must be a pd.DataFrame.")
+        if not set(self.metadata.columns).isdisjoint(self._images.columns):
+            raise ValueError("self.metadata and self._images must share no columns.")
         # shape matches
         if not (
             (self.motifs.shape[0] == self.similarity.shape[0])
             and (self.motifs.shape[0] == self.alignment_rc.shape[0])
             and (self.motifs.shape[0] == self.alignment_h.shape[0])
             and (self.motifs.shape[0] == len(self.metadata))
-            and (self.motifs.shape[0] == len(self.__images))
+            and (self.motifs.shape[0] == len(self._images))
         ):
             raise TypeError("Attribute shapes do not align.")
 
@@ -619,7 +619,7 @@ class MotifCompendium:
             self.alignment_rc.copy(),
             self.alignment_h.copy(),
             self.metadata.copy(deep=True),
-            self.__images.copy(deep=True),
+            self._images.copy(deep=True),
             safe=False,
         )
 
@@ -652,7 +652,7 @@ class MotifCompendium:
             f"MotifCompendium with {len(self.metadata)} motifs."
             + f"\n--- Motifs = {self.motifs.shape} ---\n"
             + f"\n--- Metadata ---\n{self.metadata}"
-            + f"\n--- Images ---\n{list(self.__images.columns)}"
+            + f"\n--- Images ---\n{list(self._images.columns)}"
         )
 
     def _repr_html_(self) -> str:
@@ -665,11 +665,11 @@ class MotifCompendium:
         html += self.metadata._repr_html_()
         # Images section
         html += "<h3>Images</h3>"
-        if self.__images.columns.empty:
+        if self._images.columns.empty:
             html += "<p>No images available</p>"
         else:
             html += "<ul>"
-            for col in self.__images.columns:
+            for col in self._images.columns:
                 html += f"<li>{col}</li>"
             html += "</ul>"
         return html
@@ -706,13 +706,13 @@ class MotifCompendium:
     # IMAGES
     def images(self) -> list[str]:
         """Returns a list of the images saved in the MotifCompendium."""
-        return list(self.__images.columns)
+        return list(self._images.columns)
 
     def get_images(self, image_name: str) -> list[str]:
         """Returns a list of saved images as utf8 str in the MotifCompendium by column name."""
-        if image_name not in self.__images.columns:
+        if image_name not in self._images.columns:
             raise KeyError(f"{image_name} is not a saved image.")
-        return self.__images[image_name].tolist()
+        return self._images[image_name].tolist()
 
     def add_logos(
         self,
@@ -752,7 +752,7 @@ class MotifCompendium:
             for m in motifs
         ]
         # Plot and save
-        self.__images[image_name] = [
+        self._images[image_name] = [
             motif_input.utf8_plot
             for motif_input in utils_plotting.plot_many_motif_logos(
                 logo_plotting_inputs
@@ -767,7 +767,7 @@ class MotifCompendium:
             raise KeyError(
                 "All keys in the mapper must an existing set of saved images."
             )
-        self.__images.rename(columns=mapper, inplace=True)
+        self._images.rename(columns=mapper, inplace=True)
 
     def delete_images(self, image_name: str | list[str]) -> None:
         """Deletes the specified saved images."""
@@ -779,7 +779,7 @@ class MotifCompendium:
             )
         ):
             raise TypeError("image_name must be a string or a list of strings.")
-        self.__images.drop(image_name, axis=1, inplace=True)
+        self._images.drop(image_name, axis=1, inplace=True)
 
     ########################
     # OBJECT MANIPULATIONS #
@@ -835,8 +835,8 @@ class MotifCompendium:
             raise TypeError("MotifCompendium cannot be indexed by this.")
         # metadata
         metadata_slice = self.metadata.iloc[keep_idxs].reset_index(drop=True)
-        # __images
-        __images_slice = self.__images.iloc[keep_idxs].reset_index(drop=True)
+        # _images
+        _images_slice = self._images.iloc[keep_idxs].reset_index(drop=True)
         # matrices
         motifs_slice = self.motifs[keep_idxs, :, :]
         similarity_slice = self.similarity[keep_idxs, :][:, keep_idxs]
@@ -848,7 +848,7 @@ class MotifCompendium:
             alignment_rc_slice,
             alignment_h_slice,
             metadata_slice,
-            __images_slice,
+            _images_slice,
             safe=False,
         )
 
@@ -866,7 +866,7 @@ class MotifCompendium:
             Works exactly like setting a Pandas DataFrame column does.
         """
         if isinstance(key, str):
-            if key in self.__images.columns:
+            if key in self._images.columns:
                 raise ValueError(
                     f"{key} is already a saved image. Names may not overlap."
                 )
@@ -933,7 +933,7 @@ class MotifCompendium:
         sorted_idx = list(metadata_sorted.index)
         # Create sorted attributes
         metadata_sorted.reset_index(drop=True, inplace=True)
-        __images_sorted = self.__images.iloc[sorted_idx].reset_index(drop=True)
+        _images_sorted = self._images.iloc[sorted_idx].reset_index(drop=True)
         motifs_sorted = self.motifs[sorted_idx, :, :]
         similarity_sorted = self.similarity[sorted_idx, :][:, sorted_idx]
         alignment_rc_sorted = self.alignment_rc[sorted_idx, :][:, sorted_idx]
@@ -941,7 +941,7 @@ class MotifCompendium:
         # Return
         if inplace:
             self.metadata = metadata_sorted
-            self.__images = __images_sorted
+            self._images = _images_sorted
             self.motifs = motifs_sorted
             self.similarity = similarity_sorted
             self.alignment_rc = alignment_rc_sorted
@@ -953,7 +953,7 @@ class MotifCompendium:
                 alignment_rc_sorted,
                 alignment_h_sorted,
                 metadata_sorted,
-                __images_sorted,
+                _images_sorted,
                 safe=False,
             )
 
@@ -966,8 +966,8 @@ class MotifCompendium:
         """Extracts a subset of the similarity matrix.
 
         Takes in one or two conditions as pd.Series with dtype bool. Subsets the
-          similarity matrix according to those conditions and returns the corresponding
-          slice of the similarity matrix.
+        similarity matrix according to those conditions and returns the corresponding
+        slice of the similarity matrix.
 
         Args:
             slice1: The first condition to subset on.
@@ -979,7 +979,7 @@ class MotifCompendium:
             A pd.DataFrame containing the similarity scores between two subsets of
               motifs.
 
-        Notes:
+        Note:
             If only slice1 is provided then the similarity scores between the motifs
               specified by slice1 and all other motifs are returned.
             If with_names is provided then it is assumed that the metadata has a "name"
@@ -1097,7 +1097,7 @@ class MotifCompendium:
             **kwargs: Additional named arguments specific to the clustering algorithm of
                 choice.
 
-        Notes:
+        Note:
             Review MotifCompendium.utils.clustering.cluster() for available clustering
               algorithms and algorithm-specific arguments.
             Only one of cluster_within, cluster_on, or cluster_within_on can be used at
@@ -1303,7 +1303,7 @@ class MotifCompendium:
               True, then additional columns summarizing the quality information per
               cluster are added as extra columns.
 
-        Notes:
+        Note:
             If with_stats is True, it is assumed that "name" is a column in the
               MotifCompendium.
         """
@@ -1478,7 +1478,7 @@ class MotifCompendium:
             A MotifCompendium where each entry represents a motif cluster in the current
               MotifCompendium.
 
-        Notes:
+        Note:
             Any non-supported aggregations types must be added manually to the cluster
               average MotifCompendium after it has been created.
             Turning compute_quality_stats off can save time but the quality statistics
@@ -1681,7 +1681,7 @@ class MotifCompendium:
               Alternatively, an externally provided list can fulfill the same role.
             average_motif: Whether or not to show the average motif per cluster.
 
-        Notes:
+        Note:
             Assumes self.metadata has a "name" column.
             If you just want to plot cluster averages, consider doing
               mc.cluster_averages(group_by).motif_collection_html(html_out, "name").
@@ -1785,19 +1785,19 @@ class MotifCompendium:
               of 1, all positions would be trimmed.
             editable: Whether or not the table is editable.
 
-        Notes:
+        Note:
             It is highly suggested that this function just be run on a MotifCompendium
               of motif clusters. Consider doing
               mc.cluster_averages(cluster).summary_table_html(html_out, summary_cols).
         """
         # Check columns
-        all_columns = self.metadata.columns.tolist() + self.__images.columns.tolist()
+        all_columns = self.metadata.columns.tolist() + self._images.columns.tolist()
         if columns is None:
             columns = list(self.metadata.columns)
         elif not all(c in all_columns for c in columns):
             missing_columns = [c for c in columns if c not in all_columns]
             raise KeyError(f"{missing_columns} not in metadata or saved images.")
-        # If forward and reverse logos aren't in __images, create and add them
+        # If forward and reverse logos aren't in _images, create and add them
         if "logo (fwd)" not in self.images():
             self.add_logos(
                 "logo (fwd)",
@@ -1816,15 +1816,15 @@ class MotifCompendium:
         image_column = []
         for c in columns:
             if c in self.metadata.columns:
-                if c in self.__images.columns:
+                if c in self._images.columns:
                     raise KeyError(
-                        f"Column {c} is a column in metadata and __images. Object invalid."
+                        f"Column {c} is a column in metadata and _images. Object invalid."
                     )
                 else:
                     table_columns.append(self.metadata[c])
                     image_column.append(False)
-            elif c in self.__images.columns:
-                table_columns.append(self.__images[c])
+            elif c in self._images.columns:
+                table_columns.append(self._images[c])
                 image_column.append(True)
             else:
                 raise KeyError(
@@ -1892,6 +1892,83 @@ class MotifCompendium:
         for col in df.columns:
             self.metadata[col] = df[col]
 
+    def summary_table_excel(
+        self,
+        xlsx_out: str,
+        columns: None | list[str] = None,
+        logo_trimming: bool | float | int = True,
+    ) -> None:
+        """Creates an Excel (xlsx) file summarizing all motifs and metadata about them.
+
+        Produces an xlsx file at the specified location with all motifs from the current
+          MotifCompendium. Each motif has one row in the summary table. Logos for the
+          forward and reverse complement of each motif will be displayed in the first
+          two columns. Columns from the current metadata as well as other images saved
+          in the object (which can be viewed with MotifCompendium.images())
+          can be displayed as columns in the summary table.
+
+        Args:
+            xlsx_out: The path to save the xlsx file.
+            columns: The list of column names in the metadata or saved images to display
+              as columns in the summary table. If None, uses all columns.
+            logo_trimming: This argument is only relevant if save_images is True. A bool
+              or float/int indicating how the motif should be trimmed when plotting. If
+              False, the motif will not be trimmed at all. If True, the motif will be
+              trimmed at the flanks with a standard threshold of 1/L. If a number is
+              provided, that number must be in [0, 1], and will define the trimming
+              threshold. At a value of 0, only zero positions are trimmed and at a value
+              of 1, all positions would be trimmed.
+            editable: Whether or not the table is editable.
+
+        Note:
+            It is highly suggested that this function just be run on a MotifCompendium
+              of motif clusters. Consider doing
+              mc.cluster_averages(cluster).summary_table_html(html_out, summary_cols).
+        """
+        # Check columns
+        all_columns = self.metadata.columns.tolist() + self._images.columns.tolist()
+        if columns is None:
+            columns = list(self.metadata.columns)
+        elif not all(c in all_columns for c in columns):
+            missing_columns = [c for c in columns if c not in all_columns]
+            raise KeyError(f"{missing_columns} not in metadata or saved images.")
+        # If forward and reverse logos aren't in _images, create and add them
+        if "logo (fwd)" not in self.images():
+            self.add_logos(
+                "logo (fwd)",
+                self.motifs,
+                trim=logo_trimming,
+            )
+        if "logo (rev)" not in self.images():
+            self.add_logos(
+                "logo (rev)",
+                utils_motif.reverse_complement(self.motifs),
+                trim=logo_trimming,
+            )
+        # 
+        # Build table
+        columns = ["logo (fwd)", "logo (rev)"] + columns
+        table_columns = []
+        image_column = []
+        for c in columns:
+            if c in self.metadata.columns:
+                if c in self._images.columns:
+                    raise KeyError(
+                        f"Column {c} is a column in metadata and _images. Object invalid."
+                    )
+                else:
+                    table_columns.append(self.metadata[c])
+                    image_column.append(False)
+            elif c in self._images.columns:
+                table_columns.append(self._images[c])
+                image_column.append(True)
+            else:
+                raise KeyError(
+                    f"{c} must be a column in metadata or a generated image."
+                )
+        table_df = pd.concat(table_columns, axis=1)
+        utils_visualization.df_to_xlsx(table_df, image_column, xlsx_out)
+
     def heatmap(
         self,
         similarity_threshold: float | None = None,
@@ -1914,7 +1991,7 @@ class MotifCompendium:
             show: Whether or not to show the heatmap with plt.show().
             save_loc: Where to save the heatmap to. If None, the heatmap is not saved.
 
-        Notes:
+        Note:
             Assumes self.metadata has a "name" column.
             Consider visualizing just one cluster at a time with
               mc[mc["cluster"] == "cluster_1"].heatmap().
@@ -2121,7 +2198,7 @@ class MotifCompendium:
             self.metadata[f"{save_col_prefix}_name{i}"] = match_labels[i]  # Save labels
             # Save logos, matches only
             if save_images:
-                # self.__images[f"{save_col_prefix}_logo{i}"] = ""
+                # self._images[f"{save_col_prefix}_logo{i}"] = ""
                 match_idx = np.where(match_idxs[i] >= 0)[0]
                 if utf8_images is None:
                     # Generate forward logos if not provided
@@ -2133,7 +2210,7 @@ class MotifCompendium:
                     )
                 else:
                     # Copy forward logos if provided
-                    self.__images.loc[match_idx, f"{save_col_prefix}_logo{i}"] = [
+                    self._images.loc[match_idx, f"{save_col_prefix}_logo{i}"] = [
                         utf8_images[x] if x >= 0 else ""
                         for x in match_idxs[i][match_idx]
                     ]
