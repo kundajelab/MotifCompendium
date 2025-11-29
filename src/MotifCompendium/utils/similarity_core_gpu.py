@@ -38,6 +38,7 @@ def compute_similarity_and_align(
     sim_2, sim_2_alignment = _compute_similarity(
         motifsA_normalized, motifsB_normalized_revcomp
     )  # symmetric alignment
+    del motifsA_normalized, motifsB_normalized_revcomp  # Free up memory
     # Pick best similarity
     sim_12 = cp.stack([sim_1, sim_2])
     sim = cp.max(sim_12, axis=0)

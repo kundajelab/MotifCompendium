@@ -72,7 +72,7 @@ def _normalize_mtx(X):
 
 
 @njit(cache=True)
-def _compute_similarity(motif_set_1, motif_set_2, xp):
+def _compute_similarity(motif_set_1, motif_set_2):
     """Computes similarity and alignment for two sets of motifs."""
     # Get shapes
     N, L, K = motif_set_1.shape
@@ -158,7 +158,7 @@ def _tensor3_matmul_tensor2(X, Y):
 @njit
 def _max_and_shifted_argmax_along_axis2(X, shift=0):
     N, M, L = X.shape
-    max_vals = np.empty((N, M), dtype=np.single)
+    max_vals = np.empty((N, M), dtype=np.float64)
     max_idxs = np.empty((N, M), dtype=np.short)
     for i in range(N):
         for j in range(M):

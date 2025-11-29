@@ -49,21 +49,18 @@ def compute_similarities(
         if L != L0:
             raise ValueError("All motifs must have the same length.")
     # PREPROCESS
-    if unsigned:
-        motif_stack_list = [
-            np.abs(motif_stack) for motif_stack in motif_stack_list
-        ]  # Unsigned
     if utils_config.get_ic_scaled_similarity():
         motif_stack_list = [
             utils_motif.ic_scale(motif_stack) for motif_stack in motif_stack_list
         ]  # IC scale
-    motif_stack_list = [
-        utils_motif.motif_4_to_8(motif_stack) for motif_stack in motif_stack_list
-    ]  # 8 channel
-    motif_stack_list = [
-        motif_stack / np.linalg.norm(motif_stack, axis=(1, 2), keepdims=True)
-        for motif_stack in motif_stack_list
-    ]  # L2 normalize
+    if unsigned:
+        motif_stack_list = [
+            np.abs(motif_stack) for motif_stack in motif_stack_list
+        ]  # Unsigned
+    else:
+        motif_stack_list = [
+            utils_motif.motif_4_to_8(motif_stack) for motif_stack in motif_stack_list
+        ]  # 8 channel
     # COMPUTE
     if utils_config.get_max_chunk() != -1:
         (
