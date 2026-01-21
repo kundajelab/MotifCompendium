@@ -238,7 +238,7 @@ def filter_motifs(
     if args.verbose:
         logging.info(
             f"Overriding flags for matches above threshold:\n"
-            f'Base: {MotifFilterArgs.override_filters[0].threshold}, Composite: {MotifFilterArgs.override_filters[1].threshold}'
+            f'Threshold {i}: {MotifFilterArgs.override_filters[i].threshold}\n' for i in enumerate(MotifFilterArgs.override_filters)
         )
     if args.time:
         start_time = time.time()
@@ -378,7 +378,7 @@ def filter_clusters(
     if args.verbose:
         logging.info(
             f"Overriding flags for matches above threshold:\n"
-            f'Base: {MotifFilterArgs.override_filters[0].threshold}, Composite: {MotifFilterArgs.override_filters[1].threshold}'
+            f'Threshold {i}: {MotifFilterArgs.override_filters[i].threshold}\n' for i in enumerate(MotifFilterArgs.override_filters)
         )
     if args.time:
         start_time = time.time()
@@ -773,6 +773,13 @@ if __name__ == "__main__":
         else:
             logging.error("Metadata file must be a CSV or TSV file.")
             raise ValueError("Metadata file must be a CSV or TSV file.")
+        
+        # Metadata cannot contain special column names
+        select_cols = ["name", "num_seqlets", "posneg", "avg_dist_from_summit"]
+        for col in select_cols:
+            if col in metadata_df.columns:
+                logging.error(f"Metadata file cannot contain column name: {col}")
+                raise ValueError(f"Metadata file cannot contain column name: {col}")
 
         # Merge metadata
         if len(metadata_df) == len(mc):
@@ -786,13 +793,26 @@ if __name__ == "__main__":
             )
         else:
             # Metadata per model
-            mc.metadata = mc.metadata.merge(
-                metadata_df,
-                left_on="model",
-                right_on=metadata_df.columns[0],
-                how="left",
-                suffixes=("", "_drop"),
-            )
+            if "model" not in mc.metadata.columns:
+                if "source" in mc.metadata.columns:
+                    mc.metadata = mc.metadata.merge(
+                        metadata_df,
+                        left_on="source",
+                        right_on=metadata_df.columns[0],
+                        how="left",
+                        suffixes=("", "_drop"),
+                    )
+                else:
+                    logging.error("MotifCompendium metadata does not contain 'model' or 'source' column for merging metadata.")
+                    raise ValueError("MotifCompendium metadata does not contain 'model' or 'source' column for merging metadata.")
+            else:
+                mc.metadata = mc.metadata.merge(
+                    metadata_df,
+                    left_on="model",
+                    right_on=metadata_df.columns[0],
+                    how="left",
+                    suffixes=("", "_drop"),
+                )
 
         # Drop duplicate columns
         mc.metadata = mc.metadata.loc[:, ~mc.metadata.columns.str.endswith("_drop")]
@@ -2082,9 +2102,13 @@ if __name__ == "__main__":
                 logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
 
+    ### EXPORT -----------------------------------------------------------------
+    export_dir = os.path.join(args.output_dir, "export")
+    os.makedirs(export_dir, exist_ok=True)
+    
     ## ARGUMENTS ---------------------------------------------------------------
     # Save arguments
-    arg_json = os.path.join(args.output_dir, "args.json")
+    arg_json = os.path.join(export_dir, "args.json")
     if args.verbose:
         logging.info(f"Saving arguments to: {arg_json}...")
     all_args = [
@@ -2098,6 +2122,35 @@ if __name__ == "__main__":
     ]
     with open(arg_json, "w") as f:
         json.dump(all_args, f, indent=4)
+    
+    
+    ## METADATA --------------------------------------------------------------
+    # Save metadata
+    motifs_metadata_tsv = os.path.join(export_dir, "motifcompendium_metadata.tsv")
+    clusters_metadata_tsv = os.path.join(export_dir, "motifcompendium_cluster_metadata.tsv")
+    if args.sim_threshold_meta:
+        metaclusters_metadata_tsv = os.path.join(export_dir, "motifcompendium_metacluster_metadata.tsv")
+    if args.sim_threshold_sub:
+        subclusters_metadata_tsv = os.path.join(export_dir, "motifcompendium_subcluster_metadata.tsv")
+    
+    if args.verbose:
+        logging.info(f"Saving metadata to: {export_dir}...")
+
+    # Prepare metadata
+    motifs_metadata = pd.concat([mc.metadata, mc_removed.metadata], axis=0, ignore_index=True) if args.filter else mc.metadata
+    clusters_metadata = pd.concat([mc_cluster.metadata, mc_cluster_removed.metadata], axis=0, ignore_index=True) if args.filter else mc_cluster.metadata
+    if args.sim_threshold_meta:
+        metaclusters_metadata = pd.concat([mc_metacluster.metadata, mc_metacluster_removed.metadata], axis=0, ignore_index=True) if args.filter else mc_metacluster.metadata
+    if args.sim_threshold_sub:
+        subclusters_metadata = pd.concat([mc_subcluster.metadata, mc_subcluster_removed.metadata], axis=0, ignore_index=True) if args.filter else mc_subcluster.metadata
+
+    # Export metadata as TSV
+    motifs_metadata.to_csv(motifs_metadata_tsv, sep="\t", index=False)
+    clusters_metadata.to_csv(clusters_metadata_tsv, sep="\t", index=False)
+    if args.sim_threshold_meta:
+        metaclusters_metadata.to_csv(metaclusters_metadata_tsv, sep="\t", index=False)
+    if args.sim_threshold_sub:
+        subclusters_metadata.to_csv(subclusters_metadata_tsv, sep="\t", index=False)
 
     ## END ----------------------------------------------------------------
     print(f"MotifCompendium pipeline completed successfully. Outputs saved to {args.output_dir}.")

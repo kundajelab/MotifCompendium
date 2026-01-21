@@ -16,7 +16,7 @@ def compute_similarity_and_align(
     xp = _get_array_module()
     motifsA_xp = xp.asarray(motifsA, dtype=xp.float64)
     motifsB_xp = xp.asarray(motifsB, dtype=xp.float64)
-    # Normalize motifs
+    # L2 Normalize motifs
     motifsA_normalized = motifsA_xp / xp.linalg.norm(
         motifsA_xp, axis=(1, 2), keepdims=True
     )

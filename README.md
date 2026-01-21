@@ -4,7 +4,7 @@
 
 The MotifCompendium package provides a framework for clustering, annotating, and analyzing motifs efficiently at large scales.
 
-**(7/25/2025)** The main branch of MotifCompendium has been updated! It is highly recommended to upgrade to the current version of the package. Please only work off of the main branch, which will contain the most stable build of MotifCompendium.
+**(1/21/2026)** The main branch of MotifCompendium has been updated! It is highly recommended to upgrade to the current version of the package. Please only work off of the main branch, which will contain the most stable build of MotifCompendium.
 
 README sections:
 

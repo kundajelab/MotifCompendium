@@ -221,7 +221,7 @@ def load_modisco(
                         seqlet_counts.append(seqlets.shape[0])
                         posnegs.append(pattern_posneg)
                         avgdist_summits.append(
-                            np.mean(
+                            np.median(
                                 np.abs(
                                     f[pattern_type][pattern][subpattern]["seqlets"][
                                         "start"
@@ -249,7 +249,7 @@ def load_modisco(
                     seqlet_counts.append(seqlets.shape[0])
                     posnegs.append(pattern_posneg)
                     avgdist_summits.append(
-                        np.mean(
+                        np.median(
                             np.abs(
                                 f[pattern_type][pattern]["seqlets"]["start"][
                                     :
@@ -358,19 +358,19 @@ def load_pfm(
         Motifs are returned as a normalized (N, 30, 4) 4 channel motif stack.
     """
     file_basename = os.path.basename(pfm_file)
-    if "pfm" in file_basename:
-        try:
-            return _load_pfm_file_pfm_format(pfm_file, motif_length)
-        except Exception as e:
-            raise ValueError(
-                f"Attempted to load {pfm_file} as a file in PFM format (due to 'pfm' in the file name), but failed."
-            ) from e
-    elif "meme" in pfm_file:
+    if "meme" in pfm_file:
         try:
             return _load_meme_file_meme_format(pfm_file, motif_length)
         except Exception as e:
             raise ValueError(
                 f"Attempted to load {pfm_file} as a file in MEME format (due to 'meme' in the file name), but failed."
+            ) from e
+    elif "pfm" in file_basename:
+        try:
+            return _load_pfm_file_pfm_format(pfm_file, motif_length)
+        except Exception as e:
+            raise ValueError(
+                f"Attempted to load {pfm_file} as a file in PFM format (due to 'pfm' in the file name), but failed."
             ) from e
     else:
         raise ValueError(

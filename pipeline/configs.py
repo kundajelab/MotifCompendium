@@ -73,13 +73,13 @@ class MotifMatchArgs:
         "data",
         "MotifCompendium-Database-Human.meme.txt",
     )
-    max_submotifs: int = 2
+    max_submotifs: int = 1
     min_score: float = 0.7
-    base_threshold: float = 0.88
+    base_threshold: float = 0.85
     composite_threshold: float = 0.7
     sort_threshold: float = 0.7
 
-    save_images_motif: bool = False
+    save_images_motif: bool = True
     save_images_cluster: bool = True
     save_images_metacluster: bool = True
     save_images_subcluster: bool = True
@@ -91,7 +91,7 @@ class ClusterArgs:
     algorithm_meta: str = "cpm_leiden"
     algorithm_sub: str = "cpm_leiden"
     algorithm_force: str = "dcc"
-    
+
     select_weight_col: str = "num_seqlets"
     select_scale_col: str = "motif_scale"
     scaled_weight_col: str = "scaled_weight"

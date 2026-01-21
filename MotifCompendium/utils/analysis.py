@@ -414,7 +414,7 @@ def export_compendium_meme(
     with open(save_loc, "w") as f:
         f.write("MEME version 4\n")
         f.write(f"ALPHABET= ACGT\n")
-        f.write(f"strands: +\n")
+        f.write(f"strands: + -\n")
         f.write(f"Background letter frequencies:\n")
         f.write("A 0.25 C 0.25 G 0.25 T 0.25\n")
         for i in range(len(mc)):
@@ -509,8 +509,8 @@ def calculate_filters(
     """
     # Calculate filter metrics
     mc_motifs = mc.get_standard_motif_stack() # Get 4-channel
-    if utils_config.get_ic_scale():
-        mc_motifs = utils_motif.ic_scale(mc_motifs) # IC-scale
+    # if utils_config.get_ic_scale():
+    #     mc_motifs = utils_motif.ic_scale(mc_motifs) # IC-scale
     mc_motifs_abs_norm = utils_motif.l1_norm_motif(np.abs(mc_motifs)) # Non-negative, L1-normalize into probabilities
     for filter_metric in metric_list:
         match filter_metric:
