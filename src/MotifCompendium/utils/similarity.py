@@ -84,6 +84,50 @@ def compute_similarities(
         )
 
 
+def compute_similarity_prealigned(
+    motif_stack_A: np.ndarray,
+    motif_stack_B: np.ndarray,
+    unsigned: bool = False
+) -> np.ndarray:
+    """Computes the similarity of two motif stacks assuming they are already aligned.
+
+    Given a list of motif stacks and an instruction of which motif stacks to perform
+      pairwise similarity calculations between, this function returns a list of results
+      of each one of the specified calculations.
+
+    Args:
+        motif_stack_A: A np.ndarray representing a stack of motifs. Assumed to be the
+          same shape as motif_stack_B.
+        motif_stack_B: A np.ndarray representing a stack of motifs. Assumed to be the
+          same shape as motif_stack_A.
+        unsigned: If True, compute similarity on unsigned motifs, ignoring negative
+          values. If False, compute similarity on motifs as provided.
+
+    Returns:
+        A np.ndarray representing the similarity score between the motifs in
+          motif_stack_A and motif_stack_B.
+    """
+    # VALIDATE
+    utils_motif.validate_motif_stack_standard(motif_stack_A)
+    utils_motif.validate_motif_stack_standard(motif_stack_B)
+    if motif_stack_A.shape != motif_stack_B.shape:
+        raise ValueError("motif_stack_A and motif_stack_B must have the same shape.")
+    # PREPROCESS
+    if utils_config.get_ic_scaled_similarity():
+        motif_stack_A = utils_motif.ic_scale(motif_stack_A)  # IC scale
+        motif_stack_B = utils_motif.ic_scale(motif_stack_B)  # IC scale
+    if unsigned:
+        motif_stack_A = np.abs(motif_stack_A)  # Unsigned
+        motif_stack_B = np.abs(motif_stack_B)  # Unsigned
+    else:
+        motif_stack_A = utils_motif.motif_4_to_8(motif_stack_A)  # 8 channel
+        motif_stack_B = utils_motif.motif_4_to_8(motif_stack_B)  # 8 channel
+    motif_stack_A /= np.linalg.norm(motif_stack_A, axis=(1, 2), keepdims=True) # L2 normalize
+    motif_stack_B /= np.linalg.norm(motif_stack_B, axis=(1, 2), keepdims=True) # L2 normalize
+    # COMPUTE
+    return np.sum(motif_stack_A*motif_stack_B, axis=(1,2))
+
+
 #####################
 # PRIVATE FUNCTIONS #
 #####################

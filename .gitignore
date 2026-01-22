@@ -1,16 +1,31 @@
+# Data files
 *.h5
 *.mc
 *.npy
 *.nbi
 *.nbc
 *.png
-*.pyc
-*.sh
 *.tsv
 *.txt
-*/.ipynb_checkpoints
+
+# Python
+*.nbi
+*.nbc
+*.pyc
+*.sh
 */__pycache__/*
 src/MotifCompendium.egg-info/*
 MotifCompendium.egg-info/*
+*.egg-info/
+
+# Jupyter
+*/.ipynb_checkpoints
+
+# Sphinx documentation
+docs/build/
+docs/source/tutorials/tutorial_outputs/
+
+# Personal
+tests/
 !tutorials/tutorial_outputs/*.html
 !tutorials/tutorial_outputs/*.png

@@ -9,8 +9,6 @@ os.environ["NUMBA_CACHE_DIR"] = (
 from numba import njit
 import numpy as np
 
-import MotifCompendium.utils.motif as utils_motif
-
 
 ####################
 # PUBLIC FUNCTIONS #
@@ -19,9 +17,6 @@ def compute_similarity_and_align(
     motifsA: np.ndarray, motifsB: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Computes similarity and alignment taking into account reverse complements."""
-    # Check motifs
-    utils_motif.validate_motif_stack_similarity(motifsA)
-    utils_motif.validate_motif_stack_similarity(motifsB)
     # Normalize motifs
     # Normalize motifs
     motifsA_normalized = _normalize_mtx(motifsA)

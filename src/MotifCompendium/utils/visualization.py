@@ -5,6 +5,7 @@ import os
 from jinja2 import Environment, FileSystemLoader
 from openpyxl import Workbook
 from openpyxl.drawing.image import Image as XLImage
+from openpyxl.utils import get_column_letter
 import pandas as pd
 
 import MotifCompendium.utils.plotting as utils_plotting
@@ -76,13 +77,11 @@ def table_html(
         raise TypeError("table must be a pd.DataFrame")
     if not html_out.endswith(".html"):
         html_out += ".html"
-    columns = table.columns.tolist()
-    if len(image_column) != len(columns):
-        raise ValueError("image_column length must match number of table columns")
     # Add index column
     table.insert(0, "index", table.index)
     image_column.insert(0, False)
     # Prepare data for rendering
+    columns = table.columns.tolist()
     rows = table.to_dict(orient="records")
     # Create Jinja2 environment
     current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -125,6 +124,10 @@ def df_to_xlsx(
     wb = Workbook()
     ws = wb.active
     ws.title = "motif summary"
+    # Set width for image columns to 64.07 (≈970 pixels)
+    for c_idx, is_img in enumerate(image_column, start=1):
+        if is_img:
+            ws.column_dimensions[get_column_letter(c_idx)].width = 64.07
     # Write header row
     for c_idx, col_name in enumerate(columns, start=1):
         ws.cell(row=1, column=c_idx, value=str(col_name))
@@ -133,8 +136,14 @@ def df_to_xlsx(
         for c_idx, col_name in enumerate(columns, start=1):
             val = row[col_name]
             if image_column[c_idx - 1]:
-                ws.add_image(XLImage(io.BytesIO(base64.b64decode(val))), anchor=ws.cell(row=r_idx, column=c_idx).coordinate)
+                ws.add_image(
+                    XLImage(io.BytesIO(base64.b64decode(val))),
+                    anchor=ws.cell(row=r_idx, column=c_idx).coordinate
+                )
             else:
                 ws.cell(row=r_idx, column=c_idx, value=val)
+    # Set height for all non-header rows to 127.50 (≈340 pixels)
+    for r in range(2, ws.max_row + 1):
+        ws.row_dimensions[r].height = 127.50
     # Save workbook
     wb.save(xlsx_out)

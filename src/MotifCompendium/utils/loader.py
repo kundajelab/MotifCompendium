@@ -156,7 +156,7 @@ def load_modisco(
         Assumes that all motifs are stored within "pos_patterns" or "neg_patterns".
     """
     # Set up return lists
-    motifs, motif_names, seqlet_counts, posnegs, avg_contribs, avgdist_summits = (
+    motifs, motif_names, num_seqlets, posnegs, avg_contribs, avgdist_summits = (
         [],
         [],
         [],
@@ -188,7 +188,7 @@ def load_modisco(
                         )
                         motifs.append(motif)
                         motif_names.append(f"{pattern_posneg}.{pattern}-{subpattern}")
-                        seqlet_counts.append(seqlets.shape[0])
+                        num_seqlets.append(seqlets.shape[0])
                         posnegs.append(pattern_posneg)
                         avg_contribs.append(np.sum(modisco_motif))
                         avgdist_summits.append(
@@ -220,7 +220,7 @@ def load_modisco(
                     )
                     motifs.append(motif)
                     motif_names.append(f"{pattern_posneg}.{pattern}")
-                    seqlet_counts.append(seqlets.shape[0])
+                    num_seqlets.append(seqlets.shape[0])
                     posnegs.append(pattern_posneg)
                     avg_contribs.append(np.sum(modisco_motif))
                     avgdist_summits.append(
@@ -241,7 +241,7 @@ def load_modisco(
     metadata = pd.DataFrame(
         {
             "name": motif_names,
-            "seqlet_count": seqlet_counts,
+            "num_seqlets": num_seqlets,
             "posneg": posnegs,
             "avg_contrib": avg_contribs,
             "avgdist_summit": avgdist_summits,
@@ -337,25 +337,18 @@ def load_pfm(
     Note:
         Only accepts files in the PFM or MEME file formats.
     """
-    file_basename = os.path.basename(pfm_file)
-    if "pfm" in file_basename:
-        try:
+    if not os.path.exists(pfm_file):
+        raise FileNotFoundError(f"{pfm_file} not found.")
+    with open(pfm_file, "r") as f:
+        first_line = f.readline().strip()
+        if first_line.startswith(">"):
             return _load_pfm_file_pfm_format(pfm_file, motif_length=motif_length)
-        except Exception as e:
-            raise ValueError(
-                f"Attempted to load {pfm_file} as a file in PFM format (due to 'pfm' in the file name), but failed."
-            ) from e
-    elif "meme" in pfm_file:
-        try:
+        elif first_line.startswith("MEME"):
             return _load_meme_file_meme_format(pfm_file, motif_length=motif_length)
-        except Exception as e:
+        else:
             raise ValueError(
-                f"Attempted to load {pfm_file} as a file in MEME format (due to 'meme' in the file name), but failed."
-            ) from e
-    else:
-        raise ValueError(
-            f"Could not determine file format for {pfm_file}. Please have the file name include 'pfm' or 'meme'."
-        )
+                f"Could not determine file format for {pfm_file} based on first line."
+            )
 
 
 #####################

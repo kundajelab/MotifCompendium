@@ -27,7 +27,7 @@ def single_or_many_motifs(func):
                 "Must input a single motif or motif stack as a np.ndarray."
             )
         if len(motifs.shape) == 2:
-            result = func(np.expand_dims(motifs, axis=0), *args, **kwargs)
+            result = func(motifs[np.newaxis, :, :], *args, **kwargs)
             return result[0]
         return func(motifs, *args, **kwargs)
 
@@ -40,50 +40,36 @@ def validate_motif_basic(motifs: np.ndarray) -> None:
         raise TypeError("Motifs must be a np.ndarray.")
     if not ((len(motifs.shape) in [2, 3]) and (motifs.shape[-1] in [4, 8])):
         raise ValueError(
-            "Must be a single motif or motif stack with either 4/8 channels."
+            "Must be a single motif or motif stack with 4 or 8 channels."
         )
 
 
 def validate_motif_standard(motifs: np.ndarray) -> None:
-    """Validate that motifs are in a standard 4 channel representation."""
     validate_motif_basic(motifs)
     if not motifs.shape[-1] == 4:
-        raise ValueError("Must have 4 channels.")
+        raise ValueError("Motifs must have 4 channels.")
 
 
 def validate_single_motif(motif: np.ndarray) -> None:
-    """Validate that motifs are a single (L, 4) motif."""
     validate_motif_basic(motif)
     if not len(motif.shape) == 2:
-        raise ValueError("Must be of shape (L, 4/8).")
-
-
-def validate_single_motif_standard(motif: np.ndarray) -> None:
-    """Validate that motifs are a standard (L, 4) shape."""
-    validate_single_motif(motif)
-    validate_motif_standard(motif)
+        raise ValueError("Motifs must be of shape (L, 4/8).")
 
 
 def validate_motif_stack(motifs: np.ndarray) -> None:
-    """Validate that motifs are a motif stack."""
     validate_motif_basic(motifs)
     if not len(motifs.shape) == 3:
-        raise ValueError("Must be of shape (N, L, 4/8).")
+        raise ValueError(f"Motifs must be of shape (N, L, 4/8).")
+
+
+def validate_single_motif_standard(motif: np.ndarray) -> None:
+    validate_motif_standard(motif)
+    validate_single_motif(motif)
 
 
 def validate_motif_stack_standard(motifs: np.ndarray) -> None:
-    """Validate that motifs are a standard (N, L, 4) shape."""
-    validate_motif_stack(motifs)
     validate_motif_standard(motifs)
-
-
-def validate_motif_stack_similarity(motifs: np.ndarray) -> None:
-    """Validate that motifs are fit for the core similarity calculation."""
     validate_motif_stack(motifs)
-    if not motifs.shape[2] == 8:
-        raise ValueError("Must be of shape (N, L, 8).")
-    if not np.all(motifs >= 0):
-        raise ValueError("Motifs must be non-negative.")
 
 
 #######################
@@ -116,8 +102,7 @@ _MOTIF_4_TO_8_NEG[3, 6] = 1
 @single_or_many_motifs
 def motif_4_to_8(x: np.ndarray) -> np.ndarray:
     """Converts a 4 channel motif(s) into an 8 channel motif(s)."""
-    if not x.shape[2] == 4:
-        raise ValueError("Input motif(s) must have 4 channels.")
+    validate_motif_stack_standard(x)
     x_pos = np.maximum(x, 0)
     x_neg = np.maximum(-x, 0)
     x_pos_8 = x_pos @ _MOTIF_4_TO_8_POS
@@ -190,8 +175,8 @@ def align_motifs(
 
 
 @single_or_many_motifs
-def pad_motif(motif: np.ndarray, pad_to: int) -> np.ndarray:
-    """Pad a motif or motif stack (by adding 0s) to a specified length.
+def pad_motif(motifs: np.ndarray, pad_to: int) -> np.ndarray:
+    """Pad (by adding 0s) a motif or motif stack to a specified length.
 
     If the given motif is shorter than pad_to, pad with 0s until it is large enough.
       If the given motif is larger than pad_to, raise an error.
@@ -205,47 +190,48 @@ def pad_motif(motif: np.ndarray, pad_to: int) -> np.ndarray:
     """
     if not (isinstance(pad_to, int) and pad_to > 0):
         raise ValueError("pad_to must be a positive integer.")
-    N, L, K = motif.shape
+    N, L, K = motifs.shape
     if L > pad_to:
         raise ValueError(f"Cannot pad motif of length {L} to {pad_to}.")
     padded_motif = np.zeros((N, pad_to, K))
-    padded_motif[:, 0:L, :] = motif
+    padded_motif[:, 0:L, :] = motifs
     return padded_motif
 
 
-def resize_motif(motif: np.ndarray, resize_to: int) -> np.ndarray:
-    """Resize a motif (by squashing or padding) to a specified length.
+@single_or_many_motifs
+def resize_motif(motifs: np.ndarray, resize_to: int) -> np.ndarray:
+    """Resize a motif or motif stacks (by squashing or padding) to a specified length.
 
     If the given motif is shorter than resize_to, pad with 0s until it is large enough.
       If the given motif is larger than resize_to, squash it down to a smaller motif.
-      Selects the base pairs to keep that have the highest weights.
+      Selects the base pairs to keep that have the highest absolute weights.
 
     Args:
-        motif: A (L, K) motif.
+        motif: A (L, K) motif or (N, L, K) motif stack.
         resize_to: The length to squash or pad the motif to.
 
     Returns:
-        A (resize_to, K) motif.
+        A (resize_to, K) motif or (N, resize_to, K) motif stack.
     """
-    validate_single_motif(motif)
     if not (isinstance(resize_to, int) and resize_to > 0):
         raise ValueError("resize_to must be a positive integer.")
-    L, K = motif.shape
+    N, L, K = motifs.shape
     if L < resize_to:
-        return pad_motif(motif, pad_to=resize_to)
+        return pad_motif(motifs, pad_to=resize_to)
     elif L > resize_to:
         # Squash to the desired length
-        i_sums = [
-            (np.sum(np.abs(motif[i : i + resize_to, :])), i)
-            for i in range(L - resize_to + 1)
-        ]
-        top_i = max(i_sums)[1]
-        return motif[top_i : top_i + resize_to, :]
+        num_squashes = L - resize_to + 1
+        squash_sums = np.empty((N, num_squashes))
+        for i in range(num_squashes):
+            squash_sums[:, i] = np.sum(np.abs(motifs[:, i : i + resize_to, :]), axis=(1, 2))
+        top_i = np.argmax(squash_sums, axis=1)
+        return motifs[np.arange(N)[:, np.newaxis], top_i[:, np.newaxis] + np.arange(resize_to)]
     else:
-        return motif
+        return motifs
 
 
-def trim_motif(motif: np.ndarray, importance: float = 1 / 30):
+@single_or_many_motifs
+def trim_motif(motifs: np.ndarray, importance: float = 1 / 30):
     """Trim a motif by removing flanking low-importance positions.
 
     Find the leftmost and rightmost positions in the motif that have a percentage
@@ -256,26 +242,25 @@ def trim_motif(motif: np.ndarray, importance: float = 1 / 30):
       with 0 importance are trimmed.
 
     Args:
-        motif: A (L, K) motif.
+        motif: A (L, K) motif or (N, L, K) motif stack.
         importance: The minimum level of importance a position must have to be included
           in the trimmed motif.
     """
-    validate_single_motif(motif)
     if not (isinstance(importance, (int, float)) and 0 <= importance <= 1):
         raise ValueError("importance must be a number in [0, 1].")
-    motif_abs = np.abs(motif)
+    motif_abs = np.abs(motifs)
     per_position_totals = np.sum(motif_abs, axis=1)
-    included_positions = per_position_totals > importance * np.sum(per_position_totals)
+    included_positions = per_position_totals > (importance * np.sum(per_position_totals))
     if np.sum(included_positions) == 0:
         return None
     min_index = np.argmax(included_positions)
-    max_index = motif.shape[0] - np.argmax(included_positions[::-1])
-    return motif[min_index:max_index]
+    max_index = motifs.shape[0] - np.argmax(included_positions[::-1])
+    return motifs[min_index:max_index]
 
 
 @single_or_many_motifs
 def view_motif_from_position_range(
-    motif: np.ndarray,
+    motifs: np.ndarray,
     current_min_pos: int,
     current_max_pos: int,
     new_min_pos: int,
@@ -289,7 +274,7 @@ def view_motif_from_position_range(
       the view will be cropped.
 
     Args:
-        motif: A motif or motif stack of length L.
+        motif: A (L, K) motif or (N, L, K) motif stack.
         current_min_pos: The position of the 0th index in the length axis.
         current_max_pos: The position of the (L-1)st index in the length axis.
         new_min_pos: The new minimum position from which to view the motif.
@@ -298,32 +283,31 @@ def view_motif_from_position_range(
     Returns:
         The motif as viewed from a new position range.
     """
-    if not (current_max_pos - current_min_pos) == (motif.shape[1] - 1):
+    if not (current_max_pos - current_min_pos) == (motifs.shape[1] - 1):
         raise ValueError("Current position range must match motif length.")
     if not (new_min_pos < new_max_pos):
         raise ValueError("New position range must have a positive length.")
     # Pad if needed
     if new_min_pos < current_min_pos:
         pad_left = current_min_pos - new_min_pos
-        motif = np.pad(motif, ((0, 0), (pad_left, 0), (0, 0)))
+        motifs = np.pad(motifs, ((0, 0), (pad_left, 0), (0, 0)))
         current_min_pos = new_min_pos
     if new_max_pos > current_max_pos:
         pad_right = new_max_pos - current_max_pos
-        motif = np.pad(motif, ((0, 0), (0, pad_right), (0, 0)))
+        motifs = np.pad(motifs, ((0, 0), (0, pad_right), (0, 0)))
         current_max_pos = new_max_pos
     # Crop out new view
     new_min_idx = new_min_pos - current_min_pos
     new_max_idx = new_max_pos - current_min_pos
-    return motif[:, new_min_idx : new_max_idx + 1, :]
+    return motifs[:, new_min_idx : new_max_idx + 1, :]
 
 
 def average_motifs(
     motif_stack: np.ndarray,
     alignment_rc: np.ndarray,
     alignment_h: np.ndarray,
-    match_original_length: bool = True,
-    l1_normalize: bool = False,
     weights: np.ndarray | None = None,
+    match_original_length: bool = True,
 ) -> np.ndarray:
     """Compute the average motif of a stack of motifs.
 
@@ -334,13 +318,12 @@ def average_motifs(
         motif_stack: A (N, L, 4) motif stack to be averaged.
         alignment_rc: A (N, ) forward/reverse complement alignment vector.
         alignment_h: A (N, ) horizontal alignment vector.
-        match_original_length: Whether to match the original length of the motifs. If
-          True, the average motif will be made to be the same length as the original
-          motifs. If False, the average motif will have the length of the aligned motif
-          stack.
-        l1_normalize: Whether or not to L1 normalize the average motif before returning.
         weights: A (N, ) vector of weights for each motif. If None, all motifs are
           weighed equally.
+        match_original_length: Whether to match the original length of the motifs. If
+          True, the average motif will be made to be the same length as the original
+          motifs. If False, the average motif will have the length of the original motif
+          stack.
 
     Returns:
         The average motif.
@@ -359,27 +342,23 @@ def average_motifs(
         )
     # Average
     average_motif = np.average(aligned_motifs, axis=0, weights=weights)
-    if motif_stack.shape[2] == 8:
-        average_motif = motif_4_to_8(average_motif)
     if match_original_length:
         average_motif = resize_motif(average_motif, resize_to=motif_stack.shape[1])
-    if l1_normalize:
-        average_motif = average_motif / np.sum(np.abs(average_motif))
     return average_motif
 
 
 ####################
 # PUBLIC FUNCTIONS #
 ####################
-def motif_to_df(motif: np.ndarray) -> pd.DataFrame:
+def motif_to_df(motifs: np.ndarray) -> pd.DataFrame:
     """Transforms a motif into a pd.DataFrame ready for plotting with logomaker."""
-    validate_single_motif_standard(motif)
-    return pd.DataFrame(motif, columns=["A", "C", "G", "T"])
+    validate_single_motif_standard(motifs)
+    return pd.DataFrame(motifs, columns=["A", "C", "G", "T"])
 
 
 @single_or_many_motifs
 def motif_to_string(
-    x: np.ndarray, specificity: float = 0.7, importance: float = 1 / 30
+    motifs: np.ndarray, specificity: float = 0.7, importance: float = 1 / 30
 ) -> str | list[str]:
     """Transforms motifs into ATCG strings.
 
@@ -391,7 +370,7 @@ def motif_to_string(
       requirement then a hyphen (-) is included in the string.
 
     Args:
-        x: A (L, 4) motif or (N, L, 4) motif stack representing motifs to compute
+        motif: A (L, 4) motif or (N, L, 4) motif stack representing motifs to compute
           strings from.
         specificity: The percentage of importance a base must have at a position to be
           included in the string.
@@ -402,20 +381,20 @@ def motif_to_string(
         A string or list of strings representing the motifs.
     """
     # Check inputs
-    validate_motif_stack_standard(x)
-    if not (x >= 0).all():
-        raise ValueError("Motif strings can only be generated for non-negative motifs.")
+    validate_motif_stack_standard(motifs)
     if not (isinstance(specificity, (int, float)) and 0.5 < specificity <= 1):
         raise ValueError("specificity must be a number in (0.5, 1].")
     if not (isinstance(importance, (int, float)) and 0 <= importance <= 1):
         raise ValueError("importance must be a number in [0, 1].")
+    # Non-negative + L1-normalized + IC-scaled
+    motifs = abs_ic_scale_normalize(motifs) # 
     # Turns to 1s and 0s
-    per_position_totals = np.sum(x, axis=2, keepdims=True)
+    per_position_totals = np.sum(motifs, axis=2, keepdims=True)
     meets_specificity = (
         np.divide(
-            x,
+            motifs,
             per_position_totals,
-            out=np.zeros_like(x),
+            out=np.zeros_like(motifs),
             where=(per_position_totals != 0),
         )
         >= specificity
@@ -589,7 +568,7 @@ def normalized_last_axis_entropy(x: np.ndarray) -> np.ndarray:
 
 
 @single_or_many_motifs
-def ic_scale(x: np.ndarray, invert: bool = False) -> float | np.ndarray:
+def ic_scale(motifs: np.ndarray, invert: bool = False) -> float | np.ndarray:
     """Rescale a 4 channel motif by per position information content.
 
     Each position in the motif is scaled by the information content at that position.
@@ -598,7 +577,7 @@ def ic_scale(x: np.ndarray, invert: bool = False) -> float | np.ndarray:
       information content.
 
     Args:
-        x: A (L, 4) motif or (N, L, 4) motif stack.
+        motifs: A (L, 4) motif or (N, L, 4) motif stack.
         invert: Whether or not to invert the information content scaling.
 
     Returns:
@@ -610,21 +589,20 @@ def ic_scale(x: np.ndarray, invert: bool = False) -> float | np.ndarray:
           And if all bases are present and represented equally, the weights will for all
           bases at that position will be set to 0.
     """
-    validate_motif_stack_standard(x)  # (N, L, 4)
-    x_abs = np.abs(x)
+    validate_motif_stack_standard(motifs)  # (N, L, 4)
+    x_abs = np.abs(motifs)
     entropy = normalized_last_axis_entropy(x_abs)  # (N, L, 1)
     ic = 1 - entropy
     if invert:
-        scaled = np.divide(x, ic, out=np.zeros_like(x, dtype=x.dtype), where=(ic != 0))
+        scaled = np.divide(motifs, ic, out=np.zeros_like(motifs, dtype=motifs.dtype), where=(ic != 0))
     else:
-        scaled = x * ic
+        scaled = motifs * ic
     return scaled
 
 
 @single_or_many_motifs
 def abs_ic_scale_normalize(x: np.ndarray) -> np.ndarray:
     """Takes the absolute value then IC scales and L1 normalizes."""
-    validate_motif_stack_standard(x)
     x = np.abs(x)
     x = ic_scale(x)
     x /= np.sum(x, axis=(1, 2), keepdims=True)
@@ -655,7 +633,6 @@ def calculate_full_motif_entropy(x: np.ndarray) -> float | np.ndarray:
           entropy motifs for your particular setting, but you may want to start with a
           threshold of > 0.75.
     """
-    validate_motif_stack_standard(x)
     x = abs_ic_scale_normalize(x)  # Prerequisite for filter calculations
     x_fullmotif = np.reshape(x, (x.shape[0], -1))
     return normalized_last_axis_entropy(x_fullmotif)
@@ -682,7 +659,6 @@ def calculate_weighted_base_entropy(x: np.ndarray) -> float | np.ndarray:
           entropy motifs for your particular setting, but you may want to start with a
           threshold of > 0.5.
     """
-    validate_motif_stack_standard(x)
     x = abs_ic_scale_normalize(x)  # Prerequisite for filter calculations
     across_base_entropy = normalized_last_axis_entropy(x)  # (N, L, 1)
     position_importance = np.sum(x, axis=2, keepdims=True)  # (N, L, 1)
@@ -710,7 +686,6 @@ def calculate_weighted_position_entropy(x: np.ndarray) -> float | np.ndarray:
           these high entropy motifs for your particular setting, but you may want to
           start with a threshold of > 0.71.
     """
-    validate_motif_stack_standard(x)
     x = abs_ic_scale_normalize(x)  # Prerequisite for filter calculations
     across_position_entropy = np.stack(
         [normalized_last_axis_entropy(x[:, :, i]).squeeze() for i in range(x.shape[2])],
@@ -742,7 +717,6 @@ def calculate_position_versus_base_entropy(x: np.ndarray) -> float | np.ndarray:
           these high entropy motifs for your particular setting, but you may want to
           start with a threshold of > 0.45.
     """
-    validate_motif_stack_standard(x)
     x = abs_ic_scale_normalize(x)  # Prerequisite for filter calculations
     across_position_entropy = normalized_last_axis_entropy(
         np.sum(x, axis=2)
@@ -776,7 +750,6 @@ def calculate_copair_entropy(x: np.ndarray) -> float | np.ndarray:
           entropy motifs for your particular setting, but you may want to start with a
           threshold of > 0.35.
     """
-    validate_motif_stack_standard(x)
     x = abs_ic_scale_normalize(x)  # Prerequisite for filter calculations
     # Calculate copair
     x_cross = x[:, :, :, np.newaxis] @ x[:, :, np.newaxis, :]  # (N, L, 4, 4)
@@ -815,7 +788,6 @@ def calculate_copair_composition(x: np.ndarray) -> float | np.ndarray:
           composition motifs for your particular setting, but you may want to start with a
           threshold of > 0.41.
     """
-    validate_motif_stack_standard(x)
     x = abs_ic_scale_normalize(x)  # Prerequisite for filter calculations
     # Calculate copair
     N, L, K = x.shape
@@ -854,7 +826,6 @@ def calculate_dinucleotide_entropy(x: np.ndarray) -> float | np.ndarray:
           identifying these high entropy motifs for your particular setting, but you may
           want to start with a threshold of > 0.42.
     """
-    validate_motif_stack_standard(x)
     x = abs_ic_scale_normalize(x)  # Prerequisite for filter calculations
     # Calculate dinucleotide
     L = x.shape[1]
@@ -910,7 +881,6 @@ def calculate_dinucleotide_alternating_composition(x: np.ndarray) -> float | np.
           be a little looser with this filter and a little stricter with
           calculate_dinucleotide_score().
     """
-    validate_motif_stack_standard(x)
     x = abs_ic_scale_normalize(x)  # Prerequisite for filter calculations
     # Calculate dinucleotide
     L = x.shape[1]
@@ -960,7 +930,6 @@ def calculate_dinucleotide_score(x: np.ndarray) -> float | np.ndarray:
           patterns. You should be a little stricter with this filter and can be a
           little looser with calculate_dinucleotide_alternating_composition().
     """
-    validate_motif_stack_standard(x)
     x = abs_ic_scale_normalize(x)  # Prerequisite for filter calculations
     # Calculate dinucleotide
     x_0 = x[:, :-1, :]  # (N, L-1, 4)

@@ -555,11 +555,11 @@ def assign_label_from_pfms(
     mc: MotifCompendiumClass,
     pfm_file: str,
     save_col_prefix: str = "match",
-    min_score: float = 0.5,
     max_submotifs: int = 1,
     label_unsigned: bool = True,
+    min_match_score: float = 0.5,
     save_images: bool = True,
-    logo_trimming: bool | float | int = 0,
+    logo_plotting_kws: dict = {"ic_scale": True, "trim": 0},
 ) -> None:
     """Automatic labeling of motifs from a file containing PFMs.
 
@@ -575,39 +575,34 @@ def assign_label_from_pfms(
         save_col_prefix: The prefix to use for the saved columns. All saved columns and
           saved images generated from the labeling process will begin with
           save_col_prefix. These columns will have the structure
-          f"{save_col_prefix}_{score/name/logo}{i}".
-        min_score: The minimum similarity score to consider a match.
+          f"{save_col_prefix}_{similarity/name/logo}{i}".
         max_submotifs: The maximum number of submotifs to consider in a match. If
           max_submotifs = 1, only a single match is given to each motif. If
           max_submotifs > 1, the best match for each motif can be from a combination of
           multiple reference motifs.
         label_unsigned: Whether or not to perform an unsigned similarity calculation,
           allowing negative motifs to be matched with positive counterparts.
+        min_match_score: The minimum similarity score to consider a match.
         save_images: Whether or not to save the logos of the matched motifs. If True,
-          the logos will appear as a saved image. If False, logos will not be saved as
-          saved images.
-        logo_trimming: This argument is only relevant if save_images is True. A bool or
-          float/int indicating how the motif should be trimmed when plotting. If False,
-          the motif will not be trimmed at all. If True, the motif will be trimmed at
-          the flanks with a standard threshold of 1/L. If a number is provided, that
-          number must be in [0, 1], and will define the trimming threshold. At a value
-          of 0, only zero positions are trimmed and at a value of 1, all positions would
-          be trimmed.
+          the logos will appear as a saved image. If False, logos will not be saved.
+        logo_plotting_kws: A dictionary of keyword arguments to pass to the .add_logos()
+          method that specify how motifs should be plotted. This will only be used if
+          `logo (fwd)` and `logo (rev)` are not already in the saved images.
     """
     # Load PFM database, with same length as motifs
     pfm_motifs, pfm_names = utils_loader.load_pfm(
         pfm_file, motif_length=mc.motifs.shape[1]
     )
     # Assign labels
-    mc.assign_label_from_motifs(
+    mc.assign_label_from_motifs_v2(
         pfm_motifs,
-        pfm_names,
-        min_score,
-        label_unsigned=label_unsigned,
-        max_submotifs=max_submotifs,
-        save_images=save_images,
-        logo_trimming=logo_trimming,
+        pfm_names["name"].tolist(),
         save_col_prefix=save_col_prefix,
+        max_submotifs=max_submotifs,
+        label_unsigned=label_unsigned,
+        min_match_score=min_match_score,
+        save_images=save_images,
+        logo_plotting_kws=logo_plotting_kws,
     )
 
 
@@ -616,11 +611,11 @@ def assign_label_from_other_compendium(
     assign_from_mc: MotifCompendiumClass,
     from_label_col: str = "name",
     save_col_prefix: str = "match",
-    min_score: float = 0.5,
     max_submotifs: int = 1,
     label_unsigned: bool = True,
+    min_match_score: float = 0.5,
     save_images: bool = True,
-    logo_trimming: bool | float | int = True,
+    logo_plotting_kws: dict = {"ic_scale": True, "trim": 0},
 ) -> None:
     """Automatic labeling of motifs from another MotifCompendium.
 
@@ -638,26 +633,19 @@ def assign_label_from_other_compendium(
         save_col_prefix: The prefix to use for the saved columns. All saved columns and
           saved images generated from the labeling process will begin with
           save_col_prefix. These columns will have the structure
-          f"{save_col_prefix}_{score/name/logo}{i}".
-        min_score: The minimum similarity score to consider a match.
+          f"{save_col_prefix}_{similarity/name/logo}{i}".
         max_submotifs: The maximum number of submotifs to consider in a match. If
           max_submotifs = 1, only a single match is given to each motif. If
           max_submotifs > 1, the best match for each motif can be from a combination of
           multiple reference motifs.
         label_unsigned: Whether or not to perform an unsigned similarity calculation,
           allowing negative motifs to be matched with positive counterparts.
+        min_match_score: The minimum similarity score to consider a match.
         save_images: Whether or not to save the logos of the matched motifs. If True,
-          the logos will appear as a saved image. If False, logos will not be saved as
-          saved images. The logos will come from
-          assign_from_mc.get_saved_images("logo (fwd)"), if available. If not, they will
-          be generated on the fly.
-        logo_trimming: This argument is only relevant if save_images is True. A bool or
-          float/int indicating how the motif should be trimmed when plotting. If False,
-          the motif will not be trimmed at all. If True, the motif will be trimmed at
-          the flanks with a standard threshold of 1/L. If a number is provided, that
-          number must be in [0, 1], and will define the trimming threshold. At a value
-          of 0, only zero positions are trimmed and at a value of 1, all positions would
-          be trimmed.
+          the logos will appear as a saved image. If False, logos will not be saved.
+        logo_plotting_kws: A dictionary of keyword arguments to pass to the .add_logos()
+          method that specify how motifs should be plotted. This will only be used if
+          `logo (fwd)` and `logo (rev)` are not already in the saved images.
     """
     if not (
         isinstance(assign_to_mc, MotifCompendiumClass)
@@ -670,21 +658,15 @@ def assign_label_from_other_compendium(
     if from_label_col in assign_from_mc.metadata.columns:
         labels = assign_from_mc.metadata[from_label_col].tolist()
     else:
-        raise KeyError(f"{from_label_col} not in other metadata.")
-    # Check if forward logos in other MotifCompendium
-    if save_images and "logo (fwd)" in assign_from_mc.images():
-        other_logos = assign_from_mc.get_images("logo (fwd)")
-    else:
-        other_logos = None
+        raise KeyError(f"{from_label_col} not in assign_from_mc metadata.")
     # Assign labels
-    assign_to_mc.assign_label_from_motifs(
+    assign_to_mc.assign_label_from_motifs_v2(
         assign_from_mc.motifs,
         labels,
-        min_score,
-        label_unsigned=label_unsigned,
-        max_submotifs=max_submotifs,
-        save_images=save_images,
-        logo_trimming=logo_trimming,
-        utf8_images=other_logos,
         save_col_prefix=save_col_prefix,
+        max_submotifs=max_submotifs,
+        label_unsigned=label_unsigned,
+        min_match_score=min_match_score,
+        save_images=save_images,
+        logo_plotting_kws=logo_plotting_kws,
     )

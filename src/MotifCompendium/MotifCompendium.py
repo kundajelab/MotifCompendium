@@ -634,15 +634,7 @@ class MotifCompendium:
                 ).all()  # alignment_rc equal
                 and (self.alignment_h == other.alignment_h).all()  # alignment_h equal
                 and self.metadata.equals(other.metadata)  # metadata equal
-                and (
-                    (sorted(self.images()) == sorted(other.images()))
-                    and all(
-                        [
-                            self.get_images(x) == other.get_images(x)
-                            for x in self.images()
-                        ]
-                    )
-                )  # images equal (columns equal and each column value equal)
+                and self._images.equals(other._images)  # _images equal
             )
         return False
 
@@ -716,23 +708,29 @@ class MotifCompendium:
 
     def add_logos(
         self,
-        image_name: str,
         motifs: np.ndarray,
-        ic_scale: bool = True,
-        trim: bool | float | int = False,
+        image_name: str,
+        logo_plotting_kws: dict = {"ic_scale": True}
     ) -> None:
         """Saves logos of the provided motifs as saved images.
 
         Args:
-            image_name: The name of the images to save the logos as.
             motifs: The motifs to save logos for. Of shape (N, L, 4).
-            ic_scale: Whether or not the motifs should be IC scaled when plotting.
-            trim: A bool or float/int indicating how the motif should be trimmed when
-              plotting. If False, the motif will not be trimmed at all. If True, the
-              motif will be trimmed at the flanks with a standard threshold of 1/L. If a
-              number is provided, that number must be in [0, 1], and will define the
-              trimming threshold. At a value of 0, only zero positions are trimmed and
-              at a value of 1, all positions would be trimmed.
+            image_name: The name of the images to save the logos as.
+            logo_plotting_kws: A dictionary of keyword arguments that certain attributes
+              about the logo plots. The allowed keys are:
+                - "ic_scale": Whether or not the motifs should be IC scaled when
+                    plotting.
+                - "trim": A bool or float/int indicating how the motifs should be
+                    trimmed when plotting. If False, the motif will not be trimmed at
+                    all. If True, the motif will be trimmed at the flanks with a
+                    standard threshold of 1/L. If a number is provided, that number must
+                    be in [0, 1], and will define the trimming threshold. At a value of
+                    0, only zero positions are trimmed and at a value of 1, all
+                    positions would be trimmed. If trim is not False, then the motif is
+                    not repositioned or reindexed.
+                - "bgcolor": The background color of the logo plot. If not specified,
+                    the background color will be white.
         """
         # Check inputs
         utils_motif.validate_motif_stack_standard(motifs)
@@ -746,9 +744,14 @@ class MotifCompendium:
             raise ValueError(
                 f"{image_name} is already a metadata column. Names may not overlap."
             )
+        if not isinstance(logo_plotting_kws, dict):
+            raise TypeError("logo_plotting_kws must be a dictionary.")
+        # Only pass allowed kws
+        allowed_kws = ["ic_scale", "trim", "bgcolor"]
+        logo_plotting_kws = {k: v for k, v in logo_plotting_kws.items() if k in allowed_kws}
         # Prepare plotting
         logo_plotting_inputs = [
-            utils_plotting.LogoPlottingInput(motif=m, ic_scale=ic_scale, trim=trim)
+            utils_plotting.LogoPlottingInput(m, encode=True, **logo_plotting_kws)
             for m in motifs
         ]
         # Plot and save
@@ -815,18 +818,23 @@ class MotifCompendium:
                     "When indexing by a pd.Series, the index must match the object."
                 )
             keep_idxs = list(self.metadata[key].index)
-        elif isinstance(key, list) and all(isinstance(x, bool) for x in key):
-            if len(key) != len(self):
-                raise KeyError(
-                    "When indexing by a list, the list must be same length as object."
-                )
-            keep_idxs = [i for i, v in enumerate(key) if v]
-        elif isinstance(key, list) and all(isinstance(x, int) for x in key):
-            if len(key) != len(self):
-                raise KeyError(
-                    "When indexing by a list, the list must be same length as object."
-                )
-            keep_idxs = key
+        elif isinstance(key, list):
+            if len(key) == 0:
+                raise ValueError("Indexing list may not be empty.")
+            if all(isinstance(x, bool) for x in key):
+                if len(key) != len(self):
+                    raise KeyError(
+                        "When indexing by a list of bools, the list must be same length as object."
+                    )
+                keep_idxs = [i for i, v in enumerate(key) if v]
+            elif all(isinstance(x, int) for x in key):
+                if not all(0 <= x < len(self) for x in key):
+                    raise KeyError(
+                        "When indexing by a list of ints, all indices must be within 0 <= index < length of MotifCompendium."
+                    )
+                keep_idxs = key
+            else:
+                raise TypeError("When MotifCompendium is indexed by a list, it must be a list of all bools or all ints.")
         elif isinstance(key, slice):
             keep_idxs = list(range(*key.indices(len(self))))
             if len(keep_idxs) == 0:
@@ -961,7 +969,7 @@ class MotifCompendium:
         self,
         slice1: pd.Series,
         slice2: pd.Series | None = None,
-        with_names: bool = False,
+        motif_names: str | None = None,
     ) -> pd.DataFrame:
         """Extracts a subset of the similarity matrix.
 
@@ -972,8 +980,10 @@ class MotifCompendium:
         Args:
             slice1: The first condition to subset on.
             slice2: The second condition to subset on.
-            with_names: Whether or not to annotate the index/columns of the output
-              DataFrame with motif names.
+            motif_names: The column in the metadata containing the motif names. If a
+              column is provided, the values in that column will be used to annotate the
+              motifs in the returned DataFrame. If None, the indices of the motifs will
+              be used.
 
         Returns:
             A pd.DataFrame containing the similarity scores between two subsets of
@@ -982,19 +992,17 @@ class MotifCompendium:
         Note:
             If only slice1 is provided then the similarity scores between the motifs
               specified by slice1 and all other motifs are returned.
-            If with_names is provided then it is assumed that the metadata has a "name"
-              column.
         """
         if not (isinstance(slice1, pd.Series) and (slice1.dtype == bool)):
             raise TypeError("slice1 must be a pd.Series of dtype bool.")
         keep_idxs_1 = self.metadata[slice1].index.tolist()
         if slice2 is None:
             similarity_slice = self.similarity[keep_idxs_1, :]
-            if with_names:
+            if motif_names is not None:
                 similarity_slice_df = pd.DataFrame(
                     similarity_slice,
-                    index=list(self.metadata[slice1]["name"]),
-                    columns=list(self.metadata["name"]),
+                    index=list(self.metadata.loc[slice1, motif_names]),
+                    columns=list(self.metadata[motif_names]),
                 )
                 return similarity_slice_df
             else:
@@ -1009,11 +1017,11 @@ class MotifCompendium:
                 raise TypeError("slice2 must be a pd.Series of dtype bool.")
             keep_idxs_2 = self.metadata[slice2].index.tolist()
             similarity_slice = self.similarity[keep_idxs_1, :][:, keep_idxs_2]
-            if with_names:
+            if motif_names is not None:
                 similarity_slice_df = pd.DataFrame(
                     similarity_slice,
-                    index=list(self.metadata.loc[slice1, "name"]),
-                    columns=list(self.metadata.loc[slice2, "name"]),
+                    index=list(self.metadata.loc[slice1, motif_names]),
+                    columns=list(self.metadata.loc[slice2, motif_names]),
                 )
                 return similarity_slice_df
             else:
@@ -1042,7 +1050,7 @@ class MotifCompendium:
             data_i["alignment_rc"] = self.alignment_rc[index]
             data_i["alignment_h"] = self.alignment_h[index]
             data_i["metadata"] = row
-            yield index, self.motif[index], data_i
+            yield index, self.motifs[index], data_i
 
     ########################
     # CLUSTERING FUNCTIONS #
@@ -1210,7 +1218,7 @@ class MotifCompendium:
                 # Identify motifs corresponding to cluster_within
                 c_condition = self.metadata[cluster_within] == c
                 c_idxs = list(c_condition[c_condition].index)
-                c_mc = self[c_condition]
+                c_mc = self.metadata[c_condition]
                 # Average for cluster_on
                 c_mc_average = c_mc.cluster_averages(
                     clustering=cluster_on, weight_col=cluster_on_weight
@@ -1437,6 +1445,7 @@ class MotifCompendium:
         aggregations: list[tuple[str]] = [("name", "count", "num_constituents")],
         weight_col: str | None = None,
         compute_quality_stats: bool = False,
+        logo_plotting_kws: dict = {"ic_scale": True, "trim": 0},
     ) -> MotifCompendium:
         """Creates a MotifCompendium where each motif represents a cluster of motifs.
 
@@ -1473,6 +1482,9 @@ class MotifCompendium:
             compute_quality_stats: Whether or not to compute quality statistics for the
               clustering. If True, the quality statistics will be saved in the metadata
               of the returned MotifCompendium.
+            logo_plotting_kws: A dictionary of keyword arguments to pass to the
+              .add_logos() method that specify how motifs should be plotted. This will
+              only be used if compute_quality_stats is True.
 
         Returns:
             A MotifCompendium where each entry represents a motif cluster in the current
@@ -1583,7 +1595,6 @@ class MotifCompendium:
                 for i, idx in enumerate(best_match_idx)
             ]
             mc_avg.add_logos(
-                "best_match_cluster",
                 np.stack(
                     [
                         (
@@ -1594,7 +1605,8 @@ class MotifCompendium:
                         for i, x in enumerate(best_match_idx)
                     ]
                 ),
-                trim=0,
+                "best_match_cluster",
+                logo_plotting_kws
             )
             # Actual quality
             quality_df = self.clustering_quality(clustering, with_stats=True)
@@ -1607,14 +1619,14 @@ class MotifCompendium:
                 )
             ]
             mc_avg.add_logos(
-                "lowest_internal_similarity_motif1",
                 np.stack(quality_df["lowest_internal_similarity_motif1_motif"]),
-                trim=0,
+                "lowest_internal_similarity_motif1",
+                logo_plotting_kws
             )
             mc_avg.add_logos(
-                "lowest_internal_similarity_motif2",
                 np.stack(quality_df["lowest_internal_similarity_motif2_motif"]),
-                trim=0,
+                "lowest_internal_similarity_motif2",
+                logo_plotting_kws
             )
             mc_avg["highest_external_similarity"] = [
                 f"{x:.3} ({y}: {z})"
@@ -1630,7 +1642,6 @@ class MotifCompendium:
                 for i, c in enumerate(quality_df["highest_external_similarity_cluster"])
             ]
             mc_avg.add_logos(
-                "highest_external_similarity_cluster",
                 np.stack(
                     [
                         (
@@ -1646,10 +1657,10 @@ class MotifCompendium:
                         )
                     ]
                 ),
-                trim=0,
+                "highest_external_similarity_cluster",
+                logo_plotting_kws
             )
             mc_avg.add_logos(
-                "highest_external_similarity_motif",
                 np.stack(
                     [
                         x if not y else utils_motif.reverse_complement(x)
@@ -1659,7 +1670,8 @@ class MotifCompendium:
                         )
                     ]
                 ),
-                trim=0,
+                "highest_external_similarity_motif",
+                logo_plotting_kws
             )
         return mc_avg
 
@@ -1760,7 +1772,7 @@ class MotifCompendium:
         self,
         html_out: str,
         columns: None | list[str] = None,
-        logo_trimming: bool | float | int = True,
+        logo_plotting_kws: dict = {"ic_scale": True, "trim": False},
         editable=False,
     ) -> None:
         """Creates an html file summarizing all motifs and metadata about them.
@@ -1776,13 +1788,10 @@ class MotifCompendium:
             html_out: The path to save the html file.
             columns: The list of column names in the metadata or saved images to display
               as columns in the summary table. If None, uses all columns.
-            logo_trimming: This argument is only relevant if save_images is True. A bool
-              or float/int indicating how the motif should be trimmed when plotting. If
-              False, the motif will not be trimmed at all. If True, the motif will be
-              trimmed at the flanks with a standard threshold of 1/L. If a number is
-              provided, that number must be in [0, 1], and will define the trimming
-              threshold. At a value of 0, only zero positions are trimmed and at a value
-              of 1, all positions would be trimmed.
+            logo_plotting_kws: A dictionary of keyword arguments to pass to the
+              .add_logos() method that specify how motifs should be plotted. This will
+              only be used if `logo (fwd)` and `logo (rev)` are not already in the saved
+              images.
             editable: Whether or not the table is editable.
 
         Note:
@@ -1800,15 +1809,15 @@ class MotifCompendium:
         # If forward and reverse logos aren't in _images, create and add them
         if "logo (fwd)" not in self.images():
             self.add_logos(
-                "logo (fwd)",
                 self.motifs,
-                trim=logo_trimming,
+                "logo (fwd)",
+                logo_plotting_kws,
             )
         if "logo (rev)" not in self.images():
             self.add_logos(
-                "logo (rev)",
                 utils_motif.reverse_complement(self.motifs),
-                trim=logo_trimming,
+                "logo (rev)",
+                logo_plotting_kws,
             )
         # Build table
         columns = ["logo (fwd)", "logo (rev)"] + columns
@@ -1896,7 +1905,7 @@ class MotifCompendium:
         self,
         xlsx_out: str,
         columns: None | list[str] = None,
-        logo_trimming: bool | float | int = True,
+        logo_plotting_kws: dict = {"ic_scale": True, "trim": False},
     ) -> None:
         """Creates an Excel (xlsx) file summarizing all motifs and metadata about them.
 
@@ -1911,14 +1920,10 @@ class MotifCompendium:
             xlsx_out: The path to save the xlsx file.
             columns: The list of column names in the metadata or saved images to display
               as columns in the summary table. If None, uses all columns.
-            logo_trimming: This argument is only relevant if save_images is True. A bool
-              or float/int indicating how the motif should be trimmed when plotting. If
-              False, the motif will not be trimmed at all. If True, the motif will be
-              trimmed at the flanks with a standard threshold of 1/L. If a number is
-              provided, that number must be in [0, 1], and will define the trimming
-              threshold. At a value of 0, only zero positions are trimmed and at a value
-              of 1, all positions would be trimmed.
-            editable: Whether or not the table is editable.
+            logo_plotting_kws: A dictionary of keyword arguments to pass to the
+              .add_logos() method that specify how motifs should be plotted. This will
+              only be used if `logo (fwd)` and `logo (rev)` are not already in the saved
+              images.
 
         Note:
             It is highly suggested that this function just be run on a MotifCompendium
@@ -1935,17 +1940,16 @@ class MotifCompendium:
         # If forward and reverse logos aren't in _images, create and add them
         if "logo (fwd)" not in self.images():
             self.add_logos(
-                "logo (fwd)",
                 self.motifs,
-                trim=logo_trimming,
+                "logo (fwd)",
+                logo_plotting_kws,
             )
         if "logo (rev)" not in self.images():
             self.add_logos(
-                "logo (rev)",
                 utils_motif.reverse_complement(self.motifs),
-                trim=logo_trimming,
+                "logo (rev)",
+                logo_plotting_kws,
             )
-        # 
         # Build table
         columns = ["logo (fwd)", "logo (rev)"] + columns
         table_columns = []
@@ -2158,10 +2162,11 @@ class MotifCompendium:
                 [my_motifs, reference_motifs], [(0, 1)], unsigned=label_unsigned
             )[0]
             # Unscale L2 similarity, for dot product only
-            sim = sim * (
-                np.linalg.norm(my_motifs, axis=(1, 2))[:, np.newaxis]
-                * np.linalg.norm(reference_motifs, axis=(1, 2))[np.newaxis, :]
-            )  # (N, M)
+            # sim = sim * (
+            #     np.linalg.norm(my_motifs, axis=(1, 2))[:, np.newaxis]
+            #     * np.linalg.norm(reference_motifs, axis=(1, 2))[np.newaxis, :]
+            # )  # (N, M)
+            # print(sim)
             # Identify matches, Scale score by i
             match_score = np.max(sim, axis=1) * np.sqrt(i + 1)  # (N,)
             match_idx = np.argmax(sim, axis=1)  # (N,)
@@ -2203,8 +2208,8 @@ class MotifCompendium:
                 if utf8_images is None:
                     # Generate forward logos if not provided
                     self.add_logos(
-                        f"{save_col_prefix}_logo{i}",
                         match_motifs[i],
+                        f"{save_col_prefix}_logo{i}",
                         ic_scale=logo_ic_scale,
                         trim=logo_trimming,
                     )
@@ -2214,3 +2219,167 @@ class MotifCompendium:
                         utf8_images[x] if x >= 0 else ""
                         for x in match_idxs[i][match_idx]
                     ]
+
+    def assign_label_from_motifs_v2(
+        self,
+        reference_motifs: np.ndarray,
+        reference_labels: list[str],
+        save_col_prefix: str = "match",
+        max_submotifs: int = 1,
+        label_unsigned: bool = False,
+        min_match_score: float = 0.5,
+        save_images: bool = True,
+        logo_plotting_kws: dict = {"ic_scale": True, "trim": False},
+    ) -> None:
+        """
+        Assign labels to motifs based on an external set of labeled motifs.
+
+        Given an external reference set of motifs with labels, for each motif in this
+          MotifCompendium, find the closest match that appears in the reference set. The
+          match score and the label of the best match are saved in the metadata.
+          Optionally, the logos of the matched motifs can be saved as images. These
+          logos can be computed on the fly or passed in as utf8 images if they have been
+          precomputed. Composite matching can be enabled by setting max_submotifs > 1.
+
+        Args:
+            reference_motifs: A np.ndarray motif stack of shape (M, L, 4) to compare
+              against.
+            reference_labels: A list of labels for each reference motif.
+            save_col_prefix: The prefix to use for the saved columns. All saved columns
+              and saved images generated from the labeling process will begin with
+              save_col_prefix. These columns will have the structure
+              f"{save_col_prefix}_{similarity/name/logo}{i}".
+            max_submotifs: The maximum number of submotifs to consider in a match. If
+              max_submotifs = 1, only a single match is given to each motif. If
+              max_submotifs > 1, the best match for each motif can be from a combination
+              of multiple reference motifs.
+            label_unsigned: Whether or not to perform an unsigned similarity
+              calculation, allowing negative motifs to be matched with positive
+              counterparts.
+            min_match_score: The minimum similarity score to consider a match.
+            save_images: Whether or not to save the logos of the matched motifs. If
+              True, the logos will appear as a saved image. If False, logos will not be
+              saved.
+            logo_plotting_kws: A dictionary of keyword arguments to pass to the
+              .add_logos() method that specify how motifs should be plotted. This will
+              only be used if `logo (fwd)` and `logo (rev)` are not already in the saved
+              images.
+        """
+        # Check arguments
+        utils_motif.validate_motif_stack_standard(reference_motifs)
+        if len(reference_labels) != reference_motifs.shape[0]:
+            raise ValueError(
+                "reference_labels must be the same length as reference_motifs."
+            )
+        # Make motif lengths match
+        reference_motifs = utils_motif.resize_motif(reference_motifs.copy(), self.motifs.shape[1])
+        # Setup
+        residual = self.motifs.copy() # (N, L, 4)
+        reconstruction = np.zeros_like(residual) # (N, L, 4)
+        submotif_idxs = np.empty((max_submotifs, self.motifs.shape[0]), dtype=int) # (max_submotifs, N)
+        submotif_contribs = np.empty((max_submotifs, self.motifs.shape[0]), dtype=float) # (max_submotifs, N)
+        # Iteratively find matches
+        for i in range(max_submotifs):
+            # Find best reference match
+            similarity, alignment_rc, alignment_h = utils_similarity.compute_similarities(
+                [residual, reference_motifs], [(0, 1)], unsigned=label_unsigned
+            )[0]
+            # for j in range(similarity.shape[1]):
+            #     if similarity[0, j] > 0.69 or "ETV2" in reference_labels[j]:
+            #         print(f"{j} {reference_labels[j]} {similarity[0, j]}")
+            # assert(False)
+            passes_indices = np.where(similarity >= 0.695)
+            similarity_passes = similarity[passes_indices]
+            alignment_rc = alignment_rc[passes_indices]
+            alignment_h = alignment_h[passes_indices]
+            match_motifs = reference_motifs[passes_indices[1]]
+
+            # match_idx = np.argmax(similarity, axis=1)  # (N,)
+            # alignment_rc = alignment_rc[
+            #     np.arange(alignment_rc.shape[0]), match_idx
+            # ]  # (N,)
+            # alignment_h = alignment_h[
+            #     np.arange(alignment_h.shape[0]), match_idx
+            # ]  # (N,)
+            # match_motifs = reference_motifs[match_idx] # (N, L, 4)
+
+            print(similarity_passes.shape)
+            print(alignment_rc.shape)
+            print(alignment_h.shape)
+            print(match_motifs.shape)
+
+            # Compute shifted motif
+            shifted_match = utils_motif.align_motifs(match_motifs, alignment_rc, alignment_h)
+            min_h = np.min(alignment_h)
+            max_h = np.max(alignment_h)
+            shifted_match = utils_motif.view_motif_from_position_range(
+                shifted_match,
+                min_h,
+                max_h + match_motifs.shape[1] - 1,
+                0,
+                match_motifs.shape[1] - 1,
+            ) # (N, L, 4)
+            # Compute best projection
+            vTx = np.sum(residual * shifted_match, axis=(1, 2), keepdims=True) # (N, 1, 1)
+            xTx = np.sum(shifted_match * shifted_match, axis=(1, 2), keepdims=True) # (N, 1, 1)
+            scale = vTx / xTx # (N, 1, 1)
+            scaled_shifted_match = shifted_match * scale # (N, L, 4)
+            #  Check if match is good
+            proposed_next_residual = residual - scaled_shifted_match
+            residual_spp = np.sum(np.square(residual), axis=2) # (N, L)
+            proposed_next_residual_spp = np.sum(np.square(proposed_next_residual), axis=2) # (N, L)
+            match_positional_importance = np.sum(np.square(scaled_shifted_match), axis=2) # (N, L)
+            match_positional_importance /= np.sum(match_positional_importance, axis=1, keepdims=True) # (N, L)
+            similarity_explained_proposed_next_residual = np.sum(match_positional_importance*proposed_next_residual_spp, axis=1) # (N,)
+            similarity_explained_residual = np.sum(match_positional_importance*residual_spp, axis=1) # (N,)
+            match_score = 1 - (similarity_explained_proposed_next_residual / similarity_explained_residual) # (N,)
+
+            df = pd.DataFrame({
+                "similarity": similarity_passes,
+                "alignment_rc": alignment_rc,
+                "alignment_h": alignment_h,
+                "label": [reference_labels[i] for i in passes_indices[1]],
+                "importance_explained": (np.sum(np.square(residual), axis=(1,2)) - np.sum(np.square(proposed_next_residual), axis=(1,2)))/np.sum(np.square(residual), axis=(1,2)),
+                "match_score": match_score,
+            })
+            df = df.sort_values(by="match_score", ascending=False)
+            print(df)
+            df = df.sort_values(by="importance_explained", ascending=False)
+            print(df)
+            assert(False)
+
+            # print(similarity_explained_proposed_next_residual)
+            # print(similarity_explained_residual)
+            # print(match_score)
+            self["similarity_explained_proposed_next_residual"] = similarity_explained_proposed_next_residual
+            self["similarity_explained_residual"] = similarity_explained_residual
+            self["match_score"] = match_score
+            good_match = match_score >= min_match_score
+            # If good match, keep it; else, zero it out
+            scaled_shifted_match *= good_match[:, np.newaxis, np.newaxis]
+            match_idx = match_idx * good_match + (-1) * (~good_match) # NOTE: -1 = no match
+            # Update residual, reconstruction, and label
+            residual -= scaled_shifted_match
+            reconstruction += scaled_shifted_match
+            submotif_idxs[i] = match_idx
+            submotif_contribs[i] = np.sum(scaled_shifted_match, axis=(1, 2))
+        # Compute final similarity
+        similarity = utils_similarity.compute_similarity_prealigned(self.motifs, reconstruction, unsigned=label_unsigned)
+        self.metadata[f"{save_col_prefix}_similarity"] = similarity
+        # Labels
+        submotif_idxs = submotif_idxs.T.copy() # (N, max_submotifs)
+        submotif_contribs = submotif_contribs.T.copy() # (N, max_submotifs)
+        reference_labels = np.array(reference_labels + [""])
+        submotif_labels = reference_labels[submotif_idxs] # (N, max_submotifs)
+        self.metadata[f"{save_col_prefix}_name"] = ["+".join(submotif_labels_i[submotif_labels_i != ""]) for submotif_labels_i in submotif_labels]
+        if max_submotifs > 1:
+            for i in range(max_submotifs):
+                self.metadata[f"{save_col_prefix}_name{i}"] = submotif_labels[:, i]
+        # Logos
+        if save_images:
+            self.add_logos(reconstruction, f"{save_col_prefix}_logo", logo_plotting_kws)
+            reference_motifs_forlogos = np.concatenate([reference_motifs, np.zeros_like(reference_motifs[0])[np.newaxis, :, :]], axis=0) # (N+1, L, 4)
+            if max_submotifs > 1:
+                for i in range(max_submotifs):
+                    reference_motifs_i = reference_motifs_forlogos[submotif_idxs[:, i]] # (N, L, 4)
+                    self.add_logos(reference_motifs_i, f"{save_col_prefix}_logo{i}", logo_plotting_kws)

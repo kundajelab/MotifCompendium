@@ -5,6 +5,7 @@ import pandas as pd
 import pooch
 
 import MotifCompendium
+from MotifCompendium import MotifCompendium as MotifCompendiumClass
 
 
 def silent_pooch_fetching(func):
@@ -45,6 +46,8 @@ def load_tutorial_data() -> dict[str, pd.DataFrame]:
     data_objs = {
         "cardiomyocyte_modisco": "cardiomyocyte_modisco.h5",
         "endothelial_modisco": "endothelial_modisco.h5",
+        "JASPAR_pfms": "JASPAR2024_CORE_non-redundant_pfms_meme.txt",
+        "HOCOMOCO_pfms": "H14CORE_pfms.txt"
     } # NOTE: Currently on dataV0
     # data_objs = {
     #     "cardiomyocyte_modisco": "cardiomyocyte_modisco.h5",
@@ -54,4 +57,21 @@ def load_tutorial_data() -> dict[str, pd.DataFrame]:
     #     "tutorial_mc": "tutorial_compendium.mc",
     # } # NOTE: Currently on dataV1
     data_files = {x: tutorial_data.fetch(y) for x, y in data_objs.items()}
-    return data_files   
+    return data_files
+
+
+########
+# HDMA #
+########
+@silent_pooch_fetching
+def HDMA_compendium() -> MotifCompendiumClass:
+    """Load HDMA MotifCompendium.
+
+    Returns:
+        A MotifCompendium containing motifs from the HDMA paper.
+    
+    Note:
+        Paper link: https://www.biorxiv.org/content/10.1101/2025.04.30.651381.
+    """
+    hdma_file = tutorial_data.fetch("HDMA.mc")
+    return MotifCompendium.load(hdma_file)

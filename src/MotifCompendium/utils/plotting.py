@@ -23,17 +23,17 @@ class LogoPlottingInput:
     """An object for storing inputs and outputs for plotting the logo of a motif.
 
     The LogoPlottingInput object is intended to the input to logo plotting functions.
-      The get_motif_df() function produces a pd.DataFrame that can be passed to
+      The .get_motif_df() method produces a pd.DataFrame that can be passed to
       logomaker.
 
     Attributes:
         motif: A np.ndarray of shape (L, 4) representing the motif that needs to be
           plotted.
-        revcomp: A boolean indicating whether the motif needs to be reverse
-          complemented.
         ic_scale: A boolean indicating whether the motif should be IC scaled when
           plotting.
-        pos: An int representing the position of the motif (shifted post-reverse
+        revcomp: A boolean indicating whether the motif needs to be reverse
+          complemented.
+        pos: An int representing the position of the motif (shifted after reverse
           complement).
         xmin: An int representing the minimum value of the x-axis in the logo plot.
         xmax: An int representing the maximum value of the x-axis in the logo plot.
@@ -44,28 +44,25 @@ class LogoPlottingInput:
           threshold. At a value of 0, only zero positions are trimmed and at a value of
           1, all positions would be trimmed. If trim is not False, then the motif is not
           repositioned or reindexed.
-        name: A str representing the name of the motif. Not plotted.
+        bgcolor: A str representing the background color of the logo.
         encode: A bool representing whether the plot should be encoded as a UTF-8
           string.
-        fast_plot: A bool representing whether or not the plot should be generated
-          quickly using custom plotting code. If True, use fast plotting code. If False,
-          plot using logomaker.
-        bgcolor: A str representing the background color of the logo.
-        ax: A matplotlib.axes.Axes object representing the axes of the plot.
         utf8_plot: A str representing the UTF-8 encoded plot of the motif.
+        ax: A matplotlib.axes.Axes object representing the axes of the plot.
+        name: A str representing the name of the motif. Not plotted.
     """
 
     def __init__(
         self,
         motif: np.ndarray,
-        revcomp: bool = False,
         ic_scale: bool = True,
+        revcomp: bool = False,
         pos: int = 0,
         trim: bool | float | int = False,
-        name: str = "motif",
         bgcolor: str = "white",
         encode: bool = True,
         ax: matplotlib.axes.Axes | None = None,
+        name: str = "motif",
     ) -> None:
         """LogoPlottingInput constructor.
 
@@ -73,42 +70,50 @@ class LogoPlottingInput:
 
         Args:
             motif: A np.ndarray that is assigned to self.motifs.
+            ic_scale: A bool that is assigned to self.ic_scale.
             revcomp: A bool that is assigned to self.revcomp.
             pos: An int that is assigned to self.pos.
-            ic_scale: A bool that is assigned to self.ic_scale.
-            trim: A bool or float/int indicating how the motif should be trimmed when
-              plotting. If False, the motif will not be trimmed at all. If True, the
-              motif will be trimmed at the flanks with a standard threshold of 1/L. If a
-              number is provided, that number must be in [0, 1], and will define the
-              trimming threshold. At a value of 0, only zero positions are trimmed and
-              at a value of 1, all positions would be trimmed. If trim is not False,
-              then the motif is not repositioned or reindexed.
-            name: A str that is assigned to self.name.
+            trim: A value assigned to self.trim.
             bgcolor: A str that is assigned to self.bgcolor.
             encode: A bool that is assigned to self.encode.
             ax: A matplotlib.axes.Axes object that is assigned to self.ax.
+            name: A str that is assigned to self.name.
         """
-        # Motif
+        # Validate inputs
         utils_motif.validate_single_motif_standard(motif)
-        self.motif = motif
-        self.revcomp = revcomp
-        self.ic_scale = ic_scale
-        self.pos = pos
-        self.xmin = 0
-        self.xmax = motif.shape[0] - 1
+        if not isinstance(ic_scale, bool):
+            raise TypeError("ic_scale must be a boolean.")
+        # Not adding checks for revcomp and pos
         if not (
             isinstance(trim, bool)
             or (isinstance(trim, (int, float)) and (0 <= trim <= 1))
         ):
             raise ValueError("trim must be bool or a float between 0 and 1.")
+        if not isinstance(bgcolor, str):
+            raise TypeError("bgcolor must be a string.")
+        if not isinstance(encode, bool):
+            raise TypeError("encode must be a boolean.")
+        if not (ax is None or isinstance(ax, matplotlib.axes.Axes)):
+            raise TypeError("ax must be a matplotlib.axes.Axes object or None.")
+        if not isinstance(name, str):
+            raise TypeError("name must be a string.")
+        # Motif
+        self.motif = motif
+        self.ic_scale = ic_scale
+        self.revcomp = revcomp
+        self.pos = pos
+        self.xmin = 0
+        self.xmax = motif.shape[0] - 1
+        # Display options
         self.trim = trim
-        self.name = name
-        # Plot options
         self.bgcolor = bgcolor
+        # Saving
         self.encode = encode
-        # Outputs
-        self.ax = ax
         self.utf8_plot = ""
+        # Figure options
+        self.ax = ax
+        # Other
+        self.name = name
 
     def set_bounds(self, xmin: int, xmax: int) -> None:
         """Sets the bounds of the x-axis for the motif."""
@@ -117,16 +122,20 @@ class LogoPlottingInput:
 
     def get_motif_df(self) -> pd.DataFrame:
         """Returns a pd.DataFrame of the motif that can be passed to logomaker."""
-        # Transform motif representation
+        # If motif is all zeros, return None
+        if np.all(self.motif == 0):
+            return None
         motif_to_plot = self.motif.copy()
-        if self.revcomp:
-            motif_to_plot = utils_motif.reverse_complement(motif_to_plot)
+        # Transform motif representation
         if self.ic_scale:
             motif_to_plot = utils_motif.ic_scale(motif_to_plot)
+        if self.revcomp:
+            motif_to_plot = utils_motif.reverse_complement(motif_to_plot)
         # Trim motif if needed
         if isinstance(self.trim, bool):
             if self.trim:
                 motif_to_plot = utils_motif.trim_motif(motif_to_plot, 1 / motif_to_plot.shape[0])
+            # If False, don't trim
         elif isinstance(self.trim, (int, float)):
             motif_to_plot = utils_motif.trim_motif(motif_to_plot, self.trim)
         # If trimming deletes motif, return None
@@ -384,18 +393,20 @@ def _plot_motif_logo(motif_info: LogoPlottingInput) -> LogoPlottingInput:
         fig = plot_ax.figure
     # Plot
     motif_df = motif_info.get_motif_df()
-    if not (
-        (motif_info.motif == 0).all() or (motif_df is None)
-    ):  # Only plot if motif is not all zeros
+    if motif_df is not None:
+        # Only plot motif_df if not None (handles all 0 case already)
         if utils_config.get_fast_plotting():
             _plot_logo_on_axis_fast(motif_df, plot_ax)
         else:
             logo = logomaker.Logo(motif_df, ax=plot_ax)
-    plot_ax.spines[["top", "right", "bottom", "left"]].set_visible(False)
-    plot_ax.set_axis_off()
-    # Encode image in UTF-8
-    if motif_info.encode:
-        motif_info.utf8_plot = encode_figure_as_utf8(fig)
+        plot_ax.spines[["top", "right", "bottom", "left"]].set_visible(False)
+        plot_ax.set_axis_off()
+        # Encode image in UTF-8
+        if motif_info.encode:
+            motif_info.utf8_plot = encode_figure_as_utf8(fig)
+    else:
+        if motif_info.encode:
+            motif_info.utf8_plot = ""
     # Return updated LogoPlottingInput
     return motif_info
 
