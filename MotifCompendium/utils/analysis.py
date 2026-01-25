@@ -6,6 +6,7 @@ import seaborn as sns
 import upsetplot
 
 from MotifCompendium import MotifCompendium as MotifCompendiumClass
+import MotifCompendium.utils.config as utils_config
 import MotifCompendium.utils.loader as utils_loader
 import MotifCompendium.utils.motif as utils_motif
 
@@ -255,7 +256,6 @@ def export_compendium_modisco(
     mc: MotifCompendiumClass,
     name_col: str,
     save_loc: str,
-    inverse_ic: bool = False,
 ) -> None:
     """Exports MotifCompendium in the Modisco file format.
 
@@ -267,18 +267,10 @@ def export_compendium_modisco(
         mc: The MotifCompendium to export.
         name_col: The column in the MotifCompendium to name the motifs by.
         save_loc: The location to save the Modisco h5py to.
-        inverse_ic: Whether or not to perform inverse information content scaling on
-          motifs. This should only be set to True if you want to revert previous IC
-          scaling. If you built your MotifCompendium from Modisco motifs and did not
-          explicitly turn off IC scaling, then your motifs were IC scaled and you may
-          want to perform inverse IC scaling before exporting them.
 
     Notes:
         Motif names cannot have slashes (/) in them!
         The resultant h5py file can be fed directly into FiNeMo.
-        If you are exporting your motifs to FiNeMo and your motifs were previously IC
-          scaled but you don't want to revert the IC scaling, you may need to adjust the
-          default trimming threshold during finemo call-hits with option -t 0.15.
     """
     # Check name cols are unique
     if len(mc) != len(mc[name_col].unique()):
@@ -301,8 +293,6 @@ def export_compendium_modisco(
                     if "/" in name:
                         raise ValueError("Motif names cannot have slashes (/) in them!")
                     motif = motifs_posneg[i]
-                    if inverse_ic:
-                        motif = utils_motif.ic_scale(motif, invert=True)
                     pattern_group = metapattern_group.create_group(name)
                     pattern_group.create_dataset("contrib_scores", data=motif)
 
@@ -311,7 +301,6 @@ def export_compendium_clustered_modisco(
     mc: MotifCompendiumClass,
     cluster_name: str,
     save_loc: str,
-    inverse_ic: bool = False,
     weight_col: str | None = None,
     export_subpatterns: bool = False,
 ) -> None:
@@ -326,11 +315,6 @@ def export_compendium_clustered_modisco(
         mc: The MotifCompendium to export.
         cluster_name: The motif clustering to group motifs by.
         save_loc: The location to save the Modisco h5py to.
-        inverse_ic: Whether or not to perform inverse information content scaling on
-          motifs. This should only be set to True if you want to revert previous IC
-          scaling. If you built your MotifCompendium from Modisco motifs and did not
-          explicitly turn off IC scaling, then your motifs were IC scaled and you may
-          want to perform inverse IC scaling before exporting them.
         weight_col: The name of the metadata column to be used to weight motifs when
           computing motif averages. The data in the weight_col should be numeric.
         export_subpatterns: Whether or not to export the individual motifs as
@@ -341,10 +325,11 @@ def export_compendium_clustered_modisco(
         If export_subpatterns is True, then motif names cannot have slashes (/) in them!
           Also, motif names will be taken from the "name" column in the MotifCompendium.
         The resultant h5py file can be fed directly into FiNeMo.
-        If you are exporting your motifs to FiNeMo and your motifs were previously IC
-          scaled but you don't want to revert the IC scaling, you may need to adjust the
-          default trimming threshold during finemo call-hits with option -t 0.15.
     """
+    if cluster_name not in mc.columns():
+        raise KeyError(
+            f"Cluster name '{cluster_name}' not found in MotifCompendium columns."
+        )
     if export_subpatterns and "name" not in mc.columns():
         raise KeyError(
             "If export_subpatterns is True, then the MotifCompendium must have a 'name' column."
@@ -377,8 +362,6 @@ def export_compendium_clustered_modisco(
                             "Cluster names cannot have slashes (/) in them!"
                         )
                     avg_motif = avg_motifs[i]
-                    if inverse_ic:
-                        avg_motif = utils_motif.ic_scale(avg_motif, invert=True)
                     pattern_group = metapattern_group.create_group(pattern_name)
                     pattern_group.create_dataset("contrib_scores", data=avg_motif)
                     # Subpatterns
@@ -398,8 +381,6 @@ def export_compendium_clustered_modisco(
                                 subpattern_name
                             )
                             motif = motifs_i[j]
-                            if inverse_ic:
-                                motif = utils_motif.ic_scale(motif, invert=True)
                             subpattern_group.create_dataset(
                                 "contrib_scores", data=motif
                             )
@@ -409,7 +390,6 @@ def export_compendium_meme(
     mc: MotifCompendiumClass,
     save_loc: str,
     name_col: str = "name",
-    inverse_ic: bool = False,
 ) -> None:
     """Exports MotifCompendium in the MEME file format.
 
@@ -420,11 +400,6 @@ def export_compendium_meme(
         mc: The MotifCompendium to export.
         name_col: The column in the MotifCompendium to name the motifs by.
         save_loc: The location to save the MEME file to.
-        inverse_ic: Whether or not to perform inverse information content scaling on
-          motifs. This should only be set to True if you want to revert previous IC
-          scaling. If you built your MotifCompendium from Modisco motifs and did not
-          explicitly turn off IC scaling, then your motifs were IC scaled and you may
-          want to perform inverse IC scaling before exporting them.
 
     Notes:
         Assumes that there is a "num_seqlets" column in the MotifCompendium.
@@ -439,7 +414,7 @@ def export_compendium_meme(
     with open(save_loc, "w") as f:
         f.write("MEME version 4\n")
         f.write(f"ALPHABET= ACGT\n")
-        f.write(f"strands: +\n")
+        f.write(f"strands: + -\n")
         f.write(f"Background letter frequencies:\n")
         f.write("A 0.25 C 0.25 G 0.25 T 0.25\n")
         for i in range(len(mc)):
@@ -447,9 +422,6 @@ def export_compendium_meme(
             motif = motifs[i]
             # Remove empty flanks
             motif = utils_motif.trim_motif(motif, 0)  # Remove zero flanks
-            # Inverse IC scaling
-            if inverse_ic:
-                motif = utils_motif.ic_scale(motif, invert=True)
             # Write motif
             f.write(f"\nMOTIF {name}\n")
             motif_size_line = f"letter-probability matrix: alength= {motif.shape[1]} w= {motif.shape[0]}"
@@ -536,54 +508,56 @@ def calculate_filters(
           value of thresholds to use, see MotifCompendium Tutorial 6 - Motif Filtering.
     """
     # Calculate filter metrics
-    mc_motifs = mc.get_standard_motif_stack()
-    mc_motifs_abs = np.abs(mc_motifs)
+    mc_motifs = mc.get_standard_motif_stack() # Get 4-channel
+    # if utils_config.get_ic_scale():
+    #     mc_motifs = utils_motif.ic_scale(mc_motifs) # IC-scale
+    mc_motifs_abs_norm = utils_motif.l1_norm_motif(np.abs(mc_motifs)) # Non-negative, L1-normalize into probabilities
     for filter_metric in metric_list:
         match filter_metric:
             case "motif_entropy":
                 mc["motif_entropy"] = utils_motif.calculate_full_motif_entropy(
-                    mc_motifs_abs
+                    mc_motifs_abs_norm
                 )
             case "weighted_base_entropy":
                 mc["weighted_base_entropy"] = (
-                    utils_motif.calculate_weighted_base_entropy(mc_motifs_abs)
+                    utils_motif.calculate_weighted_base_entropy(mc_motifs_abs_norm)
                 )
             case "weighted_position_entropy":
                 mc["weighted_position_entropy"] = (
-                    utils_motif.calculate_weighted_position_entropy(mc_motifs_abs)
+                    utils_motif.calculate_weighted_position_entropy(mc_motifs_abs_norm)
                 )
             case "posbase_entropy_score":
                 mc["posbase_entropy_score"] = (
-                    utils_motif.calculate_position_versus_base_entropy(mc_motifs_abs)
+                    utils_motif.calculate_position_versus_base_entropy(mc_motifs_abs_norm)
                 )
             case "copair_entropy_score":
                 mc["copair_entropy_score"] = utils_motif.calculate_copair_entropy(
-                    mc_motifs_abs
+                    mc_motifs_abs_norm
                 )
             case "copair_composition":
                 mc["copair_composition"] = utils_motif.calculate_copair_composition(
-                    mc_motifs_abs
+                    mc_motifs_abs_norm
                 )
             case "dinuc_entropy_score":
                 mc["dinuc_entropy_score"] = utils_motif.calculate_dinucleotide_entropy(
-                    mc_motifs_abs
+                    mc_motifs_abs_norm
                 )
             case "dinuc_composition":
                 mc["dinuc_composition"] = (
                     utils_motif.calculate_dinucleotide_alternating_composition(
-                        mc_motifs_abs
+                        mc_motifs_abs_norm
                     )
                 )
             case "dinuc_score":
                 mc["dinuc_score"] = utils_motif.calculate_dinucleotide_score(
-                    mc_motifs_abs
+                    mc_motifs_abs_norm
                 )
             case "posneg_inverted":
                 mc["posneg_inverted"] = (
                     utils_motif.motif_posneg_max(mc_motifs) != mc["posneg"]
                 )
             case "truncated":
-                max_pos = mc_motifs_abs.sum(axis=-1).argmax(axis=-1)  # (N,)
+                max_pos = mc_motifs_abs_norm.sum(axis=-1).argmax(axis=-1)  # (N,)
                 mc["truncated"] = (max_pos < 2) | (max_pos > mc_motifs.shape[1] - 3)
             case _:
                 raise ValueError(f"Filter metric {filter_metric} is not implemented.")
@@ -596,7 +570,6 @@ def assign_label_from_pfms(
     mc: MotifCompendiumClass,
     pfm_file: str,
     save_col_prefix: str = "match",
-    ic: bool = False,
     min_score: float = 0.5,
     max_submotifs: int = 1,
     label_unsigned: bool = True,
@@ -618,8 +591,6 @@ def assign_label_from_pfms(
           saved images generated from the labeling process will begin with
           save_col_prefix. These columns will have the structure
           f"{save_col_prefix}_{score/name/logo}{i}".
-        ic: Whether or not to apply information content scaling to the PFMs, effectively
-          making them PWMs.
         min_score: The minimum similarity score to consider a match.
         max_submotifs: The maximum number of submotifs to consider in a match. If
           max_submotifs = 1, only a single match is given to each motif. If
@@ -641,7 +612,7 @@ def assign_label_from_pfms(
     """
     # Load PFM database, with same length as motifs
     pfm_motifs, pfm_names = utils_loader.load_pfm(
-        pfm_file, ic=ic, motif_length=mc.motifs.shape[1]
+        pfm_file, motif_length=mc.motifs.shape[1]
     )
     # Label: Signed vs. Unsigned
     if label_unsigned:

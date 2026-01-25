@@ -3,6 +3,7 @@ import functools
 import numpy as np
 import pandas as pd
 
+import MotifCompendium.utils.config as utils_config
 
 ##################
 # MOTIF CHECKING #
@@ -34,16 +35,16 @@ def single_or_many_motifs(func):
 
 
 def validate_motif_basic(motifs: np.ndarray) -> None:
-    """Validate that motifs are np.ndarrays with with a last channel size of 4 or 8."""
-    if not (isinstance(motifs, np.ndarray) and (motifs.shape[-1] in [4, 8])):
-        raise TypeError("Motifs must be a np.ndarray of 4 or 8 channels.")
+    """Validate that motifs are np.ndarrays with with a last channel size of 4."""
+    if not (isinstance(motifs, np.ndarray) and (motifs.shape[-1] == 4)):
+        raise TypeError("Motifs must be a np.ndarray of 4 channels.")
 
 
 def validate_motif_stack(motifs: np.ndarray) -> None:
     """Validate that motifs are a motif stack."""
     validate_motif_basic(motifs)
     if not len(motifs.shape) == 3:
-        raise ValueError("Motif stack must be of shape (N, L, 4/8).")
+        raise ValueError("Motif stack must be of shape (N, L, 4).")
 
 
 def validate_motif_stack_standard(motifs: np.ndarray) -> None:
@@ -60,8 +61,8 @@ def validate_motif_stack_similarity(motifs: np.ndarray) -> None:
         raise ValueError("Motifs must be non-negative.")
 
 
-def validate_motif_stack_compendium(motifs: np.ndarray) -> None:
-    """Validate that motifs belong in a MotifCompendium."""
+def validate_motif_stack_l1(motifs: np.ndarray) -> None:
+    """Validate that motifs are L1 normalized (per motif), summing to 1."""
     validate_motif_stack_similarity(motifs)
     if not np.allclose(motifs.sum(axis=(1, 2)), 1):
         raise ValueError("Motifs must sum to 1.")
@@ -69,7 +70,7 @@ def validate_motif_stack_compendium(motifs: np.ndarray) -> None:
 
 def validate_motif_stack_entropy(motifs: np.ndarray) -> None:
     """Validate that motifs are fit for entropy calculations."""
-    validate_motif_stack_compendium(motifs)
+    validate_motif_stack_l1(motifs)
     if not motifs.shape[2] == 4:
         raise ValueError("Motif stack must be of shape (N, L, 4).")
 
@@ -314,7 +315,6 @@ def average_motifs(
     alignment_rc: np.ndarray,
     alignment_h: np.ndarray,
     match_original_length: bool = True,
-    l1_normalize: bool = True,
     weights: np.ndarray | None = None,
 ) -> np.ndarray:
     """Compute the average motif of a stack of motifs.
@@ -330,9 +330,6 @@ def average_motifs(
           True, the average motif will be made to be the same length as the original
           motifs. If False, the average motif will have the length of the aligned motif
           stack.
-        l1_normalize: Whether or not to L1 normalize the average motif before returning.
-        weights: A (N, ) vector of weights for each motif. If None, all motifs are
-          weighed equally.
 
     Returns:
         The average motif.
@@ -357,8 +354,6 @@ def average_motifs(
         average_motif = motif_4_to_8(average_motif)
     if match_original_length:
         average_motif = resize_motif(average_motif, resize_to=motif_stack.shape[1])
-    if l1_normalize:
-        average_motif = average_motif / np.sum(np.abs(average_motif))
     return average_motif
 
 
@@ -537,7 +532,7 @@ def remove_motif_component(
     validate_motif_stack(remove_motifs)
     validate_motif_stack(main_motifs)
     if not remove_motifs.shape == main_motifs.shape:
-        raise ValueError("main_motifs and remove_motifs must have the same shape.")
+        raise ValueError(f"main_motifs and remove_motifs must have the same shape: {main_motifs.shape} vs {remove_motifs.shape}.")
     # Align remove_motifs to main_motifs
     remove_motifs_aligned = align_motifs(remove_motifs, alignment_rc, alignment_h)
     min_h = np.min(alignment_h)
@@ -949,3 +944,45 @@ def calculate_dinucleotide_score(x: np.ndarray) -> float | np.ndarray:
         1 - np.eye(x.shape[2])[np.newaxis, np.newaxis, :, :]
     )  # Remove diagonal (self-pairs)
     return np.max(np.sum(dinucleotide_scores, axis=1), axis=(1, 2))  # (N, )
+
+
+@single_or_many_motifs
+def l1_norm_motif(motifs: np.ndarray) -> np.ndarray:
+    """L1 normalize by motif.
+
+    Each motif is normalized such that the sum of the absolute values of all elements
+      in the motif is equal to 1.
+
+    Args:
+        x: A (L, K) motif or (N, L, 4) motif stack.
+
+    Returns:
+        The L1 normalized motif or motif stack.
+    """
+    # L1 normalize by motif
+    norm = np.sum(motifs, axis=(1, 2), keepdims=True)
+    motifs = np.divide(
+        motifs, norm, out=np.zeros_like(motifs, dtype=motifs.dtype), where=norm!=0
+    )
+    return motifs
+
+
+@single_or_many_motifs
+def l1_norm_position(motifs: np.ndarray) -> np.ndarray:
+    """L1 normalize by position.
+
+    Each motif is normalized such that the sum of the absolute values of all elements
+      in the motif is equal to 1.
+
+    Args:
+        x: A (L, K) motif or (N, L, 4) motif stack.
+
+    Returns:
+        The L1 normalized motif or motif stack.
+    """
+    # L1 normalize by position
+    norm = np.sum(motifs, axis=(-1), keepdims=True)
+    motifs = np.divide(
+        motifs, norm, out=np.zeros_like(motifs, dtype=motifs.dtype), where=norm!=0
+    )
+    return motifs

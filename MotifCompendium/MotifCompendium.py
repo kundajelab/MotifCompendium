@@ -26,6 +26,7 @@ def set_compute_options(
     max_cpus: int | None = None,
     use_gpu: bool | None = None,
     max_chunk: int | None = None,
+    ic_scale: bool | None = None,
     fast_plotting: bool | None = None,
     progress_bar: bool | None = None,
 ):
@@ -57,6 +58,8 @@ def set_compute_options(
         utils_config.set_use_gpu(use_gpu)
     if max_chunk is not None:
         utils_config.set_max_chunk(max_chunk)
+    if ic_scale is not None:
+        utils_config.set_ic_scale(ic_scale)
     if fast_plotting is not None:
         utils_config.set_fast_plotting(fast_plotting)
     if progress_bar is not None:
@@ -206,7 +209,7 @@ def build(
           large objects.
     """
     # Check motifs
-    utils_motif.validate_motif_stack_compendium(motifs)
+    utils_motif.validate_motif_stack_standard(motifs)
     # Metadata
     if metadata is None:
         metadata = pd.DataFrame()
@@ -229,9 +232,9 @@ def build(
 
 def build_from_modisco(
     modisco_dict: dict[str, str],
+    score_type: str = "contrib_scores",
     load_subpatterns: bool = False,
     modisco_region_width: int = 400,
-    ic: bool = True,
     safe: bool = True,
 ) -> MotifCompendium:
     """Builds a MotifCompendium object from a set of Modisco outputs.
@@ -245,7 +248,6 @@ def build_from_modisco(
           loaded at the pattern level.
         modisco_region_width: The region width used during Modisco. This argument only
           needs to be specified if using a non-standard region width.
-        ic: Whether or not to apply information content scaling to Modisco motifs.
         safe: Whether or not to construct the MotifCompendium safely.
 
     Returns:
@@ -258,31 +260,28 @@ def build_from_modisco(
           large objects.
     """
     # Load from Modisco
-    (
-        motifs,
+    (   motifs,
         motif_names,
         seqlet_counts,
         model_names,
         posnegs,
         avgdist_summits,
-        avg_contribs,
     ) = utils_loader.load_modiscos(
         modisco_dict,
+        score_type=score_type,
         load_subpatterns=load_subpatterns,
         modisco_region_width=modisco_region_width,
-        ic=ic,
     )
-    # Convert motifs to normalized 8-channel motifs
-    motifs = utils_motif.motif_4_to_8(motifs)
-    motifs /= np.sum(motifs, axis=(1, 2), keepdims=True)
     # Build metadata
-    metadata = pd.DataFrame()
-    metadata["name"] = motif_names
-    metadata["num_seqlets"] = seqlet_counts
-    metadata["model"] = model_names
-    metadata["posneg"] = posnegs
-    metadata["avg_contrib"] = avg_contribs
-    metadata["avg_dist_from_summit"] = avgdist_summits
+    metadata = pd.DataFrame(
+        {
+            "name": motif_names,
+            "num_seqlets": seqlet_counts,
+            "model": model_names,
+            "posneg": posnegs,
+            "avg_dist_from_summit": avgdist_summits,
+        }
+    )
     # Construct object
     return build(
         motifs,
@@ -293,7 +292,6 @@ def build_from_modisco(
 
 def build_from_pfm(
     pfm_dict: dict[str, str],
-    ic: bool = True,
     safe: bool = True,
 ) -> MotifCompendium:
     """Builds a MotifCompendium object from a set of PFM files.
@@ -302,8 +300,6 @@ def build_from_pfm(
 
     Args:
         pfm_dict: A dictionary mapping motif set name to PFM file path.
-        ic: Whether or not to apply information content scaling to the PFMs, effectively
-          making them PWMs.
         safe: Whether or not to construct the MotifCompendium safely.
 
     Returns:
@@ -314,11 +310,8 @@ def build_from_pfm(
         Safe building validates object integrity but may take significantly longer for
           large objects.
     """
-    motifs, motif_names, file_names = utils_loader.load_pfms(pfm_dict, ic)
-    # Convert motifs to normalized 8-channel motifs
+    motifs, motif_names, file_names = utils_loader.load_pfms(pfm_dict)
     posneg = utils_motif.motif_posneg_sum(motifs)
-    motifs = utils_motif.motif_4_to_8(motifs)
-    motifs /= np.sum(motifs, axis=(1, 2), keepdims=True)
     # Build metadata
     metadata = pd.DataFrame(
         {
@@ -383,8 +376,8 @@ def combine(
             raise ValueError(
                 "compendium_names must have the same length as compendiums."
             )
-    else:
-        compendium_names = [f"compendium_{i}" for i in range(len(compendiums))]
+    # else:
+    #     compendium_names = [f"compendium_{i}" for i in range(len(compendiums))]
     # Confirm that the motifs from each MotifCompendium are compatible
     # motifs_length = compendiums[0].motifs.shape[1]
     # if not all([x.motifs.shape[1] == motifs_length for x in compendiums]):
@@ -410,11 +403,6 @@ def combine(
             + "\n(Check mc.images() for each MotifCompendium.)"
         )
     n = len(compendiums)
-    # MotifCompendium cannot already have a "source_compendium" column
-    if "source_compendium" in metadata_columns:
-        raise KeyError(
-            "The 'source_compendium' column may not already exist in the source MotifCompendium."
-        )
     # Prepare motifs
     motif_lengths = [mc.motifs.shape[1] for mc in compendiums]
     max_length = max(motif_lengths)
@@ -463,9 +451,10 @@ def combine(
     # Metadata
     metadata = pd.concat([mc.metadata for mc in compendiums], ignore_index=True)
     source_compendium = []
-    for i, mc in enumerate(compendiums):
-        source_compendium.extend([compendium_names[i]] * len(mc))
-    metadata["source_compendium"] = source_compendium
+    if compendium_names is not None:
+        for i, mc in enumerate(compendiums):
+            source_compendium.extend([compendium_names[i]] * len(mc))
+        metadata["source_compendium"] = source_compendium
     # Images
     __images = pd.DataFrame(index=metadata.index)
     for images in compendiums[0].images():
@@ -588,7 +577,7 @@ class MotifCompendium:
               MotifCompendium.
         """
         # motifs
-        utils_motif.validate_motif_stack_compendium(self.motifs)
+        utils_motif.validate_motif_stack_standard(self.motifs)
         # similarity
         if not (
             isinstance(self.similarity, np.ndarray)
@@ -820,7 +809,7 @@ class MotifCompendium:
         self.__images.drop(image_name, axis=1, inplace=True)
 
     # SLICING AND SORTING
-    def __getitem__(self, key: str | pd.Series) -> pd.Series | MotifCompendium:
+    def __getitem__(self, key: str | pd.Series | slice | int | list[int]) -> pd.Series | MotifCompendium:
         """Get columns or subsets of the MotifCompendium.
 
         Allows indexing into the MotifCompendium with the same syntax as a Pandas
@@ -841,29 +830,48 @@ class MotifCompendium:
         """
         if isinstance(key, str):
             return self.metadata[key]
-        elif isinstance(key, pd.Series) and key.dtype == bool:
-            # metadata
-            metadata_slice = self.metadata[key]
-            keep_idxs = list(metadata_slice.index)
-            metadata_slice = metadata_slice.reset_index(drop=True)
-            # __images
-            __images_slice = self.__images.iloc[keep_idxs].reset_index(drop=True)
-            # matrices
-            motifs_slice = self.motifs[keep_idxs, :, :]
-            similarity_slice = self.similarity[keep_idxs, :][:, keep_idxs]
-            alignment_rc_slice = self.alignment_rc[keep_idxs, :][:, keep_idxs]
-            alignment_h_slice = self.alignment_h[keep_idxs, :][:, keep_idxs]
-            return MotifCompendium(
-                motifs_slice,
-                similarity_slice,
-                alignment_rc_slice,
-                alignment_h_slice,
-                metadata_slice,
-                __images_slice,
-                safe=False,
-            )
+        elif isinstance(key, pd.Series) and pd.api.types.is_bool_dtype(key):
+            keep_idxs = list(self.metadata[key].index)
+        elif isinstance(key, np.ndarray) and key.dtype == bool:
+            if len(key) != len(self.metadata):
+                raise ValueError("Boolean mask must be same length as metadata.")
+            keep_idxs = list(np.where(key)[0])
+        elif isinstance(key, list) and all(isinstance(x, bool) for x in key):
+            if key.ndim != 1 or len(key) != len(self.metadata):
+                raise ValueError("Boolean mask must be 1D and same length as metadata.")
+            keep_idxs = [i for i, x in enumerate(key) if x]
+        elif isinstance(key, slice):
+            if len(key) != len(self.metadata):
+                raise ValueError("Boolean mask must be same length as metadata.")
+            keep_idxs = list(range(*key.indices(len(self.metadata))))
+        elif isinstance(key, int):
+            keep_idxs = [key]
+        elif isinstance(key, list) and all(isinstance(i, int) for i in key):
+            keep_idxs = key
+        elif len(key) == 0:
+            keep_idxs = []
         else:
             raise TypeError("MotifCompendium cannot be indexed by this.")
+
+        # metadata
+        metadata_slice = self.metadata.iloc[keep_idxs].reset_index(drop=True)
+        # __images
+        __images_slice = self.__images.iloc[keep_idxs].reset_index(drop=True)
+        # matrices
+        motifs_slice = self.motifs[keep_idxs, :, :]
+        similarity_slice = self.similarity[keep_idxs, :][:, keep_idxs]
+        alignment_rc_slice = self.alignment_rc[keep_idxs, :][:, keep_idxs]
+        alignment_h_slice = self.alignment_h[keep_idxs, :][:, keep_idxs]
+
+        return MotifCompendium(
+            motifs_slice,
+            similarity_slice,
+            alignment_rc_slice,
+            alignment_h_slice,
+            metadata_slice,
+            __images_slice,
+            safe=False,
+        )
 
     def __setitem__(self, key: str, value) -> None:
         """Set the value of a column in the metadata.
@@ -1551,11 +1559,14 @@ class MotifCompendium:
                     case "sum":
                         agg_dict["values"].append(np.sum(agg_c_data))
                     case "average" | "avg" | "mean":
-                        agg_dict["values"].append(np.mean(agg_c_data))
+                            agg_dict["values"].append(np.average(agg_c_data, weights=weights_c))
                     case "concatenate" | "concat":
                         agg_dict["values"].append(
-                            ",".join(sorted(set(map(str, agg_c_data))))
-                        )
+                            ",".join(sorted(set(x.strip()
+                                for val in agg_c_data
+                                for x in str(val).split(",")
+                                if x.strip())))
+                            )
                     case "concat_counted":
                         val_counts = defaultdict(int)
                         for x in agg_c_data:
@@ -1965,7 +1976,7 @@ class MotifCompendium:
         self,
         name: str = "motif_string",
         specificity: float = 0.7,
-        importance: float = 1 / 30,
+        importance: float | bool = True,
     ) -> None:
         """Adds a column to the metadata that is a string representation of each motif.
 
@@ -1980,6 +1991,8 @@ class MotifCompendium:
               included in the string.
         """
         unsigned_motifs = np.abs(self.get_standard_motif_stack())
+        if importance is True:
+            importance = 1 / unsigned_motifs.shape[1]
         motif_str_revstrs = utils_motif.motif_to_string(
             unsigned_motifs, specificity, importance
         )
@@ -2054,7 +2067,6 @@ class MotifCompendium:
               f"{save_col_prefix}_{score/name/logo}{i}".
         """
         # Check arguments
-        utils_motif.validate_motif_stack_similarity(reference_motifs)
         if not save_images and utf8_images is not None:
             raise ValueError("save_images is False but utf8_images is not None.")
         if (utf8_images is not None) and not (
@@ -2064,24 +2076,35 @@ class MotifCompendium:
             raise ValueError(
                 "utf8_images must be a list of the same length as reference_motifs."
             )
+        # Store as copys
         my_motifs = self.motifs.copy()
+        reference_motifs = reference_motifs.copy()
         # Length dimensions: Resize motifs to match length
-        if my_motifs.shape[1] > reference_motifs.shape[1]:
-            other_pad = self.motifs.shape[1] - reference_motifs.shape[1]
-            reference_motifs = np.pad(
-                reference_motifs, ((0, 0), (0, other_pad), (0, 0))
-            )
-        elif my_motifs.shape[1] < reference_motifs.shape[1]:
-            my_pad = reference_motifs.shape[1] - my_motifs.shape[1]
+        max_length = max(my_motifs.shape[1], reference_motifs.shape[1])
+        if my_motifs.shape[1] < max_length:
+            my_pad = max_length - my_motifs.shape[1]
             my_motifs = np.pad(my_motifs, ((0, 0), (0, my_pad), (0, 0)))
-        # Channel dimensions
-        if my_motifs.shape[2] == 8 and reference_motifs.shape[2] == 4:
-            my_motifs = utils_motif.motif_8_to_4_unsigned(my_motifs)
-        elif self.motifs.shape[2] == 4 and reference_motifs.shape[2] == 8:
-            reference_motifs = utils_motif.motif_8_to_4_unsigned(reference_motifs)
-        # L2 normalize once
-        my_motifs /= np.linalg.norm(my_motifs, axis=(1, 2), keepdims=True)
-        reference_motifs /= np.linalg.norm(reference_motifs, axis=(1, 2), keepdims=True)
+        if reference_motifs.shape[1] < max_length:
+            reference_pad = max_length - reference_motifs.shape[1]
+            reference_motifs = np.pad(
+                reference_motifs, ((0, 0), (0, reference_pad), (0, 0))
+            )
+
+        # Initial: IC-scale (only once)
+        reference_motifs_raw = reference_motifs
+        if utils_config.get_ic_scale():
+            ic_scale = True
+            my_motifs = utils_motif.ic_scale(my_motifs)
+            reference_motifs = utils_motif.ic_scale(reference_motifs)
+            utils_config.set_ic_scale(False)  # Turn off IC scale for rest of function
+        else:
+            ic_scale = False
+        # Initial: L2 normalize motifs (comparable scales)
+        my_motifs_norm = np.linalg.norm(my_motifs, axis=(1, 2), keepdims=True)
+        my_motifs = np.divide(my_motifs, my_motifs_norm, where=my_motifs_norm!=0)
+        reference_motifs_norm = np.linalg.norm(reference_motifs, axis=(1, 2), keepdims=True)
+        reference_motifs = np.divide(reference_motifs, reference_motifs_norm, where=reference_motifs_norm!=0)
+
         # Find best match, per iteration
         match_scores = []
         match_labels = []
@@ -2089,51 +2112,61 @@ class MotifCompendium:
         match_idxs = []
         match_mask = np.ones((my_motifs.shape[0],), dtype=bool)  # (N,)
         for i in range(max_submotifs):
-            # Compute similarity
-            sim, alignment_rc, alignment_h = utils_similarity.compute_similarities(
-                [my_motifs, reference_motifs], [(0, 1)]
-            )[0]
-
-            # Unscale L2 similarity, for dot product only
-            sim = sim * (
-                np.linalg.norm(my_motifs, axis=(1, 2))[:, np.newaxis]
-                * np.linalg.norm(reference_motifs, axis=(1, 2))[np.newaxis, :]
-            )  # (N, M)
-            # Identify matches, Scale score by i
-            match_score = np.max(sim, axis=1) * np.sqrt(i + 1)  # (N,)
-            match_idx = np.argmax(sim, axis=1)  # (N,)
-            alignment_rc = alignment_rc[
-                np.arange(alignment_rc.shape[0]), match_idx
-            ]  # (N,)
-            alignment_h = alignment_h[
-                np.arange(alignment_h.shape[0]), match_idx
-            ]  # (N,)
-            match_motif = reference_motifs[match_idx]
-            # Remove matches below threshold
-            match_mask = match_mask & (match_score >= min_score)  # (N,)
-            match_score[~match_mask] = 0
-            match_idx[~match_mask] = -1
-            match_motif[~match_mask] = 0
-            # Subtract best match
-            my_motifs = utils_motif.remove_motif_component(
-                my_motifs,
-                match_motif,
-                alignment_rc,
-                alignment_h,
-            )
+            if len(my_motifs) > 0:
+                # Compute similarity
+                sim, alignment_rc, alignment_h = utils_similarity.compute_similarities(
+                    [my_motifs, reference_motifs], [(0, 1)]
+                )[0]
+                # Unscale L2 norm
+                my_motifs_norm = np.linalg.norm(my_motifs, axis=(1, 2))[:, np.newaxis]
+                reference_motifs_norm = np.linalg.norm(reference_motifs, axis=(1, 2))[np.newaxis, :]
+                sim = sim * (
+                    my_motifs_norm * reference_motifs_norm
+                )  # (N, M)
+                # Identify matches, Scale score by i
+                match_score = np.max(sim, axis=1) * np.sqrt(i + 1)  # (N,)
+                match_idx = np.argmax(sim, axis=1)  # (N,)
+                alignment_rc = alignment_rc[
+                    np.arange(alignment_rc.shape[0]), match_idx
+                ]  # (N,)
+                alignment_h = alignment_h[
+                    np.arange(alignment_h.shape[0]), match_idx
+                ]  # (N,)
+                match_motif = reference_motifs_raw[match_idx]
+                # Remove matches below threshold
+                match_mask = match_mask & (match_score >= min_score)  # (N,)
+                match_score[~match_mask] = 0
+                match_idx[~match_mask] = -1
+                match_motif[~match_mask] = 0
+                # Subtract best match
+                if match_mask.any():
+                    my_motifs = utils_motif.remove_motif_component(
+                        my_motifs,
+                        match_motif,
+                        alignment_rc,
+                        alignment_h,
+                    )
+                # Remove motifs with no match
+                my_motifs[~match_mask] = 0
+            else:
+                # No motifs left to match
+                match_score = np.zeros((0,), dtype=float)
+                match_idx = np.zeros((0,), dtype=int)
+                match_motif = np.zeros((0, max_length, my_motifs.shape[2]), dtype=float)
             # Save match information
-            match_label = [labels[x] if x >= 0 else "" for x in match_idx]
-            if match_motif.shape[2] == 8:
-                match_motif = utils_motif.motif_8_to_4_signed(match_motif)
-            match_motifs.append(match_motif)
+            match_label = [labels[x] if x >= 0 else None for x in match_idx]
             match_scores.append(match_score)
-            match_labels.append(match_label)
             match_idxs.append(match_idx)
+            match_motifs.append(match_motif)
+            match_labels.append(match_label)
+
+        # Restore IC-scale setting
+        if ic_scale:
+            utils_config.set_ic_scale(True)
+
         # Save match information
         for i in range(max_submotifs):
-            self.metadata[f"{save_col_prefix}_score{i}"] = match_scores[
-                i
-            ]  # Save scores
+            self.metadata[f"{save_col_prefix}_score{i}"] = match_scores[i]  # Save scores
             self.metadata[f"{save_col_prefix}_name{i}"] = match_labels[i]  # Save labels
             # Save logos, matches only
             if save_images:

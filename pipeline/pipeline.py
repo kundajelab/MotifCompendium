@@ -92,19 +92,23 @@ def set_default_options():
 
 
 #### FUNCTIONS -------------------------------------------------------------------
-def bool_or_float(value):
-    if isinstance(value, bool):
+def bool_or_float(value: str):
+    """Parse a CLI argument as either bool or float."""
+    if isinstance(value, bool) or isinstance(value, float):
         return value
-    if isinstance(value, float):
-        return value
+
     if isinstance(value, str):
-        if value.lower() in {'true', 'false'}:
-            return value.lower() == 'true'
+        v = value.strip().lower()
+        if v in {"true", "t", "yes", "y", "1"}:
+            return True
+        if v in {"false", "f", "no", "n", "0"}:
+            return False
         try:
             return float(value)
         except ValueError:
-            pass
-    raise argparse.ArgumentTypeError(f"Invalid value for bool_or_float: {value}")
+            raise argparse.ArgumentTypeError(f"Invalid value for bool_or_float: {value}")
+
+    raise argparse.ArgumentTypeError(f"Unexpected type {type(value)} for bool_or_float")
 
 
 def build_inputs_dict(input_list: list, name_list: list | None) -> dict:
@@ -162,7 +166,6 @@ def label_motifs(
         utils_analysis.assign_label_from_pfms(
             mc=mc,
             pfm_file=reference,
-            ic=False,
             save_col_prefix=label_col,
             min_score=min_score,
             max_submotifs=max_submotifs,
@@ -180,7 +183,7 @@ def label_motifs(
 def filter_motifs(
     mc: MotifCompendium,
     MotifFilterArgs: configs.MotifFilterArgs,
-    MetadataCols: configs.MetadataCols,
+    filter_flag_col: str,
     args: argparse.Namespace,
 ) -> None:
     """
@@ -189,6 +192,7 @@ def filter_motifs(
     Args:
         mc (MotifCompendium): The MotifCompendium object.
         MotifFilterArgs (configs.MotifFilterArgs): The filter arguments.
+        filter_flag_col (str): The column name to use for the filter flag.
         args (argparse.Namespace): The command line arguments.
         
     Returns:
@@ -219,14 +223,14 @@ def filter_motifs(
         if filter_args.apply_motif:
             apply_filter_threshold(
                 mc=mc,
-                flag_col=MetadataCols.filter_col_flag,
+                flag_col=filter_flag_col,
                 metric=filter_args.metric,
                 operation=filter_args.operation,
                 threshold=filter_args.threshold,
                 override=filter_args.override,
             )
     if args.verbose:
-        logging.info(f"Total number of motifs flagged: {len(mc[mc[MetadataCols.filter_col_flag]])}")
+        logging.info(f"Total number of motifs flagged: {len(mc[mc[filter_flag_col]])}")
     if args.time:
         logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
@@ -234,7 +238,7 @@ def filter_motifs(
     if args.verbose:
         logging.info(
             f"Overriding flags for matches above threshold:\n"
-            f'Base: {MotifFilterArgs.override_filters[0].threshold}, Composite: {MotifFilterArgs.override_filters[1].threshold}'
+            f'Threshold {i}: {MotifFilterArgs.override_filters[i].threshold}\n' for i in enumerate(MotifFilterArgs.override_filters)
         )
     if args.time:
         start_time = time.time()
@@ -242,14 +246,14 @@ def filter_motifs(
         if override_filter_args.apply_motif:
             apply_filter_threshold(
                 mc=mc,
-                flag_col=MetadataCols.filter_col_flag,
+                flag_col=filter_flag_col,
                 metric=override_filter_args.metric,
                 operation=override_filter_args.operation,
                 threshold=override_filter_args.threshold,
                 override=override_filter_args.override,
             )
     if args.verbose:
-        logging.info(f"Total number of motifs flagged: {len(mc[mc[MetadataCols.filter_col_flag]])}")
+        logging.info(f"Total number of motifs flagged: {len(mc[mc[filter_flag_col]])}")
     if args.time:
         logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
@@ -257,9 +261,9 @@ def filter_motifs(
     # if args.first_posmotif:
     #     if args.verbose:
     #         logging.info(f"Overriding flags for first positive motif...")
-    #     mc[MetadataCols.filter_col_flag] = (mc[MetadataCols.filter_col_flag] & 
-    #                                                     ((~mc["name"].str.contains("pattern_0")) |
-    #                                                     (mc["posneg"] != "pos")))
+    #     mc[filter_flag_col] = (mc[filter_flag_col] & 
+    #         ((~mc["name"].str.contains("pattern_0")) |
+    #          (mc["posneg"] != "pos")))
     # if args.verbose:
     #     logging.info(f"Total number of first positive motifs: {len(mc[mc['name'].str.contains('pattern_0') & (mc['posneg'] == 'pos')])}")
 
@@ -276,14 +280,14 @@ def filter_motifs(
             if strict_filter_args.apply_motif:
                 apply_filter_threshold(
                     mc=mc,
-                    flag_col=MetadataCols.filter_col_flag,
+                    flag_col=filter_flag_col,
                     metric=strict_filter_args.metric,
                     operation=strict_filter_args.operation,
                     threshold=strict_filter_args.threshold,
                     override=strict_filter_args.override,
                 )
         if args.verbose:
-            logging.info(f"Total number of motifs flagged: {len(mc[mc[MetadataCols.filter_col_flag]])}")
+            logging.info(f"Total number of motifs flagged: {len(mc[mc[filter_flag_col]])}")
         if args.time:
             logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
@@ -293,10 +297,10 @@ def filter_motifs(
     #         logging.info(f"Selecting first positive motif only...")
     #     if args.time:
     #         start_time = time.time()
-    #     mc[MetadataCols.filter_col_flag] = True
-    #     mc[MetadataCols.filter_col_flag] = (mc[MetadataCols.filter_col_flag] & 
-    #                                                     ((~mc["name"].str.contains("pattern_0")) |
-    #                                                     (mc["posneg"] != "pos")))
+    #     mc[filter_flag_col] = True
+    #     mc[filter_flag_col] = (mc[filter_flag_col] & 
+    #         ((~mc["name"].str.contains("pattern_0")) |
+    #          (mc["posneg"] != "pos")))
     #     if args.verbose:
     #         logging.info(f"Total number of first positive motifs: {len(mc[mc['name'].str.contains('pattern_0') & (mc['posneg'] == 'pos')])}")
     #     if args.time:
@@ -306,7 +310,7 @@ def filter_motifs(
 def filter_clusters(
     mc: MotifCompendium,
     MotifFilterArgs: configs.MotifFilterArgs,
-    MetadataCols: configs.MetadataCols,
+    filter_flag_col: str,
     args: argparse.Namespace,
 ) -> None:
     """
@@ -314,6 +318,8 @@ def filter_clusters(
 
     Args:
         mc (MotifCompendium): The MotifCompendium object.
+        MotifFilterArgs (configs.MotifFilterArgs): The filter arguments.
+        filter_flag_col (str): The column name to use for the filter flag.
         args (argparse.Namespace): The command line arguments.
 
     Returns:
@@ -343,14 +349,14 @@ def filter_clusters(
         if filter_args.apply_cluster:
             apply_filter_threshold(
                 mc=mc,
-                flag_col=MetadataCols.filter_col_flag,
+                flag_col=filter_flag_col,
                 metric=filter_args.metric,
                 operation=filter_args.operation,
                 threshold=filter_args.threshold,
                 override=filter_args.override,
             )
     if args.verbose:
-        logging.info(f"Number of flagged motifs: {len(mc[mc[MetadataCols.filter_col_flag]])}")
+        logging.info(f"Number of flagged motifs: {len(mc[mc[filter_flag_col]])}")
     if args.time:
         logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
@@ -361,7 +367,7 @@ def filter_clusters(
     #         logging.info(f"Flagging singleton clusters...")
     #     if args.time:
     #         start_time = time.time()
-    #     mc[MetadataCols.filter_col_flag] = mc["num_motifs"] == 1
+    #     mc[filter_flag_col] = mc["num_motifs"] == 1
     #     if args.verbose:
     #         logging.info(f"Number of singleton clusters: {len(mc[mc['num_motifs'] == 1])}")
     #     if args.time:
@@ -372,7 +378,7 @@ def filter_clusters(
     if args.verbose:
         logging.info(
             f"Overriding flags for matches above threshold:\n"
-            f'Base: {MotifFilterArgs.override_filters[0].threshold}, Composite: {MotifFilterArgs.override_filters[1].threshold}'
+            f'Threshold {i}: {MotifFilterArgs.override_filters[i].threshold}\n' for i in enumerate(MotifFilterArgs.override_filters)
         )
     if args.time:
         start_time = time.time()
@@ -380,7 +386,7 @@ def filter_clusters(
         if override_filter_args.apply_cluster:
             apply_filter_threshold(
                 mc=mc,
-                flag_col=MetadataCols.filter_col_flag,
+                flag_col=filter_flag_col,
                 metric=override_filter_args.metric,
                 operation=override_filter_args.operation,
                 threshold=override_filter_args.threshold,
@@ -402,7 +408,7 @@ def filter_clusters(
             if strict_filter_args.apply_cluster:
                 apply_filter_threshold(
                     mc=mc,
-                    flag_col=MetadataCols.filter_col_flag,
+                    flag_col=filter_flag_col,
                     metric=strict_filter_args.metric,
                     operation=strict_filter_args.operation,
                     threshold=strict_filter_args.threshold,
@@ -517,7 +523,7 @@ def generate_quality_plots(
     #     logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
 def aggregate_weighted_avg(mc: MotifCompendium, mc_cluster: MotifCompendium, 
-        cluster_col: str, agg_col: str, new_col: str, weight_col: str, ) -> None:
+        cluster_col: str, agg_col: str, new_col: str, weight_col: str | None, ) -> None:
     """
     Aggregate the MotifCompendium object by weighted average.
     
@@ -535,7 +541,7 @@ def aggregate_weighted_avg(mc: MotifCompendium, mc_cluster: MotifCompendium,
     if agg_col not in mc.columns():
         raise ValueError(f"Column {agg_col} not found in metadata.")
 
-    if weight_col not in mc.columns():
+    if weight_col and weight_col not in mc.columns():
         raise ValueError(f"Column {weight_col} not found in metadata.")
 
     weighted_avgs = []
@@ -544,7 +550,10 @@ def aggregate_weighted_avg(mc: MotifCompendium, mc_cluster: MotifCompendium,
         if len(mc_subset) == 0:
             weighted_avgs.append(np.nan)
             continue
-        weighted_avg = (mc_subset[agg_col] * mc_subset[weight_col]).sum() / mc_subset[weight_col].sum()
+        if weight_col:
+            weighted_avg = (mc_subset[agg_col] * mc_subset[weight_col]).sum() / mc_subset[weight_col].sum()
+        else:
+            weighted_avg = mc_subset[agg_col].mean()
         weighted_avgs.append(weighted_avg)
     mc_cluster[new_col] = weighted_avgs
 
@@ -580,6 +589,7 @@ if __name__ == "__main__":
         max_chunk=args.max_chunk,
         max_cpus=args.max_cpus,
         use_gpu=args.use_gpu,
+        ic_scale=args.ic,
         fast_plotting=args.fast_plot,
     )
 
@@ -684,7 +694,6 @@ if __name__ == "__main__":
                     modisco_dict=modisco_dict,
                     load_subpatterns=args.input_subpatterns,
                     modisco_region_width=args.modisco_region_width,
-                    ic=args.ic,
                     safe=args.safe,
                 )
                 if args.verbose:
@@ -738,7 +747,6 @@ if __name__ == "__main__":
             start_time = time.time()
         mc = MotifCompendium.build_from_pfm(
             pfm_dict=pfm_dict,
-            ic=args.ic,
             safe=args.safe,
         )
         if args.verbose:
@@ -765,6 +773,13 @@ if __name__ == "__main__":
         else:
             logging.error("Metadata file must be a CSV or TSV file.")
             raise ValueError("Metadata file must be a CSV or TSV file.")
+        
+        # Metadata cannot contain special column names
+        select_cols = ["name", "num_seqlets", "posneg", "avg_dist_from_summit"]
+        for col in select_cols:
+            if col in metadata_df.columns:
+                logging.error(f"Metadata file cannot contain column name: {col}")
+                raise ValueError(f"Metadata file cannot contain column name: {col}")
 
         # Merge metadata
         if len(metadata_df) == len(mc):
@@ -778,13 +793,26 @@ if __name__ == "__main__":
             )
         else:
             # Metadata per model
-            mc.metadata = mc.metadata.merge(
-                metadata_df,
-                left_on="model",
-                right_on=metadata_df.columns[0],
-                how="left",
-                suffixes=("", "_drop"),
-            )
+            if "model" not in mc.metadata.columns:
+                if "source" in mc.metadata.columns:
+                    mc.metadata = mc.metadata.merge(
+                        metadata_df,
+                        left_on="source",
+                        right_on=metadata_df.columns[0],
+                        how="left",
+                        suffixes=("", "_drop"),
+                    )
+                else:
+                    logging.error("MotifCompendium metadata does not contain 'model' or 'source' column for merging metadata.")
+                    raise ValueError("MotifCompendium metadata does not contain 'model' or 'source' column for merging metadata.")
+            else:
+                mc.metadata = mc.metadata.merge(
+                    metadata_df,
+                    left_on="model",
+                    right_on=metadata_df.columns[0],
+                    how="left",
+                    suffixes=("", "_drop"),
+                )
 
         # Drop duplicate columns
         mc.metadata = mc.metadata.loc[:, ~mc.metadata.columns.str.endswith("_drop")]
@@ -802,6 +830,11 @@ if __name__ == "__main__":
             # HTML table columns
             if col not in VisualizeArgs.html_table_cols_base:
                 VisualizeArgs.html_table_cols_base.append(col)
+
+    # Add default columns
+    mc.add_motif_strings(
+        name=MetadataCols.motif_string_col,
+    )
 
     # Save MotifCompendium object
     mc_path = os.path.join(args.output_dir, OutputPaths.mc_full)
@@ -881,19 +914,19 @@ if __name__ == "__main__":
         # Apply filters
         if args.verbose:
             logging.info(f"Applying filters to motifs...")
-        mc[MetadataCols.filter_col_flag] = False
+        mc[MetadataCols.filter_flag_col] = False
         filter_motifs(
             mc=mc,
             MotifFilterArgs=MotifFilterArgs,
-            MetadataCols=MetadataCols,
+            filter_flag_col=MetadataCols.filter_flag_col,
             args=args,
         )
 
         # Remove flagged motifs
         if args.verbose:
             logging.info(f"Removing flagged motifs...")
-        mc_removed = mc[mc[MetadataCols.filter_col_flag]]
-        mc = mc[~mc[MetadataCols.filter_col_flag]]
+        mc_removed = mc[mc[MetadataCols.filter_flag_col]]
+        mc = mc[~mc[MetadataCols.filter_flag_col]]
         if args.verbose:
             logging.info(f"Number of motifs after removing flagged motifs: {len(mc)}\n"
                         f"Number of motifs removed: {len(mc_removed)}")
@@ -938,10 +971,22 @@ if __name__ == "__main__":
     if args.sim_threshold_force:
         force_name = f"-force{args.sim_threshold_force}"
 
-    # Weight column
-    if ClusterArgs.weight_col not in mc.columns():
-        logging.warning(f"Weight column '{ClusterArgs.weight_col}' not found in metadata. Not performing weighted average during cluster aggregation.")
-        ClusterArgs.weight_col = None
+    # Scale and weight column
+    if ClusterArgs.select_scale_col not in mc.columns():
+        logging.warning(f"Selected motif scale '{ClusterArgs.select_scale_col}' not found in metadata. Not performing scaling during cluster aggregation.")
+        ClusterArgs.select_scale_col = None
+    if ClusterArgs.select_weight_col not in mc.columns():
+        logging.warning(f"Selected weight '{ClusterArgs.select_weight_col}' not found in metadata. Not performing weighted average during cluster aggregation.")
+        ClusterArgs.select_weight_col = None
+    
+    if ClusterArgs.select_weight_col and ClusterArgs.select_scale_col:
+        mc.metadata[ClusterArgs.scaled_weight_col] = mc.metadata[ClusterArgs.select_weight_col] * mc.metadata[ClusterArgs.select_scale_col]
+    elif ClusterArgs.select_weight_col:
+        mc.metadata[ClusterArgs.scaled_weight_col] = mc.metadata[ClusterArgs.select_weight_col]
+    elif ClusterArgs.select_scale_col:
+        mc.metadata[ClusterArgs.scaled_weight_col] = mc.metadata[ClusterArgs.select_scale_col]
+    else:
+        ClusterArgs.scaled_weight_col = None
 
     # Cluster: Cluster, Meta-cluster, Sub-cluster
     for sim_threshold in sim_thresholds:
@@ -958,7 +1003,7 @@ if __name__ == "__main__":
                         algorithm=ClusterArgs.algorithm,
                         similarity_threshold=sim_threshold,
                         cluster_within_on=(args.cluster_within, args.cluster_on),
-                        cluster_on_weight=ClusterArgs.weight_col,
+                        cluster_on_weight=ClusterArgs.scaled_weight_col,
                         save_name=cluster_col_name,
                         largest_clusters_first=True,
                         **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
@@ -968,7 +1013,7 @@ if __name__ == "__main__":
                         algorithm=ClusterArgs.algorithm,
                         similarity_threshold=sim_threshold,
                         cluster_on=args.cluster_on,
-                        cluster_on_weight=ClusterArgs.weight_col,
+                        cluster_on_weight=ClusterArgs.scaled_weight_col,
                         save_name=cluster_col_name,
                         largest_clusters_first=True,
                         **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
@@ -1001,7 +1046,7 @@ if __name__ == "__main__":
                                 algorithm=ClusterArgs.algorithm,
                                 similarity_threshold=sim_threshold,
                                 cluster_within_on=(args.cluster_within, cluster_col_name),
-                                cluster_on_weight=ClusterArgs.weight_col,
+                                cluster_on_weight=ClusterArgs.scaled_weight_col,
                                 save_name=cluster_col_name,
                                 largest_clusters_first=True,
                                 **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
@@ -1011,7 +1056,7 @@ if __name__ == "__main__":
                                 algorithm=ClusterArgs.algorithm,
                                 similarity_threshold=sim_threshold,
                                 cluster_on=cluster_col_name,
-                                cluster_on_weight=ClusterArgs.weight_col,
+                                cluster_on_weight=ClusterArgs.scaled_weight_col,
                                 save_name=cluster_col_name,
                                 largest_clusters_first=True,
                                 **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
@@ -1031,7 +1076,7 @@ if __name__ == "__main__":
                                 algorithm=ClusterArgs.algorithm_force,
                                 similarity_threshold=args.sim_threshold_force,
                                 cluster_within_on=(args.cluster_within, cluster_col_name),
-                                cluster_on_weight=ClusterArgs.weight_col,
+                                cluster_on_weight=ClusterArgs.scaled_weight_col,
                                 save_name=cluster_col_name,
                                 largest_clusters_first=True,
                                 **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_force],
@@ -1041,7 +1086,7 @@ if __name__ == "__main__":
                                 algorithm=ClusterArgs.algorithm_force,
                                 similarity_threshold=args.sim_threshold_force,
                                 cluster_on=cluster_col_name,
-                                cluster_on_weight=ClusterArgs.weight_col,
+                                cluster_on_weight=ClusterArgs.scaled_weight_col,
                                 save_name=cluster_col_name,
                                 largest_clusters_first=True,
                                 **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_force],
@@ -1074,7 +1119,7 @@ if __name__ == "__main__":
                         algorithm=ClusterArgs.algorithm_meta,
                         similarity_threshold=args.sim_threshold_meta,
                         cluster_on=cluster_col_name,
-                        cluster_on_weight=ClusterArgs.weight_col,
+                        cluster_on_weight=ClusterArgs.scaled_weight_col,
                         save_name=metacluster_col_name,
                         largest_clusters_first=True,
                         **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_meta],
@@ -1089,7 +1134,7 @@ if __name__ == "__main__":
                                 algorithm=ClusterArgs.algorithm_meta,
                                 similarity_threshold=args.sim_threshold_meta,
                                 cluster_on=metacluster_col_name,
-                                cluster_on_weight=ClusterArgs.weight_col,
+                                cluster_on_weight=ClusterArgs.scaled_weight_col,
                                 save_name=metacluster_col_name,
                                 largest_clusters_first=True,
                                 **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_meta],
@@ -1108,7 +1153,7 @@ if __name__ == "__main__":
                                 algorithm=ClusterArgs.algorithm_force,
                                 similarity_threshold=args.sim_threshold_force,
                                 cluster_on=metacluster_col_name,
-                                cluster_on_weight=ClusterArgs.weight_col,
+                                cluster_on_weight=ClusterArgs.scaled_weight_col,
                                 save_name=metacluster_col_name,
                                 largest_clusters_first=True,
                                 **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_force],
@@ -1155,7 +1200,7 @@ if __name__ == "__main__":
                                 algorithm=ClusterArgs.algorithm_sub,
                                 similarity_threshold=args.sim_threshold_sub,
                                 cluster_within_on=(cluster_col_name, subcluster_col_name),
-                                cluster_on_weight=ClusterArgs.weight_col,
+                                cluster_on_weight=ClusterArgs.scaled_weight_col,
                                 save_name=subcluster_col_name,
                                 largest_clusters_first=True,
                                 **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_sub],
@@ -1174,7 +1219,7 @@ if __name__ == "__main__":
                                 algorithm=ClusterArgs.algorithm_force,
                                 similarity_threshold=args.sim_threshold_force,
                                 cluster_within_on=(cluster_col_name, subcluster_col_name),
-                                cluster_on_weight=ClusterArgs.weight_col,
+                                cluster_on_weight=ClusterArgs.scaled_weight_col,
                                 save_name=subcluster_col_name,
                                 largest_clusters_first=True,
                                 **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm_force],
@@ -1251,9 +1296,9 @@ if __name__ == "__main__":
     
     # Sort MotifCompendium object
     if args.sim_threshold_meta:
-        mc.metadata["sort_cluster"] = mc.metadata[metacluster_col_name]
+        mc.metadata[MetadataCols.sort_cluster_col] = mc.metadata[metacluster_col_name]
     elif args.sim_threshold:
-        mc.metadata["sort_cluster"] = mc.metadata[cluster_col_name]
+        mc.metadata[MetadataCols.sort_cluster_col] = mc.metadata[cluster_col_name]
     else:
         # Cluster: Using same conditions
         if args.verbose:
@@ -1261,7 +1306,7 @@ if __name__ == "__main__":
         mc.cluster(
             algorithm=ClusterArgs.algorithm,
             similarity_threshold=MotifMatchArgs.sort_threshold,
-            save_name="sort_cluster",
+            save_name=MetadataCols.sort_cluster_col,
             largest_clusters_first=True,
             **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
         )
@@ -1297,7 +1342,7 @@ if __name__ == "__main__":
             mc_cluster = mc.cluster_averages(
                 clustering=cluster_col_name,
                 aggregations=ClusterArgs.aggregate_metadata,
-                weight_col=ClusterArgs.weight_col,
+                weight_col=ClusterArgs.scaled_weight_col,
                 compute_quality_stats=args.quality,
             )
             if args.verbose:
@@ -1322,33 +1367,26 @@ if __name__ == "__main__":
                 logging.critical("Error averaging motifs per cluster. max_chunk has reached 0.")
                 raise ValueError("Error averaging motifs per cluster.")
 
-    # Metadata:
-    # Add positive/negative column
+    # Metadata: Add default metadata columns
     mc_cluster["posneg"] = utils_motif.motif_posneg_sum(mc_cluster.get_standard_motif_stack())
-    # Add manual aggregation columns: avg_dist_from_summit, avg_contrib
-    if "avg_dist_from_summit" in mc.columns():
+    mc_cluster.add_motif_strings(
+        name=MetadataCols.motif_string_col,
+    )
+    # Update scale, with weight only
+    if ClusterArgs.select_scale_col:
         aggregate_weighted_avg(
             mc=mc,
             mc_cluster=mc_cluster,
             cluster_col=cluster_col_name,
-            agg_col="avg_dist_from_summit",
-            new_col="avg_dist_from_summit",
-            weight_col=ClusterArgs.weight_col,
-        )
-    if "avg_contrib" in mc.columns():
-        aggregate_weighted_avg(
-            mc=mc,
-            mc_cluster=mc_cluster,
-            cluster_col=cluster_col_name,
-            agg_col="avg_contrib",
-            new_col="avg_contrib",
-            weight_col=ClusterArgs.weight_col,
+            agg_col=ClusterArgs.select_scale_col,
+            new_col=ClusterArgs.select_scale_col,
+            weight_col=ClusterArgs.select_weight_col,
         )
 
     # Sort by cluster
     if args.sim_threshold_meta:
         mc_cluster.metadata.rename(
-            columns={metacluster_col_name: "sort_cluster"},
+            columns={metacluster_col_name: MetadataCols.sort_cluster_col},
             inplace=True,
         )
     else:
@@ -1358,7 +1396,7 @@ if __name__ == "__main__":
         mc_cluster.cluster(
             algorithm=ClusterArgs.algorithm,
             similarity_threshold=MotifMatchArgs.sort_threshold,
-            save_name="sort_cluster",
+            save_name=MetadataCols.sort_cluster_col,
             largest_clusters_first=True,
             **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
         )
@@ -1391,7 +1429,7 @@ if __name__ == "__main__":
         mc_metacluster = mc.cluster_averages(
             clustering=metacluster_col_name,
             aggregations=aggregate_metadata_meta,
-            weight_col=ClusterArgs.weight_col,
+            weight_col=ClusterArgs.scaled_weight_col,
             compute_quality_stats=args.quality,
         )
         if args.verbose:
@@ -1403,26 +1441,20 @@ if __name__ == "__main__":
         if args.time:
             start_time = time.time()
 
-        # Metadata: Add positive/negative column
+        # Metadata: Add default metadata columns
         mc_metacluster["posneg"] = utils_motif.motif_posneg_sum(mc_metacluster.get_standard_motif_stack())
-        # Add manual aggregation columns: avg_dist_from_summit, avg_contrib
-        if "avg_dist_from_summit" in mc.columns():
+        mc_metacluster.add_motif_strings(
+            name=MetadataCols.motif_string_col,
+        )
+        # Update scale, with weight only
+        if ClusterArgs.select_scale_col:
             aggregate_weighted_avg(
                 mc=mc,
                 mc_cluster=mc_metacluster,
                 cluster_col=metacluster_col_name,
-                agg_col="avg_dist_from_summit",
-                new_col="avg_dist_from_summit",
-                weight_col=ClusterArgs.weight_col,
-            )
-        if "avg_contrib" in mc.columns():
-            aggregate_weighted_avg(
-                mc=mc,
-                mc_cluster=mc_metacluster,
-                cluster_col=metacluster_col_name,
-                agg_col="avg_contrib",
-                new_col="avg_contrib",
-                weight_col=ClusterArgs.weight_col,
+                agg_col=ClusterArgs.select_scale_col,
+                new_col=ClusterArgs.select_scale_col,
+                weight_col=ClusterArgs.select_weight_col,
             )
 
         # Sort by cluster
@@ -1431,7 +1463,7 @@ if __name__ == "__main__":
         mc_metacluster.cluster(
             algorithm=ClusterArgs.algorithm,
             similarity_threshold=MotifMatchArgs.sort_threshold,
-            save_name="sort_cluster",
+            save_name=MetadataCols.sort_cluster_col,
             largest_clusters_first=True,
             **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
         )
@@ -1465,7 +1497,7 @@ if __name__ == "__main__":
         mc_subcluster = mc.cluster_averages(
             clustering=subcluster_col_name,
             aggregations=aggregate_metadata_sub,
-            weight_col=ClusterArgs.weight_col,
+            weight_col=ClusterArgs.scaled_weight_col,
             compute_quality_stats=args.quality,
         )
         if args.verbose:
@@ -1477,37 +1509,31 @@ if __name__ == "__main__":
         if args.time:
             start_time = time.time()
 
-        # Add positive/negative column
+        # Metadata: Add default columns
         mc_subcluster["posneg"] = utils_motif.motif_posneg_sum(mc_subcluster.get_standard_motif_stack())
-        # Add manual aggregation columns: avg_dist_from_summit, avg_contrib
-        if "avg_dist_from_summit" in mc.columns():
+        mc_subcluster.add_motif_strings(
+            name=MetadataCols.motif_string_col,
+        )
+        # Update scale, with weight only
+        if ClusterArgs.select_scale_col:
             aggregate_weighted_avg(
                 mc=mc,
                 mc_cluster=mc_subcluster,
                 cluster_col=subcluster_col_name,
-                agg_col="avg_dist_from_summit",
-                new_col="avg_dist_from_summit",
-                weight_col=ClusterArgs.weight_col,
-            )
-        if "avg_contrib" in mc.columns():
-            aggregate_weighted_avg(
-                mc=mc,
-                mc_cluster=mc_subcluster,
-                cluster_col=subcluster_col_name,
-                agg_col="avg_contrib",
-                new_col="avg_contrib",
-                weight_col=ClusterArgs.weight_col,
+                agg_col=ClusterArgs.select_scale_col,
+                new_col=ClusterArgs.select_scale_col,
+                weight_col=ClusterArgs.select_weight_col,
             )
 
         # Sort Sub MotifCompendium object
         if args.sort_cluster:
             # Sort by cluster
             mc_subcluster.metadata.rename(
-                columns={cluster_col_name: "sort_cluster"},
+                columns={cluster_col_name: MetadataCols.sort_cluster_col},
                 inplace=True,
             )
             mc_subcluster.sort(by=["num_motifs"], ascending=False, inplace=True)
-            mc_subcluster.sort(by=["sort_cluster"], ascending=True, inplace=True)
+            mc_subcluster.sort(by=[MetadataCols.sort_cluster_col], ascending=True, inplace=True)
         else:
             # Sort by positive, then negative clusters
             mc_metacluster.sort(by=["posneg", "num_motifs"], ascending=False, inplace=True)
@@ -1680,19 +1706,19 @@ if __name__ == "__main__":
         ## Cluster: Apply filters
         if args.verbose:
             logging.info(f"Applying filters to clusters...")
-        mc_cluster[MetadataCols.filter_col_flag] = False
+        mc_cluster[MetadataCols.filter_flag_col] = False
         filter_clusters(
             mc=mc_cluster,
             MotifFilterArgs=MotifFilterArgs,
-            MetadataCols=MetadataCols,
+            filter_flag_col=MetadataCols.filter_flag_col,
             args=args,
         )
 
         # Remove flagged clusters
         if args.verbose:
             logging.info(f"Removing flagged clusters...")
-        mc_cluster_removed = mc_cluster[mc_cluster[MetadataCols.filter_col_flag]]
-        mc_cluster = mc_cluster[~mc_cluster[MetadataCols.filter_col_flag]]
+        mc_cluster_removed = mc_cluster[mc_cluster[MetadataCols.filter_flag_col]]
+        mc_cluster = mc_cluster[~mc_cluster[MetadataCols.filter_flag_col]]
         if args.verbose:
             logging.info(f"Number of clusters after removing flagged: {len(mc_cluster)}\n"
                         f"Number of clusters removed: {len(mc_cluster_removed)}")
@@ -1717,18 +1743,18 @@ if __name__ == "__main__":
         if args.sim_threshold_meta:
             if args.verbose:
                 logging.info(f"Applying filters to meta-clusters...")
-            mc_metacluster[MetadataCols.filter_col_flag] = False
+            mc_metacluster[MetadataCols.filter_flag_col] = False
             filter_clusters(
                 mc=mc_metacluster,
                 MotifFilterArgs=MotifFilterArgs,
-                MetadataCols=MetadataCols,
+                filter_flag_col=MetadataCols.filter_flag_col,
                 args=args,
             )
             # Remove flagged clusters
             if args.verbose:
                 logging.info(f"Removing flagged meta-clusters...")
-            mc_metacluster_removed = mc_metacluster[mc_metacluster[MetadataCols.filter_col_flag]]
-            mc_metacluster = mc_metacluster[~mc_metacluster[MetadataCols.filter_col_flag]]
+            mc_metacluster_removed = mc_metacluster[mc_metacluster[MetadataCols.filter_flag_col]]
+            mc_metacluster = mc_metacluster[~mc_metacluster[MetadataCols.filter_flag_col]]
             if args.verbose:
                 logging.info(f"Number of meta-clusters after removing flagged: {len(mc_metacluster)}\n"
                             f"Number of meta-clusters removed: {len(mc_metacluster_removed)}")
@@ -1752,19 +1778,19 @@ if __name__ == "__main__":
         if args.sim_threshold_sub:
             if args.verbose:
                 logging.info(f"Applying filters to sub-clusters...")
-            mc_subcluster[MetadataCols.filter_col_flag] = False
+            mc_subcluster[MetadataCols.filter_flag_col] = False
             filter_clusters(
                 mc=mc_subcluster,
                 MotifFilterArgs=MotifFilterArgs,
-                MetadataCols=MetadataCols,
+                filter_flag_col=MetadataCols.filter_flag_col,
                 args=args,
             )
 
             # Remove flagged motifs
             if args.verbose:
                 logging.info(f"Removing flagged sub-clusters...")
-            mc_subcluster_removed = mc_subcluster[mc_subcluster[MetadataCols.filter_col_flag]]
-            mc_subcluster = mc_subcluster[~mc_subcluster[MetadataCols.filter_col_flag]]
+            mc_subcluster_removed = mc_subcluster[mc_subcluster[MetadataCols.filter_flag_col]]
+            mc_subcluster = mc_subcluster[~mc_subcluster[MetadataCols.filter_flag_col]]
             if args.verbose:
                 logging.info(f"Number of sub-clusters after removing flagged: {len(mc_subcluster)}\n"
                             f"Number of sub-clusters removed: {len(mc_subcluster_removed)}")
@@ -1839,20 +1865,6 @@ if __name__ == "__main__":
             max_rows_series = pd.Series([True] * html_max_rows + [False] * (len(mc) - html_max_rows), index=mc.metadata.index)
         mc_html = mc[max_rows_series]
 
-        # Add logos
-        if "logo (fwd)" not in mc_html.images():
-            mc_html.add_logos(
-                motifs=mc_html.get_standard_motif_stack(),
-                image_name="logo (fwd)",
-                trim=args.logo_trimming,
-            )
-        if "logo (rev)" not in mc_html.images():
-            mc_html.add_logos(
-                motifs=utils_motif.reverse_complement(mc_html.get_standard_motif_stack()),
-                image_name="logo (rev)",
-                trim=args.logo_trimming,
-            )
-
         # Create HTML table
         html_motif_table_path = os.path.join(html_dir, OutputPaths.html_motif_table)
         if args.verbose:
@@ -1863,6 +1875,7 @@ if __name__ == "__main__":
         mc_html.summary_table_html(
             html_out=html_motif_table_path,
             columns=VisualizeArgs.html_table_cols_motif,
+            logo_trimming=args.logo_trimming,
             editable=VisualizeArgs.editable,
         )
         if args.time:
@@ -1882,20 +1895,6 @@ if __name__ == "__main__":
             max_rows_series = pd.Series([True] * html_max_rows + [False] * (len(mc_removed) - html_max_rows), index=mc_removed.metadata.index)
         mc_removed_html = mc_removed[max_rows_series]
 
-        # Add logos
-        if "logo (fwd)" not in mc_removed_html.images():
-            mc_removed_html.add_logos(
-                motifs=mc_removed_html.get_standard_motif_stack(),
-                image_name="logo (fwd)",
-                trim=args.logo_trimming,
-            )
-        if "logo (rev)" not in mc_removed_html.images():
-            mc_removed_html.add_logos(
-                motifs=utils_motif.reverse_complement(mc_removed_html.get_standard_motif_stack()),
-                image_name="logo (rev)",
-                trim=args.logo_trimming,
-            )
-
         # Create HTML table
         html_motif_removed_path = os.path.join(html_dir, OutputPaths.html_motif_removed)
         if args.verbose:
@@ -1906,6 +1905,7 @@ if __name__ == "__main__":
         mc_removed_html.summary_table_html(
             html_out=html_motif_removed_path,
             columns=VisualizeArgs.html_table_cols_motif_removed,
+            logo_trimming=args.logo_trimming,
             editable=VisualizeArgs.editable,
         )
         if args.time:
@@ -1929,20 +1929,6 @@ if __name__ == "__main__":
             max_rows_series = pd.Series([True] * html_max_rows + [False] * (len(mc_cluster) - html_max_rows), index=mc_cluster.metadata.index)
         mc_cluster_html = mc_cluster[max_rows_series]
 
-        # Add logos
-        if "logo (fwd)" not in mc_cluster_html.images():
-            mc_cluster_html.add_logos(
-                motifs=mc_cluster_html.get_standard_motif_stack(),
-                image_name="logo (fwd)",
-                trim=args.logo_trimming,
-            )
-        if "logo (rev)" not in mc_cluster_html.images():
-            mc_cluster_html.add_logos(
-                motifs=utils_motif.reverse_complement(mc_cluster_html.get_standard_motif_stack()),
-                image_name="logo (rev)",
-                trim=args.logo_trimming,
-            )
-
         # Cluster: Create HTML table
         html_cluster_table_path = os.path.join(html_dir, OutputPaths.html_cluster_table)
         if args.verbose:
@@ -1953,6 +1939,7 @@ if __name__ == "__main__":
         mc_cluster_html.summary_table_html(
             html_out=html_cluster_table_path,
             columns=VisualizeArgs.html_table_cols_cluster,
+            logo_trimming=args.logo_trimming,
             editable=VisualizeArgs.editable,
         )
         if args.time:
@@ -1975,20 +1962,6 @@ if __name__ == "__main__":
                 max_rows_series = pd.Series([True] * html_max_rows + [False] * (len(mc_metacluster) - html_max_rows), index=mc_metacluster.metadata.index)
             mc_metacluster_html = mc_metacluster[max_rows_series]
 
-            # Add logos
-            if "logo (fwd)" not in mc_metacluster_html.images():
-                mc_metacluster_html.add_logos(
-                    motifs=mc_metacluster_html.get_standard_motif_stack(),
-                    image_name="logo (fwd)",
-                    trim=args.logo_trimming,
-                )
-            if "logo (rev)" not in mc_metacluster_html.images():
-                mc_metacluster_html.add_logos(
-                    motifs=utils_motif.reverse_complement(mc_metacluster_html.get_standard_motif_stack()),
-                    image_name="logo (rev)",
-                    trim=args.logo_trimming,
-                )
-
             # Create HTML table
             html_metacluster_table_path = os.path.join(html_dir, OutputPaths.html_metacluster_table)
             if args.verbose:
@@ -1999,6 +1972,7 @@ if __name__ == "__main__":
             mc_metacluster_html.summary_table_html(
                 html_out=html_metacluster_table_path,
                 columns=VisualizeArgs.html_table_cols_metacluster,
+                logo_trimming=args.logo_trimming,
                 editable=VisualizeArgs.editable,
             )
             if args.time:
@@ -2021,20 +1995,6 @@ if __name__ == "__main__":
                 max_rows_series = pd.Series([True] * html_max_rows + [False] * (len(mc_subcluster) - html_max_rows), index=mc_subcluster.metadata.index)
             mc_subcluster_html = mc_subcluster[max_rows_series]
 
-            # Add logos
-            if "logo (fwd)" not in mc_subcluster_html.images():
-                mc_subcluster_html.add_logos(
-                    motifs=mc_subcluster_html.get_standard_motif_stack(),
-                    image_name="logo (fwd)",
-                    trim=args.logo_trimming,
-                )
-            if "logo (rev)" not in mc_subcluster_html.images():
-                mc_subcluster_html.add_logos(
-                    motifs=utils_motif.reverse_complement(mc_subcluster_html.get_standard_motif_stack()),
-                    image_name="logo (rev)",
-                    trim=args.logo_trimming,
-                )
-
             # Create HTML table
             html_subcluster_table_path = os.path.join(html_dir, OutputPaths.html_subcluster_table)
             if args.verbose:
@@ -2045,6 +2005,7 @@ if __name__ == "__main__":
             mc_subcluster_html.summary_table_html(
                 html_out=html_subcluster_table_path,
                 columns=VisualizeArgs.html_table_cols_subcluster,
+                logo_trimming=args.logo_trimming,
                 editable=VisualizeArgs.editable,
             )
             if args.time:
@@ -2064,20 +2025,6 @@ if __name__ == "__main__":
             max_rows_series = pd.Series([True] * html_max_rows + [False] * (len(mc_cluster_removed) - html_max_rows), index=mc_cluster_removed.metadata.index)
         mc_cluster_removed_html = mc_cluster_removed[max_rows_series]
 
-        # Add logos
-        if "logo (fwd)" not in mc_cluster_removed_html.images():
-            mc_cluster_removed_html.add_logos(
-                motifs=mc_cluster_removed_html.get_standard_motif_stack(),
-                image_name="logo (fwd)",
-                trim=args.logo_trimming,
-            )
-        if "logo (rev)" not in mc_cluster_removed_html.images():
-            mc_cluster_removed_html.add_logos(
-                motifs=utils_motif.reverse_complement(mc_cluster_removed_html.get_standard_motif_stack()),
-                image_name="logo (rev)",
-                trim=args.logo_trimming,
-            )
-
         # Cluster: Create HTML table
         html_cluster_removed_path = os.path.join(html_dir, OutputPaths.html_cluster_removed)
         if args.verbose:
@@ -2088,6 +2035,7 @@ if __name__ == "__main__":
         mc_cluster_removed_html.summary_table_html(
             html_out=html_cluster_removed_path,
             columns=VisualizeArgs.html_table_cols_cluster_removed,
+            logo_trimming=args.logo_trimming,
             editable=VisualizeArgs.editable,
         )
         if args.time:
@@ -2107,20 +2055,6 @@ if __name__ == "__main__":
                 max_rows_series = pd.Series([True] * html_max_rows + [False] * (len(mc_metacluster_removed) - html_max_rows), index=mc_metacluster_removed.metadata.index)
             mc_metacluster_removed_html = mc_metacluster_removed[max_rows_series]
 
-            # Add logos
-            if "logo (fwd)" not in mc_metacluster_removed_html.images():
-                mc_metacluster_removed_html.add_logos(
-                    motifs=mc_metacluster_removed_html.get_standard_motif_stack(),
-                    image_name="logo (fwd)",
-                    trim=args.logo_trimming,
-                )
-            if "logo (rev)" not in mc_metacluster_removed_html.images():
-                mc_metacluster_removed_html.add_logos(
-                    motifs=utils_motif.reverse_complement(mc_metacluster_removed_html.get_standard_motif_stack()),
-                    image_name="logo (rev)",
-                    trim=args.logo_trimming,
-                )
-
             # Create HTML table
             html_metacluster_removed_path = os.path.join(html_dir, OutputPaths.html_metacluster_removed)
             if args.verbose:
@@ -2131,6 +2065,7 @@ if __name__ == "__main__":
             mc_metacluster_removed_html.summary_table_html(
                 html_out=html_metacluster_removed_path,
                 columns=VisualizeArgs.html_table_cols_metacluster_removed,
+                logo_trimming=args.logo_trimming,
                 editable=VisualizeArgs.editable,
             )
             if args.time:
@@ -2150,20 +2085,6 @@ if __name__ == "__main__":
                 max_rows_series = pd.Series([True] * html_max_rows + [False] * (len(mc_subcluster_removed) - html_max_rows), index=mc_subcluster_removed.metadata.index)
             mc_subcluster_removed_html = mc_subcluster_removed[max_rows_series]
 
-            # Add logos
-            if "logo (fwd)" not in mc_subcluster_removed_html.images():
-                mc_subcluster_removed_html.add_logos(
-                    motifs=mc_subcluster_removed_html.get_standard_motif_stack(),
-                    image_name="logo (fwd)",
-                    trim=args.logo_trimming,
-                )
-            if "logo (rev)" not in mc_subcluster_removed_html.images():
-                mc_subcluster_removed_html.add_logos(
-                    motifs=utils_motif.reverse_complement(mc_subcluster_removed_html.get_standard_motif_stack()),
-                    image_name="logo (rev)",
-                    trim=args.logo_trimming,
-                )
-
             # Create HTML table
             html_subcluster_removed_path = os.path.join(html_dir, OutputPaths.html_subcluster_removed)
             if args.verbose:
@@ -2174,15 +2095,20 @@ if __name__ == "__main__":
             mc_subcluster_removed_html.summary_table_html(
                 html_out=html_subcluster_removed_path,
                 columns=VisualizeArgs.html_table_cols_subcluster_removed,
+                logo_trimming=args.logo_trimming,
                 editable=VisualizeArgs.editable,
             )
             if args.time:
                 logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
 
+    ### EXPORT -----------------------------------------------------------------
+    export_dir = os.path.join(args.output_dir, "export")
+    os.makedirs(export_dir, exist_ok=True)
+    
     ## ARGUMENTS ---------------------------------------------------------------
     # Save arguments
-    arg_json = os.path.join(args.output_dir, "args.json")
+    arg_json = os.path.join(export_dir, "args.json")
     if args.verbose:
         logging.info(f"Saving arguments to: {arg_json}...")
     all_args = [
@@ -2196,6 +2122,35 @@ if __name__ == "__main__":
     ]
     with open(arg_json, "w") as f:
         json.dump(all_args, f, indent=4)
+    
+    
+    ## METADATA --------------------------------------------------------------
+    # Save metadata
+    motifs_metadata_tsv = os.path.join(export_dir, "motifcompendium_metadata.tsv")
+    clusters_metadata_tsv = os.path.join(export_dir, "motifcompendium_cluster_metadata.tsv")
+    if args.sim_threshold_meta:
+        metaclusters_metadata_tsv = os.path.join(export_dir, "motifcompendium_metacluster_metadata.tsv")
+    if args.sim_threshold_sub:
+        subclusters_metadata_tsv = os.path.join(export_dir, "motifcompendium_subcluster_metadata.tsv")
+    
+    if args.verbose:
+        logging.info(f"Saving metadata to: {export_dir}...")
+
+    # Prepare metadata
+    motifs_metadata = pd.concat([mc.metadata, mc_removed.metadata], axis=0, ignore_index=True) if args.filter else mc.metadata
+    clusters_metadata = pd.concat([mc_cluster.metadata, mc_cluster_removed.metadata], axis=0, ignore_index=True) if args.filter else mc_cluster.metadata
+    if args.sim_threshold_meta:
+        metaclusters_metadata = pd.concat([mc_metacluster.metadata, mc_metacluster_removed.metadata], axis=0, ignore_index=True) if args.filter else mc_metacluster.metadata
+    if args.sim_threshold_sub:
+        subclusters_metadata = pd.concat([mc_subcluster.metadata, mc_subcluster_removed.metadata], axis=0, ignore_index=True) if args.filter else mc_subcluster.metadata
+
+    # Export metadata as TSV
+    motifs_metadata.to_csv(motifs_metadata_tsv, sep="\t", index=False)
+    clusters_metadata.to_csv(clusters_metadata_tsv, sep="\t", index=False)
+    if args.sim_threshold_meta:
+        metaclusters_metadata.to_csv(metaclusters_metadata_tsv, sep="\t", index=False)
+    if args.sim_threshold_sub:
+        subclusters_metadata.to_csv(subclusters_metadata_tsv, sep="\t", index=False)
 
     ## END ----------------------------------------------------------------
     print(f"MotifCompendium pipeline completed successfully. Outputs saved to {args.output_dir}.")
