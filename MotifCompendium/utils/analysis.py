@@ -598,7 +598,9 @@ def assign_label_from_pfms(
           multiple reference motifs.
         label_unsigned: Whether or not to label indifferent of positive and negative
           signs. If True, negative motifs can be labeled by a positive reference motif.
-          If False, negative motifs can only labeled by negative reference motifs.
+          (i.e., indifferent to sign), by comparing the absolute value of both motifs. 
+          If False, negative motifs can only labeled by a negative reference motif 
+          (i.e., sign matters).
         save_images: Whether or not to save the logos of the matched motifs. If True,
           the logos will appear as a saved image. If False, logos will not be saved as
           saved images.
@@ -614,17 +616,13 @@ def assign_label_from_pfms(
     pfm_motifs, pfm_names = utils_loader.load_pfm(
         pfm_file, motif_length=mc.motifs.shape[1]
     )
-    # Label: Signed vs. Unsigned
-    if label_unsigned:
-        pfm_motifs = np.abs(pfm_motifs)
-    else:
-        pfm_motifs = utils_motif.motif_4_to_8(pfm_motifs)
     # Assign labels
     mc.assign_label_from_motifs(
         pfm_motifs,
         pfm_names,
         min_score,
         max_submotifs=max_submotifs,
+        label_unsigned=label_unsigned,
         save_images=save_images,
         logo_trimming=logo_trimming,
         save_col_prefix=save_col_prefix,
@@ -666,7 +664,9 @@ def assign_label_from_other_compendium(
           multiple reference motifs.
         label_unsigned: Whether or not to label indifferent of positive and negative
           signs. If True, negative motifs can be labeled by a positive reference motif.
-          If False, negative motifs can only labeled by negative reference motifs.
+          (i.e., indifferent to sign), by comparing the absolute value of both motifs. 
+          If False, negative motifs can only labeled by a negative reference motif 
+          (i.e., sign matters).
         save_images: Whether or not to save the logos of the matched motifs. If True,
           the logos will appear as a saved image. If False, logos will not be saved as
           saved images. The logos will come from
@@ -692,11 +692,7 @@ def assign_label_from_other_compendium(
         labels = assign_from_mc.metadata[from_label_col].tolist()
     else:
         raise KeyError(f"{from_label_col} not in other metadata.")
-    # Label unsigned vs signed
-    if label_unsigned:
-        reference_motifs = np.abs(assign_from_mc.get_standard_motif_stack())
-    else:
-        reference_motifs = assign_from_mc.motifs
+    reference_motifs = assign_from_mc.motifs
     # Check if forward logos in other MotifCompendium
     if save_images and "logo (fwd)" in assign_from_mc.images():
         other_logos = assign_from_mc.get_images("logo (fwd)")
@@ -708,6 +704,7 @@ def assign_label_from_other_compendium(
         labels,
         min_score,
         max_submotifs=max_submotifs,
+        label_unsigned=label_unsigned,
         save_images=save_images,
         logo_trimming=logo_trimming,
         utf8_images=other_logos,

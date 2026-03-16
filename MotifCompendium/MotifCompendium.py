@@ -2022,6 +2022,7 @@ class MotifCompendium:
         labels: list[str],
         min_score: float,
         max_submotifs: int = 1,
+        label_unsigned: bool = True,
         save_images: bool = True,
         logo_trimming: bool | float | int = True,
         utf8_images: list[str] | None = None,
@@ -2038,7 +2039,7 @@ class MotifCompendium:
           precomputed. Composite matching can be enabled by setting max_submotifs > 1.
 
         Args:
-            reference_motifs: A np.ndarray motif stack of shape (M, L, 8/4) to compare
+            reference_motifs: A np.ndarray motif stack of shape (M, L, 4) to compare
               against.
             labels: A list of labels for each motif in reference_motifs.
             min_score: The minimum similarity score to consider a match.
@@ -2046,6 +2047,11 @@ class MotifCompendium:
               max_submotifs = 1, only a single match is given to each motif. If
               max_submotifs > 1, the best match for each motif can be from a combination
               of multiple reference motifs.
+            label_unsigned: Whether or not to label indifferent of positive and negative
+              signs. If True, negative motifs can be labeled by a positive reference motif.
+              (i.e., indifferent to sign), by comparing the absolute value of both motifs. 
+              If False, negative motifs can only labeled by a negative reference motif
+              (i.e., sign matters).
             save_images: Whether or not to save the logos of the matched motifs. If
               True, the logos will appear as a saved image. If False, logos will not be
               saved as saved images.
@@ -2089,6 +2095,10 @@ class MotifCompendium:
             reference_motifs = np.pad(
                 reference_motifs, ((0, 0), (0, reference_pad), (0, 0))
             )
+        # Sign: Use absolute values
+        if label_unsigned:
+            my_motifs = np.abs(my_motifs)
+            reference_motifs = np.abs(reference_motifs)
 
         # Initial: IC-scale (only once)
         reference_motifs_raw = reference_motifs
@@ -2099,7 +2109,7 @@ class MotifCompendium:
             utils_config.set_ic_scale(False)  # Turn off IC scale for rest of function
         else:
             ic_scale = False
-        # Initial: L2 normalize motifs (comparable scales)
+        # Initial: L2 normalize motifs (for motif-motif subtraction)
         my_motifs_norm = np.linalg.norm(my_motifs, axis=(1, 2), keepdims=True)
         my_motifs = np.divide(my_motifs, my_motifs_norm, where=my_motifs_norm!=0)
         reference_motifs_norm = np.linalg.norm(reference_motifs, axis=(1, 2), keepdims=True)
@@ -2113,7 +2123,7 @@ class MotifCompendium:
         match_mask = np.ones((my_motifs.shape[0],), dtype=bool)  # (N,)
         for i in range(max_submotifs):
             if len(my_motifs) > 0:
-                # Compute similarity
+                # Compute similarity (L2 norm included during similarity calculation)
                 sim, alignment_rc, alignment_h = utils_similarity.compute_similarities(
                     [my_motifs, reference_motifs], [(0, 1)]
                 )[0]
@@ -2170,7 +2180,7 @@ class MotifCompendium:
             self.metadata[f"{save_col_prefix}_name{i}"] = match_labels[i]  # Save labels
             # Save logos, matches only
             if save_images:
-                # self.__images[f"{save_col_prefix}_logo{i}"] = ""
+                self.__images[f"{save_col_prefix}_logo{i}"] = "" # Initialize images
                 match_idx = np.where(match_idxs[i] >= 0)[0]
                 if utf8_images is None:
                     # Generate forward logos if not provided
