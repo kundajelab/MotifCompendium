@@ -675,6 +675,7 @@ if __name__ == "__main__":
                 with h5py.File(h5, "r") as f:
                     if "pos_patterns" not in f and "neg_patterns" not in f:
                         logging.error(f"Input H5 file is not a valid Modisco file: {h5}")
+                        failed_h5s.append(h5)
 
         if failed_h5s:
             logging.error(f"Failed to load the following H5 files: {', '.join(failed_h5s)}")
