@@ -67,12 +67,13 @@ class OutputPaths:
 @dataclass
 class MotifMatchArgs:
     # Parameters for matching vs. reference database
-    reference_default: str = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "pipeline",
-        "data",
-        "MotifCompendium-Database-Human.meme.txt",
-    )
+    reference_default: None = None
+    # reference_default: str = os.path.join(
+    #     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    #     "pipeline",
+    #     "data",
+    #     "MotifCompendium-Database-Human.meme.txt",
+    # )
     max_submotifs: int = 1
     min_score: float = 0.7
     base_threshold: float = 0.85
@@ -91,12 +92,15 @@ class ClusterArgs:
     algorithm_meta: str = "cpm_leiden"
     algorithm_sub: str = "cpm_leiden"
     algorithm_force: str = "dcc"
+    algorithm_clean: str = "k_centroids"
 
     select_weight_col: str = "num_seqlets"
     select_scale_col: str = "motif_scale"
     scaled_weight_col: str = "scaled_weight"
 
     max_iter: int = 50
+    seeds = [100, 200]
+
     aggregate_metadata: List[Tuple[str, str, str]] = field(default_factory=lambda: [
         ("name", "count", "num_motifs"),
         ("num_seqlets", "sum", "num_seqlets"),
@@ -121,14 +125,20 @@ class ClusterArgs:
         "leidenalg": {},
         "rb_leiden": {},
         "mod_leiden": {},
+        "leiden_mod": {},
         "modularity_leiden": {},
         "cpm": {},
         "cpm_leiden": {},
+        "leiden_cpm": {},
         "cc": {},
         "connected_components": {},
         "dcc": {"density": 1.0,},
         "dense_cc": {"density": 1.0,},
         "spectral": {"k": 100},
+        "k_centroids": {},
+        "k_medoids": {},
+        "k_mean_distance": {},
+        "k_median_distance": {},
     })
 
 @dataclass

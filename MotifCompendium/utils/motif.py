@@ -18,7 +18,6 @@ def single_or_many_motifs(func):
       decorator will return a single output that can be indexed so that output[i]
       corresponds to the output of the ith motif that was input.
     """
-
     @functools.wraps(func)
     def wrapper(motifs, *args, **kwargs):
         validate_motif_basic(motifs)
@@ -30,6 +29,48 @@ def single_or_many_motifs(func):
             result = func(np.expand_dims(motifs, axis=0), *args, **kwargs)
             return result[0]
         return func(motifs, *args, **kwargs)
+
+    return wrapper
+
+
+def calculate_metrics(func):
+    """Decorator to handle trimming and serial execution of motif metrics.
+
+    Wraps functions decorated with @single_or_many_motifs. Adds trim and serial
+    control: trims motif flanks before passing to func, and optionally serializes
+    execution over a motif stack.
+    """
+    decorated = single_or_many_motifs(func)
+
+    @functools.wraps(func)
+    def wrapper(motifs: np.ndarray, trim: bool | float | int = False, *args, **kwargs):
+        validate_motif_basic(motifs)
+        if motifs.ndim not in (2, 3):
+            raise ValueError("Must input a single motif or motif stack as a np.ndarray.")
+
+        # Trim: threshold
+        if trim is False:
+            trim_importance = None
+        elif trim is True:
+            trim_importance = 0
+        elif isinstance(trim, (int, float)) and 0 <= trim <= 1:
+            trim_importance = trim
+        else:
+            raise ValueError("trim must be a boolean or a value between [0, 1].")
+
+        if trim_importance is None:
+            return decorated(motifs, *args, **kwargs)
+
+        # Single: 2D motif
+        single = motifs.ndim == 2
+        if single:
+            motifs = np.expand_dims(motifs, axis=0)
+        # Trim and serialize
+        results = np.stack([
+            decorated(trim_motif(motifs[i], importance=trim_importance), *args, **kwargs)
+            for i in range(motifs.shape[0])
+        ], axis=0)
+        return results[0] if single else results
 
     return wrapper
 
@@ -558,9 +599,48 @@ def remove_motif_component(
     return main_motifs_updated
 
 
-########################
-# ENTROPY CALCULATIONS #
-########################
+@single_or_many_motifs
+def l1_norm_motif(motifs: np.ndarray) -> np.ndarray:
+    """L1 normalize by motif.
+
+    Each motif is normalized such that the sum of the absolute values of all elements
+      in the motif is equal to 1.
+
+    Args:
+        x: A (L, K) motif or (N, L, 4) motif stack.
+
+    Returns:
+        The L1 normalized motif or motif stack.
+    """
+    # L1 normalize by motif
+    norm = np.sum(motifs, axis=(1, 2), keepdims=True)
+    motifs = np.divide(
+        motifs, norm, out=np.zeros_like(motifs, dtype=motifs.dtype), where=norm!=0
+    )
+    return motifs
+
+
+@single_or_many_motifs
+def l1_norm_position(motifs: np.ndarray) -> np.ndarray:
+    """L1 normalize by position.
+
+    Each motif is normalized such that the sum of the absolute values of all elements
+      in the motif is equal to 1.
+
+    Args:
+        x: A (L, K) motif or (N, L, 4) motif stack.
+
+    Returns:
+        The L1 normalized motif or motif stack.
+    """
+    # L1 normalize by position
+    norm = np.sum(motifs, axis=(-1), keepdims=True)
+    motifs = np.divide(
+        motifs, norm, out=np.zeros_like(motifs, dtype=motifs.dtype), where=norm!=0
+    )
+    return motifs
+
+
 def minusxlogx(x: np.ndarray, base: int) -> np.ndarray:
     """Compute -x*logb(x) with support in x >= 0."""
     return (
@@ -612,7 +692,10 @@ def ic_scale(x: np.ndarray, invert: bool = False) -> float | np.ndarray:
     return scaled
 
 
-@single_or_many_motifs
+###################
+# ENTROPY METRICS #
+###################
+@calculate_metrics
 def calculate_full_motif_entropy(x: np.ndarray) -> float | np.ndarray:
     """Calculate the full motif entropy of a motif or motif stack.
 
@@ -641,7 +724,7 @@ def calculate_full_motif_entropy(x: np.ndarray) -> float | np.ndarray:
     return normalized_last_axis_entropy(x_fullmotif)
 
 
-@single_or_many_motifs
+@calculate_metrics
 def calculate_weighted_base_entropy(x: np.ndarray) -> float | np.ndarray:
     """Calculate the position-weighted across-base entropy of a motif or motif stack.
 
@@ -668,7 +751,7 @@ def calculate_weighted_base_entropy(x: np.ndarray) -> float | np.ndarray:
     return np.sum(across_base_entropy * position_importance, axis=(1, 2))  # (N, )
 
 
-@single_or_many_motifs
+@calculate_metrics
 def calculate_weighted_position_entropy(x: np.ndarray) -> float | np.ndarray:
     """Calculate the base-weighted across-position entropy of a motif or motif stack.
 
@@ -698,7 +781,7 @@ def calculate_weighted_position_entropy(x: np.ndarray) -> float | np.ndarray:
     return np.sum(across_position_entropy * base_importance, axis=1)  # (N, )
 
 
-@single_or_many_motifs
+@calculate_metrics
 def calculate_position_versus_base_entropy(x: np.ndarray) -> float | np.ndarray:
     """Calculate across-position * (1 - across-base) entropy for a motif or motif stack.
 
@@ -730,7 +813,7 @@ def calculate_position_versus_base_entropy(x: np.ndarray) -> float | np.ndarray:
     return across_position_entropy * (1 - across_base_entropy)
 
 
-@single_or_many_motifs
+@calculate_metrics
 def calculate_copair_entropy(x: np.ndarray) -> float | np.ndarray:
     """Calculate a measure of copair entropy of a motif or motif stack.
 
@@ -769,7 +852,7 @@ def calculate_copair_entropy(x: np.ndarray) -> float | np.ndarray:
     return across_position_entropy * (1 - across_base_entropy)
 
 
-@single_or_many_motifs
+@calculate_metrics
 def calculate_copair_composition(x: np.ndarray) -> float | np.ndarray:
     """Calculate a measure of copair composition of a motif or motif stack.
 
@@ -805,7 +888,7 @@ def calculate_copair_composition(x: np.ndarray) -> float | np.ndarray:
     return np.sum(np.max(copair_scores, axis=2), axis=1)  # (N, )
 
 
-@single_or_many_motifs
+@calculate_metrics
 def calculate_dinucleotide_entropy(x: np.ndarray) -> float | np.ndarray:
     """Calculate a measure of dinucleotide entropy of a motif or motif stack.
 
@@ -856,7 +939,7 @@ def calculate_dinucleotide_entropy(x: np.ndarray) -> float | np.ndarray:
     return across_position_entropy * (1 - across_base_entropy)
 
 
-@single_or_many_motifs
+@calculate_metrics
 def calculate_dinucleotide_alternating_composition(x: np.ndarray) -> float | np.ndarray:
     """Calculate a measure of dinucleotide composition of a motif or motif stack.
 
@@ -904,7 +987,7 @@ def calculate_dinucleotide_alternating_composition(x: np.ndarray) -> float | np.
     return np.max(dinucleotide_composition, axis=(1, 2))
 
 
-@single_or_many_motifs
+@calculate_metrics
 def calculate_dinucleotide_score(x: np.ndarray) -> float | np.ndarray:
     """Calculate a measure of dinucleotide occurrence of a motif or motif stack.
 
@@ -945,44 +1028,22 @@ def calculate_dinucleotide_score(x: np.ndarray) -> float | np.ndarray:
     )  # Remove diagonal (self-pairs)
     return np.max(np.sum(dinucleotide_scores, axis=1), axis=(1, 2))  # (N, )
 
+@calculate_metrics
+def calculate_truncated(x: np.ndarray, threshold: float = 0.1) -> bool | np.ndarray:
+    """Calculate whether a motif or motif stack is truncated.
 
-@single_or_many_motifs
-def l1_norm_motif(motifs: np.ndarray) -> np.ndarray:
-    """L1 normalize by motif.
-
-    Each motif is normalized such that the sum of the absolute values of all elements
-      in the motif is equal to 1.
-
-    Args:
-        x: A (L, K) motif or (N, L, 4) motif stack.
-
-    Returns:
-        The L1 normalized motif or motif stack.
-    """
-    # L1 normalize by motif
-    norm = np.sum(motifs, axis=(1, 2), keepdims=True)
-    motifs = np.divide(
-        motifs, norm, out=np.zeros_like(motifs, dtype=motifs.dtype), where=norm!=0
-    )
-    return motifs
-
-
-@single_or_many_motifs
-def l1_norm_position(motifs: np.ndarray) -> np.ndarray:
-    """L1 normalize by position.
-
-    Each motif is normalized such that the sum of the absolute values of all elements
-      in the motif is equal to 1.
+    A motif is classified as truncated if the max peak position is in the first 10%
+      or last 10% of the motif. The max peak position is the position with the highest
+      absolute importance, summed across all bases.
 
     Args:
-        x: A (L, K) motif or (N, L, 4) motif stack.
-
+        x: A non-negative, normalized (L, 4) motif or (N, L, 4) motif stack.
+        threshold: Fraction of the motif length to consider as the start and end of the
+          motif for classifying truncation.
     Returns:
-        The L1 normalized motif or motif stack.
+        A boolean for a single motif or an array of booleans for a motif stack indicating
+          whether each motif is truncated.
     """
-    # L1 normalize by position
-    norm = np.sum(motifs, axis=(-1), keepdims=True)
-    motifs = np.divide(
-        motifs, norm, out=np.zeros_like(motifs, dtype=motifs.dtype), where=norm!=0
-    )
-    return motifs
+    max_pos = np.argmax(np.sum(np.abs(x), axis=2), axis=1)  # (N, )
+    motif_length = x.shape[1]
+    return (max_pos < threshold * motif_length) | (max_pos > (1 - threshold) * motif_length)
