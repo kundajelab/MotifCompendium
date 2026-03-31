@@ -43,31 +43,33 @@ def calculate_metrics(func):
     decorated = single_or_many_motifs(func)
 
     @functools.wraps(func)
-    def wrapper(motifs: np.ndarray, trim: bool | float | int = False, *args, **kwargs):
+    def wrapper(motifs: np.ndarray, 
+            trim_importance: float | int | None = None,
+            trim_length: int | None = None,
+            *args, **kwargs
+        ):
         validate_motif_basic(motifs)
         if motifs.ndim not in (2, 3):
             raise ValueError("Must input a single motif or motif stack as a np.ndarray.")
 
-        # Trim: threshold
-        if trim is False:
-            trim_importance = None
-        elif trim is True:
-            trim_importance = 0
-        elif isinstance(trim, (int, float)) and 0 <= trim <= 1:
-            trim_importance = trim
-        else:
-            raise ValueError("trim must be a boolean or a value between [0, 1].")
-
-        if trim_importance is None:
+        # No trim
+        if trim_importance is None and trim_length is None:
             return decorated(motifs, *args, **kwargs)
 
         # Single: 2D motif
         single = motifs.ndim == 2
         if single:
             motifs = np.expand_dims(motifs, axis=0)
-        # Trim and serialize
+        # Trim, normalize, and serialize
         results = np.stack([
-            decorated(trim_motif(motifs[i], importance=trim_importance), *args, **kwargs)
+            decorated(
+                l1_norm_motif(
+                    trim_motif(
+                        motif=motifs[i],
+                        importance=trim_importance,
+                        length=trim_length,
+                    )
+                ), *args, **kwargs)
             for i in range(motifs.shape[0])
         ], axis=0)
         return results[0] if single else results
@@ -80,6 +82,11 @@ def validate_motif_basic(motifs: np.ndarray) -> None:
     if not (isinstance(motifs, np.ndarray) and (motifs.shape[-1] == 4)):
         raise TypeError("Motifs must be a np.ndarray of 4 channels.")
 
+def validate_motif_single(motifs: np.ndarray) -> None:
+    """Validate that motif is a single 2D np.ndarray with a last channel size of 4."""
+    validate_motif_basic(motifs)
+    if not len(motifs.shape) == 2:
+        raise ValueError("Motif must be a single 2D np.ndarray of shape (L, 4).")
 
 def validate_motif_stack(motifs: np.ndarray) -> None:
     """Validate that motifs are a motif stack."""
@@ -278,7 +285,11 @@ def resize_motif(motif: np.ndarray, resize_to: int) -> np.ndarray:
         return motif
 
 
-def trim_motif(motif: np.ndarray, importance: float = 1 / 30):
+def trim_motif(
+        motif: np.ndarray,
+        importance: float | None = 0,
+        length: int | None = None
+    ) -> np.ndarray | None:
     """Trim a motif by removing flanking low-importance positions.
 
     Find the leftmost and rightmost positions in the motif that have a percentage
@@ -292,18 +303,37 @@ def trim_motif(motif: np.ndarray, importance: float = 1 / 30):
         motif: A (L, K) motif.
         importance: The minimum level of importance a position must have to be included
           in the trimmed motif.
+        length: The desired length of the trimmed motif. If None, the length is determined
+          by the importance threshold. The window of this length with the highest total
+          absolute contribution is returned.
     """
-    validate_motif_basic(motif)
-    if not (isinstance(importance, (int, float)) and 0 <= importance <= 1):
+    validate_motif_single(motif)
+    if (importance is not None) and (length is not None):
+        raise ValueError("Cannot specify both importance and length.")
+    if importance is not None and not (isinstance(importance, (int, float)) and 0 <= importance <= 1):
         raise ValueError("importance must be a number in [0, 1].")
+    if length is not None and not (isinstance(length, int) and length > 0):
+        raise ValueError("length must be a positive integer.")
+    if importance is None and length is None:
+        raise ValueError("Must specify either importance or length.")
+
     motif_abs = np.abs(motif)
     per_position_totals = np.sum(motif_abs, axis=1)
-    included_positions = per_position_totals > importance * np.sum(per_position_totals)
-    if np.sum(included_positions) == 0:
-        return None
-    min_index = np.argmax(included_positions)
-    max_index = motif.shape[0] - np.argmax(included_positions[::-1])
-    return motif[min_index:max_index]
+
+    if length is not None:
+        if length > motif.shape[0]:
+            raise ValueError(f"length ({length}) exceeds motif length ({motif.shape[0]}).")
+        window_totals = np.convolve(per_position_totals, np.ones(length, dtype=float), mode='valid')
+        best_start = int(np.argmax(window_totals))
+        return motif[best_start:best_start + length]
+
+    if importance is not None:
+        included_positions = per_position_totals > importance * np.sum(per_position_totals)
+        if np.sum(included_positions) == 0:
+            return None
+        min_index = np.argmax(included_positions)
+        max_index = motif.shape[0] - np.argmax(included_positions[::-1])
+        return motif[min_index:max_index]
 
 
 @single_or_many_motifs
@@ -642,7 +672,14 @@ def l1_norm_position(motifs: np.ndarray) -> np.ndarray:
 
 
 def minusxlogx(x: np.ndarray, base: int) -> np.ndarray:
-    """Compute -x*logb(x) with support in x >= 0."""
+    """Compute -x*logb(x) with support in x >= 0.
+    Args:
+        x: A np.ndarray of values to compute -x*logb(x) for. Must be non-negative.
+        base: The base of the logarithm.
+
+    Returns:
+        A np.ndarray of the same shape as x containing the values of -x*logb(x).
+    """
     return (
         x * np.log2(x, where=(x > 0), out=np.zeros_like(x, dtype=x.dtype))
     ) / -np.log2(
@@ -651,7 +688,14 @@ def minusxlogx(x: np.ndarray, base: int) -> np.ndarray:
 
 
 def normalized_last_axis_entropy(x: np.ndarray) -> np.ndarray:
-    """Computes the entropy on the last axis assuming that x >= 0."""
+    """Computes the entropy on the last axis assuming that x >= 0.
+    Args:
+        x: A (N, L, K) motif stack.
+
+    Returns:
+        The entropy of the last axis, normalized to be in [0, 1] by dividing by log2(K).
+        (N, L, 1) array of entropies.
+    """
     x_sum = np.sum(x, axis=-1, keepdims=True)
     x_normalized = np.divide(
         x, x_sum, out=np.zeros_like(x, dtype=x.dtype), where=(x_sum != 0)
@@ -721,7 +765,7 @@ def calculate_full_motif_entropy(x: np.ndarray) -> float | np.ndarray:
     """
     validate_motif_stack_entropy(x)
     x_fullmotif = np.reshape(x, (x.shape[0], -1))
-    return normalized_last_axis_entropy(x_fullmotif)
+    return normalized_last_axis_entropy(x_fullmotif).squeeze(axis=-1)
 
 
 @calculate_metrics
@@ -774,7 +818,7 @@ def calculate_weighted_position_entropy(x: np.ndarray) -> float | np.ndarray:
     """
     validate_motif_stack_entropy(x)
     across_position_entropy = np.stack(
-        [normalized_last_axis_entropy(x[:, :, i]).squeeze() for i in range(x.shape[2])],
+        [normalized_last_axis_entropy(x[:, :, i]).squeeze(axis=-1) for i in range(x.shape[2])],
         axis=1,
     )  # (N, 4)
     base_importance = np.sum(x, axis=1)  # (N, 4)
@@ -806,10 +850,10 @@ def calculate_position_versus_base_entropy(x: np.ndarray) -> float | np.ndarray:
     validate_motif_stack_entropy(x)
     across_position_entropy = normalized_last_axis_entropy(
         np.sum(x, axis=2)
-    ).squeeze()  # (N, )
+    ).squeeze(axis=-1)  # (N, )
     across_base_entropy = normalized_last_axis_entropy(
         np.sum(x, axis=1)
-    ).squeeze()  # (N, )
+    ).squeeze(axis=-1)  # (N, )
     return across_position_entropy * (1 - across_base_entropy)
 
 
@@ -845,10 +889,10 @@ def calculate_copair_entropy(x: np.ndarray) -> float | np.ndarray:
     # across-position entropy * (1 - across-base entropy) for copair
     across_position_entropy = normalized_last_axis_entropy(
         np.sum(copair, axis=2)
-    ).squeeze()  # (N, )
+    ).squeeze(axis=-1)  # (N, )
     across_base_entropy = normalized_last_axis_entropy(
         np.sum(copair, axis=1)
-    ).squeeze()  # (N, )
+    ).squeeze(axis=-1)  # (N, )
     return across_position_entropy * (1 - across_base_entropy)
 
 
@@ -932,10 +976,10 @@ def calculate_dinucleotide_entropy(x: np.ndarray) -> float | np.ndarray:
     # across-position entropy * (1 - across-base entropy) for dinucleotide
     across_position_entropy = normalized_last_axis_entropy(
         np.sum(dinucleotide, axis=2)
-    ).squeeze()  # (N, )
+    ).squeeze(axis=-1)  # (N, )
     across_base_entropy = normalized_last_axis_entropy(
         np.sum(dinucleotide, axis=1)
-    ).squeeze()  # (N, )
+    ).squeeze(axis=-1)  # (N, )
     return across_position_entropy * (1 - across_base_entropy)
 
 

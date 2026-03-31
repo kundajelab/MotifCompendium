@@ -749,6 +749,7 @@ class MotifCompendium:
         motifs: np.ndarray,
         image_name: str,
         trim: bool | float | int = False,
+        length: int | None = None,
     ) -> None:
         """Saves logos of the provided motifs as saved images.
 
@@ -761,6 +762,8 @@ class MotifCompendium:
               number is provided, that number must be in [0, 1], and will define the
               trimming threshold. At a value of 0, only zero positions are trimmed and
               at a value of 1, all positions would be trimmed.
+            length: An int indicating the length of the motif to be trimmed to, with the
+              maximum importance. If None, no trimming is done.
         """
         # Check inputs
         utils_motif.validate_motif_stack_standard(motifs)
@@ -776,7 +779,11 @@ class MotifCompendium:
             )
         # Prepare plotting
         logo_plotting_inputs = [
-            utils_plotting.LogoPlottingInput(motif=m, trim=trim) for m in motifs
+            utils_plotting.LogoPlottingInput(
+                motif=m, 
+                trim=trim,
+                length=length,
+            ) for m in motifs
         ]
         # Plot and save
         self.__images[image_name] = [
@@ -1576,6 +1583,24 @@ class MotifCompendium:
             compute_quality_stats: Whether or not to compute quality statistics for the
               clustering. If True, the quality statistics will be saved in the metadata
               of the returned MotifCompendium.
+                - "best_match_similarity": The similarity of the cluster average motif to
+                  its most similar cluster average motif (excluding itself). 
+                - "best_match_cluster": The cluster of the most similar cluster average motif.
+                - "best_match_cluster_logo": The logo of the most similar cluster average motif.
+                - "lowest_constituent_cluster_similarity": The similarity of the cluster to 
+                  its least similar constituent motif. ("radius")
+                - "lowest_constituent_cluster_similarity_logo": The logo of the least similar
+                  constituent motif.
+                - "lowest_internal_similarity": The lowest similarity between all consituents
+                  in the cluster. ("diameter")
+                - "lowest_internal_similarity_motif1": Logo of one of the motif pair contributing 
+                  to the lowest internal similarity.
+                - "lowest_internal_similarity_motif2": Logo of the other motif pair contributing
+                  to the lowest internal similarity.
+                - "highest_external_similarity": The highest similarity between motifs in the 
+                  cluster and motifs outside of the cluster.
+                - "highest_external_similarity_logo": The logo of the motif outside of the cluster 
+                  that has the highest external similarity.
 
         Returns:
             A MotifCompendium where each entry represents a motif cluster in the current
@@ -1704,12 +1729,13 @@ class MotifCompendium:
                 0,
             )
             # Best constituent-cluster match
+            cluster_revcomp = {c: i for i, c in enumerate(clusters)}
             mc_mc_avg_similarity, _, _ = utils_similarity.compute_similarities(
                 [self.motifs, mc_avg.motifs], [(0, 1)])[0]
             mc_mc_avg_membership = (
                 self.metadata[clustering].to_numpy()[:, None] == mc_avg.metadata["source_cluster"].to_numpy()[None, :]
             )  # Membership matrix: True if motif i belongs to cluster j
-            mc_mc_avg_similarity_masked = np.where(mc_mc_avg_membership, mc_mc_avg_similarity, -np.inf)
+            mc_mc_avg_similarity_masked = np.where(mc_mc_avg_membership, mc_mc_avg_similarity, np.inf)
             mc_mc_avg_similarity_min = np.min(mc_mc_avg_similarity_masked, axis=0)
             mc_mc_avg_similarity_idx = np.argmin(mc_mc_avg_similarity_masked, axis=0)
             mc_avg["lowest_constituent_cluster_similarity"] = [
@@ -1728,7 +1754,7 @@ class MotifCompendium:
                         )
                     ) for idx, c in zip(mc_mc_avg_similarity_idx, clusters)
                 ]),
-                "lowest_constituent_cluster_similarity_motif",
+                "lowest_constituent_cluster_similarity_logo",
                 0,
             )
             # Actual quality
@@ -1759,7 +1785,6 @@ class MotifCompendium:
                     quality_df["highest_external_similarity_motif_name"],
                 )
             ]
-            cluster_revcomp = {c: i for i, c in enumerate(clusters)}
             mc_avg_standard_motifs = mc_avg.get_standard_motif_stack()
             external_cluster_rc = [
                 mc_avg.alignment_rc[i, cluster_revcomp[c]]

@@ -451,7 +451,8 @@ def calculate_filters(
         "posneg_inverted",
         "truncated",
     ],
-    trim: bool | float | int = False,
+    trim_importance: float | int | None = None,
+    trim_length: int | None = None,
 ) -> None:
     """Calculates filter metrics and stores them in the MotifCompendium metadata.
 
@@ -501,12 +502,12 @@ def calculate_filters(
           - "truncated": Checks if the motif is truncated and likely has more mass
               extending beyond the edge of the motif length.
               When True: A truncated motif that has been cut off by the window size.
-        trim: A bool or float/int indicating whether/how much the motif should be trimmed
-              when calculating metrics. If False, the motif will not be trimmed at all. 
-              If True, the motif will be trimmed at the flanks with values zero. 
-              If a number is provided, that number must be in [0, 1], and will define the
-              trimming threshold. At a value of 0, only zero positions are trimmed and
-              at a value of 1, all positions would be trimmed.
+        trim_importance: A float or int indicating the fraction of importance to trim off the motif.
+              If None, no trimming is done. If a float in (0, 1), the motif is trimmed at flanks below
+              the fraction of the maximum importance.
+        trim_length: An int indicating the length of the motif to be trimmed to. 
+              If None, no trimming is done. If an int, the motif is trimmed to the specified length,
+              with maximum importance by trimming the flanks.
 
     Notes:
         After these filters are calculated, they can be thresholded to identify and
@@ -515,52 +516,72 @@ def calculate_filters(
     """
     # Calculate filter metrics
     mc_motifs = mc.get_standard_motif_stack() # Get 4-channel
-    mc_motifs_abs_norm = utils_motif.l1_norm_motif(np.abs(mc_motifs)) # Non-negative, L1-normalize into probabilities
+    mc_motifs_abs_norm = utils_motif.l1_norm_motif(
+        np.abs(mc_motifs)
+    ) # Non-negative, L1-normalize into probabilities
     for filter_metric in metric_list:
         match filter_metric:
             case "motif_entropy":
                 mc["motif_entropy"] = utils_motif.calculate_full_motif_entropy(
-                    mc_motifs_abs_norm, trim=trim,
+                    mc_motifs_abs_norm,
+                    trim_importance=trim_importance,
+                    trim_length=trim_length,
                 )
             case "weighted_base_entropy":
                 mc["weighted_base_entropy"] = (
                     utils_motif.calculate_weighted_base_entropy(
-                        mc_motifs_abs_norm, trim=trim,
+                        mc_motifs_abs_norm,
+                        trim_importance=trim_importance,
+                        trim_length=trim_length,
                     )
                 )
             case "weighted_position_entropy":
                 mc["weighted_position_entropy"] = (
                     utils_motif.calculate_weighted_position_entropy(
-                        mc_motifs_abs_norm, trim=trim,
+                        mc_motifs_abs_norm,
+                        trim_importance=trim_importance,
+                        trim_length=trim_length,
                     )
                 )
             case "posbase_entropy_score":
                 mc["posbase_entropy_score"] = (
                     utils_motif.calculate_position_versus_base_entropy(
-                        mc_motifs_abs_norm, trim=trim,
+                        mc_motifs_abs_norm,
+                        trim_importance=trim_importance,
+                        trim_length=trim_length,
                     )
                 )
             case "copair_entropy_score":
                 mc["copair_entropy_score"] = utils_motif.calculate_copair_entropy(
-                    mc_motifs_abs_norm, trim=trim,
+                    mc_motifs_abs_norm,
+                    trim_importance=trim_importance,
+                    trim_length=trim_length,
                 )
             case "copair_composition":
                 mc["copair_composition"] = utils_motif.calculate_copair_composition(
-                    mc_motifs_abs_norm, trim=trim,
+                    mc_motifs_abs_norm,
+                    trim_importance=trim_importance,
+                    trim_length=trim_length,
                 )
             case "dinuc_entropy_score":
                 mc["dinuc_entropy_score"] = utils_motif.calculate_dinucleotide_entropy(
-                    mc_motifs_abs_norm, trim=trim,
+                    mc_motifs_abs_norm,
+                    trim_importance=trim_importance,
+                    trim_length=trim_length,
                 )
             case "dinuc_composition":
                 mc["dinuc_composition"] = (
                     utils_motif.calculate_dinucleotide_alternating_composition(
-                        mc_motifs_abs_norm, trim=trim,
+                        mc_motifs_abs_norm,
+                        trim_importance=trim_importance,
+                        trim_length=trim_length,
                     )
                 )
             case "dinuc_score":
                 mc["dinuc_score"] = utils_motif.calculate_dinucleotide_score(
-                    mc_motifs_abs_norm, trim=trim,
+                    mc_motifs_abs_norm,
+                    trim_importance=trim_importance,
+                    trim_length=trim_length,
                 )
             case "posneg_inverted":
                 mc["posneg_inverted"] = (
@@ -568,7 +589,9 @@ def calculate_filters(
                 )
             case "truncated":
                 mc["truncated"] = utils_motif.calculate_truncated(
-                    mc_motifs_abs_norm, trim=trim
+                    mc_motifs_abs_norm,
+                    trim_importance=trim_importance,
+                    trim_length=trim_length,
                 )
             case _:
                 raise ValueError(f"Filter metric {filter_metric} is not implemented.")
