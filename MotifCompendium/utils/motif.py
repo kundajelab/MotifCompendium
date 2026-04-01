@@ -45,7 +45,6 @@ def calculate_metrics(func):
     @functools.wraps(func)
     def wrapper(motifs: np.ndarray, 
             trim_importance: float | int | None = None,
-            trim_length: int | None = None,
             *args, **kwargs
         ):
         validate_motif_basic(motifs)
@@ -53,13 +52,14 @@ def calculate_metrics(func):
             raise ValueError("Must input a single motif or motif stack as a np.ndarray.")
 
         # No trim
-        if trim_importance is None and trim_length is None:
+        if trim_importance is None:
             return decorated(motifs, *args, **kwargs)
 
         # Single: 2D motif
         single = motifs.ndim == 2
         if single:
-            motifs = np.expand_dims(motifs, axis=0)
+            motifs = np.expand_dims(motifs, axis=0)  # (1, L, 4)
+
         # Trim, normalize, and serialize
         results = np.stack([
             decorated(
@@ -67,7 +67,6 @@ def calculate_metrics(func):
                     trim_motif(
                         motif=motifs[i],
                         importance=trim_importance,
-                        length=trim_length,
                     )
                 ), *args, **kwargs)
             for i in range(motifs.shape[0])
@@ -251,7 +250,10 @@ def pad_motif(motif: np.ndarray, pad_to: int) -> np.ndarray:
     return padded_motif
 
 
-def resize_motif(motif: np.ndarray, resize_to: int) -> np.ndarray:
+def resize_motif(
+    motif: np.ndarray,
+    resize_to: int,
+) -> np.ndarray:
     """Resize a motif (by squashing or padding) to a specified length.
 
     If the given motif is shorter than resize_to, pad with 0s until it is large enough.
@@ -274,21 +276,18 @@ def resize_motif(motif: np.ndarray, resize_to: int) -> np.ndarray:
     if L < resize_to:
         return pad_motif(motif, pad_to=resize_to)
     elif L > resize_to:
-        # Squash to the desired length
-        i_sums = [
-            (np.sum(np.abs(motif[i : i + resize_to, :])), i)
-            for i in range(L - resize_to + 1)
-        ]
-        top_i = max(i_sums)[1]
-        return motif[top_i : top_i + resize_to, :]
+        # Slice out the window of length resize_to with the highest total absolute contribution
+        per_position_totals = np.sum(np.abs(motif), axis=-1)
+        window_totals = np.convolve(per_position_totals, np.ones(resize_to), mode='valid')
+        top_i = int(np.argmax(window_totals))
+        return motif[top_i:top_i + resize_to]
     else:
         return motif
 
 
 def trim_motif(
         motif: np.ndarray,
-        importance: float | None = 0,
-        length: int | None = None
+        importance: float | int = 0,
     ) -> np.ndarray | None:
     """Trim a motif by removing flanking low-importance positions.
 
@@ -303,37 +302,18 @@ def trim_motif(
         motif: A (L, K) motif.
         importance: The minimum level of importance a position must have to be included
           in the trimmed motif.
-        length: The desired length of the trimmed motif. If None, the length is determined
-          by the importance threshold. The window of this length with the highest total
-          absolute contribution is returned.
     """
-    validate_motif_single(motif)
-    if (importance is not None) and (length is not None):
-        raise ValueError("Cannot specify both importance and length.")
-    if importance is not None and not (isinstance(importance, (int, float)) and 0 <= importance <= 1):
+    validate_motif_basic(motif)
+    if not (isinstance(importance, (int, float)) and 0 <= importance <= 1):
         raise ValueError("importance must be a number in [0, 1].")
-    if length is not None and not (isinstance(length, int) and length > 0):
-        raise ValueError("length must be a positive integer.")
-    if importance is None and length is None:
-        raise ValueError("Must specify either importance or length.")
-
     motif_abs = np.abs(motif)
     per_position_totals = np.sum(motif_abs, axis=1)
-
-    if length is not None:
-        if length > motif.shape[0]:
-            raise ValueError(f"length ({length}) exceeds motif length ({motif.shape[0]}).")
-        window_totals = np.convolve(per_position_totals, np.ones(length, dtype=float), mode='valid')
-        best_start = int(np.argmax(window_totals))
-        return motif[best_start:best_start + length]
-
-    if importance is not None:
-        included_positions = per_position_totals > importance * np.sum(per_position_totals)
-        if np.sum(included_positions) == 0:
-            return None
-        min_index = np.argmax(included_positions)
-        max_index = motif.shape[0] - np.argmax(included_positions[::-1])
-        return motif[min_index:max_index]
+    included_positions = per_position_totals > importance * np.sum(per_position_totals)
+    if np.sum(included_positions) == 0:
+        return None
+    min_index = np.argmax(included_positions)
+    max_index = motif.shape[0] - np.argmax(included_positions[::-1])
+    return motif[min_index:max_index]
 
 
 @single_or_many_motifs
