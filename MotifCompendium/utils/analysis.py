@@ -514,25 +514,41 @@ def calculate_filters(
           filter out low quality or low information content motifs. For guidance on the
           value of thresholds to use, see MotifCompendium Tutorial 6 - Motif Filtering.
     """
-    # Calculate filter metrics
     mc_motifs = mc.get_standard_motif_stack() # Get 4-channel
-    mc_motifs_abs_norm = utils_motif.l1_norm_motif(
-        np.abs(mc_motifs)
-    ) # Non-negative, L1-normalize into probabilities
+
+    # Trim
+    if trim_length is not None and trim_importance is not None:
+        raise ValueError("Cannot specify both trim_importance and trim_length.")
+    elif trim_length is not None and trim_importance is None:
+        mc_motifs_abs_norm = utils_motif.l1_norm_motif(
+                np.abs(
+                    np.stack([
+                        utils_motif.resize_motif(
+                            motif=mc_motifs[i],
+                            resize_to=trim_length,
+                        ) for i in range(mc_motifs.shape[0])
+                    ], axis=0)
+                )  # (N, L_trim, 4)
+            )
+    # Non-negative, L1-normalize into probabilities
+    else:
+        mc_motifs_abs_norm = utils_motif.l1_norm_motif(
+            np.abs(mc_motifs)
+        )  # (N, L, 4)
+
+    # Calculate filters
     for filter_metric in metric_list:
         match filter_metric:
             case "motif_entropy":
                 mc["motif_entropy"] = utils_motif.calculate_full_motif_entropy(
                     mc_motifs_abs_norm,
                     trim_importance=trim_importance,
-                    trim_length=trim_length,
                 )
             case "weighted_base_entropy":
                 mc["weighted_base_entropy"] = (
                     utils_motif.calculate_weighted_base_entropy(
                         mc_motifs_abs_norm,
                         trim_importance=trim_importance,
-                        trim_length=trim_length,
                     )
                 )
             case "weighted_position_entropy":
@@ -540,7 +556,6 @@ def calculate_filters(
                     utils_motif.calculate_weighted_position_entropy(
                         mc_motifs_abs_norm,
                         trim_importance=trim_importance,
-                        trim_length=trim_length,
                     )
                 )
             case "posbase_entropy_score":
@@ -548,40 +563,34 @@ def calculate_filters(
                     utils_motif.calculate_position_versus_base_entropy(
                         mc_motifs_abs_norm,
                         trim_importance=trim_importance,
-                        trim_length=trim_length,
                     )
                 )
             case "copair_entropy_score":
                 mc["copair_entropy_score"] = utils_motif.calculate_copair_entropy(
                     mc_motifs_abs_norm,
                     trim_importance=trim_importance,
-                    trim_length=trim_length,
                 )
             case "copair_composition":
                 mc["copair_composition"] = utils_motif.calculate_copair_composition(
                     mc_motifs_abs_norm,
                     trim_importance=trim_importance,
-                    trim_length=trim_length,
                 )
             case "dinuc_entropy_score":
                 mc["dinuc_entropy_score"] = utils_motif.calculate_dinucleotide_entropy(
                     mc_motifs_abs_norm,
                     trim_importance=trim_importance,
-                    trim_length=trim_length,
                 )
             case "dinuc_composition":
                 mc["dinuc_composition"] = (
                     utils_motif.calculate_dinucleotide_alternating_composition(
                         mc_motifs_abs_norm,
                         trim_importance=trim_importance,
-                        trim_length=trim_length,
                     )
                 )
             case "dinuc_score":
                 mc["dinuc_score"] = utils_motif.calculate_dinucleotide_score(
                     mc_motifs_abs_norm,
                     trim_importance=trim_importance,
-                    trim_length=trim_length,
                 )
             case "posneg_inverted":
                 mc["posneg_inverted"] = (
@@ -591,7 +600,6 @@ def calculate_filters(
                 mc["truncated"] = utils_motif.calculate_truncated(
                     mc_motifs_abs_norm,
                     trim_importance=trim_importance,
-                    trim_length=trim_length,
                 )
             case _:
                 raise ValueError(f"Filter metric {filter_metric} is not implemented.")

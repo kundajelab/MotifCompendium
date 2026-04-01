@@ -132,9 +132,9 @@ class LogoPlottingInput:
                 importance=self.trim
             )
         elif isinstance(self.length, int) and self.trim is False:
-            motif_to_plot = utils_motif.trim_motif(
+            motif_to_plot = utils_motif.resize_motif(
                 motif=self.motif,
-                length=self.length,
+                resize_to=self.length,
             )
         else:
             motif_to_plot = self.motif
