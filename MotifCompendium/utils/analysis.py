@@ -5,8 +5,7 @@ import pandas as pd
 import seaborn as sns
 import upsetplot
 
-from MotifCompendium import MotifCompendium as MotifCompendiumClass
-import MotifCompendium.utils.config as utils_config
+import MotifCompendium.MotifCompendium as MotifCompendiumClass
 import MotifCompendium.utils.loader as utils_loader
 import MotifCompendium.utils.motif as utils_motif
 
@@ -452,6 +451,8 @@ def calculate_filters(
         "posneg_inverted",
         "truncated",
     ],
+    trim_importance: float | int | None = None,
+    trim_length: int | None = None,
 ) -> None:
     """Calculates filter metrics and stores them in the MotifCompendium metadata.
 
@@ -501,64 +502,105 @@ def calculate_filters(
           - "truncated": Checks if the motif is truncated and likely has more mass
               extending beyond the edge of the motif length.
               When True: A truncated motif that has been cut off by the window size.
+        trim_importance: A float or int indicating the fraction of importance to trim off the motif.
+              If None, no trimming is done. If a float in (0, 1), the motif is trimmed at flanks below
+              the fraction of the maximum importance.
+        trim_length: An int indicating the length of the motif to be trimmed to. 
+              If None, no trimming is done. If an int, the motif is trimmed to the specified length,
+              with maximum importance by trimming the flanks.
 
     Notes:
         After these filters are calculated, they can be thresholded to identify and
           filter out low quality or low information content motifs. For guidance on the
           value of thresholds to use, see MotifCompendium Tutorial 6 - Motif Filtering.
     """
-    # Calculate filter metrics
     mc_motifs = mc.get_standard_motif_stack() # Get 4-channel
-    # if utils_config.get_ic_scale():
-    #     mc_motifs = utils_motif.ic_scale(mc_motifs) # IC-scale
-    mc_motifs_abs_norm = utils_motif.l1_norm_motif(np.abs(mc_motifs)) # Non-negative, L1-normalize into probabilities
+
+    # Trim
+    if trim_length is not None and trim_importance is not None:
+        raise ValueError("Cannot specify both trim_importance and trim_length.")
+    elif trim_length is not None and trim_importance is None:
+        mc_motifs_abs_norm = utils_motif.l1_norm_motif(
+                np.abs(
+                    np.stack([
+                        utils_motif.resize_motif(
+                            motif=mc_motifs[i],
+                            resize_to=trim_length,
+                        ) for i in range(mc_motifs.shape[0])
+                    ], axis=0)
+                )  # (N, L_trim, 4)
+            )
+    # Non-negative, L1-normalize into probabilities
+    else:
+        mc_motifs_abs_norm = utils_motif.l1_norm_motif(
+            np.abs(mc_motifs)
+        )  # (N, L, 4)
+
+    # Calculate filters
     for filter_metric in metric_list:
         match filter_metric:
             case "motif_entropy":
                 mc["motif_entropy"] = utils_motif.calculate_full_motif_entropy(
-                    mc_motifs_abs_norm
+                    mc_motifs_abs_norm,
+                    trim_importance=trim_importance,
                 )
             case "weighted_base_entropy":
                 mc["weighted_base_entropy"] = (
-                    utils_motif.calculate_weighted_base_entropy(mc_motifs_abs_norm)
+                    utils_motif.calculate_weighted_base_entropy(
+                        mc_motifs_abs_norm,
+                        trim_importance=trim_importance,
+                    )
                 )
             case "weighted_position_entropy":
                 mc["weighted_position_entropy"] = (
-                    utils_motif.calculate_weighted_position_entropy(mc_motifs_abs_norm)
+                    utils_motif.calculate_weighted_position_entropy(
+                        mc_motifs_abs_norm,
+                        trim_importance=trim_importance,
+                    )
                 )
             case "posbase_entropy_score":
                 mc["posbase_entropy_score"] = (
-                    utils_motif.calculate_position_versus_base_entropy(mc_motifs_abs_norm)
+                    utils_motif.calculate_position_versus_base_entropy(
+                        mc_motifs_abs_norm,
+                        trim_importance=trim_importance,
+                    )
                 )
             case "copair_entropy_score":
                 mc["copair_entropy_score"] = utils_motif.calculate_copair_entropy(
-                    mc_motifs_abs_norm
+                    mc_motifs_abs_norm,
+                    trim_importance=trim_importance,
                 )
             case "copair_composition":
                 mc["copair_composition"] = utils_motif.calculate_copair_composition(
-                    mc_motifs_abs_norm
+                    mc_motifs_abs_norm,
+                    trim_importance=trim_importance,
                 )
             case "dinuc_entropy_score":
                 mc["dinuc_entropy_score"] = utils_motif.calculate_dinucleotide_entropy(
-                    mc_motifs_abs_norm
+                    mc_motifs_abs_norm,
+                    trim_importance=trim_importance,
                 )
             case "dinuc_composition":
                 mc["dinuc_composition"] = (
                     utils_motif.calculate_dinucleotide_alternating_composition(
-                        mc_motifs_abs_norm
+                        mc_motifs_abs_norm,
+                        trim_importance=trim_importance,
                     )
                 )
             case "dinuc_score":
                 mc["dinuc_score"] = utils_motif.calculate_dinucleotide_score(
-                    mc_motifs_abs_norm
+                    mc_motifs_abs_norm,
+                    trim_importance=trim_importance,
                 )
             case "posneg_inverted":
                 mc["posneg_inverted"] = (
                     utils_motif.motif_posneg_max(mc_motifs) != mc["posneg"]
                 )
             case "truncated":
-                max_pos = mc_motifs_abs_norm.sum(axis=-1).argmax(axis=-1)  # (N,)
-                mc["truncated"] = (max_pos < 2) | (max_pos > mc_motifs.shape[1] - 3)
+                mc["truncated"] = utils_motif.calculate_truncated(
+                    mc_motifs_abs_norm,
+                    trim_importance=trim_importance,
+                )
             case _:
                 raise ValueError(f"Filter metric {filter_metric} is not implemented.")
 

@@ -749,6 +749,7 @@ class MotifCompendium:
         motifs: np.ndarray,
         image_name: str,
         trim: bool | float | int = False,
+        length: int | None = None,
     ) -> None:
         """Saves logos of the provided motifs as saved images.
 
@@ -761,6 +762,8 @@ class MotifCompendium:
               number is provided, that number must be in [0, 1], and will define the
               trimming threshold. At a value of 0, only zero positions are trimmed and
               at a value of 1, all positions would be trimmed.
+            length: An int indicating the length of the motif to be trimmed to, with the
+              maximum importance. If None, no trimming is done.
         """
         # Check inputs
         utils_motif.validate_motif_stack_standard(motifs)
@@ -776,7 +779,11 @@ class MotifCompendium:
             )
         # Prepare plotting
         logo_plotting_inputs = [
-            utils_plotting.LogoPlottingInput(motif=m, trim=trim) for m in motifs
+            utils_plotting.LogoPlottingInput(
+                motif=m, 
+                trim=trim,
+                length=length,
+            ) for m in motifs
         ]
         # Plot and save
         self.__images[image_name] = [
@@ -1063,12 +1070,14 @@ class MotifCompendium:
     def cluster(
         self,
         algorithm: str = "cpm_leiden",
-        similarity_threshold: float = 0.9,
+        similarity_threshold: float | int = 0.9,
         save_name: str = "cluster",
         cluster_within: str | None = None,
         cluster_on: str | None = None,
         cluster_within_on: tuple[str, str] | None = None,
         cluster_on_weight: str | None = None,
+        init_clustering_col: str | None = None,
+        weight_col: str | None = None,
         largest_clusters_first: bool = True,
         **kwargs,
     ) -> None:
@@ -1104,6 +1113,17 @@ class MotifCompendium:
               use when averaging motifs while doing a cluster_on. If None, all motifs
               are equally weighted. cluster_on_weight can only be set when cluster_on or
               cluster_within_on is set.
+            init_clustering_col: The name of the column in metadata containing initial cluster
+              annotations to use as the initial clusters for algorithms that support
+              initialization. If None, no initialization is used. (Cannot be used with 
+              cluster_on or cluster_within_on as the initializations are averaged immediately;
+              Only used if algorithm supports weighting. See 
+              MotifCompendium.utils.clustering.cluster() for details.)
+            weight_col: The name of the column in metadata containing weights to
+              use when averaging motifs while doing a cluster_on. If None, all motifs
+              are equally weighted. weight_col can only be set when cluster_on or
+              cluster_within_on is set. (Only used if algorithm supports weighting. 
+              See MotifCompendium.utils.clustering.cluster() for details.)
             largest_clusters_first: Whether or not the first clusters (0, 1, 2, ...)
               should be the largest clusters. If True, cluster 0 will be the largest
               cluster. If False, the cluster order will not relate to cluster size.
@@ -1118,9 +1138,22 @@ class MotifCompendium:
         """
         # Check arguments
         if not (
-            isinstance(similarity_threshold, float) and (0 <= similarity_threshold <= 1)
+            isinstance(similarity_threshold, (float, int)) and (0 <= similarity_threshold <= 1)
         ):
-            raise ValueError("similarity_threshold must be a float between [0, 1].")
+            raise ValueError("similarity_threshold must be a float or int between [0, 1].")
+        if weight_col and cluster_on_weight:
+            cluster_on_weight = weight_col
+            warnings.warn(
+                "Both weight_col and cluster_on_weight are set. weight_col will be used and cluster_on_weight will be ignored. " \
+                "Note that cluster_on_weight will be deprecated in favor of weight_col in the future.",
+                FutureWarning,
+            )
+        elif cluster_on_weight:
+            weight_col = cluster_on_weight
+            warnings.warn(
+                "cluster_on_weight is set. Note that cluster_on_weight will be deprecated in favor of weight_col in the future.",
+                FutureWarning,
+            )
         # Cluster within
         if (
             (cluster_within is not None)
@@ -1130,10 +1163,22 @@ class MotifCompendium:
             # Check inputs
             if not cluster_within in self.metadata.columns:
                 raise KeyError(f"cluster_within {cluster_within} not in metadata.")
-            if cluster_on_weight is not None:
-                raise ValueError(
-                    "cluster_on_weight can only be set when cluster_on or cluster_within_on is set."
+            if (weight_col is not None) and (
+                weight_col not in self.metadata.columns
+            ):
+                raise KeyError(
+                    f"weight_col {weight_col} not in metadata."
                 )
+            if (init_clustering_col is not None) and (
+                init_clustering_col not in self.metadata.columns
+            ):
+                raise KeyError(
+                    f"init_clustering_col {init_clustering_col} not in metadata."
+                )
+            # if cluster_on_weight is not None:
+            #     raise ValueError(
+            #         "cluster_on_weight can only be set when cluster_on or cluster_within_on is set."
+            #     )
             # Prepare clustering
             clusters = pd.Series(-1, index=self.metadata.index)  # -1 for int
             num_clusters_so_far = 0
@@ -1141,11 +1186,16 @@ class MotifCompendium:
             for c in set(self.metadata[cluster_within]):
                 c_condition = self.metadata[cluster_within] == c
                 c_idxs = list(c_condition[c_condition].index)
-                c_similarity = self.similarity[c_idxs, :][:, c_idxs]
+                # c_similarity = self.similarity[c_idxs, :][:, c_idxs]
                 c_clusters = utils_clustering.cluster(
-                    similarity_matrix=c_similarity,
-                    algorithm=algorithm,
+                    motifs=self[c_condition].motifs,
+                    similarity_matrix=self[c_condition].similarity,
+                    alignment_rc_matrix=self[c_condition].alignment_rc,
+                    alignment_h_matrix=self[c_condition].alignment_h,
+                    init_membership=self[c_condition].metadata[init_clustering_col].to_numpy() if init_clustering_col else None,
+                    weights=self[c_condition].metadata[weight_col].to_numpy() if weight_col else None,
                     similarity_threshold=similarity_threshold,
+                    algorithm=algorithm,
                     **kwargs,
                 )
                 c_clusters = [c + num_clusters_so_far for c in c_clusters]
@@ -1161,21 +1211,33 @@ class MotifCompendium:
             # Check inputs
             if not cluster_on in self.metadata.columns:
                 raise KeyError(f"cluster_on {cluster_on} not in metadata.")
-            if (cluster_on_weight is not None) and (
-                cluster_on_weight not in self.metadata.columns
+            if (weight_col is not None) and (
+                weight_col not in self.metadata.columns
             ):
                 raise KeyError(
-                    f"cluster_on_weight {cluster_on_weight} not in metadata."
+                    f"weight_col {weight_col} not in metadata."
+                )
+            if init_clustering_col:
+                raise ValueError(
+                    "init_clustering_col cannot be used when cluster_on is set as the initializations are averaged immediately."
                 )
             # Average
             mc_average = self.cluster_averages(
-                clustering=cluster_on, weight_col=cluster_on_weight
+                clustering=cluster_on,
+                weight_col=weight_col,
+                aggregations=[
+                        (weight_col, "sum", weight_col) 
+                    ] if weight_col else [],
             )
             # Cluster
             mc_average.metadata["cluster"] = utils_clustering.cluster(
+                motifs=mc_average.motifs,
                 similarity_matrix=mc_average.similarity,
-                algorithm=algorithm,
+                alignment_rc_matrix=mc_average.alignment_rc,
+                alignment_h_matrix=mc_average.alignment_h,
+                weights=mc_average.metadata[weight_col].to_numpy() if weight_col else None,
                 similarity_threshold=similarity_threshold,
+                algorithm=algorithm,
                 **kwargs,
             )
             # Map back to self
@@ -1208,11 +1270,15 @@ class MotifCompendium:
                 raise KeyError(
                     f"cluster_within_on-->cluster_on {cluster_within_on[1]} not in metadata."
                 )
-            if (cluster_on_weight is not None) and (
-                cluster_on_weight not in self.metadata.columns
+            if (weight_col is not None) and (
+                weight_col not in self.metadata.columns
             ):
                 raise KeyError(
-                    f"cluster_on_weight {cluster_on_weight} not in metadata."
+                    f"weight_col {weight_col} not in metadata."
+                )
+            if init_clustering_col:
+                raise ValueError(
+                    "init_clustering_col cannot be used when cluster_on is set as the initializations are averaged immediately."
                 )
             # Prepare clustering
             clusters = pd.Series(-1, index=self.metadata.index)  # -1 for int
@@ -1226,13 +1292,21 @@ class MotifCompendium:
                 c_mc = self[c_condition]
                 # Average for cluster_on
                 c_mc_average = c_mc.cluster_averages(
-                    clustering=cluster_on, weight_col=cluster_on_weight
+                    clustering=cluster_on,
+                    weight_col=weight_col,
+                    aggregations=[
+                        (weight_col, "sum", weight_col) 
+                    ] if weight_col else [],
                 )
                 # Cluster
                 c_mc_average.metadata["cluster"] = utils_clustering.cluster(
+                    motifs=c_mc_average.motifs,
                     similarity_matrix=c_mc_average.similarity,
-                    algorithm=algorithm,
+                    alignment_rc_matrix=c_mc_average.alignment_rc,
+                    alignment_h_matrix=c_mc_average.alignment_h,
+                    weights=c_mc_average.metadata[weight_col].to_numpy() if weight_col else None,
                     similarity_threshold=similarity_threshold,
+                    algorithm=algorithm,
                     **kwargs,
                 )
                 # Map back to c_mc
@@ -1252,10 +1326,29 @@ class MotifCompendium:
             and (cluster_on is None)
             and (cluster_within_on is None)
         ):
+            # Check inputs
+            if (weight_col is not None) and (
+                weight_col not in self.metadata.columns
+            ):
+                raise KeyError(
+                    f"weight_col {weight_col} not in metadata."
+                )
+            if (init_clustering_col is not None) and (
+                init_clustering_col not in self.metadata.columns
+            ):
+                raise KeyError(
+                    f"init_clustering_col {init_clustering_col} not in metadata."
+                )
+            # Cluster
             self.metadata[save_name] = utils_clustering.cluster(
+                motifs=self.motifs,
                 similarity_matrix=self.similarity,
-                algorithm=algorithm,
+                alignment_rc_matrix=self.alignment_rc,
+                alignment_h_matrix=self.alignment_h,
+                init_membership=self.metadata[init_clustering_col].to_numpy() if init_clustering_col else None,
+                weights=self.metadata[weight_col].to_numpy() if weight_col else None,
                 similarity_threshold=similarity_threshold,
+                algorithm=algorithm,
                 **kwargs,
             )
         # Otherwise, throw error
@@ -1295,18 +1388,18 @@ class MotifCompendium:
                 - "lowest_internal_similarity": The lowest internal similarity.
                 - "lowest_internal_similarity_motif1_name": The name of the first motif
                   contributing to the lowest internal similarity.
-                - "lowest_internal_similarity_motif1_motif": The motif of the first
+                - "lowest_internal_similarity_motif1_logo": The motif of the first
                   motif contributing to the lowest internal similarity.
                 - "lowest_internal_similarity_motif2_name": The name of the second motif
                   contributing to the lowest internal similarity.
-                - "lowest_internal_similarity_motif2_motif": The motif of the second
+                - "lowest_internal_similarity_motif2_logo": The logo of the second
                   motif contributing to the lowest internal similarity.
                 - "highest_external_similarity": The highest external similarity.
                 - "highest_external_similarity_cluster": The cluster within which the
                   highest external similarity motif is found in.
                 - "highest_external_similarity_motif_name": The name of the motif in the
                   external cluster that is driving high external similarity.
-                - "highest_external_similarity_motif_motif": The motif of the motif in
+                - "highest_external_similarity_motif_logo": The logo of the motif in
                   the external cluster that is driving high external similarity.
 
         Returns:
@@ -1333,13 +1426,16 @@ class MotifCompendium:
                 columns=[
                     "lowest_internal_similarity",
                     "lowest_internal_similarity_motif1_name",
-                    "lowest_internal_similarity_motif1_motif",
+                    "lowest_internal_similarity_motif1_logo",
                     "lowest_internal_similarity_motif2_name",
-                    "lowest_internal_similarity_motif2_motif",
+                    "lowest_internal_similarity_motif2_logo",
+                    "lowest_constituent_cluster_similarity",
+                    "lowest_constituent_cluster_similarity_motif_name",
+                    "lowest_constituent_cluster_similarity_logo",
                     "highest_external_similarity",
                     "highest_external_similarity_cluster",
                     "highest_external_similarity_motif_name",
-                    "highest_external_similarity_motif_motif",
+                    "highest_external_similarity_motif_logo",
                 ],
             )
             motif_names = list(self.metadata["name"])
@@ -1377,7 +1473,7 @@ class MotifCompendium:
                         stats.loc[c1, "lowest_internal_similarity_motif1_name"] = (
                             motif_names[culprit_1_idx]
                         )
-                        stats.loc[c1, "lowest_internal_similarity_motif1_motif"] = (
+                        stats.loc[c1, "lowest_internal_similarity_motif1_logo"] = (
                             motifs_standard[culprit_1_idx]
                             if not culprit_1_rc
                             else utils_motif.reverse_complement(
@@ -1387,7 +1483,7 @@ class MotifCompendium:
                         stats.loc[c1, "lowest_internal_similarity_motif2_name"] = (
                             motif_names[culprit_2_idx]
                         )
-                        stats.loc[c1, "lowest_internal_similarity_motif2_motif"] = (
+                        stats.loc[c1, "lowest_internal_similarity_motif2_logo"] = (
                             motifs_standard[culprit_2_idx]
                             if not culprit_2_rc
                             else utils_motif.reverse_complement(
@@ -1430,7 +1526,7 @@ class MotifCompendium:
             stats["highest_external_similarity_motif_name"] = [
                 motif_names[x] for x in highest_external_similarity_motif_idxs
             ]
-            stats["highest_external_similarity_motif_motif"] = [
+            stats["highest_external_similarity_motif_logo"] = [
                 (
                     motifs_standard[y]
                     if ci_idxs[x] and not self.alignment_rc[ci_idxs[x][0], y]
@@ -1487,6 +1583,24 @@ class MotifCompendium:
             compute_quality_stats: Whether or not to compute quality statistics for the
               clustering. If True, the quality statistics will be saved in the metadata
               of the returned MotifCompendium.
+                - "best_match_similarity": The similarity of the cluster average motif to
+                  its most similar cluster average motif (excluding itself). 
+                - "best_match_cluster": The cluster of the most similar cluster average motif.
+                - "best_match_cluster_logo": The logo of the most similar cluster average motif.
+                - "lowest_constituent_cluster_similarity": The similarity of the cluster to 
+                  its least similar constituent motif. ("radius")
+                - "lowest_constituent_cluster_similarity_logo": The logo of the least similar
+                  constituent motif.
+                - "lowest_internal_similarity": The lowest similarity between all consituents
+                  in the cluster. ("diameter")
+                - "lowest_internal_similarity_motif1": Logo of one of the motif pair contributing 
+                  to the lowest internal similarity.
+                - "lowest_internal_similarity_motif2": Logo of the other motif pair contributing
+                  to the lowest internal similarity.
+                - "highest_external_similarity": The highest similarity between motifs in the 
+                  cluster and motifs outside of the cluster.
+                - "highest_external_similarity_logo": The logo of the motif outside of the cluster 
+                  that has the highest external similarity.
 
         Returns:
             A MotifCompendium where each entry represents a motif cluster in the current
@@ -1614,6 +1728,35 @@ class MotifCompendium:
                 "best_match_cluster",
                 0,
             )
+            # Best constituent-cluster match
+            cluster_revcomp = {c: i for i, c in enumerate(clusters)}
+            mc_mc_avg_similarity, _, _ = utils_similarity.compute_similarities(
+                [self.motifs, mc_avg.motifs], [(0, 1)])[0]
+            mc_mc_avg_membership = (
+                self.metadata[clustering].to_numpy()[:, None] == mc_avg.metadata["source_cluster"].to_numpy()[None, :]
+            )  # Membership matrix: True if motif i belongs to cluster j
+            mc_mc_avg_similarity_masked = np.where(mc_mc_avg_membership, mc_mc_avg_similarity, np.inf)
+            mc_mc_avg_similarity_min = np.min(mc_mc_avg_similarity_masked, axis=0)
+            mc_mc_avg_similarity_idx = np.argmin(mc_mc_avg_similarity_masked, axis=0)
+            mc_avg["lowest_constituent_cluster_similarity"] = [
+                f"{x:.3} ({y})"
+                for x, y in zip(
+                    mc_mc_avg_similarity_min,
+                    self.metadata["name"][mc_mc_avg_similarity_idx],
+                )
+            ]
+            mc_avg.add_logos(
+                np.stack([(
+                        self.get_standard_motif_stack()[idx]
+                        if not self.alignment_rc[idx, cluster_revcomp[c]]
+                        else utils_motif.reverse_complement(
+                            self.get_standard_motif_stack()[idx]
+                        )
+                    ) for idx, c in zip(mc_mc_avg_similarity_idx, clusters)
+                ]),
+                "lowest_constituent_cluster_similarity_logo",
+                0,
+            )
             # Actual quality
             quality_df = self.clustering_quality(clustering, with_stats=True)
             mc_avg["lowest_internal_similarity"] = [
@@ -1625,12 +1768,12 @@ class MotifCompendium:
                 )
             ]
             mc_avg.add_logos(
-                np.stack(quality_df["lowest_internal_similarity_motif1_motif"]),
+                np.stack(quality_df["lowest_internal_similarity_motif1_logo"]),
                 "lowest_internal_similarity_motif1",
                 0,
             )
             mc_avg.add_logos(
-                np.stack(quality_df["lowest_internal_similarity_motif2_motif"]),
+                np.stack(quality_df["lowest_internal_similarity_motif2_logo"]),
                 "lowest_internal_similarity_motif2",
                 0,
             )
@@ -1642,7 +1785,6 @@ class MotifCompendium:
                     quality_df["highest_external_similarity_motif_name"],
                 )
             ]
-            cluster_revcomp = {c: i for i, c in enumerate(clusters)}
             mc_avg_standard_motifs = mc_avg.get_standard_motif_stack()
             external_cluster_rc = [
                 mc_avg.alignment_rc[i, cluster_revcomp[c]]
@@ -1672,12 +1814,12 @@ class MotifCompendium:
                     [
                         x if not y else utils_motif.reverse_complement(x)
                         for x, y in zip(
-                            quality_df["highest_external_similarity_motif_motif"],
+                            quality_df["highest_external_similarity_motif_logo"],
                             external_cluster_rc,
                         )
                     ]
                 ),
-                "highest_external_similarity_motif",
+                "highest_external_similarity_logo",
                 0,
             )
         return mc_avg

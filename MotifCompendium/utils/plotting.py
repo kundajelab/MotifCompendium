@@ -59,6 +59,7 @@ class LogoPlottingInput:
         revcomp: bool = False,
         pos: int = 0,
         trim: bool | float | int = False,
+        length: int | None = None,
         name: str = "motif",
         bgcolor: str = "white",
         encode: bool = True,
@@ -99,6 +100,11 @@ class LogoPlottingInput:
         ):
             raise ValueError("trim must be bool or a float between 0 and 1.")
         self.trim = trim
+        if trim is not False and length is not None:
+            raise ValueError("Cannot specify both trim and length.")
+        if not (isinstance(length, int) or length is None):
+            raise ValueError("length must be an int or None.")
+        self.length = length
         self.name = name
         # Plot options
         self.bgcolor = bgcolor
@@ -115,12 +121,24 @@ class LogoPlottingInput:
     def get_motif_df(self) -> pd.DataFrame:
         """Returns a pd.DataFrame of the motif that can be passed to logomaker."""
         # Trim motif if needed
-        if isinstance(self.trim, bool) and not self.trim:
-            motif_to_plot = self.motif
-        elif isinstance(self.trim, bool) and self.trim:
-            motif_to_plot = utils_motif.trim_motif(self.motif, 1 / self.motif.shape[0])
+        if isinstance(self.trim, bool) and self.trim and self.length is None:
+            motif_to_plot = utils_motif.trim_motif(
+                motif=self.motif,
+                importance=1 / self.motif.shape[0]
+            )
+        elif isinstance(self.trim, (int, float)) and self.length is None:
+            motif_to_plot = utils_motif.trim_motif(
+                motif=self.motif,
+                importance=self.trim
+            )
+        elif isinstance(self.length, int) and self.trim is False:
+            motif_to_plot = utils_motif.resize_motif(
+                motif=self.motif,
+                resize_to=self.length,
+            )
         else:
-            motif_to_plot = utils_motif.trim_motif(self.motif, self.trim)
+            motif_to_plot = self.motif
+
         # If trimming deletes motif, return None
         if motif_to_plot is None:
             return None
