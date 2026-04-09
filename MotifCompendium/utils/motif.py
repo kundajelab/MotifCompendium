@@ -670,11 +670,11 @@ def minusxlogx(x: np.ndarray, base: int) -> np.ndarray:
 def normalized_last_axis_entropy(x: np.ndarray) -> np.ndarray:
     """Computes the entropy on the last axis assuming that x >= 0.
     Args:
-        x: A (N, L, K) motif stack.
+        x: A (N, L, K) motif stack, or (N, L*K) flattened motif stack.
 
     Returns:
         The entropy of the last axis, normalized to be in [0, 1] by dividing by log2(K).
-        (N, L, 1) array of entropies.
+        (N, L, 1) or (N, 1) array of entropies.
     """
     x_sum = np.sum(x, axis=-1, keepdims=True)
     x_normalized = np.divide(

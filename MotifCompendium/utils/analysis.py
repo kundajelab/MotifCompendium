@@ -453,6 +453,7 @@ def calculate_filters(
     ],
     trim_importance: float | int | None = None,
     trim_length: int | None = None,
+    ic_scale: bool = False,
 ) -> None:
     """Calculates filter metrics and stores them in the MotifCompendium metadata.
 
@@ -514,12 +515,17 @@ def calculate_filters(
           filter out low quality or low information content motifs. For guidance on the
           value of thresholds to use, see MotifCompendium Tutorial 6 - Motif Filtering.
     """
+    ## Preprocess motifs
     mc_motifs = mc.get_standard_motif_stack() # Get 4-channel
-
+    # IC scale
+    if ic_scale:
+        mc_motifs = utils_motif.ic_scale(mc_motifs)
     # Trim
     if trim_length is not None and trim_importance is not None:
         raise ValueError("Cannot specify both trim_importance and trim_length.")
     elif trim_length is not None and trim_importance is None:
+        if trim_length > mc_motifs.shape[1]:
+            raise ValueError("Trim length cannot be greater than the length of the motif.")
         mc_motifs_abs_norm = utils_motif.l1_norm_motif(
                 np.abs(
                     np.stack([
