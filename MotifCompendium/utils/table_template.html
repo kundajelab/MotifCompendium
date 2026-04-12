@@ -1,242 +1,731 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>DataFrame Table</title>
-    <style>
-        .table-container {
-            height: 100vh;
-            overflow-y: auto;
-            border-left: 1px solid black;
-            border-right: 1px solid black;
-        }
-        table {
-            width: 100%;
-            border-collapse: separate;
-            border-spacing: 0;
-            position: relative;
-        }
-        th, td {
-            border: 1px solid black;
-            padding: 8px;
-            text-align: left;
-        }
-        th {
-            font-weight: bold;
-            position: sticky;
-            top: 0;
-            background-color: #e1e3e6;
-            z-index: 1;
-            border-top: 2px solid black;
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Motif Table</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#f0f2f5;--surface:#fff;--surface2:#f5f7fa;--border:#e0e4e9;--border2:#c8ced6;
+  --accent:#4361ee;--accent-h:#3451d1;--accent-ring:rgba(67,97,238,.15);
+  --text:#1a1d23;--muted:#6b7280;--row-alt:#fafbfc;--row-hover:#eef2ff;
+  --edited:#fff8e1;--edited-b:#f59e0b;--focus-ring:rgba(67,97,238,.25);
+  --r:6px;--r-sm:4px
+}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+  font-size:13px;color:var(--text);background:var(--bg);height:100vh;
+  display:flex;flex-direction:column;overflow:hidden}
 
-        }
-        button {
-            background: none;
-            background-color: #B9FEFF;
-            border: 2px solid black;
-            border-radius: 3px;
-            cursor: pointer;
-            font-weight: bold;
-            padding: 0 5px;
-            margin-left: 5px;
-        }
-        .filterInput {
-            width: 100%;
-            box-sizing: border-box;
-            min-width: 40px;
-        }
-        tr:nth-child(2) td {
-            position: sticky;
-            background-color: #e1e3e6;
-            z-index: 1;
-            border-bottom: 2px solid black;
+/* ── loading overlay ── */
+#loading-mask{position:fixed;inset:0;z-index:1000;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:14px;
+  background:rgba(240,242,245,.96);color:var(--text);
+  transition:opacity .25s ease,visibility .25s ease}
+#loading-mask.done{opacity:0;visibility:hidden;pointer-events:none}
+#loading-inner{display:flex;align-items:center;gap:10px;font-size:13px}
+#loading-spinner{width:18px;height:18px;border:2px solid #d2d8e0;
+  border-top-color:var(--accent);border-radius:50%;animation:spin .75s linear infinite;flex-shrink:0}
+#loading-bar-wrap{width:220px;height:3px;background:#e0e4e9;border-radius:2px;overflow:hidden}
+#loading-bar{height:100%;width:0%;background:var(--accent);border-radius:2px;
+  transition:width .3s ease}
+@keyframes spin{to{transform:rotate(360deg)}}
 
-        }
-        .cell-edited {
-            background-color: #d3a279;
-        }
-    </style>
-    
-    <script>
-        window.onload = function() {
-            // Get the height of the first row (header row)
-            const headerHeight = document.querySelector('#DataTable tr:first-child').offsetHeight;
-            
-            // Set the top position of the filter row cells
-            const filterCells = document.querySelectorAll('#DataTable tr:nth-child(2) td');
-            for(let cell of filterCells) {
-                cell.style.top = headerHeight + 'px';
-            }
-        };
+/* ── toolbar ── */
+#toolbar{display:flex;align-items:center;gap:8px;padding:9px 14px;
+  background:var(--surface);border-bottom:1px solid var(--border);
+  flex-wrap:wrap;flex-shrink:0;z-index:20}
+#tl{display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:1;min-width:0}
+#tr{display:flex;align-items:center;gap:6px;margin-left:auto}
+#row-count{font-size:12px;color:var(--muted);white-space:nowrap}
 
-        // Also update on window resize to handle dynamic changes
-        window.onresize = function() {
-            const headerHeight = document.querySelector('#DataTable tr:first-child').offsetHeight;
-            const filterCells = document.querySelectorAll('#DataTable tr:nth-child(2) td');
-            for(let cell of filterCells) {
-                cell.style.top = headerHeight + 'px';
-            }
-        };
+/* bg-filter indicator in toolbar */
+#bg-pill{display:none;align-items:center;gap:5px;
+  padding:3px 8px;border-radius:20px;
+  background:var(--surface2);border:1px solid var(--border);
+  font-size:11px;color:var(--muted);white-space:nowrap}
+#bg-pill.on{display:flex}
+#bg-pill-spin{width:10px;height:10px;border:1.5px solid #d2d8e0;
+  border-top-color:var(--accent);border-radius:50%;
+  animation:spin .75s linear infinite;flex-shrink:0}
 
-        function sortTable(columnIndex, ascending) {
-            // Load rows
-            let table = document.getElementById("DataTable");
-            let trs = table.getElementsByTagName("tr");
-            const headerRow = trs[0];
-            const filterRow = trs[1];
-            let rows = Array.from(trs).slice(2);
-            // Sort with custom row-sorting function
-            rows.sort((a, b) => {
-                let aVal = a.cells[columnIndex].innerText.trim();
-                let bVal = b.cells[columnIndex].innerText.trim();
-                if (!isNaN(aVal) && !isNaN(bVal)) {
-                    aVal = parseFloat(aVal);
-                    bVal = parseFloat(bVal);
-                } else {
-                    aVal = aVal.toLowerCase();
-                    bVal = bVal.toLowerCase();
-                }
-                if (aVal < bVal) {
-                    return ascending ? 1 : -1;
-                }
-                if (aVal > bVal) {
-                    return ascending ? -1 : 1;
-                }
-                return 0;
-            });
-            // Rebuild rows with new order
-            while (table.firstChild) {
-                table.removeChild(table.firstChild);
-            }
-            table.appendChild(headerRow);
-            table.appendChild(filterRow);
-            rows.forEach(row => table.appendChild(row));
-        }
+#zoom{display:inline-flex;align-items:center;gap:4px}
+#zoom-lbl{font-size:12px;color:var(--muted)}
+#zoom-sel{border:1px solid var(--border);border-radius:var(--r-sm);
+  padding:3px 6px;font-size:12px;outline:none;background:var(--surface)}
 
-        function filterRow(row) {
-            // Check if there are any active filters
-            let inputs = document.getElementsByClassName("filterInput");
-            let anyFilters = false;
-            for (let z = 0; z < inputs.length; z++) {
-                if (inputs[z].value != "") {
-                    anyFilters = true;
-                    break;
-                }
-            }
-            // If no filters, display row
-            if (!anyFilters) {
-                row.style.display = "";
-                return;
-            }
-            // Otherwise, there are filters
-            let showRow = true;
-            let tds = row.getElementsByTagName("td");
-            // Check each filter
-            for (let z = 0; z < inputs.length; z++) {
-                let filter = inputs[z].value;
-                // Skip empty filters
-                if (filter == "")
-                    continue;
-                // For non-empty filters, check if row matches
-                let col_idx = inputs[z].getAttribute("data-columnindex");
-                let txtValue = tds[col_idx].textContent.trim();
-                // Non-case-sensitive search
-                filter = filter.toLowerCase();
-                txtValue = txtValue.toLowerCase();
-                // Filter
-                if (!txtValue.includes(filter)) {
-                    showRow = false;
-                    break;
-                }
-            }
-            row.style.display = showRow ? "" : "none";
-        }
+.sw{position:relative;display:flex;align-items:center}
+.sw svg{position:absolute;left:8px;color:var(--muted);pointer-events:none}
+#gsearch{padding:6px 10px 6px 29px;border:1px solid var(--border);border-radius:var(--r);
+  font-size:13px;width:210px;outline:none;background:var(--surface);
+  transition:border-color .15s,box-shadow .15s}
+#gsearch:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-ring)}
 
-        function filterTable() {
-            // Load rows
-            let table = document.getElementById("DataTable");
-            let trs = table.getElementsByTagName("tr");
-            // Check if there are any active filters
-            let inputs = document.getElementsByClassName("filterInput");
-            let anyFilters = false;
-            for (let z = 0; z < inputs.length; z++) {
-                if (inputs[z].value != "") {
-                    anyFilters = true;
-                    break;
-                }
-            }
-            // If filters, filter rows
-            if (anyFilters) {
-                // Filter each row
-                for (let i = 2; i < trs.length; i++) {
-                    filterRow(trs[i]);
-                }
-            } else {
-                // If no filters, display every row
-                for (let i = 2; i < trs.length; i++) {
-                    trs[i].style.display = "";
-                }
-            }
-        }
+.btn{display:inline-flex;align-items:center;gap:5px;padding:5px 10px;
+  border:1px solid var(--border);border-radius:var(--r);font-size:12px;font-weight:500;
+  cursor:pointer;background:var(--surface);color:var(--text);white-space:nowrap;
+  line-height:1;transition:background .1s,border-color .1s}
+.btn:hover{background:var(--surface2);border-color:var(--border2)}
+.btn-p{background:var(--accent);color:#fff;border-color:var(--accent)}
+.btn-p:hover{background:var(--accent-h);border-color:var(--accent-h)}
+.btn svg{flex-shrink:0}
 
-        function checkCellEdited(cell) {
-            const originalValue = cell.getAttribute('data-originalvalue');
-            const currentValue = cell.textContent.trim();
-            if (currentValue !== originalValue) {
-                cell.classList.add('cell-edited');
-            } else {
-                cell.classList.remove('cell-edited');
-            }
-            // Filter this row
-            const row = cell.parentNode;
-            filterRow(row);
-        }
-    </script>
+/* ── dropdown ── */
+.dd{position:relative}
+.dp{display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:200;
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--r);
+  box-shadow:0 6px 18px rgba(0,0,0,.12);min-width:190px;max-height:310px;
+  overflow-y:auto;padding:4px 0}
+.dp.open{display:block}
+.ti{display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;
+  user-select:none;font-size:12px;transition:background .08s}
+.ti:hover{background:var(--surface2)}
+.ti input[type=checkbox]{width:14px;height:14px;cursor:pointer;accent-color:var(--accent)}
+
+/* ── table area ── */
+#tw{flex:1;overflow:auto;position:relative;background:var(--surface)}
+table{border-collapse:separate;border-spacing:0;width:max-content;min-width:100%}
+
+/* header rows */
+thead th{position:sticky;top:0;background:var(--surface2);z-index:4;
+  border-bottom:1px solid var(--border);border-right:1px solid var(--border);
+  padding:0;white-space:nowrap;font-weight:600;user-select:none}
+thead tr:nth-child(2) th{top:var(--hh,38px);background:var(--surface2);z-index:4;
+  padding:4px 6px;border-bottom:2px solid var(--border2)}
+
+/* frozen first column */
+th:first-child,td:first-child{position:sticky;left:0;z-index:3;
+  background:var(--surface2);border-left:1px solid var(--border);
+  border-right:2px solid var(--border2)!important}
+thead th:first-child{z-index:6}
+tbody td:first-child{background:var(--surface2)}
+tbody tr:hover td:first-child{background:#dde4f9}
+
+/* body */
+tbody tr{transition:background .06s}
+tbody td{border-bottom:1px solid var(--border);border-right:1px solid var(--border);
+  padding:6.25px 10px;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;max-width:280px;vertical-align:middle}
+tbody tr:nth-child(even) td{background:var(--row-alt)}
+tbody tr:nth-child(even) td:first-child{background:#f0f2f7}
+tbody tr:hover td{background:var(--row-hover)}
+tbody td:focus{outline:2px solid var(--accent);outline-offset:-2px}
+td.ed{background:var(--edited)!important;outline:1px solid var(--edited-b)}
+
+/* per-row resize handle (first/index column) */
+tbody td:first-child{position:sticky}
+.rrh{position:absolute;left:0;right:0;bottom:-1px;height:7px;cursor:row-resize;z-index:7}
+.rrh::after{content:'';position:absolute;left:10px;right:10px;bottom:2px;height:2px;
+  background:transparent;transition:background .1s}
+tbody tr:hover td:first-child .rrh::after,.rrh.on::after{background:#c6ceda}
+.row-resizing *{cursor:row-resize!important}
+
+/* th inner */
+.thi{display:flex;align-items:center;padding:8px 10px;gap:4px;min-height:38px}
+.thl{flex:1;overflow:hidden;text-overflow:ellipsis;font-size:12px}
+.sg{display:flex;flex-direction:column;gap:1px;flex-shrink:0}
+.sb{background:none;border:none;padding:0;cursor:pointer;font-size:8px;
+  line-height:1;color:var(--muted);display:block;transition:color .1s}
+.sb:hover{color:var(--text)}
+.sb.on{color:var(--accent)}
+
+/* resize handle */
+.rh{position:absolute;right:0;top:0;width:5px;height:100%;cursor:col-resize;z-index:2}
+.rh:hover,.rh.on{background:var(--accent);opacity:.4}
+
+/* filter inputs */
+.fi{width:100%;border:1px solid var(--border);border-radius:var(--r-sm);
+  padding:3px 6px;font-size:11px;outline:none;min-width:34px;
+  background:var(--surface);transition:border-color .12s}
+.fi:focus{border-color:var(--accent)}
+
+td img{display:block;max-height:38px;width:auto}
+
+.hc{display:none!important}
+
+/* ── page-loading overlay (inside table wrapper) ── */
+#tw-mask{display:none;position:absolute;inset:0;z-index:10;pointer-events:none;
+  align-items:center;justify-content:center}
+#tw-mask.on{display:flex;pointer-events:auto}
+#tw-mask-box{display:flex;align-items:center;gap:10px;
+  background:var(--surface);padding:12px 18px;border-radius:var(--r);
+  border:1px solid var(--border);box-shadow:0 4px 14px rgba(0,0,0,.1);
+  font-size:13px;color:var(--text)}
+#tw-mask-spin{width:16px;height:16px;border:2px solid #d2d8e0;
+  border-top-color:var(--accent);border-radius:50%;
+  animation:spin .75s linear infinite;flex-shrink:0}
+
+/* ── pagination ── */
+#pg{display:flex;align-items:center;gap:8px;padding:7px 14px;
+  background:var(--surface);border-top:1px solid var(--border);
+  font-size:12px;color:var(--muted);flex-shrink:0;flex-wrap:wrap}
+#pg select{border:1px solid var(--border);border-radius:var(--r-sm);
+  padding:3px 6px;font-size:12px;outline:none;background:var(--surface)}
+#pi{white-space:nowrap}
+#pbs{display:flex;align-items:center;gap:3px;margin-left:auto}
+.pb{border:1px solid var(--border);border-radius:var(--r-sm);padding:3px 8px;
+  cursor:pointer;background:var(--surface);font-size:12px;min-width:28px;
+  text-align:center;transition:background .08s}
+.pb:hover:not(:disabled){background:var(--surface2)}
+.pb:disabled{opacity:.35;cursor:default}
+.pb.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.el{padding:0 2px;color:var(--muted)}
+
+/* ── pg-loading indicator (shown while bg-filter runs) ── */
+#pg-loading{display:none;align-items:center;gap:5px;font-size:11px;color:var(--muted)}
+#pg-loading.on{display:flex}
+#pg-loading-spin{width:10px;height:10px;border:1.5px solid #d2d8e0;
+  border-top-color:var(--accent);border-radius:50%;animation:spin .75s linear infinite}
+</style>
 </head>
-
 <body>
-    <div class="table-container">
-        <table id="DataTable">
-            <tr>
-                {% for col in columns %}
-                    {% if image_column[loop.index0] or loop.index0 == 0 %}
-                        <th>{{ col }}</th>
-                    {% else %}
-                        <th>
-                            {{ col }}
-                            <br></br>
-                            <button class="sort-button" onclick="sortTable({{ loop.index0 }}, true)">&uarr;</button>
-                            <button class="sort-button" onclick="sortTable({{ loop.index0 }}, false)">&darr;</button>
-                        </th>
-                    {% endif %}
-                {% endfor %}
-            </tr>
-            <tr>
-                {% for col in columns %}
-                    {% if image_column[loop.index0] or loop.index0 == 0 %}
-                        <td></td>
-                    {% else %}
-                        <td><input type="text" class="filterInput" onkeyup="filterTable()" data-columnindex="{{ loop.index0 }}"></td>
-                    {% endif %}
-                {% endfor %}
-            </tr>
-            {% for row in rows %}
-                <tr>
-                    {% for col in columns %}
-                        {% if image_column[loop.index0] %}
-                            <td><img src="data:image/png;base64,{{ row[col] }}" class="plot-image"></td>
-                        {% else %}
-                            {% if not editable or loop.index0 == 0 %}
-                                <td>{{ row[col] }}</td>
-                            {% else %}
-                                <td contenteditable="true" oninput="checkCellEdited(this)" data-originalvalue="{{ row[col] }}">{{ row[col] }}</td>
-                            {% endif %}
-                        {% endif %}
-                    {% endfor %}
-                </tr>
-            {% endfor %}
-        </table>
-    </div>
-</body>
 
+<div id="loading-mask" role="status" aria-live="polite">
+  <div id="loading-inner">
+    <div id="loading-spinner" aria-hidden="true"></div>
+    <span id="loading-text">Initialising…</span>
+  </div>
+  <div id="loading-bar-wrap" aria-hidden="true">
+    <div id="loading-bar"></div>
+  </div>
+</div>
+
+<div id="toolbar">
+  <div id="tl">
+    <div class="sw">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      <input type="text" id="gsearch" placeholder="Search all columns…" oninput="onGS()">
+    </div>
+    <button class="btn btn-p" onclick="doExport()">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      Export CSV
+    </button>
+    <div class="dd" id="cdd">
+      <button class="btn" onclick="toggleCDD()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+        Columns
+      </button>
+      <div class="dp" id="cdp"></div>
+    </div>
+    <button class="btn" id="savebtn" onclick="doSave()" style="display:none" title="Downloads a new HTML file with your current in-browser cell edits embedded in it.">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+      Save Edits
+    </button>
+    <!-- background-filter progress pill -->
+    <div id="bg-pill">
+      <div id="bg-pill-spin"></div>
+      <span id="bg-pill-text">Indexing rows…</span>
+    </div>
+  </div>
+  <div id="tr">
+    <div id="zoom">
+      <button class="btn" type="button" onclick="stepZoom(-1)" title="Zoom out">-</button>
+      <span id="zoom-lbl">Zoom</span>
+      <select id="zoom-sel" onchange="onZoomChange()" aria-label="Table zoom">
+        <option value="50">50%</option>
+        <option value="67">67%</option>
+        <option value="75">75%</option>
+        <option value="90">90%</option>
+        <option value="100" selected>100%</option>
+        <option value="110">110%</option>
+        <option value="125">125%</option>
+        <option value="150">150%</option>
+        <option value="175">175%</option>
+        <option value="200">200%</option>
+      </select>
+      <button class="btn" type="button" onclick="stepZoom(1)" title="Zoom in">+</button>
+    </div>
+    <span id="row-count"></span>
+  </div>
+</div>
+
+<div id="tw">
+  <div id="tw-mask">
+    <div id="tw-mask-box">
+      <div id="tw-mask-spin"></div>
+      <span id="tw-mask-text">Loading page…</span>
+    </div>
+  </div>
+  <table id="DataTable">
+    <thead><tr id="hr"></tr><tr id="fr"></tr></thead>
+    <tbody id="tb"></tbody>
+  </table>
+</div>
+
+<div id="pg">
+  <label>Rows per page:
+    <select id="pss" onchange="onPSC()">
+      <option value="25">25</option>
+      <option value="50" selected>50</option>
+      <option value="100">100</option>
+      <option value="250">250</option>
+      <option value="all">All</option>
+    </select>
+  </label>
+  <span id="pi"></span>
+  <div id="pg-loading">
+    <div id="pg-loading-spin"></div>
+    <span id="pg-loading-text">Loading rows…</span>
+  </div>
+  <div id="pbs"></div>
+</div>
+
+<script>const _META = {{ meta_payload | safe }};</script>
+{% for chunk in row_chunks %}
+<script type="application/json" class="rc">{{ chunk | safe }}</script>
+{% endfor %}
+<script>
+
+const {columns: COLS, image_column: IMGS, editable: EDIT} = _META;
+const ROWS = [];
+
+const ZOOM_LEVELS=[50,67,75,90,100,110,125,150,175,200];
+const DEFAULT_INDEX_COL_W=72;
+const FILTER_CHUNK=2000;
+
+let fRows=[], sortC=null, sortA=true, pg=1, pgSz=50;
+let cFilters={}, gSearch='', hidden=new Set(), colW={}, edits={}, rowH={};
+let zoomPct=100;
+
+// Progressive-filter state
+let filterVersion=0;   // incremented on each applyF call; stale workers abort
+let filterReady=false; // true once all ROWS have been processed for current filter
+let pendingPage=null;  // page user clicked while filter was still running
+
+if(EDIT) document.getElementById('savebtn').style.display='';
+
+/* ── zoom ── */
+function zoomScale(){ return zoomPct/100; }
+function setZoom(v){
+  const clamp=Math.max(50,Math.min(200,v));
+  zoomPct=clamp;
+  document.getElementById('tw').style.zoom=zoomPct+'%';
+  document.getElementById('zoom-sel').value=String(zoomPct);
+}
+function onZoomChange(){ setZoom(parseInt(document.getElementById('zoom-sel').value,10)||100); }
+function stepZoom(dir){
+  const cur=ZOOM_LEVELS.indexOf(zoomPct);
+  const idx=cur===-1?ZOOM_LEVELS.findIndex(v=>v>zoomPct):cur;
+  const base=idx===-1?(dir<0?ZOOM_LEVELS.length-1:0):idx;
+  const next=Math.max(0,Math.min(ZOOM_LEVELS.length-1,base+dir));
+  setZoom(ZOOM_LEVELS[next]);
+}
+
+/* ── loading overlay helpers ── */
+function setLoadingText(msg){ const el=document.getElementById('loading-text'); if(el) el.textContent=msg; }
+function setLoadingBar(pct){ const el=document.getElementById('loading-bar'); if(el) el.style.width=Math.round(pct)+'%'; }
+function hideLoading(){ const m=document.getElementById('loading-mask'); if(m){ setLoadingBar(100); setTimeout(()=>m.classList.add('done'),120); } }
+
+/* ── bg-filter pill (toolbar) ── */
+function showBGPill(txt){ const p=document.getElementById('bg-pill'); p.classList.add('on'); document.getElementById('bg-pill-text').textContent=txt||'Indexing rows…'; }
+function updateBGPill(txt){ document.getElementById('bg-pill-text').textContent=txt; }
+function hideBGPill(){ document.getElementById('bg-pill').classList.remove('on'); }
+
+/* ── page loading mask (inside table) ── */
+function showPageMask(txt){ const m=document.getElementById('tw-mask'); m.classList.add('on'); document.getElementById('tw-mask-text').textContent=txt||'Loading page…'; }
+function hidePageMask(){ document.getElementById('tw-mask').classList.remove('on'); }
+
+/* ── pagination loading text ── */
+function showPGLoading(txt){ const p=document.getElementById('pg-loading'); p.classList.add('on'); document.getElementById('pg-loading-text').textContent=txt||'Loading rows…'; }
+function hidePGLoading(){ document.getElementById('pg-loading').classList.remove('on'); }
+
+/* ── init ── */
+function initTable(){
+  setLoadingText('Building column headers…');
+  setLoadingBar(10);
+  requestAnimationFrame(()=>{
+    setZoom(100);
+    buildHeader();
+    setLoadingBar(30);
+    requestAnimationFrame(()=>{
+      setLoadingText('Setting up column controls…');
+      buildCDP();
+      setLoadingBar(45);
+      requestAnimationFrame(()=>{
+        setLoadingText('Filtering rows…');
+        setLoadingBar(50);
+        applyF(true);
+      });
+    });
+  });
+}
+
+/* ── header ── */
+function buildHeader(){
+  const hr=document.getElementById('hr'), fr=document.getElementById('fr');
+  hr.innerHTML=''; fr.innerHTML='';
+  COLS.forEach((col,i)=>{
+    const th=document.createElement('th');
+    th.dataset.col=i; if(hidden.has(i)) th.classList.add('hc');
+    const inn=document.createElement('div'); inn.className='thi';
+    const lbl=document.createElement('span'); lbl.className='thl'; lbl.textContent=col;
+    inn.appendChild(lbl);
+    if(!IMGS[i]){
+      const sg=document.createElement('div'); sg.className='sg';
+      [['▲',true],['▼',false]].forEach(([a,asc])=>{
+        const b=document.createElement('button'); b.className='sb'+(sortC===i&&sortA===asc?' on':'');
+        b.textContent=a; b.title=asc?'Sort ascending':'Sort descending';
+        b.onclick=()=>{sortC=i;sortA=asc;applyF(false);buildHeader()};
+        sg.appendChild(b);
+      });
+      inn.appendChild(sg);
+    }
+    const rh=document.createElement('div'); rh.className='rh';
+    rh.addEventListener('mousedown',e=>startR(e,i,th));
+    inn.appendChild(rh);
+    const cw=colW[i]??(i===0?DEFAULT_INDEX_COL_W:null);
+    if(cw!==null){ th.style.width=cw+'px'; colW[i]=cw; }
+    th.appendChild(inn); hr.appendChild(th);
+    const fth=document.createElement('th'); fth.dataset.col=i;
+    if(hidden.has(i)) fth.classList.add('hc');
+    if(!IMGS[i]){
+      const inp=document.createElement('input'); inp.className='fi'; inp.type='text';
+      inp.placeholder='…'; inp.value=cFilters[i]||'';
+      inp.addEventListener('input',()=>{cFilters[i]=inp.value;applyF(false)});
+      fth.appendChild(inp);
+    }
+    fr.appendChild(fth);
+  });
+  requestAnimationFrame(()=>{
+    const h=document.getElementById('hr').offsetHeight;
+    document.querySelectorAll('#fr th').forEach(t=>t.style.top=h+'px');
+    document.documentElement.style.setProperty('--hh',h+'px');
+  });
+}
+
+/* ── column toggles ── */
+function buildCDP(){
+  const p=document.getElementById('cdp'); p.innerHTML='';
+  COLS.forEach((col,i)=>{
+    const lbl=document.createElement('label'); lbl.className='ti';
+    const cb=document.createElement('input'); cb.type='checkbox'; cb.checked=!hidden.has(i);
+    cb.addEventListener('change',()=>{
+      hidden[cb.checked?'delete':'add'](i);
+      document.querySelectorAll(`[data-col="${i}"]`).forEach(el=>el.classList.toggle('hc',!cb.checked));
+    });
+    lbl.appendChild(cb); lbl.appendChild(document.createTextNode(col));
+    p.appendChild(lbl);
+  });
+}
+function toggleCDD(){ document.getElementById('cdp').classList.toggle('open') }
+document.addEventListener('click',e=>{ if(!e.target.closest('#cdd')) document.getElementById('cdp').classList.remove('open') });
+
+/* ── progressive filter/sort ── */
+function applyF(isInit){
+  const version=++filterVersion;
+  filterReady=false;
+  pendingPage=null;
+  fRows=[];
+
+  const gs=gSearch.toLowerCase();
+  const activeFilters=Object.entries(cFilters).filter(([,v])=>v);
+  let idx=0;
+  let firstPageDone=false;
+
+  // For the initial load we want to show first page ASAP even before sort.
+  // For user-triggered sorts we need all rows before we can sort correctly,
+  // so we delay the first render until sorting is done.
+  const sortPending=sortC!==null;
+
+  if(!isInit){
+    // Show background pill immediately for re-filter
+    showBGPill('Filtering…');
+    showPGLoading('Filtering…');
+  }
+
+  function passesFilters(row){
+    if(gs&&!COLS.some((c,ci)=>!IMGS[ci]&&row[c]!=null&&String(row[c]).toLowerCase().includes(gs))) return false;
+    for(const[ci,fv] of activeFilters){
+      const c=COLS[+ci];
+      if(row[c]==null||!String(row[c]).toLowerCase().includes(fv.toLowerCase())) return false;
+    }
+    return true;
+  }
+
+  function doSort(){
+    if(sortC===null) return;
+    const sc=COLS[sortC];
+    fRows.sort((a,b)=>{
+      let av=a[sc]??'',bv=b[sc]??'';
+      const na=parseFloat(av),nb=parseFloat(bv);
+      if(!isNaN(na)&&!isNaN(nb)){av=na;bv=nb;}else{av=String(av).toLowerCase();bv=String(bv).toLowerCase();}
+      return av<bv?(sortA?-1:1):av>bv?(sortA?1:-1):0;
+    });
+  }
+
+  function processChunk(){
+    if(filterVersion!==version) return; // stale — newer applyF was called
+
+    const end=Math.min(idx+FILTER_CHUNK,ROWS.length);
+    for(let i=idx;i<end;i++){
+      if(passesFilters(ROWS[i])) fRows.push(ROWS[i]);
+    }
+    idx=end;
+
+    const pct=idx/ROWS.length;
+    const done=idx>=ROWS.length;
+
+    // Update loading indicators
+    if(isInit){
+      const barPct=50+pct*40; // 50→90 while filtering
+      setLoadingBar(barPct);
+      if(!done) setLoadingText(`Filtering rows… ${Math.round(pct*100)}%`);
+    } else {
+      const label=`${Math.round(pct*100)}% indexed`;
+      updateBGPill(label);
+      updatePGLoading(label);
+    }
+
+    if(done){
+      doSort();
+      filterReady=true;
+
+      if(isInit){
+        pg=1;
+        render();
+        updateRC();
+        updatePG();
+        setLoadingText('Ready');
+        setLoadingBar(100);
+        hideLoading();
+        hideBGPill();
+        hidePGLoading();
+      } else {
+        // Handle any pending navigation
+        if(pendingPage!==null){ pg=pendingPage; pendingPage=null; }
+        else pg=1;
+        render();
+        updateRC();
+        updatePG();
+        hideBGPill();
+        hidePGLoading();
+        hidePageMask();
+      }
+      return;
+    }
+
+    // Not done yet — can we show first page?
+    if(!firstPageDone&&!sortPending){
+      const needRows=pgSz===Infinity?1:(pg*pgSz);
+      if(fRows.length>=needRows){
+        firstPageDone=true;
+        if(isInit){
+          pg=1;
+          render();
+          updateRC();
+          updatePG();
+          setLoadingText('Loading remaining rows…');
+          hideLoading();             // hide overlay, keep pill
+          showBGPill('Indexing rows…');
+          showPGLoading('Indexing rows…');
+        } else {
+          pg=1;
+          render();
+          updateRC();
+          updatePG();
+        }
+      }
+    } else if(firstPageDone&&!isInit){
+      // Keep row count updated as rows come in
+      updateRC();
+      updatePG();
+    }
+
+    setTimeout(processChunk,0);
+  }
+
+  processChunk();
+}
+
+function updatePGLoading(txt){ document.getElementById('pg-loading-text').textContent=txt; }
+
+function onGS(){ gSearch=document.getElementById('gsearch').value; applyF(false); }
+
+/* ── render page ── */
+function render(){
+  const tb=document.getElementById('tb');
+  const s=pgSz===Infinity?0:(pg-1)*pgSz;
+  const e=pgSz===Infinity?fRows.length:Math.min(s+pgSz,fRows.length);
+  const frag=document.createDocumentFragment();
+  for(let ri=s;ri<e;ri++){
+    const row=fRows[ri], key=row[COLS[0]];
+    const tr=document.createElement('tr');
+    if(rowH[key]) tr.style.height=rowH[key]+'px';
+    COLS.forEach((col,i)=>{
+      const td=document.createElement('td'); td.dataset.col=i;
+      if(hidden.has(i)) td.classList.add('hc');
+      const val=row[col], ev=edits[key]?.[col];
+      const disp=ev!==undefined?ev:(val!=null?String(val):'');
+      if(IMGS[i]){
+        if(val!=null){const img=document.createElement('img');img.src='data:image/png;base64,'+val;img.loading='lazy';td.appendChild(img);}
+      } else if(EDIT&&i>0){
+        td.contentEditable='true'; td.textContent=disp;
+        td.dataset.orig=val!=null?String(val):'';
+        if(ev!==undefined&&ev!==td.dataset.orig) td.classList.add('ed');
+        td.addEventListener('input',()=>{
+          if(!edits[key]) edits[key]={};
+          edits[key][col]=td.textContent;
+          td.classList.toggle('ed',td.textContent!==td.dataset.orig);
+        });
+      } else {
+        td.textContent=disp;
+        if(!IMGS[i]) td.tabIndex=0;
+      }
+      if(i===0){
+        const rr=document.createElement('div');
+        rr.className='rrh';
+        rr.title='Drag to increase row height';
+        rr.addEventListener('mousedown',e=>startRowR(e,tr,key,rr));
+        td.appendChild(rr);
+      }
+      tr.appendChild(td);
+    });
+    frag.appendChild(tr);
+  }
+  tb.replaceChildren(frag);
+}
+
+/* ── pagination ── */
+function onPSC(){const v=document.getElementById('pss').value;pgSz=v==='all'?Infinity:+v;pg=1;render();updatePG()}
+function tpg(){return pgSz===Infinity?1:Math.max(1,Math.ceil(fRows.length/pgSz))}
+
+// Navigate to page — handles "not ready" case
+function goPage(to){
+  if(to===pg) return;
+
+  if(!filterReady){
+    // Check if the requested page is within already-filtered rows
+    const needed=pgSz===Infinity?1:to*pgSz;
+    if(fRows.length>=needed){
+      pg=to; render(); updatePG();
+    } else {
+      // Page not available yet — park the request and show mask
+      pendingPage=to;
+      showPageMask(`Loading page ${to}…`);
+    }
+    return;
+  }
+
+  pg=to; render(); updatePG();
+}
+
+function updatePG(){
+  const tp=tpg();
+  const notReady=!filterReady;
+  document.getElementById('pi').textContent=`Page ${pg} of ${notReady?tp+'…':tp}`;
+  const c=document.getElementById('pbs'); c.innerHTML='';
+  const mk=(lbl,to,dis,act)=>{
+    const b=document.createElement('button');
+    b.className='pb'+(act?' on':'');
+    b.textContent=lbl;
+    b.disabled=dis;
+    b.onclick=()=>goPage(to);
+    // Dim pages that might not be ready yet
+    if(notReady){
+      const needed=pgSz===Infinity?1:to*pgSz;
+      if(fRows.length<needed) b.style.opacity='0.45';
+    }
+    return b;
+  };
+  const el=()=>{const s=document.createElement('span');s.className='el';s.textContent='…';return s};
+  c.appendChild(mk('«',1,pg===1)); c.appendChild(mk('‹',pg-1,pg===1));
+  let s=Math.max(1,pg-2),e=Math.min(tp,pg+2);
+  if(e-s<4){s=Math.max(1,e-4);e=Math.min(tp,s+4);}
+  if(s>1){c.appendChild(mk('1',1,false));if(s>2)c.appendChild(el());}
+  for(let p=s;p<=e;p++) c.appendChild(mk(String(p),p,false,p===pg));
+  if(e<tp){if(e<tp-1)c.appendChild(el());c.appendChild(mk(String(tp),tp,false));}
+  c.appendChild(mk('›',pg+1,pg===tp)); c.appendChild(mk('»',tp,pg===tp));
+}
+
+function updateRC(){
+  const t=ROWS.length,s=fRows.length;
+  const suf=filterReady?'':'+';
+  document.getElementById('row-count').textContent=
+    s<t?`${s.toLocaleString()}${suf} / ${t.toLocaleString()} rows`:`${t.toLocaleString()}${suf} rows`;
+}
+
+/* ── CSV export ── */
+function doExport(){
+  const ti=COLS.map((_,i)=>i).filter(i=>!IMGS[i]);
+  const q=v=>v==null?'':'"'+String(v).replace(/"/g,'""')+'"';
+  const lines=[ti.map(i=>q(COLS[i])).join(',')];
+  fRows.forEach(row=>lines.push(ti.map(i=>q(row[COLS[i]])).join(',')));
+  Object.assign(document.createElement('a'),{href:URL.createObjectURL(new Blob([lines.join('\n')],{type:'text/csv'})),download:'export.csv'}).click();
+}
+
+/* ── save edits ── */
+function doSave(){
+  const updated=ROWS.map(row=>{const k=row[COLS[0]];return edits[k]?{...row,...edits[k]}:row});
+  const np=JSON.stringify({...DATA,rows:updated}).replace(/<\//g,'<\\/');
+  let html=document.documentElement.outerHTML;
+  html=html.replace(/\/\/ DATA_START[\s\S]*?\/\/ DATA_END/,`// DATA_START\nconst DATA = ${np};\n// DATA_END`);
+  Object.assign(document.createElement('a'),{href:URL.createObjectURL(new Blob([html],{type:'text/html'})),download:'table_edited.html'}).click();
+}
+
+/* ── column resize ── */
+let _r=null;
+function startR(e,ci,th){
+  e.preventDefault(); _r={ci,th,sx:e.clientX,sw:th.offsetWidth};
+  th.querySelector('.rh').classList.add('on');
+  document.addEventListener('mousemove',onR); document.addEventListener('mouseup',stopR,{once:true});
+}
+function onR(e){ if(!_r) return; const w=Math.max(50,_r.sw+(e.clientX-_r.sx)/zoomScale()); _r.th.style.width=w+'px'; colW[_r.ci]=w; }
+function stopR(){ if(_r){_r.th.querySelector('.rh').classList.remove('on');_r=null;} document.removeEventListener('mousemove',onR); }
+
+/* ── row resize ── */
+let _rr=null;
+function startRowR(e,tr,key,handle){
+  e.preventDefault(); e.stopPropagation();
+  _rr={tr,key,sy:e.clientY,sh:tr.getBoundingClientRect().height,handle};
+  handle.classList.add('on');
+  document.body.classList.add('row-resizing');
+  document.addEventListener('mousemove',onRowR);
+  document.addEventListener('mouseup',stopRowR,{once:true});
+}
+function onRowR(e){ if(!_rr) return; const h=Math.max(24,_rr.sh+(e.clientY-_rr.sy)/zoomScale()); _rr.tr.style.height=h+'px'; rowH[_rr.key]=h; }
+function stopRowR(){ if(_rr){_rr.handle.classList.remove('on');_rr=null;} document.body.classList.remove('row-resizing'); document.removeEventListener('mousemove',onRowR); }
+
+/* ── keyboard nav ── */
+document.getElementById('tw').addEventListener('keydown',e=>{
+  const el=document.activeElement;
+  if(!el||el.tagName!=='TD'||el.contentEditable==='true') return;
+  if(!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)) return;
+  e.preventDefault();
+  const tr=el.closest('tr'), trs=[...document.querySelectorAll('#tb tr')];
+  const vis=r=>[...r.querySelectorAll('td')].filter(t=>!t.classList.contains('hc'));
+  const tds=vis(tr), tri=trs.indexOf(tr), tdi=tds.indexOf(el);
+  if(e.key==='ArrowRight'&&tdi<tds.length-1) tds[tdi+1].focus();
+  else if(e.key==='ArrowLeft'&&tdi>0) tds[tdi-1].focus();
+  else if(e.key==='ArrowDown'&&tri<trs.length-1){const n=vis(trs[tri+1]);if(n[tdi])n[tdi].focus();}
+  else if(e.key==='ArrowUp'&&tri>0){const p=vis(trs[tri-1]);if(p[tdi])p[tdi].focus();}
+});
+
+/* ── click-to-copy ── */
+document.getElementById('tw').addEventListener('click',e=>{
+  const td=e.target.closest('td');
+  if(!td||td.contentEditable==='true'||td.querySelector('img')||!navigator.clipboard) return;
+  const txt=td.textContent.trim(); if(!txt) return;
+  navigator.clipboard.writeText(txt).then(()=>{
+    const prev=td.style.outline; td.style.outline='2px solid var(--accent)';
+    setTimeout(()=>td.style.outline=prev,500);
+  }).catch(()=>{});
+});
+
+/* ── start ── */
+function parseRowChunks(onDone){
+  const tags=[...document.querySelectorAll('script.rc')];
+  const total=tags.length; let i=0;
+  function next(){
+    if(i>=total){onDone();return;}
+    ROWS.push(...JSON.parse(tags[i].textContent));
+    i++;
+    setLoadingText(`Parsing table data… ${i} / ${total}`);
+    setLoadingBar(Math.round(i/total*45));
+    setTimeout(next,0);
+  }
+  next();
+}
+parseRowChunks(()=>initTable());
+</script>
+</body>
 </html>
