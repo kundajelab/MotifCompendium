@@ -1056,10 +1056,6 @@ def calculate_dinucleotide_score(x: np.ndarray) -> float | np.ndarray:
 def calculate_truncated(x: np.ndarray, threshold: float = 0.1) -> bool | np.ndarray:
     """Calculate whether a motif or motif stack is truncated.
 
-@calculate_metrics
-def calculate_truncated(x: np.ndarray, threshold: float = 0.1) -> bool | np.ndarray:
-    """Calculate whether a motif or motif stack is truncated.
-
     A motif is classified as truncated if the max peak position is in the first 10%
       or last 10% of the motif. The max peak position is the position with the highest
       absolute importance, summed across all bases.
