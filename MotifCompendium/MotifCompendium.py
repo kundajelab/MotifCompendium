@@ -837,6 +837,13 @@ class MotifCompendium:
         """
         if isinstance(key, str):
             return self.metadata[key]
+        elif isinstance(key, list) and all(isinstance(k, str) for k in key):
+            return self.metadata[key]
+        elif isinstance(key, pd.Index):
+            keep_idxs = list(self.metadata.index.get_indexer(key))
+            if any(i == -1 for i in keep_idxs):
+                missing = [k for k, i in zip(key, keep_idxs) if i == -1]
+                raise KeyError(f"Labels not found in index: {missing}")
         elif isinstance(key, pd.Series) and pd.api.types.is_bool_dtype(key):
             keep_idxs = list(self.metadata[key].index)
         elif isinstance(key, np.ndarray) and key.dtype == bool:
@@ -844,12 +851,10 @@ class MotifCompendium:
                 raise ValueError("Boolean mask must be same length as metadata.")
             keep_idxs = list(np.where(key)[0])
         elif isinstance(key, list) and all(isinstance(x, bool) for x in key):
-            if key.ndim != 1 or len(key) != len(self.metadata):
+            if len(key) != len(self.metadata):
                 raise ValueError("Boolean mask must be 1D and same length as metadata.")
             keep_idxs = [i for i, x in enumerate(key) if x]
         elif isinstance(key, slice):
-            if len(key) != len(self.metadata):
-                raise ValueError("Boolean mask must be same length as metadata.")
             keep_idxs = list(range(*key.indices(len(self.metadata))))
         elif isinstance(key, int):
             keep_idxs = [key]
