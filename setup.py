@@ -19,7 +19,6 @@ setup(
         "pandas",
         "seaborn",
         "scikit-learn",
-        "kmedoids",
         "tables",
         "tqdm",
         "upsetplot",
