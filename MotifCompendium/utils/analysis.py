@@ -449,6 +449,8 @@ def calculate_filters(
         "dinuc_composition",
         "dinuc_score",
         "posneg_inverted",
+        "posneg_ratio",
+        "maxmean_ratio",
         "truncated",
     ],
     trim_importance: float | int | None = None,
@@ -499,6 +501,12 @@ def calculate_filters(
           - "posneg_inverted": Checks if a positive motif exists in an otherwise
               negative pattern or if a negative motifs in an otherwise positive pattern.
               When True: Positive motif in a negative pattern or visa versa.
+          - "posneg_ratio": Computes the ratio of the max positive value to the max negative value in a motif.
+              (Or vice versa if max negative value is greater than max positive value).
+              When close to 1: A motif with a similar maximum positive and negative value, 
+              which may indicate a low information content motif.
+          - "maxmean_ratio": Computes the ratio of the max value in the motif to the mean value in the motif.
+              When High: A motif with a very strong peak compared to the average value in the motif.
           - "truncated": Checks if the motif is truncated and likely has more mass
               extending beyond the edge of the motif length.
               When True: A truncated motif that has been cut off by the window size.
@@ -514,27 +522,25 @@ def calculate_filters(
           filter out low quality or low information content motifs. For guidance on the
           value of thresholds to use, see MotifCompendium Tutorial 6 - Motif Filtering.
     """
+    ## Preprocess motifs
     mc_motifs = mc.get_standard_motif_stack() # Get 4-channel
-
     # Trim
     if trim_length is not None and trim_importance is not None:
         raise ValueError("Cannot specify both trim_importance and trim_length.")
     elif trim_length is not None and trim_importance is None:
-        mc_motifs_abs_norm = utils_motif.l1_norm_motif(
-                np.abs(
-                    np.stack([
-                        utils_motif.resize_motif(
-                            motif=mc_motifs[i],
-                            resize_to=trim_length,
-                        ) for i in range(mc_motifs.shape[0])
-                    ], axis=0)
-                )  # (N, L_trim, 4)
-            )
+        if trim_length > mc_motifs.shape[1]:
+            raise ValueError("Trim length cannot be greater than the length of the motif.")
+        mc_motifs = np.stack([
+                utils_motif.resize_motif(
+                    motif=mc_motifs[i],
+                    resize_to=trim_length,
+                ) for i in range(mc_motifs.shape[0])
+            ], axis=0
+        )  # (N, trim_length, 4)
     # Non-negative, L1-normalize into probabilities
-    else:
-        mc_motifs_abs_norm = utils_motif.l1_norm_motif(
-            np.abs(mc_motifs)
-        )  # (N, L, 4)
+    mc_motifs_abs_norm = utils_motif.l1_norm_motif(
+        np.abs(mc_motifs)
+    )  # (N, L, 4)
 
     # Calculate filters
     for filter_metric in metric_list:
@@ -560,7 +566,7 @@ def calculate_filters(
                 )
             case "posbase_entropy_score":
                 mc["posbase_entropy_score"] = (
-                    utils_motif.calculate_position_versus_base_entropy(
+                    utils_motif.calculate_position_vs_base_entropy(
                         mc_motifs_abs_norm,
                         trim_importance=trim_importance,
                     )
@@ -595,6 +601,14 @@ def calculate_filters(
             case "posneg_inverted":
                 mc["posneg_inverted"] = (
                     utils_motif.motif_posneg_max(mc_motifs) != mc["posneg"]
+                )
+            case "posneg_ratio":
+                mc["posneg_ratio"] = (
+                    utils_motif.calculate_posmax_vs_negmax(mc_motifs)
+                )
+            case "maxmean_ratio":
+                mc["maxmean_ratio"] = (
+                    utils_motif.calculate_max_vs_mean(mc_motifs)
                 )
             case "truncated":
                 mc["truncated"] = utils_motif.calculate_truncated(

@@ -670,11 +670,11 @@ def minusxlogx(x: np.ndarray, base: int) -> np.ndarray:
 def normalized_last_axis_entropy(x: np.ndarray) -> np.ndarray:
     """Computes the entropy on the last axis assuming that x >= 0.
     Args:
-        x: A (N, L, K) motif stack.
+        x: A (N, L, K) motif stack, or (N, L*K) flattened motif stack.
 
     Returns:
         The entropy of the last axis, normalized to be in [0, 1] by dividing by log2(K).
-        (N, L, 1) array of entropies.
+        (N, L, 1) or (N, 1) array of entropies.
     """
     x_sum = np.sum(x, axis=-1, keepdims=True)
     x_normalized = np.divide(
@@ -806,7 +806,7 @@ def calculate_weighted_position_entropy(x: np.ndarray) -> float | np.ndarray:
 
 
 @calculate_metrics
-def calculate_position_versus_base_entropy(x: np.ndarray) -> float | np.ndarray:
+def calculate_position_vs_base_entropy(x: np.ndarray) -> float | np.ndarray:
     """Calculate across-position * (1 - across-base) entropy for a motif or motif stack.
 
     Computes the across-position entropy of each motif by summing the importance across
@@ -845,7 +845,7 @@ def calculate_copair_entropy(x: np.ndarray) -> float | np.ndarray:
       co-occurrence of two bases at the same position. Then, the copair values are
       normalized and the across-position and across-base entropies are computed. Then,
       the combined score of across-position entropy * (1 - across-base entropy) is
-      computed just like in calculate_position_versus_base_entropy().
+      computed just like in calculate_position_vs_base_entropy().
 
     Args:
         x: A non-negative, normalized (L, 4) motif or (N, L, 4) motif stack.
@@ -921,7 +921,7 @@ def calculate_dinucleotide_entropy(x: np.ndarray) -> float | np.ndarray:
       the dinucleotide values are normalized and the across-position and across-base
       entropies are computed. Then, the combined score of
       across-position entropy * (1 - across-base entropy) is computed just like in
-      calculate_position_versus_base_entropy().
+      calculate_position_vs_base_entropy().
 
     Args:
         x: A non-negative, normalized (L, 4) motif or (N, L, 4) motif stack.
@@ -1056,6 +1056,10 @@ def calculate_dinucleotide_score(x: np.ndarray) -> float | np.ndarray:
 def calculate_truncated(x: np.ndarray, threshold: float = 0.1) -> bool | np.ndarray:
     """Calculate whether a motif or motif stack is truncated.
 
+@calculate_metrics
+def calculate_truncated(x: np.ndarray, threshold: float = 0.1) -> bool | np.ndarray:
+    """Calculate whether a motif or motif stack is truncated.
+
     A motif is classified as truncated if the max peak position is in the first 10%
       or last 10% of the motif. The max peak position is the position with the highest
       absolute importance, summed across all bases.
@@ -1071,3 +1075,70 @@ def calculate_truncated(x: np.ndarray, threshold: float = 0.1) -> bool | np.ndar
     max_pos = np.argmax(np.sum(np.abs(x), axis=2), axis=1)  # (N, )
     motif_length = x.shape[1]
     return (max_pos < threshold * motif_length) | (max_pos > (1 - threshold) * motif_length)
+
+
+@calculate_metrics
+def calculate_posmax_vs_negmax(x: np.ndarray) -> float | np.ndarray:
+    """Calculate the ratio of the dominant signal to the weaker signal in a motif or motif stack.
+
+    This metric is calculated by taking the maximum positive value and the absolute value
+      of the minimum negative value across all positions and bases in the motif, then
+      dividing the larger by the smaller. This metric captures how much stronger the
+      dominant signal is compared to the weaker signal in a motif.
+
+    Args:
+        x: A (L, K) motif or (N, L, K) motif stack.
+
+    Returns:
+        The ratio of the dominant signal vs. the weaker signal as a float for a
+          single motif or an array of floats for a motif stack. The values are bounded in
+          [1, inf).
+
+    Notes:
+        When this ratio is close to 1, the motif has equal positive and negative signal
+        that is close in magnitude. This suggests that the motif may be noisy.
+    """
+    validate_motif_stack_standard(x)
+    max_positive = np.max(x, axis=(1, 2))   # (N, )
+    abs_min_negative = -np.min(x, axis=(1, 2))  # (N, )
+
+    pos_dominant = max_positive >= abs_min_negative
+
+    ratio = np.where(
+        pos_dominant,
+        np.divide(max_positive, abs_min_negative, out=np.zeros_like(max_positive), where=(abs_min_negative > 0)),
+        np.divide(abs_min_negative, max_positive, out=np.zeros_like(max_positive), where=(max_positive > 0)),
+    )
+    return ratio
+
+
+@calculate_metrics
+def calculate_max_vs_mean(x: np.ndarray) -> float | np.ndarray:
+    """Calculate the ratio of the max value to the mean value in a motif or motif stack.
+
+    This metric is calculated by taking the maximum absolute value across all positions and
+      bases in the motif, and dividing it by the mean absolute value across all positions
+      and bases in the motif. This metric captures how much stronger the strongest signal
+      is compared to the average signal in a motif.
+
+    Args:
+        x: A (L, K) motif or (N, L, K) motif stack.
+
+    Returns:
+        The ratio of the max value to the mean value as a float for a single motif or an
+          array of floats for a motif stack. The values are bounded in [0, inf).
+
+    Notes:
+        When this ratio is very high, it means that the motif has a very strong peak 
+        compared to the rest of the signal. This suggests that the motif has a 
+        very sharp peak.
+    """
+    validate_motif_stack_standard(x)
+    max_abs = np.max(np.abs(x), axis=(1, 2))  # (N, )
+    mean_abs = np.mean(np.abs(x), axis=(1, 2))  # (N, )
+    return np.divide(
+        max_abs,
+        mean_abs,
+        out=np.zeros_like(max_abs, dtype=x.dtype),
+        where=(mean_abs != 0),
+    )
