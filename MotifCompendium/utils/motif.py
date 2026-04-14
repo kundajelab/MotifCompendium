@@ -1052,6 +1052,9 @@ def calculate_dinucleotide_score(x: np.ndarray) -> float | np.ndarray:
     )  # Remove diagonal (self-pairs)
     return np.max(np.sum(dinucleotide_scores, axis=1), axis=(1, 2))  # (N, )
 
+@calculate_metrics
+def calculate_truncated(x: np.ndarray, threshold: float = 0.1) -> bool | np.ndarray:
+    """Calculate whether a motif or motif stack is truncated.
 
 @calculate_metrics
 def calculate_truncated(x: np.ndarray, threshold: float = 0.1) -> bool | np.ndarray:
