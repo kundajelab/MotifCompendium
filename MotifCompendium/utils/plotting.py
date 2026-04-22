@@ -124,7 +124,7 @@ class LogoPlottingInput:
         if isinstance(self.trim, bool) and self.trim and self.length is None:
             motif_to_plot = utils_motif.trim_motif(
                 motif=self.motif,
-                importance=1 / self.motif.shape[0]
+                importance=1/self.motif.shape[0]
             )
         elif isinstance(self.trim, (int, float)) and self.length is None:
             motif_to_plot = utils_motif.trim_motif(
@@ -163,9 +163,12 @@ class LogoPlottingInput:
 ###########################
 def plot_motif(
     motif: np.ndarray,
-    show: bool = True,
+    trim: bool | float | int = False,
+    length: int | None = None,
+    encode: bool = False,
+    show: bool = False,
     save_loc: str | None = None,
-) -> None:
+) -> str | None:
     """Plots a single motif.
 
     Plots a single motif. If show is True, the figure is shown. If save_loc is not None,
@@ -173,8 +176,15 @@ def plot_motif(
 
     Args:
         motif: A np.ndarray of shape (L, 4) representing the motif to be plotted.
+        trim: A bool or float/int indicating how the motif should be trimmed when plotting.
+        length: An int indicating the length of the motifs to be trimmed to, with the
+          maximum importance. If None, no trimming is done.
+        encode: A bool indicating whether to encode the figure as a UTF-8 string.
         show: Whether or not to show the heatmap with plt.show().
         save_loc: Where to save the motif plot to. If None, the motif plot is not saved.
+    
+    Returns:
+        A UTF-8 encoded string of the figure if encode is True, else None.
     """
     # Check inputs
     utils_motif.validate_motif_basic(motif)
@@ -182,22 +192,83 @@ def plot_motif(
         raise TypeError("motif must be a 2D array with shape (L, 4).")
     # Plot
     fig, ax = plt.subplots(figsize=(6, 2))
-    motif_logo = LogoPlottingInput(motif, ax=ax, encode=False)
+    motif_logo = LogoPlottingInput(
+        motifs=motif,
+        trim=trim,
+        length=length,
+        encode=encode,
+        ax=ax,
+    )
     _plot_motif_logo(motif_logo)
     # Output
     if save_loc is not None:
         fig.savefig(save_loc, bbox_inches="tight")
     if show:
         plt.show()
+    if encode:
+        return motif_logo.utf8_plot
+
+
+def plot_motifs(
+    motifs: np.ndarray,
+    trim: bool | float | int = False,
+    length: int | None = None,
+    encode: bool = False,
+    save_locs: list[str] | None = None,
+) -> list[str] | None:
+    """Plots multiple motifs.
+
+    Plots multiple motifs by calling plot_motif() on each motif in motifs. If show is
+      True, the figure is shown. If save_locs is not None, the motif plots are saved to
+      the corresponding locations in save_locs.
+
+    Args:
+        motifs: A stack of motifs to be plotted. (N, L, 4)
+        trim: A bool or float/int indicating how the motifs should be trimmed when
+          plotting.
+        length: An int indicating the length of the motifs to be trimmed to, with the
+          maximum importance. If None, no trimming is done.
+        encode: A bool indicating whether to encode the figure as a UTF-8 string.
+        save_locs: A list of where to save the motif plots to. If None, the motif plots
+          are not saved. If not None, must be the same length as motifs.
+
+    Returns:
+        A list of UTF-8 encoded strings of the figures if encode is True, else None.
+    """
+    utils_motif.validate_motif_stack_standard(motifs)
+    if save_locs is not None and len(save_locs) != len(motifs):
+        raise ValueError("The number of save locations must match the number of motifs.")
+    
+    # Prepare plotting
+    logo_plotting_inputs = [
+        LogoPlottingInput(
+            motif=m, 
+            trim=trim,
+            length=length,
+            encode=encode,
+        ) for m in motifs
+    ]
+    # Plot
+    logo_plotting_inputs = plot_many_motif_logos(logo_plotting_inputs)
+    # Output
+    if save_locs is not None:
+        for motif_logo, save_loc in zip(logo_plotting_inputs, save_locs):
+            motif_logo.ax.figure.savefig(save_loc, bbox_inches="tight")
+    if encode:
+        return [motif_logo.utf8_plot for motif_logo in logo_plotting_inputs]
 
 
 def plot_motif_stack(
     motif_stack: np.ndarray,
     alignment_rc: np.ndarray | None = None,
     alignment_h: np.ndarray | None = None,
+    trim: bool | float | int = False,
+    length: int | None = None,
+    encode: bool = False,
     show: bool = False,
     save_loc: str | None = None,
-) -> None:
+    parallel: bool = True,
+) -> str | None:
     """Plots a stack of motifs.
 
     Plots a stack of motifs by calling plot_many_motif_logos(). If alignment information
@@ -205,28 +276,40 @@ def plot_motif_stack(
       same figure. If show is True, the figure is shown.
 
     Args:
-        motif_stack: A stack of motifs to be plotted.
+        motif_stack: A stack of motifs to be plotted. (N, L, 4)
         alignment_rc: A (N, ) forward/reverse complement alignment vector. If None, no
           alignment is performed.
         alignment_h: A (N, ) horizontal alignment vector. If None, no alignment is
           performed.
+        trim: A bool or float/int indicating how the motifs should be trimmed when plotting.
+        length: An int indicating the length of the motifs to be trimmed to, with the
+          maximum importance. If None, no trimming is done.
+        encode: A bool indicating whether to encode the figure as a UTF-8 string.
         show: Whether or not to show the heatmap with plt.show().
         save_loc: Where to save the motif plot to. If None, the motif plot is not saved.
+        parallel: A bool indicating whether or not to parallelize the plotting of the motifs. 
+    
+    Returns:
+        A UTF-8 encoded string of the figure if encode is True, else None.
     """
     # Check inputs
+    if (motif_stack is None) or (len(motif_stack) == 0):
+        return None
+    if motif_stack.ndim == 2:
+        motif_stack = motif_stack[np.newaxis, :]
     utils_motif.validate_motif_stack_standard(motif_stack)
     N = motif_stack.shape[0]
     if alignment_rc is not None and not (
         isinstance(alignment_rc, np.ndarray) and alignment_rc.shape == (N,)
     ):
         raise TypeError(
-            "alignment_rc must be a vector whose length matches that of the motif stack."
+            f"alignment_rc must be a vector whose length matches that of the motif stack; Current motif stack shape: {motif_stack.shape}, alignment_rc shape: {alignment_rc.shape}"
         )
     if alignment_h is not None and not (
         isinstance(alignment_h, np.ndarray) and alignment_h.shape == (N,)
     ):
         raise TypeError(
-            "alignment_h must be a vector whose length matches that of the motif stack."
+            f"alignment_h must be a vector whose length matches that of the motif stack; Current motif stack shape: {motif_stack.shape}, alignment_h shape: {alignment_h.shape}"
         )
     # Defaults for alignment_rc and alignment_h
     if alignment_rc is None:
@@ -235,6 +318,7 @@ def plot_motif_stack(
         alignment_h = np.zeros(N)
     # Create figure
     fig, axs = plt.subplots(N, figsize=(6, 2 * N))
+    axs = np.atleast_1d(axs)
     # Prepare inputs
     motif_info_list = []
     for i, ax in enumerate(axs):
@@ -243,6 +327,8 @@ def plot_motif_stack(
                 motif_stack[i],
                 revcomp=alignment_rc[i],
                 pos=alignment_h[i],
+                trim=trim,
+                length=length,
                 encode=False,
                 ax=ax,
             )
@@ -252,7 +338,11 @@ def plot_motif_stack(
     for motif_info in motif_info_list:
         motif_info.set_bounds(x_min, x_max)
     # Plot
-    motif_info_list = plot_many_motif_logos(motif_info_list)
+    if parallel:
+        motif_info_list = plot_many_motif_logos(motif_info_list)
+    else:
+        for motif_info in motif_info_list:
+            _plot_motif_logo(motif_info)
     # Determine if plots need to be transferred (ocurrs when parallel plotting)
     if motif_info_list[0].ax.figure != fig:
         # Create new figure
@@ -276,6 +366,82 @@ def plot_motif_stack(
         fig.savefig(save_loc, bbox_inches="tight")
     if show:
         plt.show()
+    if encode:
+        return encode_figure_as_utf8(fig)
+
+
+def plot_motif_stacks(
+    motifs_stack_list: list[np.ndarray],
+    alignment_rc_list: list[np.ndarray] | None = None,
+    alignment_h_list: list[np.ndarray] | None = None,
+    trim: bool | float | int = False,
+    length: int | None = None,
+    encode: bool = False,
+    save_locs: list[str] | None = None,
+) -> list[str] | None:
+    """Plots multiple stacks of motifs.
+
+    Plots multiple stacks of motifs by calling plot_motif_stack() on each stack in
+      motifs. If show is True, the figure is shown. If save_locs is not None, the motif
+      stack plots are saved to the corresponding locations in save_locs.
+
+    Args:
+        motifs_stack_list: A list of stacks of motifs to be plotted. Each stack should have shape
+          (N, L, 4).
+        alignment_rc_list: A list of alignment_rc matrices corresponding to each motif stack.
+        alignment_h_list: A list of alignment_h matrices corresponding to each motif stack.
+        trim: A bool or float/int indicating how the motifs should be trimmed when
+          plotting.
+        length: An int indicating the length of the motifs to be trimmed to, with the
+          maximum importance. If None, no trimming is done.
+        encode: A bool indicating whether to encode the figure as a UTF-8 string.
+        save_locs: A list of where to save the motif stack plots to. If None, the motif
+          stack plots are not saved. If not None, must be the same length as motifs_stack_list.
+
+    Returns:
+        A list of UTF-8 encoded strings of the figures if encode is True, else None.
+    """
+    if save_locs is not None and len(save_locs) != len(motifs_stack_list):
+        raise ValueError("The number of save locations must match the number of motif stacks.")
+
+    # Pair each motif with its save location
+    if alignment_rc_list is None:
+        alignment_rc_list = [None] * len(motifs_stack_list)
+    if alignment_h_list is None:
+        alignment_h_list = [None] * len(motifs_stack_list)
+    if save_locs is None:
+        save_locs = [None] * len(motifs_stack_list)
+    inputs = list(zip(motifs_stack_list, alignment_rc_list, alignment_h_list, save_locs))
+
+    # Run
+    num_processes = min(utils_config.get_max_cpus(), multiprocessing.cpu_count())
+    if num_processes == 1 or len(inputs) == 1:
+        utf8_images = [
+            plot_motif_stack(
+                motif_stack=motif_stack,
+                alignment_rc=alignment_rc,
+                alignment_h=alignment_h,
+                trim=trim,
+                length=length,
+                encode=encode,
+                show=False,
+                save_loc=save_loc,
+                parallel=False,
+            )
+            for motif_stack, alignment_rc, alignment_h, save_loc in inputs
+        ]
+    else:
+        args = [
+            (motif_stack, alignment_rc, alignment_h, trim, length, encode, False, save_loc, False)
+            for motif_stack, alignment_rc, alignment_h, save_loc in inputs
+        ]
+
+        with multiprocessing.Pool(processes=num_processes) as p:
+            utf8_images = p.starmap(plot_motif_stack, args)
+
+    if encode:
+        return utf8_images
+    return None
 
 
 def plot_many_motif_logos(
@@ -291,7 +457,7 @@ def plot_many_motif_logos(
           should be plotted.
 
     Returns:
-        A LogoPlottingInput object containing the plot of the motif.
+        A list of LogoPlottingInput objects containing the plots of the motifs.
     """
     # Use Agg backend
     current_backend = matplotlib.get_backend()
@@ -397,9 +563,8 @@ def _plot_motif_logo(motif_info: LogoPlottingInput) -> LogoPlottingInput:
         fig = plot_ax.figure
     # Plot
     motif_df = motif_info.get_motif_df()
-    if not (
-        (motif_info.motif == 0).all() or (motif_df is None)
-    ):  # Only plot if motif is not all zeros
+    if motif_df is not None and not np.all(motif_info.motif == 0):
+        # Only plot if motif is not all zeros
         if utils_config.get_fast_plotting():
             _plot_logo_on_axis_fast(motif_df, plot_ax)
         else:

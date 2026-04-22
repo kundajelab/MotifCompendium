@@ -2,6 +2,7 @@ import os
 import json
 
 from jinja2 import Environment, FileSystemLoader
+import numpy as np
 import pandas as pd
 
 import MotifCompendium.utils.plotting as utils_plotting
@@ -69,6 +70,9 @@ def table_html(
     table = table.astype(object).where(pd.notna(table), None)
 
     columns  = table.columns.tolist()
+    table = table.applymap(
+        lambda x: x.tolist() if isinstance(x, np.ndarray) else x
+    )
     rows_all = table.to_dict(orient="records")
 
     def _json(obj) -> str:

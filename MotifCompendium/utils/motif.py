@@ -79,47 +79,47 @@ def calculate_metrics(func):
 def validate_motif_basic(motifs: np.ndarray) -> None:
     """Validate that motifs are np.ndarrays with with a last channel size of 4."""
     if not (isinstance(motifs, np.ndarray) and (motifs.shape[-1] == 4)):
-        raise TypeError("Motifs must be a np.ndarray of 4 channels.")
+        raise TypeError(f"Motifs must be a np.ndarray of 4 channels; Current shape: {motifs.shape}")
 
 def validate_motif_single(motifs: np.ndarray) -> None:
     """Validate that motif is a single 2D np.ndarray with a last channel size of 4."""
     validate_motif_basic(motifs)
     if not len(motifs.shape) == 2:
-        raise ValueError("Motif must be a single 2D np.ndarray of shape (L, 4).")
+        raise ValueError(f"Motif must be a single 2D np.ndarray of shape (L, 4); Current shape: {motifs.shape}")
 
 def validate_motif_stack(motifs: np.ndarray) -> None:
     """Validate that motifs are a motif stack."""
     validate_motif_basic(motifs)
     if not len(motifs.shape) == 3:
-        raise ValueError("Motif stack must be of shape (N, L, 4).")
+        raise ValueError(f"Motif stack must be of shape (N, L, 4); Current shape: {motifs.shape}")
 
 
 def validate_motif_stack_standard(motifs: np.ndarray) -> None:
     """Validate that motifs are a standard (N, L, 4) shape."""
     validate_motif_stack(motifs)
     if not motifs.shape[2] == 4:
-        raise ValueError("Motif stack must be of shape (N, L, 4).")
+        raise ValueError(f"Motif stack must be of shape (N, L, 4); Current shape: {motifs.shape}")
 
 
 def validate_motif_stack_similarity(motifs: np.ndarray) -> None:
     """Validate that motifs are fit for similarity calculations."""
     validate_motif_stack(motifs)
     if not (motifs >= 0).all():
-        raise ValueError("Motifs must be non-negative.")
+        raise ValueError(f"Motifs must be non-negative; Current min value: {motifs.min()}")
 
 
 def validate_motif_stack_l1(motifs: np.ndarray) -> None:
     """Validate that motifs are L1 normalized (per motif), summing to 1."""
     validate_motif_stack_similarity(motifs)
     if not np.allclose(motifs.sum(axis=(1, 2)), 1):
-        raise ValueError("Motifs must sum to 1.")
+        raise ValueError(f"Motifs must sum to 1; Current sums: {motifs.sum(axis=(1, 2))}")
 
 
 def validate_motif_stack_entropy(motifs: np.ndarray) -> None:
     """Validate that motifs are fit for entropy calculations."""
     validate_motif_stack_l1(motifs)
     if not motifs.shape[2] == 4:
-        raise ValueError("Motif stack must be of shape (N, L, 4).")
+        raise ValueError(f"Motif stack must be of shape (N, L, 4); Current shape: {motifs.shape}")
 
 
 #######################
@@ -1056,10 +1056,6 @@ def calculate_dinucleotide_score(x: np.ndarray) -> float | np.ndarray:
 def calculate_truncated(x: np.ndarray, threshold: float = 0.1) -> bool | np.ndarray:
     """Calculate whether a motif or motif stack is truncated.
 
-@calculate_metrics
-def calculate_truncated(x: np.ndarray, threshold: float = 0.1) -> bool | np.ndarray:
-    """Calculate whether a motif or motif stack is truncated.
-
     A motif is classified as truncated if the max peak position is in the first 10%
       or last 10% of the motif. The max peak position is the position with the highest
       absolute importance, summed across all bases.
@@ -1075,6 +1071,50 @@ def calculate_truncated(x: np.ndarray, threshold: float = 0.1) -> bool | np.ndar
     max_pos = np.argmax(np.sum(np.abs(x), axis=2), axis=1)  # (N, )
     motif_length = x.shape[1]
     return (max_pos < threshold * motif_length) | (max_pos > (1 - threshold) * motif_length)
+
+
+@calculate_metrics
+def calculate_possum_vs_negsum(x: np.ndarray) -> float | np.ndarray:
+    """Calculate the ratio of the sum of positive values to the absolute value of the sum of negative values in a motif or motif stack.
+
+    This metric is calculated by taking the sum of all positive values and the absolute value
+      of the sum of all negative values across all positions and bases in the motif, then
+      dividing the larger by the smaller. This metric captures how much stronger the
+      overall positive signal is compared to the overall negative signal in a motif.
+
+    Args:
+        x: A (L, K) motif or (N, L, K) motif stack.
+
+    Returns:
+        The ratio of the sum of positive values vs. the absolute value of the sum of
+          negative values as a float for a single motif or an array of floats for a
+          motif stack. The values are bounded in [0, inf).
+
+    Notes:
+        - When this ratio is close to 1, the motif has equal positive and negative signal
+          that is close in magnitude. This suggests that the motif may be noisy.
+        - When either positive or negative signal is 0, the ratio will be +inf.
+        - When both positive and negative signal are 0, the ratio will be 0.
+    """
+    validate_motif_stack_standard(x)
+
+    sum_positive = np.sum(x * (x > 0), axis=(1, 2))         # (N,)
+    abs_sum_negative = -np.sum(x * (x < 0), axis=(1, 2))    # (N,)
+
+    pos_dominant = sum_positive >= abs_sum_negative
+
+    with np.errstate(divide='ignore', invalid='ignore'):
+        ratio = np.where(
+            pos_dominant,
+            sum_positive / abs_sum_negative,
+            abs_sum_negative / sum_positive,
+        )
+
+    # Handle 0/0 explicitly
+    both_zero = (sum_positive == 0) & (abs_sum_negative == 0)
+    ratio = np.where(both_zero, 0.0, ratio)
+
+    return ratio
 
 
 @calculate_metrics
@@ -1095,20 +1135,29 @@ def calculate_posmax_vs_negmax(x: np.ndarray) -> float | np.ndarray:
           [1, inf).
 
     Notes:
-        When this ratio is close to 1, the motif has equal positive and negative signal
-        that is close in magnitude. This suggests that the motif may be noisy.
+        - When this ratio is close to 1, the motif has equal positive and negative signal
+          that is close in magnitude. This suggests that the motif may be noisy.
+        - When either positive or negative signal is 0, the ratio will be +inf.
+        - When both positive and negative signal are 0, the ratio will be 0.
     """
     validate_motif_stack_standard(x)
-    max_positive = np.max(x, axis=(1, 2))   # (N, )
-    abs_min_negative = -np.min(x, axis=(1, 2))  # (N, )
+
+    max_positive = np.max(x, axis=(1, 2))        # (N,)
+    abs_min_negative = -np.min(x, axis=(1, 2))   # (N,)
 
     pos_dominant = max_positive >= abs_min_negative
 
-    ratio = np.where(
-        pos_dominant,
-        np.divide(max_positive, abs_min_negative, out=np.zeros_like(max_positive), where=(abs_min_negative > 0)),
-        np.divide(abs_min_negative, max_positive, out=np.zeros_like(max_positive), where=(max_positive > 0)),
-    )
+    with np.errstate(divide='ignore', invalid='ignore'):
+        ratio = np.where(
+            pos_dominant,
+            max_positive / abs_min_negative,
+            abs_min_negative / max_positive,
+        )
+
+    # Handle 0/0 explicitly
+    both_zero = (max_positive == 0) & (abs_min_negative == 0)
+    ratio = np.where(both_zero, 0.0, ratio)
+
     return ratio
 
 

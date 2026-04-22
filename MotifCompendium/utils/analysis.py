@@ -449,7 +449,8 @@ def calculate_filters(
         "dinuc_composition",
         "dinuc_score",
         "posneg_inverted",
-        "posneg_ratio",
+        "possum_negsum_ratio",
+        "posmax_negmax_ratio",
         "maxmean_ratio",
         "truncated",
     ],
@@ -501,7 +502,11 @@ def calculate_filters(
           - "posneg_inverted": Checks if a positive motif exists in an otherwise
               negative pattern or if a negative motifs in an otherwise positive pattern.
               When True: Positive motif in a negative pattern or visa versa.
-          - "posneg_ratio": Computes the ratio of the max positive value to the max negative value in a motif.
+          - "possum_negsum_ratio": Computes the ratio of the sum of positive values to the sum of negative values in a motif.
+              (Or vice versa if the sum of negative values is greater than the sum of positive values).
+              When close to 1: A motif with a similar maximum positive and negative value, 
+              which may indicate a low information content motif.
+          - "posmax_negmax_ratio": Computes the ratio of the max positive value to the max negative value in a motif.
               (Or vice versa if max negative value is greater than max positive value).
               When close to 1: A motif with a similar maximum positive and negative value, 
               which may indicate a low information content motif.
@@ -602,8 +607,12 @@ def calculate_filters(
                 mc["posneg_inverted"] = (
                     utils_motif.motif_posneg_max(mc_motifs) != mc["posneg"]
                 )
-            case "posneg_ratio":
-                mc["posneg_ratio"] = (
+            case "possum_negsum_ratio":
+                mc["possum_negsum_ratio"] = (
+                    utils_motif.calculate_possum_vs_negsum(mc_motifs)
+                )
+            case "posmax_negmax_ratio":
+                mc["posmax_negmax_ratio"] = (
                     utils_motif.calculate_posmax_vs_negmax(mc_motifs)
                 )
             case "maxmean_ratio":
@@ -626,11 +635,13 @@ def assign_label_from_pfms(
     mc: MotifCompendiumClass,
     pfm_file: str,
     save_col_prefix: str = "match",
-    min_score: float = 0.5,
+    min_score: float = 0.8,
+    save_all_matches: bool = False,
     max_submotifs: int = 1,
     label_unsigned: bool = True,
     save_images: bool = True,
     logo_trimming: bool | float | int = 0,
+    logo_length: int | None = None,
 ) -> None:
     """Automatic labeling of motifs from a file containing PFMs.
 
@@ -648,6 +659,9 @@ def assign_label_from_pfms(
           save_col_prefix. These columns will have the structure
           f"{save_col_prefix}_{score/name/logo}{i}".
         min_score: The minimum similarity score to consider a match.
+        save_all_matches: Whether to save all matches above the minimum score, or just the best match. 
+              If True, all matches above the minimum score will be saved as a list.
+              If False, only the best match will be saved.
         max_submotifs: The maximum number of submotifs to consider in a match. If
           max_submotifs = 1, only a single match is given to each motif. If
           max_submotifs > 1, the best match for each motif can be from a combination of
@@ -667,6 +681,9 @@ def assign_label_from_pfms(
           number must be in [0, 1], and will define the trimming threshold. At a value
           of 0, only zero positions are trimmed and at a value of 1, all positions would
           be trimmed.
+        logo_length: This argument is only relevant if save_images is True. An int or
+          None indicating how the motif should be trimmed when plotting.
+        (Note: logo_trimming and logo_length cannot be used together.)
     """
     # Load PFM database, with same length as motifs
     pfm_motifs, pfm_names = utils_loader.load_pfm(
@@ -674,14 +691,16 @@ def assign_label_from_pfms(
     )
     # Assign labels
     mc.assign_label_from_motifs(
-        pfm_motifs,
-        pfm_names,
-        min_score,
+        reference_motifs=pfm_motifs,
+        labels=pfm_names,
+        min_score=min_score,
+        save_col_prefix=save_col_prefix,
+        save_all_matches=save_all_matches,
         max_submotifs=max_submotifs,
         label_unsigned=label_unsigned,
         save_images=save_images,
         logo_trimming=logo_trimming,
-        save_col_prefix=save_col_prefix,
+        logo_length=logo_length,
     )
 
 
@@ -690,11 +709,13 @@ def assign_label_from_other_compendium(
     assign_from_mc: MotifCompendiumClass,
     from_label_col: str = "name",
     save_col_prefix: str = "match",
-    min_score: float = 0.5,
+    min_score: float = 0.8,
+    save_all_matches: bool = False,
     max_submotifs: int = 1,
     label_unsigned: bool = True,
     save_images: bool = True,
     logo_trimming: bool | float | int = True,
+    logo_length: int | None = None,
 ) -> None:
     """Automatic labeling of motifs from another MotifCompendium.
 
@@ -714,6 +735,9 @@ def assign_label_from_other_compendium(
           save_col_prefix. These columns will have the structure
           f"{save_col_prefix}_{score/name/logo}{i}".
         min_score: The minimum similarity score to consider a match.
+        save_all_matches: Whether to save all matches above the minimum score, or just the best match. 
+              If True, all matches above the minimum score will be saved as a list.
+              If False, only the best match will be saved.
         max_submotifs: The maximum number of submotifs to consider in a match. If
           max_submotifs = 1, only a single match is given to each motif. If
           max_submotifs > 1, the best match for each motif can be from a combination of
@@ -735,6 +759,9 @@ def assign_label_from_other_compendium(
           number must be in [0, 1], and will define the trimming threshold. At a value
           of 0, only zero positions are trimmed and at a value of 1, all positions would
           be trimmed.
+        logo_length: This argument is only relevant if save_images is True. An int or
+          None indicating how the motif should be trimmed when plotting.
+        (Note: logo_trimming and logo_length cannot be used together.)
     """
     if not (
         isinstance(assign_to_mc, MotifCompendiumClass)
@@ -756,13 +783,15 @@ def assign_label_from_other_compendium(
         other_logos = None
     # Assign labels
     assign_to_mc.assign_label_from_motifs(
-        reference_motifs,
-        labels,
-        min_score,
+        reference_motifs=reference_motifs,
+        labels=labels,
+        min_score=min_score,
+        save_col_prefix=save_col_prefix,
+        save_all_matches=save_all_matches,
         max_submotifs=max_submotifs,
         label_unsigned=label_unsigned,
         save_images=save_images,
         logo_trimming=logo_trimming,
+        logo_length=logo_length,
         utf8_images=other_logos,
-        save_col_prefix=save_col_prefix,
     )

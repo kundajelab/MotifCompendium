@@ -777,21 +777,68 @@ class MotifCompendium:
             raise ValueError(
                 f"{image_name} is already a metadata column. Names may not overlap."
             )
-        # Prepare plotting
-        logo_plotting_inputs = [
-            utils_plotting.LogoPlottingInput(
-                motif=m, 
-                trim=trim,
-                length=length,
-            ) for m in motifs
-        ]
         # Plot and save
-        self.__images[image_name] = [
-            motif_input.utf8_plot
-            for motif_input in utils_plotting.plot_many_motif_logos(
-                logo_plotting_inputs
+        self.__images[image_name] = utils_plotting.plot_motifs(
+            motifs=motifs,
+            trim=trim,
+            length=length,
+            encode=True,
+        )
+    
+    def add_logo_stacks(
+        self,
+        motifs_stack_list: list[np.ndarray],
+        image_name: str,
+        alignment_rc_list: list[np.ndarray] | None = None,
+        alignment_h_list: list[np.ndarray] | None = None,
+        trim: bool | float | int = False,
+        length: int | None = None,
+    ) -> None:
+        """Saves logos of the provided list of motif stacks as saved images.
+
+        Args:
+            motifs_stack_list: A list of motif stacks to save logos for. Each element is of
+              shape (N, L, 4). All motif stacks must have the same number of motifs N.
+            alignment_rc_list: A list of alignment_rc matrices corresponding to each motif stack.
+            alignment_h_list: A list of alignment_h matrices corresponding to each motif stack.
+            image_name: The name of the images to save the logos as.
+            trim: A bool or float/int indicating how the motif should be trimmed when
+              plotting. If False, the motif will not be trimmed at all. If True, the
+              motif will be trimmed at the flanks with a standard threshold of 1/L. If a
+              number is provided, that number must be in [0, 1], and will define the
+              trimming threshold. At a value of 0, only zero positions are trimmed and
+              at a value of 1, all positions would be trimmed.
+            length: An int indicating the length of the motif to be trimmed to, with the
+              maximum importance. If None, no trimming is done.
+        """
+        # Check inputs
+        if not len(motifs_stack_list) == len(self):
+            raise ValueError(
+                "The number of motif stacks must be the same as the number of motifs in the MotifCompendium."
             )
-        ]
+        if alignment_rc_list is not None and not len(alignment_rc_list) == len(motifs_stack_list):
+            raise ValueError(
+                "alignment_rc_list must have the same length as motifs_stack_list."
+            )
+        if alignment_h_list is not None and not len(alignment_h_list) == len(motifs_stack_list):
+            raise ValueError(
+                "alignment_h_list must have the same length as motifs_stack_list."
+            )
+        if not isinstance(image_name, str):
+            raise TypeError("image_name must be a string.")
+        if image_name in self.columns():
+            raise ValueError(
+                f"{image_name} is already a metadata column. Names may not overlap."
+            )
+        # Plot and save
+        self.__images[image_name] = utils_plotting.plot_motif_stacks(
+            motifs_stack_list=motifs_stack_list,
+            alignment_rc_list=alignment_rc_list,
+            alignment_h_list=alignment_h_list,
+            trim=trim,
+            length=length,
+            encode=True,
+        )
 
     def rename_images(self, mapper: dict[str, str]) -> None:
         """Renames the saved images in the MotifCompendium in a Pandas-like syntax."""
@@ -2175,12 +2222,14 @@ class MotifCompendium:
         reference_motifs: np.ndarray,
         labels: list[str],
         min_score: float,
+        save_col_prefix: str = "match",
+        save_all_matches: bool = False,
         max_submotifs: int = 1,
         label_unsigned: bool = True,
         save_images: bool = True,
-        logo_trimming: bool | float | int = True,
+        logo_trimming: bool | float | int = 0,
+        logo_length: int | None = None,
         utf8_images: list[str] | None = None,
-        save_col_prefix: str = "match",
     ) -> None:
         """
         Assign labels to motifs based on an external set of labeled motifs.
@@ -2197,6 +2246,9 @@ class MotifCompendium:
               against.
             labels: A list of labels for each motif in reference_motifs.
             min_score: The minimum similarity score to consider a match.
+            save_all_matches: Whether to save all matches above the minimum score, or just the best match. 
+              If True, all matches above the minimum score will be saved as a list.
+              If False, only the best match will be saved.
             max_submotifs: The maximum number of submotifs to consider in a match. If
               max_submotifs = 1, only a single match is given to each motif. If
               max_submotifs > 1, the best match for each motif can be from a combination
@@ -2216,6 +2268,9 @@ class MotifCompendium:
               provided, that number must be in [0, 1], and will define the trimming
               threshold. At a value of 0, only zero positions are trimmed and at a value
               of 1, all positions would be trimmed.
+            logo_length: An int indicating the length of the motifs to be trimmed to, with the
+              maximum importance. If None, no trimming is done. 
+            (Note: Cannot use logo_length and logo_trimming together.)
             utf8_images: A list of utf8 images for each motif in reference_motifs. If
               saved_images is True and utf8_images is None, the logos will be generated
               on the fly using the trimming option logo_trimming. If saved_images is
@@ -2274,76 +2329,140 @@ class MotifCompendium:
         match_labels = []
         match_motifs = []
         match_idxs = []
-        match_mask = np.ones((my_motifs.shape[0],), dtype=bool)  # (N,)
+        match_alignment_rcs = []
+        match_alignment_hs = []
+        match_mask = np.ones((my_motifs.shape[0],), dtype=bool)  # My motifs remaining for matching (N,)
+        
         for i in range(max_submotifs):
-            if len(my_motifs) > 0:
-                # Compute similarity (L2 norm included during similarity calculation)
-                sim, alignment_rc, alignment_h = utils_similarity.compute_similarities(
-                    [my_motifs, reference_motifs], [(0, 1)]
-                )[0]
-                # Unscale L2 norm
-                my_motifs_norm = np.linalg.norm(my_motifs, axis=(1, 2))[:, np.newaxis]
-                reference_motifs_norm = np.linalg.norm(reference_motifs, axis=(1, 2))[np.newaxis, :]
-                sim = sim * (
-                    my_motifs_norm * reference_motifs_norm
-                )  # (N, M)
-                # Identify matches, Scale score by i
-                match_score = np.max(sim, axis=1) * np.sqrt(i + 1)  # (N,)
-                match_idx = np.argmax(sim, axis=1)  # (N,)
-                alignment_rc = alignment_rc[
-                    np.arange(alignment_rc.shape[0]), match_idx
-                ]  # (N,)
-                alignment_h = alignment_h[
-                    np.arange(alignment_h.shape[0]), match_idx
-                ]  # (N,)
-                match_motif = reference_motifs_raw[match_idx]
-                # Remove matches below threshold
-                match_mask = match_mask & (match_score >= min_score)  # (N,)
-                match_score[~match_mask] = 0
-                match_idx[~match_mask] = -1
-                match_motif[~match_mask] = 0
-                # Subtract best match
-                if match_mask.any():
-                    my_motifs = utils_motif.remove_motif_component(
-                        my_motifs,
-                        match_motif,
-                        alignment_rc,
-                        alignment_h,
-                    )
-                # Remove motifs with no match
-                my_motifs[~match_mask] = 0
+            # Initialize:
+            if save_all_matches:
+                match_score = [np.array([]) for _ in range(my_motifs.shape[0])]  # list of length (N,) of arrays of shape (K_n,) scores
+                match_idx = [np.array([]) for _ in range(my_motifs.shape[0])]  # list of length (N,) of arrays of shape (K_n,) indices
+                match_motif = [np.array([]) for _ in range(my_motifs.shape[0])]  # list of length (N,) of arrays of shape (K_n, L, 4) motifs
+                match_label = [None] * my_motifs.shape[0]  # list of length (N,) of lists of length (K_n,) of labels
+                match_alignment_rc = [np.array([]) for _ in range(my_motifs.shape[0])]  # list of length (N,) of arrays of shape (K_n,) alignments
+                match_alignment_h = [np.array([]) for _ in range(my_motifs.shape[0])]  # list of length (N,) of arrays of shape (K_n,) alignments
             else:
-                # No motifs left to match
-                match_score = np.zeros((0,), dtype=float)
-                match_idx = np.zeros((0,), dtype=int)
-                match_motif = np.zeros((0, max_length, my_motifs.shape[2]), dtype=float)
+                match_score = np.zeros((my_motifs.shape[0],), dtype=float)  # (N,)
+                match_idx = -np.ones((my_motifs.shape[0],), dtype=int)  # (N,)
+                match_motif = np.zeros((my_motifs.shape[0], max_length, my_motifs.shape[2]), dtype=float)  # (N, L, 4)
+                match_label = [None] * my_motifs.shape[0]  # (N,)
+                match_alignment_rc = np.zeros((my_motifs.shape[0],), dtype=bool)  # (N,)
+                match_alignment_h = np.zeros((my_motifs.shape[0],), dtype=int)  # (N,)
+
+            # Compute similarity (L2 norm included during similarity calculation)
+            sim, alignment_rc, alignment_h = utils_similarity.compute_similarities(
+                [my_motifs, reference_motifs], [(0, 1)]
+            )[0]
+            # Unscale L2 norm
+            my_motifs_norm = np.linalg.norm(my_motifs, axis=(1, 2))[:, np.newaxis]
+            reference_motifs_norm = np.linalg.norm(reference_motifs, axis=(1, 2))[np.newaxis, :]
+            sim = sim * (
+                my_motifs_norm * reference_motifs_norm
+            )  # (N, M)
+            # Scale score by i
+            sim *= np.sqrt(i + 1)  # (N, M)
+            # Remove matches below threshold
+            sim_threshold = np.where(sim >= min_score, sim, 0)  # (N, M)
+            match_mask = match_mask & (sim_threshold > 0).any(axis=1)  # (N,)
+            my_motifs[~match_mask] = 0
+            
+            if sim_threshold.sum() > 0:
+                # Identify best matches, all matches
+                has_match = (sim_threshold > 0).any(axis=1)  # (N,)
+                safe_idx = np.where(has_match, np.argmax(sim_threshold, axis=1), 0)  # (N,), 0 is placeholder
+                top_match_idx = np.where(has_match, safe_idx, -1)  # (N,), -1 if no match
+                top_match_score = np.max(sim_threshold, axis=1)  # (N,)
+                top_match_motif = reference_motifs_raw[safe_idx]  # (N, L, 4)
+                top_match_motif[~has_match] = 0  # zero out placeholder lookups
+                top_match_label = [labels[idx] if idx >= 0 else "" for idx in top_match_idx]  # (N,)
+                top_alignment_rc = alignment_rc[np.arange(alignment_rc.shape[0]), safe_idx]  # (N,)
+                top_alignment_h = alignment_h[np.arange(alignment_h.shape[0]), safe_idx]   # (N,)
+
+                if save_all_matches:
+                    # Return all matches above threshold per motif
+                    match_idx = [
+                        np.where(sim_threshold[n] > 0)[0]
+                        for n in range(sim_threshold.shape[0])
+                    ]  # list of length (N,) of arrays of shape (K_n,) indices
+                    match_score = [
+                        sim_threshold[n, match_idx[n]]
+                        for n in range(sim_threshold.shape[0])
+                    ]  # list of length (N,) of arrays of shape (K_n,) scores
+                    match_motif = [
+                        reference_motifs_raw[match_idx[n]]
+                        for n in range(sim_threshold.shape[0])
+                    ]  # list of length (N,) of arrays of shape (K_n, L, 4) motifs
+                    match_label = [
+                        [labels[idx] for idx in match_idx[n]]
+                        for n in range(sim_threshold.shape[0])
+                    ]  # list of length (N,) of lists of length (K_n,) of labels
+                    match_alignment_h = [
+                        alignment_h[n, match_idx[n]]
+                        for n in range(sim_threshold.shape[0])
+                    ]  # list of length (N,) of arrays of shape (K_n,) alignments
+                    match_alignment_rc = [
+                        alignment_rc[n, match_idx[n]]
+                        for n in range(sim_threshold.shape[0])
+                    ]  # list of length (N,) of arrays of shape (K_n,) alignments
+                else:
+                    match_idx = top_match_idx      # (N,)
+                    match_score = top_match_score  # (N,)
+                    match_motif = top_match_motif  # (N, L, 4)
+                    match_label = top_match_label  # (N,)
+                    match_alignment_h = top_alignment_h  # (N,)
+                    match_alignment_rc = top_alignment_rc  # (N,)
+
+                # Subtract best match component (always using single best match)
+                my_motifs = utils_motif.remove_motif_component(
+                    my_motifs,
+                    top_match_motif,
+                    top_alignment_rc,
+                    top_alignment_h,
+                )
+            
             # Save match information
-            match_label = [labels[x] if x >= 0 else None for x in match_idx]
-            match_scores.append(match_score)
             match_idxs.append(match_idx)
+            match_scores.append(match_score)
             match_motifs.append(match_motif)
             match_labels.append(match_label)
+            match_alignment_rcs.append(match_alignment_rc)
+            match_alignment_hs.append(match_alignment_h)
 
         # Restore IC-scale setting
         if ic_scale:
             utils_config.set_ic_scale(True)
 
-        # Save match information
+        # Save match information to metadata and images
         for i in range(max_submotifs):
-            self.metadata[f"{save_col_prefix}_score{i}"] = match_scores[i]  # Save scores
-            self.metadata[f"{save_col_prefix}_name{i}"] = match_labels[i]  # Save labels
-            # Save logos, matches only
+            self.metadata[f"{save_col_prefix}_score{i}"] = match_scores[i]  # Save score
+            self.metadata[f"{save_col_prefix}_name{i}"] = match_labels[i]  # Save label
+            # Save logos
             if save_images:
-                self.__images[f"{save_col_prefix}_logo{i}"] = "" # Initialize images
-                match_idx = np.where(match_idxs[i] >= 0)[0]
-                if utf8_images is None:
-                    # Generate forward logos if not provided
-                    self.add_logos(
-                        match_motifs[i], f"{save_col_prefix}_logo{i}", logo_trimming
-                    )
-                else:
+                self.__images[f"{save_col_prefix}_logo{i}"] = ""  # Initialize images
+                if utf8_images is not None and not save_all_matches:
                     # Copy forward logos if provided
-                    self.__images.loc[match_idx, f"{save_col_prefix}_logo{i}"] = [
+                    valid = np.where(match_idxs[i] >= 0)[0]
+                    if save_all_matches:
+                        self.__images.loc[valid, f"{save_col_prefix}_logo{i}"] = [
                         utf8_images[x] if x >= 0 else ""
-                        for x in match_idxs[i][match_idx]
+                        for x in match_idxs[i][valid]
                     ]
+                else:
+                    # Generate forward logos if not provided
+                    if save_all_matches:
+                        self.add_logo_stacks(
+                            motifs_stack_list=match_motifs[i],
+                            alignment_h_list=match_alignment_hs[i],
+                            alignment_rc_list=match_alignment_rcs[i],
+                            image_name=f"{save_col_prefix}_logo{i}", 
+                            trim=logo_trimming,
+                            length=logo_length,
+                        )
+                    else:
+                        self.add_logos(
+                            motifs=match_motifs[i], 
+                            image_name=f"{save_col_prefix}_logo{i}", 
+                            trim=logo_trimming,
+                            length=logo_length,
+                        )
