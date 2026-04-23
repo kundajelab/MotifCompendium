@@ -778,7 +778,10 @@ def assign_label_from_other_compendium(
     reference_motifs = assign_from_mc.motifs
     # Check if forward logos in other MotifCompendium
     if save_images and "logo (fwd)" in assign_from_mc.images():
-        other_logos = assign_from_mc.get_images("logo (fwd)")
+        other_logos = {
+            "logo (fwd)": assign_from_mc.get_images("logo (fwd)"),
+            "logo (rev)": assign_from_mc.get_images("logo (rev)"),
+        }
     else:
         other_logos = None
     # Assign labels

@@ -354,7 +354,6 @@ thead th.col-dragging .drag-handle{opacity:.9}
 <script type="application/json" class="rc">{{ chunk | safe }}</script>
 {% endfor %}
 <script>
-
 const {columns: COLS, image_column: IMGS, editable: EDIT} = _META;
 const ROWS = [];
 
@@ -1024,11 +1023,62 @@ function doExport(){
 
 /* ── save edits ── */
 function doSave(){
-  const updated=ROWS.map(row=>{const k=row[COLS[0]];return edits[k]?{...row,...edits[k]}:row});
-  const np=JSON.stringify({...DATA,rows:updated}).replace(/<\//g,'<\\/');
-  let html=document.documentElement.outerHTML;
-  html=html.replace(/\/\/ DATA_START[\s\S]*?\/\/ DATA_END/,`// DATA_START\nconst DATA = ${np};\n// DATA_END`);
-  Object.assign(document.createElement('a'),{href:URL.createObjectURL(new Blob([html],{type:'text/html'})),download:'table_edited.html'}).click();
+  try {
+    const updated = ROWS.map(row => {
+      const k = row[COLS[0]];
+      return edits[k] ? {...row, ...edits[k]} : row;
+    });
+
+    // Accumulate parts as an array — never concat into one giant string
+    const parts = [];
+
+    parts.push(`<!DOCTYPE html>\n<html lang="en">\n`);
+    parts.push(document.head.outerHTML);
+    parts.push(`\n<body>\n`);
+
+    for (const child of document.body.childNodes) {
+      if (child.nodeType !== 1) { parts.push(child.textContent); continue; }
+      if (child.classList.contains('rc')) continue;
+      if (child.id === 'tw') {
+        const twClone = child.cloneNode(true);
+        const tb = twClone.querySelector('#tb');
+        if (tb) tb.innerHTML = '';
+        parts.push(twClone.outerHTML);
+        continue;
+      }
+      parts.push(child.outerHTML);
+      if (child.tagName === 'SCRIPT' && child.textContent.trim().startsWith('const _META =')) {
+        const CHUNK = 500;
+        for (let i = 0; i < updated.length; i += CHUNK) {
+          parts.push(`<script type="application/json" class="rc">${
+            JSON.stringify(updated.slice(i, i + CHUNK)).replace(/<\//g, '<\\/')
+          }<\/script>\n`);
+        }
+      }
+    }
+
+    // DATA block for Python reader
+    const textCols = COLS.filter((_, i) => !IMGS[i]);
+    const rowsNoImages = updated.map(row => {
+      const r = {};
+      textCols.forEach(c => r[c] = row[c]);
+      return r;
+    });
+
+    parts.push(`\n</body>\n</html>`);
+
+    const currentName = window.location.pathname.split('/').pop()
+      .replace(/\.html$/i, '') || 'table';
+    // Blob accepts an array of strings natively — no concatenation needed
+    const blob = new Blob(parts, { type: 'text/html' });
+    Object.assign(document.createElement('a'), {
+      href: URL.createObjectURL(blob),
+      download: currentName + '_edited.html'
+    }).click();
+
+  } catch(err) {
+    alert('Save failed: ' + err.message + '\n\n' + err.stack);
+  }
 }
 
 /* ── column resize ── */
