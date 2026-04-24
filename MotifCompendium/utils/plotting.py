@@ -32,7 +32,7 @@ class LogoPlottingInput:
         revcomp: A boolean indicating whether the motif needs to be reverse
           complemented.
         pos: An int representing the position of the motif (shifted post-reverse
-          complement).
+          complement), with respect to the x-axis of the logo plot.
         xmin: An int representing the minimum value of the x-axis in the logo plot.
         xmax: An int representing the maximum value of the x-axis in the logo plot.
         trim: A bool or float/int indicating how the motif should be trimmed when
@@ -121,20 +121,22 @@ class LogoPlottingInput:
     def get_motif_df(self) -> pd.DataFrame:
         """Returns a pd.DataFrame of the motif that can be passed to logomaker."""
         # Trim motif if needed
-        if isinstance(self.trim, bool) and self.trim and self.length is None:
-            motif_to_plot = utils_motif.trim_motif(
-                motif=self.motif,
-                importance=1/self.motif.shape[0]
-            )
-        elif isinstance(self.trim, (int, float)) and self.length is None:
-            motif_to_plot = utils_motif.trim_motif(
-                motif=self.motif,
-                importance=self.trim
-            )
-        elif isinstance(self.length, int) and self.trim is False:
+        if (self.trim is not False) and (self.length is not None):
+            raise ValueError("Cannot specify both trim and length.")
+        elif (self.trim is False) and (isinstance(self.length, int)):
             motif_to_plot = utils_motif.resize_motif(
                 motif=self.motif,
                 resize_to=self.length,
+            )
+        elif (self.trim is True) and (self.length is None):
+            motif_to_plot = utils_motif.trim_motif(
+                motif=self.motif,
+                importance=(1 / self.motif.shape[0]),
+            )
+        elif (self.trim is not False) and (isinstance(self.trim, (int, float))) and (self.length is None):
+            motif_to_plot = utils_motif.trim_motif(
+                motif=self.motif,
+                importance=self.trim,
             )
         else:
             motif_to_plot = self.motif
@@ -293,24 +295,39 @@ def plot_motif_stack(
         A UTF-8 encoded string of the figure if encode is True, else None.
     """
     # Check inputs
-    if (motif_stack is None) or (len(motif_stack) == 0):
+    if (motif_stack is None) or (len(motif_stack) == 0) or (np.all(motif_stack == 0)):
         return None
     if motif_stack.ndim == 2:
         motif_stack = motif_stack[np.newaxis, :]
     utils_motif.validate_motif_stack_standard(motif_stack)
-    N = motif_stack.shape[0]
+    N, L, K = motif_stack.shape
     if alignment_rc is not None and not (
         isinstance(alignment_rc, np.ndarray) and alignment_rc.shape == (N,)
     ):
         raise TypeError(
-            f"alignment_rc must be a vector whose length matches that of the motif stack; Current motif stack shape: {motif_stack.shape}, alignment_rc shape: {alignment_rc.shape}"
-        )
+            f"alignment_rc must be a vector that matches the length of the motif stack; \
+            Current motif stack shape: {motif_stack.shape}, alignment_rc shape: {alignment_rc.shape}"
+    )
     if alignment_h is not None and not (
         isinstance(alignment_h, np.ndarray) and alignment_h.shape == (N,)
     ):
         raise TypeError(
-            f"alignment_h must be a vector whose length matches that of the motif stack; Current motif stack shape: {motif_stack.shape}, alignment_h shape: {alignment_h.shape}"
+            f"alignment_h must be a vector that matches the length of the motif stack; \
+            Current motif stack shape: {motif_stack.shape}, alignment_h shape: {alignment_h.shape}"
         )
+    if (trim is not False) and (length is not None):
+        raise ValueError("Cannot specify both trim and length.")
+    # Adjust trim: Per stack, Per motif
+    if (trim is not False) or (length is not None):
+        trim_motif = False
+        trim_stack = trim
+        length_motif = None
+        length_stack = length
+    else:
+        trim_motif = trim
+        trim_stack = False
+        length_motif = length
+        length_stack = None
     # Defaults for alignment_rc and alignment_h
     if alignment_rc is None:
         alignment_rc = np.zeros(N).astype(bool)
@@ -327,8 +344,8 @@ def plot_motif_stack(
                 motif_stack[i],
                 revcomp=alignment_rc[i],
                 pos=alignment_h[i],
-                trim=trim,
-                length=length,
+                trim=trim_motif,
+                length=length_motif,
                 encode=False,
                 ax=ax,
             )
@@ -337,6 +354,34 @@ def plot_motif_stack(
     x_max = int(np.max(alignment_h)) + motif_stack.shape[1]
     for motif_info in motif_info_list:
         motif_info.set_bounds(x_min, x_max)
+    # Adjust trim: Per stack
+    if (trim_stack is not False or length_stack is not None):
+        motifs_dfs = [motif_info.get_motif_df() for motif_info in motif_info_list]
+        motifs_concat_df = pd.concat(motifs_dfs)
+        motif_sum_abs_df = motifs_concat_df.groupby(motifs_concat_df.index).sum().abs()
+        # Trim:
+        if trim_stack is not False:
+            if trim_stack is True:
+                trim_stack = 1 / L  # Trim: True
+            elif isinstance(trim_stack, (int, float)):
+                pass  # Trim: Float/Int
+            nonzero_mask = (motif_sum_abs_df > (trim_stack * motif_sum_abs_df.sum()) ).any(axis=1)
+            nonzero_idx = motif_sum_abs_df.index[nonzero_mask]
+            x_min = nonzero_idx.min()
+            x_max = nonzero_idx.max()
+        # Length:
+        elif length_stack is not None:
+            if length_stack > L:
+                x_min -= round((length_stack - L) / 2)
+                x_max += (length_stack - L) // 2
+            elif length_stack < L:
+                per_position_sums = motif_sum_abs_df.sum(axis=-1).to_numpy()
+                window_totals = np.convolve(per_position_sums, np.ones(length_stack, dtype=int), 'valid')
+                top_i = int(np.argmax(window_totals))
+                x_min = top_i
+                x_max = top_i + length_stack - 1
+        for motif_info in motif_info_list:
+            motif_info.set_bounds(x_min, x_max)
     # Plot
     if parallel:
         motif_info_list = plot_many_motif_logos(motif_info_list)
