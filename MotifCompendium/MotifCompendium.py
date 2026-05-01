@@ -2076,7 +2076,6 @@ class MotifCompendium:
         with open(html_loc, "r", encoding="utf-8") as f:
             html_content = f.read()
 
-        # Parse all rc chunks
         chunks = re.findall(
             r'<script[^>]*class="rc"[^>]*>\s*(\[[\s\S]*?\])\s*<\/script>',
             html_content
@@ -2084,7 +2083,6 @@ class MotifCompendium:
         if not chunks:
             raise ValueError("No rc chunks found in HTML file.")
 
-        # Parse _META for column/image info
         meta_match = re.search(r'const _META\s*=\s*(\{[\s\S]*?\});', html_content)
         if not meta_match:
             raise ValueError("Could not find _META in HTML file.")
@@ -2099,21 +2097,27 @@ class MotifCompendium:
             if not chunk:
                 continue
             rows_data.extend(json.loads(chunk))
+        
+        if len(rows_data) != len(self.metadata):
+            raise ValueError(
+                f"Row count mismatch: HTML file has {len(rows_data)} rows, "
+                f"but metadata has {len(self.metadata)} rows. "
+                "Ensure the HTML was generated from the current metadata."
+            )
 
         index_col = columns[0]
         text_cols = [c for c, is_img in zip(columns[1:], image_column[1:]) if not is_img]
 
         index_values = [int(row[index_col]) for row in rows_data]
         records = [{c: row.get(c) for c in text_cols} for row in rows_data]
-        df = pd.DataFrame(records, index=pd.Index(index_values, dtype=int))
-        df.sort_index(inplace=True)
+
+        df = pd.DataFrame(records, index=pd.Index(index_values, dtype=self.metadata.index.dtype))
 
         for col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="ignore")
 
-        for col in df.columns:
-            if col in self.metadata.columns:
-                self.metadata[col] = df[col]
+        # update() aligns on both index and columns — no silent row shifting
+        self.metadata.update(df)
 
     def heatmap(
         self,

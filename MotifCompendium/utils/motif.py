@@ -472,8 +472,14 @@ def motif_to_string(
     base_map = np.array(["A", "C", "G", "T"])
     for m in motif_to_str:
         m_valid = np.sum(m, axis=1) > 0
+
+        if not np.any(m_valid):
+            str_revstr.append((None, None))  # or ("", "")
+            continue
+
         min_index = np.argmax(m_valid)
         max_index = m_valid.shape[0] - np.argmax(m_valid[::-1])
+
         motif_str_list, motif_revstr_list = [], []
         for i in range(min_index, max_index):
             pos = m[i]
@@ -486,6 +492,7 @@ def motif_to_string(
                 motif_str_list.append(base)
                 revbase = base_map[-base_idx - 1]
                 motif_revstr_list.insert(0, revbase)
+
         motif_str = "".join(motif_str_list)
         motif_revstr = "".join(motif_revstr_list)
         str_revstr.append((motif_str, motif_revstr))
@@ -1099,7 +1106,7 @@ def calculate_possum_vs_negsum(x: np.ndarray) -> float | np.ndarray:
     validate_motif_stack_standard(x)
 
     sum_positive = np.sum(x * (x > 0), axis=(1, 2))         # (N,)
-    abs_sum_negative = -np.sum(x * (x < 0), axis=(1, 2))    # (N,)
+    abs_sum_negative = np.abs(np.sum(x * (x < 0), axis=(1, 2)))     # (N,)
 
     pos_dominant = sum_positive >= abs_sum_negative
 
@@ -1143,7 +1150,7 @@ def calculate_posmax_vs_negmax(x: np.ndarray) -> float | np.ndarray:
     validate_motif_stack_standard(x)
 
     max_positive = np.max(x, axis=(1, 2))        # (N,)
-    abs_min_negative = -np.min(x, axis=(1, 2))   # (N,)
+    abs_min_negative = np.abs(np.min(x, axis=(1, 2)))       # (N,)
 
     pos_dominant = max_positive >= abs_min_negative
 
