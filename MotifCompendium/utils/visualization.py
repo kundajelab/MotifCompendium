@@ -4,6 +4,7 @@ import json
 from jinja2 import Environment, FileSystemLoader
 import numpy as np
 import pandas as pd
+import math
 
 import MotifCompendium.utils.plotting as utils_plotting
 
@@ -62,21 +63,36 @@ def table_html(
         raise TypeError("table must be a pd.DataFrame")
     if not html_out.endswith(".html"):
         html_out += ".html"
+    
+    def _sanitize(val):
+        """Recursively replace NaN/Inf with None so json.dumps never sees them."""
+        if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
+            return None
+        if isinstance(val, dict):
+            return {k: _sanitize(v) for k, v in val.items()}
+        if isinstance(val, (list, tuple)):
+            return [_sanitize(v) for v in val]
+        return val
 
     image_column = list(image_column)
     table = table.copy()
     table.insert(0, "index", table.index)
     image_column.insert(0, False)
+    table = table.apply(
+        lambda col: col.map(lambda x: x.tolist() if isinstance(x, np.ndarray) else x)
+    )
     table = table.astype(object).where(pd.notna(table), None)
 
     columns  = table.columns.tolist()
-    table = table.applymap(
-        lambda x: x.tolist() if isinstance(x, np.ndarray) else x
-    )
-    rows_all = table.to_dict(orient="records")
+    array_cols = {col for col, is_img in zip(columns, image_column) if is_img}
+    rows_all = [
+        {k: (_sanitize(v) if k in array_cols else _sanitize(v))
+        for k, v in row.items()}
+        for row in table.to_dict(orient="records")
+    ]
 
     def _json(obj) -> str:
-        return json.dumps(obj, ensure_ascii=True).replace("</", "<\\/")
+        return json.dumps(obj, allow_nan=False, ensure_ascii=True).replace("</", "<\\/")
 
     meta_payload = _json({
         "columns":      columns,
