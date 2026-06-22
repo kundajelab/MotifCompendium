@@ -14,6 +14,7 @@ README sections:
 - [Loading old versions of MotifCompendium](#working-with-old-versions-of-motifcompendium)
 - [Problems with MotifCompendium](#problems)
 - [Developers](#developers)
+- [License](#license)
 
 ## Installation
 
@@ -52,3 +53,7 @@ If you run into an issue with MotifCompendium, please file a GitHub issue. And c
 ## Developers
 
 Developed by Salil Deshpande and Chang Yun.
+
+## License
+
+MotifCompendium is licensed under the [MIT license](LICENSE).
