@@ -744,6 +744,22 @@ class MotifCompendium:
             raise KeyError(f"{image_name} is not a saved image.")
         return self.__images[image_name].tolist()
 
+    def set_images(self, image_name: str, images: list[str | None]) -> None:
+        """Sets the saved images in the MotifCompendium for a given column name."""
+        if not isinstance(image_name, str):
+            raise TypeError("image_name must be a string.")
+        if image_name in self.columns():
+            raise ValueError(
+                f"{image_name} is already a metadata column. Names may not overlap."
+            )
+        if not isinstance(images, list) or not all(
+            [isinstance(x, str) or x is None for x in images]
+        ):
+            raise TypeError("images must be a list of strings or None.")
+        if len(images) != len(self):
+            raise ValueError("Length of images must match number of motifs.")
+        self.__images[image_name] = images
+
     def add_logos(
         self,
         motifs: np.ndarray,
@@ -1980,6 +1996,7 @@ class MotifCompendium:
         columns: None | list[str] = None,
         logo_trimming: bool | float | int = True,
         editable=False,
+        column_desc_dict: dict[str, str] | None = None,
     ) -> None:
         """Creates an html file summarizing all motifs and metadata about them.
 
@@ -2002,6 +2019,9 @@ class MotifCompendium:
               threshold. At a value of 0, only zero positions are trimmed and at a value
               of 1, all positions would be trimmed.
             editable: Whether or not the table is editable.
+            column_desc_dict: A dictionary mapping column names to descriptions. If provided,
+              these descriptions will be shown as tooltips when hovering over the column headers 
+              in the HTML table.
 
         Notes:
             It is highly suggested that this function just be run on a MotifCompendium
@@ -2049,7 +2069,13 @@ class MotifCompendium:
                     f"{c} must be a column in metadata or a generated image."
                 )
         table_df = pd.concat(table_columns, axis=1)
-        utils_visualization.table_html(table_df, image_column, html_out, editable)
+        utils_visualization.table_html(
+            table=table_df, 
+            image_column=image_column, 
+            html_out=html_out, 
+            editable=editable,
+            column_desc_dict=column_desc_dict,
+        )
 
     def update_from_summary_table(self, html_loc: str) -> None:
         """Read edited metadata back from a summary table HTML file.

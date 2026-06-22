@@ -672,7 +672,7 @@ def k_centroids_clustering(
           same cluster.
     """
     # Import libraries (avoid circular imports)
-    import MotifCompendium
+    from MotifCompendium.MotifCompendium import MotifCompendium
     N = similarity_matrix.shape[0]
 
     # Initialization: Similarity, Motif, Membership
@@ -706,7 +706,7 @@ def k_centroids_clustering(
                 method=init_method,
             )
         # Build MotifCompendium object
-        mc = MotifCompendium.MotifCompendium(
+        mc = MotifCompendium(
             motifs,
             similarity_matrix,
             alignment_rc_matrix,

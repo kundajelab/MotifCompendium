@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="MotifCompendium",
-    version="1.0.17",
+    version="1.0.18",
     packages=find_packages(),
     package_data={
         "MotifCompendium": ["utils/*"],
@@ -11,6 +11,7 @@ setup(
         # List any dependencies here
         "beautifulsoup4",
         "h5py",
+        "hdf5plugin",
         "igraph",
         "jinja2",
         "leidenalg",

@@ -5,7 +5,7 @@ import pandas as pd
 import seaborn as sns
 import upsetplot
 
-import MotifCompendium.MotifCompendium as MotifCompendiumClass
+from MotifCompendium.MotifCompendium import MotifCompendium
 import MotifCompendium.utils.loader as utils_loader
 import MotifCompendium.utils.motif as utils_motif
 
@@ -14,7 +14,7 @@ import MotifCompendium.utils.motif as utils_motif
 # SIMILARITY ANALYSES #
 #######################
 def plot_similarity_distribution(
-    mc: MotifCompendiumClass,
+    mc: MotifCompendium,
     save_loc: str,
     vals: list[float] = [0.99, 0.98, 0.97, 0.96, 0.95, 0.9, 0.85, 0.8, 0.75, 0.7],
     tolerance: float = 0.001,
@@ -57,7 +57,7 @@ def plot_similarity_distribution(
 
 
 def plot_clustering_similarity_mismatch(
-    mc: MotifCompendiumClass,
+    mc: MotifCompendium,
     clustering: str,
     similarity_threshold: float,
     save_loc: str,
@@ -129,7 +129,7 @@ def plot_clustering_similarity_mismatch(
 
 
 def judge_clustering(
-    mc: MotifCompendiumClass,
+    mc: MotifCompendium,
     cluster_col: str,
     show: bool = False,
     save_loc: str | None = None,
@@ -179,7 +179,7 @@ def judge_clustering(
 # DOWNSTREAM ANALYSES #
 #######################
 def plot_unique_per_cluster(
-    mc: MotifCompendiumClass, group_by: str, save_loc: str
+    mc: MotifCompendium, group_by: str, save_loc: str
 ) -> None:
     """Identifies and plots the most unique in each cluster.
 
@@ -212,7 +212,7 @@ def plot_unique_per_cluster(
 
 
 def cluster_grouping_upset_plot(
-    mc: MotifCompendiumClass,
+    mc: MotifCompendium,
     clustering: str,
     grouping: str,
     show: bool = False,
@@ -252,7 +252,7 @@ def cluster_grouping_upset_plot(
 
 
 def export_compendium_modisco(
-    mc: MotifCompendiumClass,
+    mc: MotifCompendium,
     name_col: str,
     save_loc: str,
 ) -> None:
@@ -297,7 +297,7 @@ def export_compendium_modisco(
 
 
 def export_compendium_clustered_modisco(
-    mc: MotifCompendiumClass,
+    mc: MotifCompendium,
     cluster_name: str,
     save_loc: str,
     weight_col: str | None = None,
@@ -386,7 +386,7 @@ def export_compendium_clustered_modisco(
 
 
 def export_compendium_meme(
-    mc: MotifCompendiumClass,
+    mc: MotifCompendium,
     save_loc: str,
     name_col: str = "name",
 ) -> None:
@@ -437,7 +437,7 @@ def export_compendium_meme(
 # ENTROPY ANALYSES #
 ####################
 def calculate_filters(
-    mc: MotifCompendiumClass,
+    mc: MotifCompendium,
     metric_list: list[str] = [
         "motif_entropy",
         "weighted_base_entropy",
@@ -632,7 +632,7 @@ def calculate_filters(
 # EXISTING MOTIF DATABASE #
 ###########################
 def assign_label_from_pfms(
-    mc: MotifCompendiumClass,
+    mc: MotifCompendium,
     pfm_file: str,
     save_col_prefix: str = "match",
     min_score: float = 0.8,
@@ -705,8 +705,8 @@ def assign_label_from_pfms(
 
 
 def assign_label_from_other_compendium(
-    assign_to_mc: MotifCompendiumClass,
-    assign_from_mc: MotifCompendiumClass,
+    assign_to_mc: MotifCompendium,
+    assign_from_mc: MotifCompendium,
     from_label_col: str = "name",
     save_col_prefix: str = "match",
     min_score: float = 0.8,
@@ -764,8 +764,8 @@ def assign_label_from_other_compendium(
         (Note: logo_trimming and logo_length cannot be used together.)
     """
     if not (
-        isinstance(assign_to_mc, MotifCompendiumClass)
-        and isinstance(assign_from_mc, MotifCompendiumClass)
+        isinstance(assign_to_mc, MotifCompendium)
+        and isinstance(assign_from_mc, MotifCompendium)
     ):
         raise TypeError(
             "Both assign_to_mc and assign_from_mc must be MotifCompendium instances."
