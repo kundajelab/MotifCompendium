@@ -195,7 +195,7 @@ def plot_motif(
     # Plot
     fig, ax = plt.subplots(figsize=(6, 2))
     motif_logo = LogoPlottingInput(
-        motifs=motif,
+        motif=motif,
         trim=trim,
         length=length,
         encode=encode,

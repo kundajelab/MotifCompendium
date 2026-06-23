@@ -14,7 +14,8 @@
   --r:6px;--r-sm:4px;--row-h:40px
 }
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
-  font-size:13px;color:var(--text);background:var(--bg);height:100vh;
+  font-size:13px;color:var(--text);background:var(--bg);
+  height:100vh;height:100dvh;
   display:flex;flex-direction:column;overflow:hidden}
 
 /* ── loading overlay ── */
@@ -104,7 +105,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-seri
 #rhdp .rh-presets .btn.btn-active{background:var(--row-hover);border-color:var(--accent);color:var(--accent)}
 
 /* ── table area ── */
-#tw{flex:1;overflow:auto;position:relative;background:var(--surface)}
+#tw{flex:1;min-height:0;overflow:auto;position:relative;background:var(--surface)}
 table{border-collapse:separate;border-spacing:0;width:max-content;min-width:100%}
 
 /* header rows */
@@ -204,7 +205,8 @@ tbody td a:hover{text-decoration:underline}
 /* ── pagination ── */
 #pg{display:flex;align-items:center;gap:8px;padding:7px 14px;
   background:var(--surface);border-top:1px solid var(--border);
-  font-size:12px;color:var(--muted);flex-shrink:0;flex-wrap:wrap}
+  font-size:12px;color:var(--muted);flex-shrink:0;flex-wrap:wrap;
+  padding-bottom:max(7px, env(safe-area-inset-bottom))}
 #pg select{border:1px solid var(--border);border-radius:var(--r-sm);
   padding:3px 6px;font-size:12px;outline:none;background:var(--surface)}
 #pi{white-space:nowrap}
@@ -235,6 +237,55 @@ thead th.drop-after{background:var(--row-hover)!important}
   flex-shrink:0;opacity:.35;transition:opacity .12s;margin-right:1px}
 thead th.col-draggable:hover .drag-handle{opacity:.7}
 thead th.col-dragging .drag-handle{opacity:.9}
+
+/* ── column-header description tooltip ── */
+.thl-wrap{position:relative;display:flex;align-items:center;gap:4px;flex:1;}
+.thl{flex:1;overflow:hidden;text-overflow:ellipsis;}
+
+.col-desc-icon{
+  display:inline-flex;align-items:center;justify-content:center;
+  flex-shrink:0;width:14px;height:14px;border-radius:50%;
+  background:transparent;color:var(--border2);
+  border:1px solid var(--border);
+  font-size:9px;font-weight:700;line-height:1;cursor:default;
+  opacity:0.75;
+  transition:background .12s,color .12s,opacity .12s;
+  pointer-events:auto;
+}
+.col-desc-icon:hover{background:var(--accent);color:#fff;border-color:var(--accent);opacity:1;}
+
+.col-desc-tip{
+  display:none;
+  position:absolute;
+  top:calc(100% + 6px);
+  left:0;
+  z-index:300;
+  width:220px;
+  padding:8px 10px;
+  background:var(--text);
+  color:#fff;
+  font-size:11px;
+  font-weight:400;
+  line-height:1.45;
+  border-radius:var(--r);
+  box-shadow:0 4px 14px rgba(0,0,0,.22);
+  pointer-events:none;
+  white-space:normal;
+  word-break:break-word;
+}
+.col-desc-tip::before{
+  content:'';position:absolute;top:-5px;left:10px;
+  border:5px solid transparent;
+  border-top:none;border-bottom-color:var(--text);
+}
+.col-desc-icon:hover + .col-desc-tip,
+.col-desc-icon:focus + .col-desc-tip{
+  display:block;
+}
+thead th:has(.col-desc-icon:hover),
+thead th:has(.col-desc-icon:focus) {
+  z-index: 100;
+}
 </style>
 </head>
 <body>
@@ -354,7 +405,7 @@ thead th.col-dragging .drag-handle{opacity:.9}
 <script type="application/json" class="rc">{{ chunk | safe }}</script>
 {% endfor %}
 <script>
-const {columns: COLS, image_column: IMGS, editable: EDIT} = _META;
+const {columns: COLS, image_column: IMGS, editable: EDIT, col_desc: COL_DESC} = _META;
 const ROWS = [];
 
 const ZOOM_LEVELS=[50,67,75,90,100,110,125,150,175,200];
@@ -434,7 +485,6 @@ function setRH(v){
   document.getElementById('rh-val').textContent=v;
   document.getElementById('rh-slider').value=v;
   document.documentElement.style.setProperty('--row-h',v+'px');
-  // Update active preset button
   document.querySelectorAll('#rhdp .rh-presets .btn').forEach(b=>{
     b.classList.toggle('btn-active',parseInt(b.dataset.rh,10)===v);
   });
@@ -516,8 +566,28 @@ function buildHeader(){
       });
     }
 
+    // ── column label + optional description tooltip ──────────────────────────
+    const wrap=document.createElement('div'); wrap.className='thl-wrap';
     const lbl=document.createElement('span'); lbl.className='thl'; lbl.textContent=col;
-    inn.appendChild(lbl);
+    wrap.appendChild(lbl);
+
+    const desc=COL_DESC[col];
+    if(desc){
+      const icon=document.createElement('span');
+      icon.className='col-desc-icon';
+      icon.textContent='?';
+      icon.setAttribute('aria-label',`Description: ${desc}`);
+      icon.setAttribute('tabindex','0');
+
+      const tip=document.createElement('div');
+      tip.className='col-desc-tip';
+      tip.textContent=desc;
+
+      wrap.appendChild(icon);
+      wrap.appendChild(tip);
+    }
+    inn.appendChild(wrap);
+    // ─────────────────────────────────────────────────────────────────────────
 
     if(!IMGS[i]){
       const sg=document.createElement('div'); sg.className='sg';
@@ -605,13 +675,11 @@ function clearDropIndicators(){
 }
 
 /* ── Columns dropdown: show/hide + drag-to-reorder ── */
-// CDP drag state
 let cdpDragSrcPos=null;
 
 function buildCDP(){
   const p=document.getElementById('cdp'); p.innerHTML='';
 
-  // Render items in current colOrder
   colOrder.forEach((colIdx, orderPos)=>{
     const col=COLS[colIdx];
     const item=document.createElement('label');
@@ -621,7 +689,6 @@ function buildCDP(){
       item.draggable=true;
     }
 
-    // Grip handle (only for non-frozen columns)
     if(orderPos>0){
       const grip=document.createElement('span');
       grip.className='cdp-grip';
@@ -633,7 +700,6 @@ function buildCDP(){
       </svg>`;
       item.appendChild(grip);
     } else {
-      // Spacer so text aligns
       const sp=document.createElement('span');
       sp.style.width='13px'; sp.style.flexShrink='0';
       item.appendChild(sp);
@@ -654,7 +720,6 @@ function buildCDP(){
     lbl.textContent=col;
     item.appendChild(lbl);
 
-    // Drag events on item
     if(orderPos>0){
       item.addEventListener('dragstart',e=>{
         cdpDragSrcPos=orderPos;
@@ -700,7 +765,6 @@ function buildCDP(){
 
       let insertAt=newOrder.indexOf(colOrder[tgtPos]);
       if(!insertBefore) insertAt+=1;
-      // Never drop before position 0 (frozen index column)
       insertAt=Math.max(1,Math.min(newOrder.length,insertAt));
 
       newOrder.splice(insertAt,0,moved);
@@ -724,7 +788,9 @@ function clearCDPDropIndicators(){
 function toggleCDD(){
   const dp=document.getElementById('cdp');
   dp.classList.toggle('open');
-  document.getElementById('cdd-btn').classList.toggle('btn-active', dp.classList.contains('open'));
+  const isOpen=dp.classList.contains('open');
+  document.getElementById('cdd-btn').classList.toggle('btn-active', isOpen);
+  if(isOpen) buildCDP();
 }
 document.addEventListener('click',e=>{
   if(!e.target.closest('#cdd')){
@@ -753,10 +819,13 @@ function applyF(isInit){
   }
 
   function passesFilters(row){
-    if(gs&&!COLS.some((c,ci)=>!IMGS[ci]&&row[c]!=null&&String(row[c]).toLowerCase().includes(gs))) return false;
+    const key=row[COLS[0]];
+    const eff=c=>{ const ed=edits[key]?.[c]; return ed!==undefined?ed:row[c]; };
+    if(gs&&!COLS.some((c,ci)=>{ if(IMGS[ci]) return false; const v=eff(c); return v!=null&&String(v).toLowerCase().includes(gs); })) return false;
     for(const[ci,fv] of activeFilters){
       const c=COLS[+ci];
-      if(row[c]==null||!String(row[c]).toLowerCase().includes(fv.toLowerCase())) return false;
+      const v=eff(c);
+      if(v==null||!String(v).toLowerCase().includes(fv.toLowerCase())) return false;
     }
     return true;
   }
@@ -912,8 +981,6 @@ function render(){
   for(let ri=s;ri<e;ri++){
     const row=fRows[ri], key=row[COLS[0]];
     const tr=document.createElement('tr');
-    // Always set inline height so it overrides CSS table-layout minimum.
-    // rowH[key] is a per-row override; globalRowH is the global setting.
     const trH=rowH[key]||globalRowH;
     tr.style.height=trH+'px';
 
@@ -926,7 +993,6 @@ function render(){
       const disp=ev!==undefined?ev:origDisp;
 
       if(IMGS[i]){
-        // ── Image cell: no padding, fill ──
         td.classList.add('img-cell');
         if(hasImageData(val)){
           const img=document.createElement('img');
@@ -1017,8 +1083,18 @@ function doExport(){
   const orderedVisible=colOrder.filter(i=>!IMGS[i]);
   const q=v=>v==null?'':'"'+String(v).replace(/"/g,'""')+'"';
   const lines=[orderedVisible.map(i=>q(COLS[i])).join(',')];
-  fRows.forEach(row=>lines.push(orderedVisible.map(i=>q(row[COLS[i]])).join(',')));
-  Object.assign(document.createElement('a'),{href:URL.createObjectURL(new Blob([lines.join('\n')],{type:'text/csv'})),download:'export.csv'}).click();
+  ROWS.forEach(row=>{
+    const key=row[COLS[0]];
+    lines.push(orderedVisible.map(i=>{
+      const col=COLS[i];
+      const edited=edits[key]?.[col];
+      return q(edited!==undefined ? edited : row[col]);
+    }).join(','));
+  });
+  Object.assign(document.createElement('a'),{
+    href:URL.createObjectURL(new Blob([lines.join('\n')],{type:'text/csv'})),
+    download:'export.csv'
+  }).click();
 }
 
 /* ── save edits ── */
@@ -1029,7 +1105,6 @@ function doSave(){
       return edits[k] ? {...row, ...edits[k]} : row;
     });
 
-    // Accumulate parts as an array — never concat into one giant string
     const parts = [];
 
     parts.push(`<!DOCTYPE html>\n<html lang="en">\n`);
@@ -1057,19 +1132,10 @@ function doSave(){
       }
     }
 
-    // DATA block for Python reader
-    const textCols = COLS.filter((_, i) => !IMGS[i]);
-    const rowsNoImages = updated.map(row => {
-      const r = {};
-      textCols.forEach(c => r[c] = row[c]);
-      return r;
-    });
-
     parts.push(`\n</body>\n</html>`);
 
     const currentName = window.location.pathname.split('/').pop()
       .replace(/\.html$/i, '') || 'table';
-    // Blob accepts an array of strings natively — no concatenation needed
     const blob = new Blob(parts, { type: 'text/html' });
     Object.assign(document.createElement('a'), {
       href: URL.createObjectURL(blob),
@@ -1170,7 +1236,7 @@ function parseRowChunks(onDone){
   }
   next();
 }
-parseRowChunks(()=>initTable());
+requestAnimationFrame(()=>setTimeout(()=>parseRowChunks(()=>initTable()),0));
 </script>
 </body>
 </html>

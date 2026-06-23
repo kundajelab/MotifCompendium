@@ -55,10 +55,13 @@ def motif_collection_html(
 
 
 def table_html(
-    table: pd.DataFrame, image_column: list[bool], html_out: str, editable: bool
+    table: pd.DataFrame,
+    image_column: list[bool],
+    html_out: str,
+    editable: bool,
+    column_desc_dict: dict[str, str] | None = None,
+    chunk_size: int = 1000,
 ) -> None:
-    CHUNK_SIZE = 1_000   # tune to taste; ~1 k rows ≈ smooth 30-50 ms steps
-
     if not isinstance(table, pd.DataFrame):
         raise TypeError("table must be a pd.DataFrame")
     if not html_out.endswith(".html"):
@@ -98,11 +101,12 @@ def table_html(
         "columns":      columns,
         "image_column": image_column,
         "editable":     editable,
+        "col_desc":     column_desc_dict or {},
     })
 
     row_chunks = [
-        _json(rows_all[i : i + CHUNK_SIZE])
-        for i in range(0, len(rows_all), CHUNK_SIZE)
+        _json(rows_all[i : i + chunk_size])
+        for i in range(0, len(rows_all), chunk_size)
     ]
 
     current_dir = os.path.dirname(os.path.abspath(__file__))
