@@ -1137,7 +1137,7 @@ class MotifCompendium:
     ########################
     def cluster(
         self,
-        algorithm: str = "cpm_leiden",
+        algorithm: list[str] | str = ["cpm_leiden", "k_centroids"],
         similarity_threshold: float | int = 0.9,
         save_name: str = "cluster",
         cluster_within: str | None = None,
@@ -1147,6 +1147,7 @@ class MotifCompendium:
         init_clustering_col: str | None = None,
         weight_col: str | None = None,
         largest_clusters_first: bool = True,
+        algorithm_kwargs: dict[str, dict] | list[dict] | None = None,
         **kwargs,
     ) -> None:
         """Cluster motifs.
@@ -1155,8 +1156,9 @@ class MotifCompendium:
             cluster assignment will be saved into the metadata in column save_name.
 
         Args:
-            algorithm: The clustering algorithm to cluster with. Please see
-              MotifCompendium.utils.clustering.cluster() for available algorithms.
+            algorithm: The clustering algorithm(s) to cluster with. When provided as a list, 
+              each algorithm will run, initialized with the memmbership from the previous algorithm.
+              Please see MotifCompendium.utils.clustering.cluster() for available algorithms.
             similarity_threshold: The similarity threshold above which motifs should be
               considered similar.
             save_name: The name of the column in the metadata to save motif clustering
@@ -1195,8 +1197,13 @@ class MotifCompendium:
             largest_clusters_first: Whether or not the first clusters (0, 1, 2, ...)
               should be the largest clusters. If True, cluster 0 will be the largest
               cluster. If False, the cluster order will not relate to cluster size.
+            algorithm_kwargs: A dictionary of dictionaries or a list of dictionaries
+              containing additional named arguments specific to the clustering algorithm of choice. 
+              If a dictionary is provided, it will be used for all algorithms. 
+              If a list is provided, each dictionary will be used for the corresponding
+              algorithm in the algorithm list.
             **kwargs: Additional named arguments specific to the clustering algorithm of
-                choice.
+                choice. If used with a list of algorithms, passed to all algorithms.
 
         Notes:
             Review MotifCompendium.utils.clustering.cluster() for available clustering
@@ -1264,6 +1271,7 @@ class MotifCompendium:
                     weights=self[c_condition].metadata[weight_col].to_numpy() if weight_col else None,
                     similarity_threshold=similarity_threshold,
                     algorithm=algorithm,
+                    algorithm_kwargs=algorithm_kwargs,
                     **kwargs,
                 )
                 c_clusters = [c + num_clusters_so_far for c in c_clusters]
@@ -1306,6 +1314,7 @@ class MotifCompendium:
                 weights=mc_average.metadata[weight_col].to_numpy() if weight_col else None,
                 similarity_threshold=similarity_threshold,
                 algorithm=algorithm,
+                algorithm_kwargs=algorithm_kwargs,
                 **kwargs,
             )
             # Map back to self
@@ -1375,6 +1384,7 @@ class MotifCompendium:
                     weights=c_mc_average.metadata[weight_col].to_numpy() if weight_col else None,
                     similarity_threshold=similarity_threshold,
                     algorithm=algorithm,
+                    algorithm_kwargs=algorithm_kwargs,
                     **kwargs,
                 )
                 # Map back to c_mc
@@ -1417,6 +1427,7 @@ class MotifCompendium:
                 weights=self.metadata[weight_col].to_numpy() if weight_col else None,
                 similarity_threshold=similarity_threshold,
                 algorithm=algorithm,
+                algorithm_kwargs=algorithm_kwargs,
                 **kwargs,
             )
         # Otherwise, throw error
