@@ -14,6 +14,82 @@ import MotifCompendium.utils.similarity as utils_similarity
 ######################
 # CLUSTERING HANDLER #
 ######################
+_CLUSTERING_ALGORITHM_ALIASES = {
+    "mod_leiden": "rb_leiden",
+    "leiden_mod": "rb_leiden",
+    "modularity_leiden": "rb_leiden",
+    "leiden_modularity": "rb_leiden",
+    "rb_leiden": "rb_leiden",
+    "cpm": "cpm_leiden",
+    "cpm_leiden": "cpm_leiden",
+    "leiden_cpm": "cpm_leiden",
+    "constant_potts_leiden": "cpm_leiden",
+    "leiden_constant_potts": "cpm_leiden",
+    "leiden": "leiden",
+    "leidenalg": "leiden",
+    "cc": "cc",
+    "connected_components": "cc",
+    "dcc": "dense_cc",
+    "dense_cc": "dense_cc",
+    "densely_connected_components": "dense_cc",
+    "spectral": "spectral",
+    "k_centroids": "k_centroids",
+    "kmeans_centroids": "k_centroids",
+    "k_means_centroids": "k_centroids",
+    "k_medoids": "k_medoids",
+    "kmedoids": "k_medoids",
+    "k_mean_distance": "k_mean_distance",
+    "kmeans_distance": "k_mean_distance",
+    "k_means_distance": "k_mean_distance",
+    "k_median": "k_median_distance",
+    "k_median_distance": "k_median_distance",
+    "kmedians_distance": "k_median_distance",
+}
+
+
+def _canonicalize_algorithm_name(algorithm: str) -> str:
+    """Map supported clustering aliases to canonical names."""
+    return _CLUSTERING_ALGORITHM_ALIASES.get(algorithm.lower(), algorithm.lower())
+
+
+def _normalize_algorithm_kwargs(
+    algorithm: list[str],
+    algorithm_kwargs: dict | list[dict] | None,
+) -> list[dict]:
+    """Normalize clustering kwargs to one kwargs dictionary per algorithm step."""
+    if algorithm_kwargs is None:
+        return [{} for _ in algorithm]
+    if isinstance(algorithm_kwargs, list):
+        if len(algorithm_kwargs) != len(algorithm):
+            raise ValueError("algorithm_kwargs list must match algorithm length.")
+        if not all(isinstance(alg_kwargs, dict) for alg_kwargs in algorithm_kwargs):
+            raise TypeError("Each entry in algorithm_kwargs must be a dict.")
+        return algorithm_kwargs
+    if not isinstance(algorithm_kwargs, dict):
+        raise TypeError("algorithm_kwargs must be None, a dict, or a list of dicts.")
+
+    shared_kwargs = {}
+    per_algorithm_kwargs = {}
+    for key, value in algorithm_kwargs.items():
+        canonical_key = _canonicalize_algorithm_name(key)
+        if canonical_key in _CLUSTERING_ALGORITHM_ALIASES.values():
+            if not isinstance(value, dict):
+                raise TypeError(
+                    "Algorithm-specific entries in algorithm_kwargs must be dicts."
+                )
+            per_algorithm_kwargs.setdefault(canonical_key, {}).update(value)
+        else:
+            shared_kwargs[key] = value
+
+    return [
+        {
+            **shared_kwargs,
+            **per_algorithm_kwargs.get(_canonicalize_algorithm_name(alg), {}),
+        }
+        for alg in algorithm
+    ]
+
+
 def cluster(
     motifs: np.ndarray,
     similarity_matrix: np.ndarray,
@@ -23,7 +99,7 @@ def cluster(
     similarity_threshold: float = 0.0,
     init_membership: np.ndarray | None = None,
     weights: np.ndarray | None = None,
-    algorithm_kwargs: dict[str, dict] | list[dict] | None = None,
+    algorithm_kwargs: dict | list[dict] | None = None,
     **kwargs,
 ) -> list[int]:
     """Cluster a similarity matrix.
@@ -37,8 +113,8 @@ def cluster(
         similarity_matrix: A square numpy array representing the similarity matrix.
         alignment_rc_matrix: A square numpy array representing the reverse complement alignment matrix.
         alignment_h_matrix: A square numpy array representing the horizontal alignment matrix.
-        similarity_threshold: The threshold above which two motifs are considered to be
-          similar.
+        similarity_threshold: The default threshold above which two motifs are considered to be
+          similar. Can be overridden per algorithm step with algorithm_kwargs.
         algorithm: Which clustering algorithm to use. When provided as a list, each algorithm will run,
           initialized with the memmbership from the previous algorithm.
           Supported options:
@@ -60,9 +136,11 @@ def cluster(
         weights: A 1D numpy array representing the weight of each motif.
             If not specified, all motifs will be weighted equally. 
             Supported only for K-means-style clustering algorithms: K-centroids, K-mean-distance
-        algorithm_kwargs: A dictionary of dictionaries or a list of dictionaries containing additional named arguments 
-          specific to the clustering algorithm of choice. If a dictionary is provided, it will be used for all algorithms. 
+            Can be overridden per algorithm step with algorithm_kwargs.
+        algorithm_kwargs: Additional named arguments specific to the clustering algorithm of choice.
           If a list is provided, each dictionary will be used for the corresponding algorithm.
+          If a dictionary is keyed by algorithm name, values are used for those algorithms.
+          Non-algorithm keys are treated as shared kwargs for every algorithm step.
         **kwargs: Any additional arguments to be passed to the clustering algorithm of
           choice. If used with a list of algorithms, passed to all algorithms.
 
@@ -73,6 +151,12 @@ def cluster(
 
     Notes:
         Please look through the possible clustering algorithm options in this function.
+        Per-step algorithm_kwargs override shared **kwargs and top-level defaults, e.g.:
+          algorithm=["cpm_leiden", "k_centroids"],
+          algorithm_kwargs=[
+              {"similarity_threshold": 0.9, "resolution_parameter": 0.5},
+              {"weights": weights, "assignment_threshold": 0.01},
+          ]
     """
     # Check arguments
     if not (
@@ -90,25 +174,20 @@ def cluster(
     elif len(algorithm) == 0:
         raise ValueError("algorithm must contain at least one clustering algorithm.")
 
-    if algorithm_kwargs is None:
-        per_algorithm_kwargs = [{} for _ in algorithm]
-    elif isinstance(algorithm_kwargs, list):
-        if len(algorithm_kwargs) != len(algorithm):
-            raise ValueError("algorithm_kwargs list must match algorithm length.")
-        per_algorithm_kwargs = algorithm_kwargs
-    elif isinstance(algorithm_kwargs, dict):
-        per_algorithm_kwargs = [algorithm_kwargs.get(alg, {}) for alg in algorithm]
-    else:
-        raise TypeError("algorithm_kwargs must be None, a dict, or a list of dicts.")
+    per_algorithm_kwargs = _normalize_algorithm_kwargs(algorithm, algorithm_kwargs)
 
     membership = init_membership
     for alg, alg_kwargs in zip(algorithm, per_algorithm_kwargs):
         step_kwargs = {**kwargs, **alg_kwargs}
+        step_similarity_threshold = step_kwargs.pop(
+            "similarity_threshold", similarity_threshold
+        )
+        step_weights = step_kwargs.pop("weights", weights)
         match alg.lower():
             # Leiden
             case "mod_leiden" | "leiden_mod" | "modularity_leiden" | "leiden_modularity" | "rb_leiden":
                 weighted_adjacency_matrix = similarity_matrix * (
-                    similarity_matrix >= similarity_threshold
+                    similarity_matrix >= step_similarity_threshold
                 )
                 # if utils_config.get_use_gpu():
                 #     return modularity_leiden_clustering_gpu(weighted_adjacency_matrix, **kwargs)
@@ -119,7 +198,7 @@ def cluster(
                 )
             case "cpm" | "cpm_leiden" | "leiden_cpm" |"constant_potts_leiden" | "leiden_constant_potts":
                 weighted_adjacency_matrix = similarity_matrix * (
-                    similarity_matrix >= similarity_threshold
+                    similarity_matrix >= step_similarity_threshold
                 )
                 membership = cpm_leiden_clustering(
                     weighted_adjacency_matrix=weighted_adjacency_matrix,
@@ -131,7 +210,7 @@ def cluster(
                     "Defaulting Leiden algorithm: Constant Potts model", UserWarning
                 )
                 weighted_adjacency_matrix = similarity_matrix * (
-                    similarity_matrix >= similarity_threshold
+                    similarity_matrix >= step_similarity_threshold
                 )
                 membership = cpm_leiden_clustering(
                     weighted_adjacency_matrix=weighted_adjacency_matrix, 
@@ -142,12 +221,12 @@ def cluster(
             case "cc" | "connected_components":
                 if membership is not None:
                     warnings.warn("init_membership is provided but not supported for connected component clustering: Ignoring init_membership.", UserWarning)
-                binary_adjacency_matrix = similarity_matrix >= similarity_threshold
+                binary_adjacency_matrix = similarity_matrix >= step_similarity_threshold
                 membership =  cc_clustering(
                     adjacency_matrix=binary_adjacency_matrix,
                 )
             case "dcc" | "dense_cc" | "densely_connected_components":
-                binary_adjacency_matrix = similarity_matrix >= similarity_threshold
+                binary_adjacency_matrix = similarity_matrix >= step_similarity_threshold
                 membership =  densely_cc_clustering(
                     adjacency_matrix=binary_adjacency_matrix,
                     init_membership=membership, 
@@ -158,7 +237,7 @@ def cluster(
                 if membership is not None:
                     warnings.warn("init_membership is provided but not supported for spectral clustering: Ignoring init_membership.", UserWarning)
                 thresholded_similarity_matrix = similarity_matrix * (
-                    similarity_matrix >= similarity_threshold)
+                    similarity_matrix >= step_similarity_threshold)
                 membership = spectral_clustering_k(
                     similarity_matrix=thresholded_similarity_matrix, 
                     **step_kwargs
@@ -171,7 +250,7 @@ def cluster(
                     alignment_rc_matrix=alignment_rc_matrix,
                     alignment_h_matrix=alignment_h_matrix,
                     init_membership=membership,
-                    weights=weights,
+                    weights=step_weights,
                     **step_kwargs
                 )
             case "k_medoids" | "kmedoids":
@@ -184,7 +263,7 @@ def cluster(
                 membership = k_mean_distance_clustering(
                     similarity_matrix=similarity_matrix, 
                     init_membership=membership,
-                    weights=weights,
+                    weights=step_weights,
                     **step_kwargs
                 )
             case "k_median" | "k_median_distance" | "kmedians_distance":

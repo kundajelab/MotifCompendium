@@ -12,7 +12,6 @@ setup(
         "beautifulsoup4",
         "h5py",
         "hdf5plugin",
-        "hdf5plugin",
         "igraph",
         "jinja2",
         "leidenalg",
