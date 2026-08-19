@@ -14,15 +14,92 @@ import MotifCompendium.utils.similarity as utils_similarity
 ######################
 # CLUSTERING HANDLER #
 ######################
+_CLUSTERING_ALGORITHM_ALIASES = {
+    "mod_leiden": "rb_leiden",
+    "leiden_mod": "rb_leiden",
+    "modularity_leiden": "rb_leiden",
+    "leiden_modularity": "rb_leiden",
+    "rb_leiden": "rb_leiden",
+    "cpm": "cpm_leiden",
+    "cpm_leiden": "cpm_leiden",
+    "leiden_cpm": "cpm_leiden",
+    "constant_potts_leiden": "cpm_leiden",
+    "leiden_constant_potts": "cpm_leiden",
+    "leiden": "leiden",
+    "leidenalg": "leiden",
+    "cc": "cc",
+    "connected_components": "cc",
+    "dcc": "dense_cc",
+    "dense_cc": "dense_cc",
+    "densely_connected_components": "dense_cc",
+    "spectral": "spectral",
+    "k_centroids": "k_centroids",
+    "kmeans_centroids": "k_centroids",
+    "k_means_centroids": "k_centroids",
+    "k_medoids": "k_medoids",
+    "kmedoids": "k_medoids",
+    "k_mean_distance": "k_mean_distance",
+    "kmeans_distance": "k_mean_distance",
+    "k_means_distance": "k_mean_distance",
+    "k_median": "k_median_distance",
+    "k_median_distance": "k_median_distance",
+    "kmedians_distance": "k_median_distance",
+}
+
+
+def _canonicalize_algorithm_name(algorithm: str) -> str:
+    """Map supported clustering aliases to canonical names."""
+    return _CLUSTERING_ALGORITHM_ALIASES.get(algorithm.lower(), algorithm.lower())
+
+
+def _normalize_algorithm_kwargs(
+    algorithm: list[str],
+    algorithm_kwargs: dict | list[dict] | None,
+) -> list[dict]:
+    """Normalize clustering kwargs to one kwargs dictionary per algorithm step."""
+    if algorithm_kwargs is None:
+        return [{} for _ in algorithm]
+    if isinstance(algorithm_kwargs, list):
+        if len(algorithm_kwargs) != len(algorithm):
+            raise ValueError("algorithm_kwargs list must match algorithm length.")
+        if not all(isinstance(alg_kwargs, dict) for alg_kwargs in algorithm_kwargs):
+            raise TypeError("Each entry in algorithm_kwargs must be a dict.")
+        return algorithm_kwargs
+    if not isinstance(algorithm_kwargs, dict):
+        raise TypeError("algorithm_kwargs must be None, a dict, or a list of dicts.")
+
+    shared_kwargs = {}
+    per_algorithm_kwargs = {}
+    for key, value in algorithm_kwargs.items():
+        canonical_key = _canonicalize_algorithm_name(key)
+        if canonical_key in _CLUSTERING_ALGORITHM_ALIASES.values():
+            if not isinstance(value, dict):
+                raise TypeError(
+                    "Algorithm-specific entries in algorithm_kwargs must be dicts."
+                )
+            per_algorithm_kwargs.setdefault(canonical_key, {}).update(value)
+        else:
+            shared_kwargs[key] = value
+
+    return [
+        {
+            **shared_kwargs,
+            **per_algorithm_kwargs.get(_canonicalize_algorithm_name(alg), {}),
+        }
+        for alg in algorithm
+    ]
+
+
 def cluster(
     motifs: np.ndarray,
     similarity_matrix: np.ndarray,
     alignment_rc_matrix: np.ndarray,
     alignment_h_matrix: np.ndarray,
-    algorithm: str,
+    algorithm: list[str] | str,
     similarity_threshold: float = 0.0,
     init_membership: np.ndarray | None = None,
     weights: np.ndarray | None = None,
+    algorithm_kwargs: dict | list[dict] | None = None,
     **kwargs,
 ) -> list[int]:
     """Cluster a similarity matrix.
@@ -36,9 +113,11 @@ def cluster(
         similarity_matrix: A square numpy array representing the similarity matrix.
         alignment_rc_matrix: A square numpy array representing the reverse complement alignment matrix.
         alignment_h_matrix: A square numpy array representing the horizontal alignment matrix.
-        similarity_threshold: The threshold above which two motifs are considered to be
-          similar.
-        algorithm: Which clustering algorithm to use. Supported options:
+        similarity_threshold: The default threshold above which two motifs are considered to be
+          similar. Can be overridden per algorithm step with algorithm_kwargs.
+        algorithm: Which clustering algorithm to use. When provided as a list, each algorithm will run,
+          initialized with the memmbership from the previous algorithm.
+          Supported options:
             - "leiden": Leiden clustering with Reichardt & Bornholdt's quality function
                 and a configuration model as a null.
             - "cpm" or "cpm_leiden": Leiden clustering with the constant Potts model.
@@ -49,7 +128,6 @@ def cluster(
             - "k_medoids": K-means-style clustering, by taking the medoid of the cluster ("medoid").
             - "k_mean_distance": K-means-style clustering, by taking mean distance to all constituents.
             - "k_median_distance": K-means-style clustering, by taking median distance to all constituents.
-          Supportd only for K-means-style clustering algorithms.
         init_membership: A 1D numpy array representing the initial membership of each motif.
           If not specified, the initial membership will be determined by the clustering algorithm and seed.
           Not supported:
@@ -58,8 +136,13 @@ def cluster(
         weights: A 1D numpy array representing the weight of each motif.
             If not specified, all motifs will be weighted equally. 
             Supported only for K-means-style clustering algorithms: K-centroids, K-mean-distance
+            Can be overridden per algorithm step with algorithm_kwargs.
+        algorithm_kwargs: Additional named arguments specific to the clustering algorithm of choice.
+          If a list is provided, each dictionary will be used for the corresponding algorithm.
+          If a dictionary is keyed by algorithm name, values are used for those algorithms.
+          Non-algorithm keys are treated as shared kwargs for every algorithm step.
         **kwargs: Any additional arguments to be passed to the clustering algorithm of
-          choice.
+          choice. If used with a list of algorithms, passed to all algorithms.
 
     Returns:
         A list of integers where each element represents the cluster that index
@@ -68,6 +151,12 @@ def cluster(
 
     Notes:
         Please look through the possible clustering algorithm options in this function.
+        Per-step algorithm_kwargs override shared **kwargs and top-level defaults, e.g.:
+          algorithm=["cpm_leiden", "k_centroids"],
+          algorithm_kwargs=[
+              {"similarity_threshold": 0.9, "resolution_parameter": 0.5},
+              {"weights": weights, "assignment_threshold": 0.01},
+          ]
     """
     # Check arguments
     if not (
@@ -78,99 +167,116 @@ def cluster(
         raise ValueError(f"The similarity matrix must be a square matrix.")
     if similarity_matrix.shape[0] == 1:
         return [0]
+    if not isinstance(algorithm, (list, str)):
+        raise TypeError("Algorithm must be a string or a list of strings.")
+    if isinstance(algorithm, str):
+        algorithm = [algorithm]
+    elif len(algorithm) == 0:
+        raise ValueError("algorithm must contain at least one clustering algorithm.")
 
-    match algorithm.lower():
-        # Leiden
-        case "mod_leiden" | "leiden_mod" | "modularity_leiden" | "leiden_modularity" | "rb_leiden":
-            weighted_adjacency_matrix = similarity_matrix * (
-                similarity_matrix >= similarity_threshold
-            )
-            # if utils_config.get_use_gpu():
-            #     return modularity_leiden_clustering_gpu(weighted_adjacency_matrix, **kwargs)
-            return rb_leiden_clustering_cpu(
-                weighted_adjacency_matrix=weighted_adjacency_matrix,
-                init_membership=init_membership,
-                **kwargs
-            )
-        case "cpm" | "cpm_leiden" | "leiden_cpm" |"constant_potts_leiden" | "leiden_constant_potts":
-            weighted_adjacency_matrix = similarity_matrix * (
-                similarity_matrix >= similarity_threshold
-            )
-            return cpm_leiden_clustering(
-                weighted_adjacency_matrix=weighted_adjacency_matrix,
-                init_membership=init_membership,
-                **kwargs
-            )
-        case "leiden" | "leidenalg":
-            warnings.warn(
-                "Defaulting Leiden algorithm: Constant Potts model", UserWarning
-            )
-            weighted_adjacency_matrix = similarity_matrix * (
-                similarity_matrix >= similarity_threshold
-            )
-            return cpm_leiden_clustering(
-                weighted_adjacency_matrix=weighted_adjacency_matrix, 
-                init_membership=init_membership,
-                **kwargs
-            )
-        # Connected-components
-        case "cc" | "connected_components":
-            if init_membership is not None:
-                warnings.warn("init_membership is provided but not supported for connected component clustering: Ignoring init_membership.", UserWarning)
-            binary_adjacency_matrix = similarity_matrix >= similarity_threshold
-            return cc_clustering(
-                adjacency_matrix=binary_adjacency_matrix,
-            )
-        case "dcc" | "dense_cc" | "densely_connected_components":
-            binary_adjacency_matrix = similarity_matrix >= similarity_threshold
-            return densely_cc_clustering(
-                adjacency_matrix=binary_adjacency_matrix,
-                init_membership=init_membership, 
-                **kwargs
-            )
-        # Spectral
-        case "spectral":
-            if init_membership is not None:
-                warnings.warn("init_membership is provided but not supported for spectral clustering: Ignoring init_membership.", UserWarning)
-            thresholded_similarity_matrix = similarity_matrix * (
-                similarity_matrix >= similarity_threshold)
-            return spectral_clustering_k(
-                similarity_matrix=thresholded_similarity_matrix, 
-                **kwargs
-            )
-        # K-means
-        case "k_centroids" | "kmeans_centroids" | "k_means_centroids":
-            return k_centroids_clustering(
-                motifs=motifs,
-                similarity_matrix=similarity_matrix,
-                alignment_rc_matrix=alignment_rc_matrix,
-                alignment_h_matrix=alignment_h_matrix,
-                init_membership=init_membership,
-                weights=weights,
-                **kwargs
-            )
-        case "k_medoids" | "kmedoids":
-            return k_medoids_clustering(
-                similarity_matrix=similarity_matrix,
-                init_membership=init_membership,
-                **kwargs
-            )
-        case "k_mean_distance" | "kmeans_distance" | "k_means_distance":
-            return k_mean_distance_clustering(
-                similarity_matrix=similarity_matrix, 
-                init_membership=init_membership,
-                weights=weights,
-                **kwargs
-            )
-        case "k_median" | "k_median_distance" | "kmedians_distance":
-            return k_median_distance_clustering(
-                similarity_matrix=similarity_matrix,
-                init_membership=init_membership,
-                **kwargs
-            )
-        # Other
-        case _:
-            raise ValueError(f"Unsupported clustering algorithm: {algorithm}")
+    per_algorithm_kwargs = _normalize_algorithm_kwargs(algorithm, algorithm_kwargs)
+
+    membership = init_membership
+    for alg, alg_kwargs in zip(algorithm, per_algorithm_kwargs):
+        step_kwargs = {**kwargs, **alg_kwargs}
+        step_similarity_threshold = step_kwargs.pop(
+            "similarity_threshold", similarity_threshold
+        )
+        step_weights = step_kwargs.pop("weights", weights)
+        match alg.lower():
+            # Leiden
+            case "mod_leiden" | "leiden_mod" | "modularity_leiden" | "leiden_modularity" | "rb_leiden":
+                weighted_adjacency_matrix = similarity_matrix * (
+                    similarity_matrix >= step_similarity_threshold
+                )
+                # if utils_config.get_use_gpu():
+                #     return modularity_leiden_clustering_gpu(weighted_adjacency_matrix, **kwargs)
+                membership = rb_leiden_clustering_cpu(
+                    weighted_adjacency_matrix=weighted_adjacency_matrix,
+                    init_membership=membership,
+                    **step_kwargs
+                )
+            case "cpm" | "cpm_leiden" | "leiden_cpm" |"constant_potts_leiden" | "leiden_constant_potts":
+                weighted_adjacency_matrix = similarity_matrix * (
+                    similarity_matrix >= step_similarity_threshold
+                )
+                membership = cpm_leiden_clustering(
+                    weighted_adjacency_matrix=weighted_adjacency_matrix,
+                    init_membership=membership,
+                    **step_kwargs
+                )
+            case "leiden" | "leidenalg":
+                warnings.warn(
+                    "Defaulting Leiden algorithm: Constant Potts model", UserWarning
+                )
+                weighted_adjacency_matrix = similarity_matrix * (
+                    similarity_matrix >= step_similarity_threshold
+                )
+                membership = cpm_leiden_clustering(
+                    weighted_adjacency_matrix=weighted_adjacency_matrix, 
+                    init_membership=membership,
+                    **step_kwargs
+                )
+            # Connected-components
+            case "cc" | "connected_components":
+                if membership is not None:
+                    warnings.warn("init_membership is provided but not supported for connected component clustering: Ignoring init_membership.", UserWarning)
+                binary_adjacency_matrix = similarity_matrix >= step_similarity_threshold
+                membership =  cc_clustering(
+                    adjacency_matrix=binary_adjacency_matrix,
+                )
+            case "dcc" | "dense_cc" | "densely_connected_components":
+                binary_adjacency_matrix = similarity_matrix >= step_similarity_threshold
+                membership =  densely_cc_clustering(
+                    adjacency_matrix=binary_adjacency_matrix,
+                    init_membership=membership, 
+                    **step_kwargs
+                )
+            # Spectral
+            case "spectral":
+                if membership is not None:
+                    warnings.warn("init_membership is provided but not supported for spectral clustering: Ignoring init_membership.", UserWarning)
+                thresholded_similarity_matrix = similarity_matrix * (
+                    similarity_matrix >= step_similarity_threshold)
+                membership = spectral_clustering_k(
+                    similarity_matrix=thresholded_similarity_matrix, 
+                    **step_kwargs
+                )
+            # K-means
+            case "k_centroids" | "kmeans_centroids" | "k_means_centroids":
+                membership = k_centroids_clustering(
+                    motifs=motifs,
+                    similarity_matrix=similarity_matrix,
+                    alignment_rc_matrix=alignment_rc_matrix,
+                    alignment_h_matrix=alignment_h_matrix,
+                    init_membership=membership,
+                    weights=step_weights,
+                    **step_kwargs
+                )
+            case "k_medoids" | "kmedoids":
+                membership = k_medoids_clustering(
+                    similarity_matrix=similarity_matrix,
+                    init_membership=membership,
+                    **step_kwargs
+                )
+            case "k_mean_distance" | "kmeans_distance" | "k_means_distance":
+                membership = k_mean_distance_clustering(
+                    similarity_matrix=similarity_matrix, 
+                    init_membership=membership,
+                    weights=step_weights,
+                    **step_kwargs
+                )
+            case "k_median" | "k_median_distance" | "kmedians_distance":
+                membership =  k_median_distance_clustering(
+                    similarity_matrix=similarity_matrix,
+                    init_membership=membership,
+                    **step_kwargs
+                )
+            # Other
+            case _:
+                raise ValueError(f"Unsupported clustering algorithm: {alg}.")
+
+    return membership.tolist()
 
 
 #####################
@@ -182,7 +288,7 @@ def rb_leiden_clustering_cpu(
     n_iterations: int = -1,
     init_membership: np.ndarray = None,
     seeds: list[int] = [100, 200],
-) -> list[int]:
+) -> np.ndarray:
     """Perform Leiden clustering with R&B quality and a configuration null.
 
     Args:
@@ -201,7 +307,7 @@ def rb_leiden_clustering_cpu(
           runs of Leiden that are performed.
 
     Returns:
-        A list of integers where each element represents the cluster that index
+        A numpy array of integers where each element represents the cluster that index
           corresponds to. All elements with the same value have been assigned to the
           same cluster.
 
@@ -246,7 +352,7 @@ def rb_leiden_clustering_cpu(
         if best_quality is None or partition.quality() > best_quality:
             best_quality = partition.quality()
             best_membership = partition.membership
-    return best_membership
+    return np.array(best_membership)
 
 
 def cpm_leiden_clustering(
@@ -255,7 +361,7 @@ def cpm_leiden_clustering(
     n_iterations: int = -1,
     init_membership: np.ndarray = None,
     seeds: list[int] = [100, 200],
-) -> list[int]:
+) -> np.ndarray:
     """Perform Leiden clustering with the constant Potts model.
 
     Args:
@@ -272,7 +378,7 @@ def cpm_leiden_clustering(
           runs of Leiden that are performed.
 
     Returns:
-        A list of integers where each element represents the cluster that index
+        A numpy array of integers where each element represents the cluster that index
           corresponds to. All elements with the same value have been assigned to the
           same cluster.
 
@@ -316,7 +422,7 @@ def cpm_leiden_clustering(
         if best_quality is None or partition.quality() > best_quality:
             best_quality = partition.quality()
             best_membership = partition.membership
-    return best_membership
+    return np.array(best_membership)
 
 
 def rb_leiden_clustering_gpu(
@@ -324,9 +430,8 @@ def rb_leiden_clustering_gpu(
     resolution_parameter: float = 1.0,
     n_iterations: int = 100,
     seeds: list[int] = [100, 200],
-) -> list[int]:
-    """
-    Perform Leiden clustering with R&B quality and a configuration null, on GPU.
+) -> np.ndarray:
+    """Perform Leiden clustering with R&B quality and a configuration null, on GPU.
 
     Args:
         weighted_adjacency_matrix : A square weighted adjacency matrix.
@@ -342,7 +447,7 @@ def rb_leiden_clustering_gpu(
           runs of Leiden that are performed.
 
     Returns:
-        A list of integers where each element represents the cluster that index
+        A numpy array of integers where each element represents the cluster that index
           corresponds to. All elements with the same value have been assigned to the
           same cluster.
 
@@ -387,7 +492,7 @@ def rb_leiden_clustering_gpu(
         )
         if best_quality is None or quality > best_quality:
             best_quality = quality
-            best_membership = partition['partition'].to_numpy().tolist()
+            best_membership = partition['partition'].to_numpy()
     return best_membership
     """
 
@@ -397,8 +502,17 @@ def rb_leiden_clustering_gpu(
 #################
 def cc_clustering(
     adjacency_matrix: np.ndarray
-) -> list[int]:
-    """Find connected components in an adjacency matrix."""
+) -> np.ndarray:
+    """Find connected components in an adjacency matrix.
+    
+    Args:
+        adjacency_matrix: A square binary numpy array representing the adjacency matrix.
+
+    Returns:
+        A numpy array of integers where each element represents the cluster that index
+          corresponds to. All elements with the same value have been assigned to the
+          same cluster.
+    """
     N = adjacency_matrix.shape[0]
     clustering = np.zeros((N,), dtype=int)
     current_cluster = 1
@@ -422,7 +536,7 @@ def cc_clustering(
         current_cluster += 1
     # Return
     assert (clustering > 0).all()
-    return (clustering - 1).tolist()
+    return (clustering - 1)
 
 
 def densely_cc_clustering(
@@ -430,8 +544,20 @@ def densely_cc_clustering(
     density: float = 1.0,
     init_membership: np.ndarray = None,
     seed: int = 100
-) -> list[int]:
-    """Find densely connected components in a greedy fashion in an adjacency matrix."""
+) -> np.ndarray:
+    """Find densely connected components in a greedy fashion in an adjacency matrix.
+    
+    Args:
+        adjacency_matrix: A square binary numpy array representing the adjacency matrix.
+        density: The minimum density of edges within a cluster.
+        init_membership: An optional numpy array of integers representing the initial membership of each node.
+        seed: The random seed to use for initialization.
+
+    Returns:
+        A numpy array of integers where each element represents the cluster that index
+          corresponds to. All elements with the same value have been assigned to the
+          same cluster.
+    """
     # Check arguments
     if not (isinstance(density, float) and (0 < density <= 1)):
         raise ValueError("Density must be a float between 0 and 1.")
@@ -471,7 +597,7 @@ def densely_cc_clustering(
         current_cluster += 1
     # Return
     assert (clustering > 0).all()
-    return (clustering - 1).tolist()
+    return (clustering - 1)
 
 
 #######################
@@ -481,8 +607,19 @@ def spectral_clustering_k(
     similarity_matrix: np.ndarray,
     k: int = 40,
     cluster_qr: bool = False
-) -> list[int]:
-    """Spectral clustering on a similarity matrix for a fixed number of clusters."""
+) -> np.ndarray:
+    """Spectral clustering on a similarity matrix for a fixed number of clusters.
+    
+    Args:
+        similarity_matrix: A square numpy array representing similarities between N points.
+        k: The number of clusters to find.
+        cluster_qr: Whether to use the QR method for cluster assignment.
+
+    Returns:
+        A numpy array of integers where each element represents the cluster that index
+          corresponds to. All elements with the same value have been assigned to the
+          same cluster.
+    """
     if cluster_qr:
         clustering = (
             sklearn.cluster.SpectralClustering(
@@ -620,6 +757,12 @@ def _update_assignment_threshold(
     return membership_update, similarity_motif_cluster_update
 
 
+def _remap_membership(membership: np.ndarray) -> np.ndarray:
+    """Remap cluster labels to contiguous 0-based indices."""
+    _, membership_remapped = np.unique(membership, return_inverse=True)
+    return membership_remapped
+
+
 ## K-CENTROIDS CLUSTERING ##
 def k_centroids_clustering(
     motifs: np.ndarray,
@@ -633,7 +776,7 @@ def k_centroids_clustering(
     assignment_threshold: float = 0.0,
     n_iterations: int = -1,
     seeds: list[int] = [100, 200],
-) -> list[int]:
+) -> np.ndarray:
     """K-means clustering, by taking the mean of the cluster ("centroid") as the cluster representation, 
     and assigning cluster membership to motifs by assigning the cluster with the closest centroid.
     
@@ -667,7 +810,7 @@ def k_centroids_clustering(
           runs of clustering that are performed.
 
     Returns:
-        A list of integers where each element represents the cluster that index
+        A numpy array of integers where each element represents the cluster that index
           corresponds to. All elements with the same value have been assigned to the
           same cluster.
     """
@@ -723,6 +866,8 @@ def k_centroids_clustering(
         score_old = 0
         iteration = 0
         while iteration != n_iterations:
+            membership_old = _remap_membership(membership_old)
+            mc["membership"] = membership_old
             # Compute cluster representations: Centroids
             mc_average = mc.cluster_averages(
                 clustering="membership",
@@ -756,7 +901,7 @@ def k_centroids_clustering(
     # Remove temp columns
     mc.delete_columns(["membership", "weights"])
 
-    return global_membership.tolist()
+    return global_membership
 
 
 ## K-MEDOIDS CLUSTERING ##
@@ -786,7 +931,7 @@ def k_medoids_clustering(
     assignment_threshold: float = 0.0,
     n_iterations: int = -1,
     seeds: list[int] = [100, 200],
-) -> list[int]:
+) -> np.ndarray:
     """K-medoids clustering, by taking the motif with the closest similarity to all other motifs 
     in the cluster as the cluster representation ("medoid"), and assigning cluster membership 
     to motifs by assigning the cluster with the closest medoid.
@@ -815,7 +960,7 @@ def k_medoids_clustering(
           runs of clustering that are performed.
 
     Returns:
-        A list of integers where each element represents the cluster that index
+        A numpy array of integers where each element represents the cluster that index
           corresponds to. All elements with the same value have been assigned to the
           same cluster.
     """
@@ -850,6 +995,7 @@ def k_medoids_clustering(
         score_old = 0
         iteration = 0
         while iteration != n_iterations:
+            membership_old = _remap_membership(membership_old)
             # Compute cluster representations: Medoids
             medoids = _find_k_medoids(
                 memberships=membership_old,
@@ -877,7 +1023,7 @@ def k_medoids_clustering(
             global_membership = membership_new
             global_score = score_new
 
-    return global_membership.tolist()
+    return global_membership
 
 
 ## K-MEAN DISTANCE CLUSTERING ##
@@ -909,7 +1055,7 @@ def k_mean_distance_clustering(
     assignment_threshold: float = 0.0,
     n_iterations: int = -1,
     seeds: list[int] = [100, 200],
-) -> list[int]:
+) -> np.ndarray:
     """K-means clustering, by taking the mean distance across all motifs in the cluster as the 
     representative distance to each cluster ("mean distance"), and assigning cluster membership
     to motifs by assigning the cluster with the closest mean distance.
@@ -941,7 +1087,7 @@ def k_mean_distance_clustering(
           runs of clustering that are performed.
 
     Returns:
-        A list of integers where each element represents the cluster that index
+        A numpy array of integers where each element represents the cluster that index
           corresponds to. All elements with the same value have been assigned to the
           same cluster.
     """
@@ -982,6 +1128,7 @@ def k_mean_distance_clustering(
         score_old = 0
         iteration = 0
         while iteration != n_iterations:
+            membership_old = _remap_membership(membership_old)
             # Calculate distance matrix: Motif to clusters
             similarity_matrix_motif_cluster = _calculate_k_mean_distance(
                 memberships=membership_old,
@@ -1008,7 +1155,7 @@ def k_mean_distance_clustering(
             global_membership = membership_new
             global_score = score_new
 
-    return global_membership.tolist()
+    return global_membership
 
 
 ## K-MEDIAN DISTANCE CLUSTERING ##
@@ -1037,7 +1184,7 @@ def k_median_distance_clustering(
     assignment_threshold: float = 0.0,
     n_iterations: int = -1,
     seeds: list[int] = [100, 200],
-) -> list[int]:
+) -> np.ndarray:
     """K-medoid clustering, by taking the median distance across all motifs in the cluster as the 
     representative distance to each cluster ("median distance"), and assigning cluster membership
     to motifs by assigning the cluster with the closest median distance.
@@ -1066,7 +1213,7 @@ def k_median_distance_clustering(
           runs of clustering that are performed.
 
     Returns:
-        A list of integers where each element represents the cluster that index
+        A numpy array of integers where each element represents the cluster that index
           corresponds to. All elements with the same value have been assigned to the
           same cluster.
     """
@@ -1101,6 +1248,7 @@ def k_median_distance_clustering(
         score_old = 0
         iteration = 0
         while iteration != n_iterations:
+            membership_old = _remap_membership(membership_old)
             # Calculate distance matrix: Motif to clusters
             similarity_matrix_motif_cluster = _calculate_k_median_distance(
                 memberships=membership_old,
@@ -1126,4 +1274,4 @@ def k_median_distance_clustering(
             global_membership = membership_new
             global_score = score_new
 
-    return global_membership.tolist()
+    return global_membership

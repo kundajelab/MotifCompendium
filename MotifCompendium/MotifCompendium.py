@@ -1137,7 +1137,7 @@ class MotifCompendium:
     ########################
     def cluster(
         self,
-        algorithm: str = "cpm_leiden",
+        algorithm: list[str] | str = ["cpm_leiden", "k_centroids"],
         similarity_threshold: float | int = 0.9,
         save_name: str = "cluster",
         cluster_within: str | None = None,
@@ -1147,6 +1147,7 @@ class MotifCompendium:
         init_clustering_col: str | None = None,
         weight_col: str | None = None,
         largest_clusters_first: bool = True,
+        algorithm_kwargs: dict | list[dict] | None = None,
         **kwargs,
     ) -> None:
         """Cluster motifs.
@@ -1155,10 +1156,12 @@ class MotifCompendium:
             cluster assignment will be saved into the metadata in column save_name.
 
         Args:
-            algorithm: The clustering algorithm to cluster with. Please see
-              MotifCompendium.utils.clustering.cluster() for available algorithms.
-            similarity_threshold: The similarity threshold above which motifs should be
-              considered similar.
+            algorithm: The clustering algorithm(s) to cluster with. When provided as a list, 
+              each algorithm will run, initialized with the memmbership from the previous algorithm.
+              Please see MotifCompendium.utils.clustering.cluster() for available algorithms.
+            similarity_threshold: The default similarity threshold above which motifs should be
+              considered similar. Advanced users can override this per algorithm step with
+              algorithm_kwargs.
             save_name: The name of the column in the metadata to save motif clustering
                 results into.
             cluster_within: The name of the column in metadata containing cluster
@@ -1195,8 +1198,18 @@ class MotifCompendium:
             largest_clusters_first: Whether or not the first clusters (0, 1, 2, ...)
               should be the largest clusters. If True, cluster 0 will be the largest
               cluster. If False, the cluster order will not relate to cluster size.
+            algorithm_kwargs: Additional named arguments specific to the clustering algorithm of
+              choice. If a list is provided, each dictionary will be used for the
+              corresponding algorithm in the algorithm list. If a dictionary is keyed by
+              algorithm name, values are used for those algorithms. Non-algorithm keys are
+              treated as shared kwargs for every algorithm step. For example:
+                algorithm=["cpm_leiden", "k_centroids"],
+                algorithm_kwargs=[
+                    {"similarity_threshold": 0.9, "resolution_parameter": 0.5},
+                    {"weight_col": "col1", "assignment_threshold": 0.01},
+                ]
             **kwargs: Additional named arguments specific to the clustering algorithm of
-                choice.
+                choice. If used with a list of algorithms, passed to all algorithms.
 
         Notes:
             Review MotifCompendium.utils.clustering.cluster() for available clustering
@@ -1209,6 +1222,30 @@ class MotifCompendium:
             isinstance(similarity_threshold, (float, int)) and (0 <= similarity_threshold <= 1)
         ):
             raise ValueError("similarity_threshold must be a float or int between [0, 1].")
+        if not isinstance(algorithm, (list, str)):
+            raise TypeError("Algorithm must be a string or a list of strings.")
+        if isinstance(algorithm, str):
+            algorithm = [algorithm]
+        elif len(algorithm) == 0:
+            raise ValueError("algorithm must contain at least one clustering algorithm.")
+        if algorithm_kwargs is None:
+            per_algorithm_kwargs = None
+        else:
+            per_algorithm_kwargs = utils_clustering._normalize_algorithm_kwargs(
+                algorithm, algorithm_kwargs
+            )
+        algorithm_weight_cols = []
+        if per_algorithm_kwargs is not None:
+            for alg_kwargs in per_algorithm_kwargs:
+                if "weight_col" not in alg_kwargs:
+                    continue
+                step_weight_col = alg_kwargs["weight_col"]
+                if step_weight_col is None:
+                    continue
+                if not isinstance(step_weight_col, str):
+                    raise TypeError("algorithm_kwargs weight_col values must be strings.")
+                algorithm_weight_cols.append(step_weight_col)
+            algorithm_weight_cols = list(dict.fromkeys(algorithm_weight_cols))
         if weight_col and cluster_on_weight:
             cluster_on_weight = weight_col
             warnings.warn(
@@ -1222,6 +1259,13 @@ class MotifCompendium:
                 "cluster_on_weight is set. Note that cluster_on_weight will be deprecated in favor of weight_col in the future.",
                 FutureWarning,
             )
+        weight_col_aggregations = [
+            (col, "sum", col)
+            for col in dict.fromkeys(
+                ([weight_col] if weight_col is not None else [])
+                + algorithm_weight_cols
+            )
+        ]
         # Cluster within
         if (
             (cluster_within is not None)
@@ -1237,6 +1281,9 @@ class MotifCompendium:
                 raise KeyError(
                     f"weight_col {weight_col} not in metadata."
                 )
+            for algorithm_weight_col in algorithm_weight_cols:
+                if algorithm_weight_col not in self.metadata.columns:
+                    raise KeyError(f"weight_col {algorithm_weight_col} not in metadata.")
             if (init_clustering_col is not None) and (
                 init_clustering_col not in self.metadata.columns
             ):
@@ -1254,16 +1301,34 @@ class MotifCompendium:
             for c in set(self.metadata[cluster_within]):
                 c_condition = self.metadata[cluster_within] == c
                 c_idxs = list(c_condition[c_condition].index)
+                c_mc = self[c_condition]
+                c_algorithm_kwargs = None
+                if per_algorithm_kwargs is not None:
+                    c_algorithm_kwargs = []
+                    for alg_kwargs in per_algorithm_kwargs:
+                        c_alg_kwargs = alg_kwargs.copy()
+                        if "weight_col" in c_alg_kwargs:
+                            step_weight_col = c_alg_kwargs.pop("weight_col")
+                            if step_weight_col is not None:
+                                if step_weight_col not in c_mc.metadata.columns:
+                                    raise KeyError(
+                                        f"weight_col {step_weight_col} not in metadata."
+                                    )
+                                c_alg_kwargs["weights"] = c_mc.metadata[
+                                    step_weight_col
+                                ].to_numpy()
+                        c_algorithm_kwargs.append(c_alg_kwargs)
                 # c_similarity = self.similarity[c_idxs, :][:, c_idxs]
                 c_clusters = utils_clustering.cluster(
-                    motifs=self[c_condition].motifs,
-                    similarity_matrix=self[c_condition].similarity,
-                    alignment_rc_matrix=self[c_condition].alignment_rc,
-                    alignment_h_matrix=self[c_condition].alignment_h,
-                    init_membership=self[c_condition].metadata[init_clustering_col].to_numpy() if init_clustering_col else None,
-                    weights=self[c_condition].metadata[weight_col].to_numpy() if weight_col else None,
+                    motifs=c_mc.motifs,
+                    similarity_matrix=c_mc.similarity,
+                    alignment_rc_matrix=c_mc.alignment_rc,
+                    alignment_h_matrix=c_mc.alignment_h,
+                    init_membership=c_mc.metadata[init_clustering_col].to_numpy() if init_clustering_col else None,
+                    weights=c_mc.metadata[weight_col].to_numpy() if weight_col else None,
                     similarity_threshold=similarity_threshold,
                     algorithm=algorithm,
+                    algorithm_kwargs=c_algorithm_kwargs,
                     **kwargs,
                 )
                 c_clusters = [c + num_clusters_so_far for c in c_clusters]
@@ -1285,6 +1350,9 @@ class MotifCompendium:
                 raise KeyError(
                     f"weight_col {weight_col} not in metadata."
                 )
+            for algorithm_weight_col in algorithm_weight_cols:
+                if algorithm_weight_col not in self.metadata.columns:
+                    raise KeyError(f"weight_col {algorithm_weight_col} not in metadata.")
             if init_clustering_col:
                 raise ValueError(
                     "init_clustering_col cannot be used when cluster_on is set as the initializations are averaged immediately."
@@ -1293,10 +1361,24 @@ class MotifCompendium:
             mc_average = self.cluster_averages(
                 clustering=cluster_on,
                 weight_col=weight_col,
-                aggregations=[
-                        (weight_col, "sum", weight_col) 
-                    ] if weight_col else [],
+                aggregations=weight_col_aggregations,
             )
+            mc_average_algorithm_kwargs = None
+            if per_algorithm_kwargs is not None:
+                mc_average_algorithm_kwargs = []
+                for alg_kwargs in per_algorithm_kwargs:
+                    mc_average_alg_kwargs = alg_kwargs.copy()
+                    if "weight_col" in mc_average_alg_kwargs:
+                        step_weight_col = mc_average_alg_kwargs.pop("weight_col")
+                        if step_weight_col is not None:
+                            if step_weight_col not in mc_average.metadata.columns:
+                                raise KeyError(
+                                    f"weight_col {step_weight_col} not in metadata."
+                                )
+                            mc_average_alg_kwargs["weights"] = mc_average.metadata[
+                                step_weight_col
+                            ].to_numpy()
+                    mc_average_algorithm_kwargs.append(mc_average_alg_kwargs)
             # Cluster
             mc_average.metadata["cluster"] = utils_clustering.cluster(
                 motifs=mc_average.motifs,
@@ -1306,6 +1388,7 @@ class MotifCompendium:
                 weights=mc_average.metadata[weight_col].to_numpy() if weight_col else None,
                 similarity_threshold=similarity_threshold,
                 algorithm=algorithm,
+                algorithm_kwargs=mc_average_algorithm_kwargs,
                 **kwargs,
             )
             # Map back to self
@@ -1344,6 +1427,9 @@ class MotifCompendium:
                 raise KeyError(
                     f"weight_col {weight_col} not in metadata."
                 )
+            for algorithm_weight_col in algorithm_weight_cols:
+                if algorithm_weight_col not in self.metadata.columns:
+                    raise KeyError(f"weight_col {algorithm_weight_col} not in metadata.")
             if init_clustering_col:
                 raise ValueError(
                     "init_clustering_col cannot be used when cluster_on is set as the initializations are averaged immediately."
@@ -1362,10 +1448,24 @@ class MotifCompendium:
                 c_mc_average = c_mc.cluster_averages(
                     clustering=cluster_on,
                     weight_col=weight_col,
-                    aggregations=[
-                        (weight_col, "sum", weight_col) 
-                    ] if weight_col else [],
+                    aggregations=weight_col_aggregations,
                 )
+                c_mc_average_algorithm_kwargs = None
+                if per_algorithm_kwargs is not None:
+                    c_mc_average_algorithm_kwargs = []
+                    for alg_kwargs in per_algorithm_kwargs:
+                        c_mc_average_alg_kwargs = alg_kwargs.copy()
+                        if "weight_col" in c_mc_average_alg_kwargs:
+                            step_weight_col = c_mc_average_alg_kwargs.pop("weight_col")
+                            if step_weight_col is not None:
+                                if step_weight_col not in c_mc_average.metadata.columns:
+                                    raise KeyError(
+                                        f"weight_col {step_weight_col} not in metadata."
+                                    )
+                                c_mc_average_alg_kwargs["weights"] = c_mc_average.metadata[
+                                    step_weight_col
+                                ].to_numpy()
+                        c_mc_average_algorithm_kwargs.append(c_mc_average_alg_kwargs)
                 # Cluster
                 c_mc_average.metadata["cluster"] = utils_clustering.cluster(
                     motifs=c_mc_average.motifs,
@@ -1375,6 +1475,7 @@ class MotifCompendium:
                     weights=c_mc_average.metadata[weight_col].to_numpy() if weight_col else None,
                     similarity_threshold=similarity_threshold,
                     algorithm=algorithm,
+                    algorithm_kwargs=c_mc_average_algorithm_kwargs,
                     **kwargs,
                 )
                 # Map back to c_mc
@@ -1401,12 +1502,31 @@ class MotifCompendium:
                 raise KeyError(
                     f"weight_col {weight_col} not in metadata."
                 )
+            for algorithm_weight_col in algorithm_weight_cols:
+                if algorithm_weight_col not in self.metadata.columns:
+                    raise KeyError(f"weight_col {algorithm_weight_col} not in metadata.")
             if (init_clustering_col is not None) and (
                 init_clustering_col not in self.metadata.columns
             ):
                 raise KeyError(
                     f"init_clustering_col {init_clustering_col} not in metadata."
                 )
+            self_algorithm_kwargs = None
+            if per_algorithm_kwargs is not None:
+                self_algorithm_kwargs = []
+                for alg_kwargs in per_algorithm_kwargs:
+                    self_alg_kwargs = alg_kwargs.copy()
+                    if "weight_col" in self_alg_kwargs:
+                        step_weight_col = self_alg_kwargs.pop("weight_col")
+                        if step_weight_col is not None:
+                            if step_weight_col not in self.metadata.columns:
+                                raise KeyError(
+                                    f"weight_col {step_weight_col} not in metadata."
+                                )
+                            self_alg_kwargs["weights"] = self.metadata[
+                                step_weight_col
+                            ].to_numpy()
+                    self_algorithm_kwargs.append(self_alg_kwargs)
             # Cluster
             self.metadata[save_name] = utils_clustering.cluster(
                 motifs=self.motifs,
@@ -1417,6 +1537,7 @@ class MotifCompendium:
                 weights=self.metadata[weight_col].to_numpy() if weight_col else None,
                 similarity_threshold=similarity_threshold,
                 algorithm=algorithm,
+                algorithm_kwargs=self_algorithm_kwargs,
                 **kwargs,
             )
         # Otherwise, throw error

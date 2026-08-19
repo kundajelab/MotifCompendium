@@ -1,12 +1,16 @@
-# MotifCompendium
+# MotifCompendium: A GPU-accelerated motif analysis package
 
-**Please read this README.**
+![MotifCompendium](motifcompendium.png)
 
-The MotifCompendium package provides a framework for clustering, annotating, and analyzing motifs efficiently at large scales.
+MotifCompendium is a GPU-accelerated package that provides a framework for comparing, clustering, annotating, filtering, analyzing sequence motifs efficiently, at large scales.
 
-**(1/21/2026)** The main branch of MotifCompendium has been updated! It is highly recommended to upgrade to the current version of the package. Please only work off of the main branch, which will contain the most stable build of MotifCompendium.
+We describe MotifCompendium, along with ENCODE GRAMMAR (Genomic Regulatory Atlas of sequence Models, Motifs, Annotations and Rules), and ENCODE MotifCompendium (a unified collection of predictive sequence motifs from ENCODE GRAMMAR), in our technical note: 
+["A unified lexicon of predictive DNA sequence motifs from ENCODE transcription factor binding and chromatin accessibility assays"](https://doi.org/10.5281/zenodo.17123347).
 
-README sections:
+> ![NOTE]
+> **Version V1.0 [1/21/2026]** The main branch of MotifCompendium has been updated! It is highly recommended to upgrade to the current version of the package. Please only work off of the main branch, which will contain the most stable build of MotifCompendium.
+
+## Contents
 
 - [Installation](#installation)
 - [Getting started](#getting-started)
@@ -22,17 +26,36 @@ These are instructions for creating a conda environment within which you can run
 
 If you are creating an environment for the first time, follow:
 
-1. Clone this GitHub repository: `git clone https://github.com/kundajelab/MotifCompendium.git`.
-2. Move into the MotifCompendium directory: `cd MotifCompendium`.
+1. Clone this GitHub repository: 
+```
+git clone https://github.com/kundajelab/MotifCompendium.git
+```
+2. Move into the MotifCompendium directory: 
+```
+cd MotifCompendium
+```
 3. Create a conda environment:
-    - If you have GPU access and want to run MotifCompendium with a GPU, run `conda env create -f environment_gpu.yml`.
-    - If you do not have GPU access or you want to run MotifCompendium only with a CPU, run `conda env create -f environment.yml`.
-4. Activate the environment with `conda activate motifcompendium-gpu` or `conda activate motifcompendium` depending on which environment you built.
-5. In the MotifCompendium directory run `pip install -e .`.
+    - If you have GPU access and want to run MotifCompendium with a GPU:
+    ```
+    conda env create -f environment_gpu.yml
+    ```
+    - If you do not have GPU access or you want to run MotifCompendium only with a CPU:
+    ```
+    conda env create -f environment.yml
+    ```
+4. Activate the environment:
+```
+conda activate motifcompendium-gpu # or conda activate motifcompendium, depending on which environment you built
+``` 
+5. Stay in the MotifCompendium directory and install package:
+```
+pip install -e 
+```
 
-If you would like to update an existing conda environment, follow:
-
-1. Run `conda env update -f environment_gpu.yml --prune` or `conda env update -f environment.yml --prune` depending on which environment you want to update.
+6. If you would like to update an existing conda environment:
+```
+conda env update -f environment_gpu.yml --prune  # or conda env update -f environment.yml --prune, depending on which environment you want to update
+```
 
 ## Getting started
 
@@ -40,7 +63,7 @@ Please go through the [tutorials](tutorials/README.md) to learn how to get start
 
 ## Working with old versions of MotifCompendium
 
-**(7/25/2025)** **Old MotifCompendium objects may not be compatible with the current version of the package!** If possible, rerun your MotifCompendium code with the current version of the package. If that is not possible, you may need to upgrade your MotifCompendium object in order for it to be compatible with the newest version of the package. To check if your MotifCompendium object needs upgrading, try loading the object. If the load fails, try loading with `safe=False` and saving the object; the saved version will be compatible with the package. If that also fails, try loading your object with the `load_old_compendium()` function. And if all of that still fails, please reach out on Slack for assistance.
+**[7/25/2025]** **Old MotifCompendium objects may not be compatible with the current version of the package!** If possible, rerun your MotifCompendium code with the current version of the package. If that is not possible, you may need to upgrade your MotifCompendium object in order for it to be compatible with the newest version of the package. To check if your MotifCompendium object needs upgrading, try loading the object. If the load fails, try loading with `safe=False` and saving the object; the saved version will be compatible with the package. If that also fails, try loading your object with the `load_old_compendium()` function. And if all of that still fails, please reach out on Slack for assistance.
 
 ## Documentation/Usage
 
