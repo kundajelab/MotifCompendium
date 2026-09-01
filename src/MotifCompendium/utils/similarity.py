@@ -16,33 +16,35 @@ from MotifCompendium.utils.similarity_core_cpu import compute_similarity_and_ali
 def compute_similarities(
     motif_stack_list: list[np.ndarray],
     calculations: list[tuple[int, int]],
+    *,
     unsigned: bool = False,
 ) -> list[tuple[np.ndarray, np.ndarray, np.ndarray]]:
-    """Performs similarity and calculations between sets of motif stacks.
+    """Performs similarity and alignment calculations between sets of motif stacks.
 
     Given a list of motif stacks and an instruction of which motif stacks to perform
-      pairwise similarity calculations between, this function returns a list of results
-      of each one of the specified calculations.
+    pairwise similarity calculations between, returns a list of results of each one of
+    the specified calculations.
 
     Args:
         motif_stack_list: A list of np.ndarrays representing stacks of motifs.
         calculations: A list where each element specifies a motif similarity calculation
           to perform. Each element of the list is a tuple of two ints where each int is
-          the index of a motif stack in the motif_stack_list. For example, the
-          calculation (i, j) says to compute the pairwise similarity between all motifs
-          in motif stack i and motif stack j.
+          the index of a motif stack in the motif_stack_list. For example, if
+          calculations[k] is (i, j), it specifies that the kth similarity that is
+          performed is the pairwise similarity between all motifs in motif stack i and
+          motif stack j.
         unsigned: If True, compute similarity on unsigned motifs, ignoring negative
           values. If False, compute similarity on motifs as provided.
 
     Returns:
         A list of motif calculation result tuples. There is one motif calculation result
           tuple for each calculation specification tuple in calculations. Each motif
-          calculation result tuple consists of a similarity matrix, an alignemnt_fr
+          calculation result tuple consists of a similarity matrix, an alignemnt_rc
           matrix, and an alignment_h matrix.
     """
     # VALIDATE
     for motif_stack in motif_stack_list:
-        utils_motif.validate_motif_stack_standard(motif_stack)
+        utils_motif.validate_motif_stack(motif_stack)
     L0 = motif_stack_list[0].shape[1]
     for motif_stack in motif_stack_list[1:]:
         L = motif_stack.shape[1]
@@ -59,7 +61,7 @@ def compute_similarities(
         ]  # Unsigned
     else:
         motif_stack_list = [
-            utils_motif.motif_4_to_8(motif_stack) for motif_stack in motif_stack_list
+            _motif_4_to_8(motif_stack) for motif_stack in motif_stack_list
         ]  # 8 channel
     # COMPUTE
     if utils_config.get_max_chunk() != -1:
@@ -87,29 +89,28 @@ def compute_similarities(
 def compute_similarity_prealigned(
     motif_stack_A: np.ndarray,
     motif_stack_B: np.ndarray,
-    unsigned: bool = False
+    *,
+    unsigned: bool = False,
 ) -> np.ndarray:
     """Computes the similarity of two motif stacks assuming they are already aligned.
 
-    Given a list of motif stacks and an instruction of which motif stacks to perform
-      pairwise similarity calculations between, this function returns a list of results
-      of each one of the specified calculations.
+    Given two pre-aligned motif stacks with the same number of motifs, this function
+    simply computes the pairwise similarity between the motifs in each stack. The
+    similarity of motif_stack_A[i] and motif_stack_B[i] is computed for each i.
 
     Args:
-        motif_stack_A: A np.ndarray representing a stack of motifs. Assumed to be the
-          same shape as motif_stack_B.
-        motif_stack_B: A np.ndarray representing a stack of motifs. Assumed to be the
-          same shape as motif_stack_A.
+        motif_stack_A: A (N, L, 4) motif stack.
+        motif_stack_B: A (N, L, 4) motif stack.
         unsigned: If True, compute similarity on unsigned motifs, ignoring negative
           values. If False, compute similarity on motifs as provided.
 
     Returns:
-        A np.ndarray representing the similarity score between the motifs in
+        A (N, ) vector of the similarity scores between corresponding motifs in
           motif_stack_A and motif_stack_B.
     """
     # VALIDATE
-    utils_motif.validate_motif_stack_standard(motif_stack_A)
-    utils_motif.validate_motif_stack_standard(motif_stack_B)
+    utils_motif.validate_motif_stack(motif_stack_A)
+    utils_motif.validate_motif_stack(motif_stack_B)
     if motif_stack_A.shape != motif_stack_B.shape:
         raise ValueError("motif_stack_A and motif_stack_B must have the same shape.")
     # PREPROCESS
@@ -120,17 +121,25 @@ def compute_similarity_prealigned(
         motif_stack_A = np.abs(motif_stack_A)  # Unsigned
         motif_stack_B = np.abs(motif_stack_B)  # Unsigned
     else:
-        motif_stack_A = utils_motif.motif_4_to_8(motif_stack_A)  # 8 channel
-        motif_stack_B = utils_motif.motif_4_to_8(motif_stack_B)  # 8 channel
-    motif_stack_A /= np.linalg.norm(motif_stack_A, axis=(1, 2), keepdims=True) # L2 normalize
-    motif_stack_B /= np.linalg.norm(motif_stack_B, axis=(1, 2), keepdims=True) # L2 normalize
+        motif_stack_A = _motif_4_to_8(motif_stack_A)  # 8 channel
+        motif_stack_B = _motif_4_to_8(motif_stack_B)  # 8 channel
+    motif_stack_A /= np.linalg.norm(
+        motif_stack_A, axis=(1, 2), keepdims=True
+    )  # L2 normalize
+    motif_stack_B /= np.linalg.norm(
+        motif_stack_B, axis=(1, 2), keepdims=True
+    )  # L2 normalize
     # COMPUTE
-    return np.sum(motif_stack_A*motif_stack_B, axis=(1,2))
+    similarity = np.sum(motif_stack_A * motif_stack_B, axis=(1, 2))
+    np.clip(
+        similarity, 0, 1, out=similarity
+    )  # Clip similarity to [0, 1] due to numerical precision issues
+    return similarity
 
 
-#####################
-# PRIVATE FUNCTIONS #
-#####################
+###############################################
+# SIMILARITY CALCULATION MANAGEMENT FUNCTIONS #
+###############################################
 def _chunk_motif_stacks_and_calcs(
     motif_stack_list: list[np.ndarray],
     calculations: list[tuple[int, int]],
@@ -279,3 +288,51 @@ def _reassemble_results(
         results.append((sim, rc, ali))
     assert len(results) == len(calculations)
     return results
+
+
+############################################
+# 8 CHANNEL MOTIF REPRESENTATION FUNCTIONS #
+############################################
+
+# 4 CHANNEL = (A, C, G, T)
+# 8 CHANNEL = (A+, A-, C+, C-, G-, G+, T-, T+)
+
+
+_MOTIF_4_TO_8_POS = np.zeros((4, 8))
+_MOTIF_4_TO_8_POS[0, 0] = 1
+_MOTIF_4_TO_8_POS[1, 2] = 1
+_MOTIF_4_TO_8_POS[2, 5] = 1
+_MOTIF_4_TO_8_POS[3, 7] = 1
+
+
+_MOTIF_4_TO_8_NEG = np.zeros((4, 8))
+_MOTIF_4_TO_8_NEG[0, 1] = 1
+_MOTIF_4_TO_8_NEG[1, 3] = 1
+_MOTIF_4_TO_8_NEG[2, 4] = 1
+_MOTIF_4_TO_8_NEG[3, 6] = 1
+
+
+def _motif_4_to_8(x: np.ndarray) -> np.ndarray:
+    """Converts a 4 channel motif/stack into an 8 channel motif/stack."""
+    x_pos = np.maximum(x, 0)
+    x_neg = np.maximum(-x, 0)
+    x_pos_8 = x_pos @ _MOTIF_4_TO_8_POS
+    x_neg_8 = x_neg @ _MOTIF_4_TO_8_NEG
+    x_8 = x_pos_8 + x_neg_8
+    return x_8
+
+
+def _motif_8_to_4_signed(x: np.ndarray) -> np.ndarray:
+    """Converts an 8 channel motif/stack into a signed 4 channel motif/stack."""
+    x_pos_4 = x @ _MOTIF_4_TO_8_POS.T
+    x_neg_4 = x @ _MOTIF_4_TO_8_NEG.T
+    x_4 = x_pos_4 - x_neg_4
+    return x_4
+
+
+def _motif_8_to_4_unsigned(x: np.ndarray) -> np.ndarray:
+    """Converts an 8 channel motif/stack into an unsigned 4 channel motif/stack."""
+    x_pos_4 = x @ _MOTIF_4_TO_8_POS.T
+    x_neg_4 = x @ _MOTIF_4_TO_8_NEG.T
+    x_4 = x_pos_4 + x_neg_4
+    return x_4

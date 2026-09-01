@@ -1,15 +1,15 @@
-import logging
-
-import numpy as np
 import pandas as pd
 import pooch
 
-import MotifCompendium
-from MotifCompendium import MotifCompendium as MotifCompendiumClass
+from .MotifCompendium import load as load_MotifCompendium
+from .MotifCompendium import MotifCompendium as MotifCompendiumClass
+
+__all__ = ["load_tutorial_data", "HDMA_compendium"]
 
 
 def silent_pooch_fetching(func):
     """Decorator to silence pooch fetching messages."""
+
     def wrapper(*args, **kwargs):
         logger = pooch.get_logger()
         was_disabled = logger.disabled
@@ -17,6 +17,7 @@ def silent_pooch_fetching(func):
         result = func(*args, **kwargs)
         logger.disabled = was_disabled
         return result
+
     return wrapper
 
 
@@ -28,7 +29,7 @@ tutorial_data = pooch.create(
     path=pooch.os_cache("MotifCompendium/data/tutorial_data"),
     base_url=tutorial_doi,
     version="0",
-    registry=None
+    registry=None,
 )
 tutorial_data.load_registry_from_doi()
 
@@ -39,7 +40,7 @@ def load_tutorial_data() -> dict[str, pd.DataFrame]:
 
     Returns:
         A dictionary from tutorial data file name to tutorial data file path.
-    
+
     Note:
         All tutorial data files are downloaded to the local cache directory.
     """
@@ -47,8 +48,8 @@ def load_tutorial_data() -> dict[str, pd.DataFrame]:
         "cardiomyocyte_modisco": "cardiomyocyte_modisco.h5",
         "endothelial_modisco": "endothelial_modisco.h5",
         "JASPAR_pfms": "JASPAR2024_CORE_non-redundant_pfms_meme.txt",
-        "HOCOMOCO_pfms": "H14CORE_pfms.txt"
-    } # NOTE: Currently on dataV0
+        "HOCOMOCO_pfms": "H14CORE_pfms.txt",
+    }  # NOTE: Currently on dataV0
     # data_objs = {
     #     "cardiomyocyte_modisco": "cardiomyocyte_modisco.h5",
     #     "endothelial_modisco": "endothelial_modisco.h5",
@@ -69,9 +70,9 @@ def HDMA_compendium() -> MotifCompendiumClass:
 
     Returns:
         A MotifCompendium containing motifs from the HDMA paper.
-    
+
     Note:
         Paper link: https://www.biorxiv.org/content/10.1101/2025.04.30.651381.
     """
     hdma_file = tutorial_data.fetch("HDMA.mc")
-    return MotifCompendium.load(hdma_file)
+    return load_MotifCompendium(hdma_file)

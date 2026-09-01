@@ -29,9 +29,9 @@ class LogoPlottingInput:
     Attributes:
         motif: A np.ndarray of shape (L, 4) representing the motif that needs to be
           plotted.
-        ic_scale: A boolean indicating whether the motif should be IC scaled when
+        ic_scale: A boolean indicating whether or not the motif should be IC scaled when
           plotting.
-        revcomp: A boolean indicating whether the motif needs to be reverse
+        revcomp: A boolean indicating whether or not the motif needs to be reverse
           complemented.
         pos: An int representing the position of the motif (shifted after reverse
           complement).
@@ -73,14 +73,14 @@ class LogoPlottingInput:
             ic_scale: A bool that is assigned to self.ic_scale.
             revcomp: A bool that is assigned to self.revcomp.
             pos: An int that is assigned to self.pos.
-            trim: A value assigned to self.trim.
+            trim: A bool, float, or int assigned to self.trim.
             bgcolor: A str that is assigned to self.bgcolor.
             encode: A bool that is assigned to self.encode.
             ax: A matplotlib.axes.Axes object that is assigned to self.ax.
             name: A str that is assigned to self.name.
         """
         # Validate inputs
-        utils_motif.validate_single_motif_standard(motif)
+        utils_motif.validate_single_motif(motif)
         if not isinstance(ic_scale, bool):
             raise TypeError("ic_scale must be a boolean.")
         # Not adding checks for revcomp and pos
@@ -134,7 +134,9 @@ class LogoPlottingInput:
         # Trim motif if needed
         if isinstance(self.trim, bool):
             if self.trim:
-                motif_to_plot = utils_motif.trim_motif(motif_to_plot, 1 / motif_to_plot.shape[0])
+                motif_to_plot = utils_motif.trim_motif(
+                    motif_to_plot, 1 / motif_to_plot.shape[0]
+                )
             # If False, don't trim
         elif isinstance(self.trim, (int, float)):
             motif_to_plot = utils_motif.trim_motif(motif_to_plot, self.trim)
@@ -162,9 +164,6 @@ def plot_motif(
 ) -> None:
     """Plots a single motif.
 
-    Plots a single motif. If show is True, the figure is shown. If save_loc is not None,
-      the motif plot is saved to that location.
-
     Args:
         motif: A np.ndarray of shape (L, 4) representing the motif to be plotted.
         ic_scale: Whether or not the motif should be IC scaled when plotting.
@@ -172,7 +171,7 @@ def plot_motif(
         save_loc: Where to save the motif plot to. If None, the motif plot is not saved.
     """
     # Check inputs
-    utils_motif.validate_single_motif_standard(motif)
+    utils_motif.validate_single_motif(motif)
     # Plot
     fig, ax = plt.subplots(figsize=(6, 2))
     motif_logo = LogoPlottingInput(motif, ic_scale=ic_scale, ax=ax, encode=False)
@@ -195,8 +194,8 @@ def plot_motif_stack(
     """Plots a stack of motifs.
 
     Plots a stack of motifs by calling plot_many_motif_logos(). If alignment information
-      is provided, the motifs are aligned accordingly. All motifs are plotted on the
-      same figure. If show is True, the figure is shown.
+    is provided, the motifs are aligned accordingly. All motifs are plotted on the same
+    figure. If show is True, the figure is shown.
 
     Args:
         motif_stack: A stack of motifs to be plotted.
@@ -209,7 +208,7 @@ def plot_motif_stack(
         save_loc: Where to save the motif plot to. If None, the motif plot is not saved.
     """
     # Check inputs
-    utils_motif.validate_motif_stack_standard(motif_stack)
+    utils_motif.validate_motif_stack(motif_stack)
     N = motif_stack.shape[0]
     if alignment_rc is not None and not (
         isinstance(alignment_rc, np.ndarray) and alignment_rc.shape == (N,)
@@ -280,14 +279,15 @@ def plot_many_motif_logos(
     """Plot the logos of multiple motifs.
 
     Calls plot_motif_logo() on each motif in motif_info_list and returns the updated
-      list. Parallelizes the plotting if config.get_max_cpus() > 1.
+    list. Parallelizes the plotting if utils_config.get_max_cpus() > 1.
 
     Args:
         motif_info_list: A list of LogoPlottingInput object specifying how each motif
           should be plotted.
 
     Returns:
-        A LogoPlottingInput object containing the plot of the motif.
+        A list of updated LogoPlottingInput objects that optionally contain the UTF-8
+          encoded plot of the motif.
     """
     # Use Agg backend
     current_backend = matplotlib.get_backend()
@@ -312,9 +312,7 @@ def plot_many_motif_logos(
 
 
 def encode_figure_as_utf8(fig: matplotlib.figure.Figure) -> str:
-    """Encodes a figure as a UTF-8 string.
-
-    Encodes a figure as a UTF-8 string and returns the string.
+    """Produces a UTF-8 string representation of a figure.
 
     Args:
         fig: A matplotlib.figure.Figure object.
@@ -338,7 +336,7 @@ def plot_heatmap(
     labels: list[str] | None = None,
     show: bool = False,
     save_loc: str | None = None,
-):
+) -> None:
     """Plot a heatmap.
 
     Creates a heatmap. Includes additional options to annotate/label the heatmap and
@@ -373,16 +371,17 @@ def _plot_motif_logo(motif_info: LogoPlottingInput) -> LogoPlottingInput:
     """Plots the logo of a motif.
 
     Plots the logo of a motif as specified by a LogoPlottingInput object. If
-      motif_info.ax is not None, the logo is plotted to that Axes object. If
-      motif_info.encode is True, the plot is encoded as a UTF-8 string and stored in
-      motif_info.utf8_plot. Returns the updated LogoPlottingInput object.
+    motif_info.ax is not None, the logo is plotted to that Axes object. If
+    motif_info.encode is True, the plot is encoded as a UTF-8 string and stored in
+    motif_info.utf8_plot. Returns the updated LogoPlottingInput object.
 
     Args:
         motif_info: A LogoPlottingInput object specifying how the motif should be
           plotted.
 
     Returns:
-        A LogoPlottingInput object containing the plot of the motif.
+        An updated instance of the input LogoPlottingInput object that optionally
+          contains the UTF-8 encoded plot of the motif.
     """
     # Get Axes
     if motif_info.ax is None:
@@ -412,10 +411,10 @@ def _plot_motif_logo(motif_info: LogoPlottingInput) -> LogoPlottingInput:
 
 
 def _plot_logo_on_axis_fast(motif_df: pd.DataFrame, ax: matplotlib.axes.Axes) -> None:
-    """Plots a motif with rectangles.
+    """Plots a motif quickly using basic shapes.
 
-    Fast custom code for plotting a motif with rectangles. This is faster than using
-        logomaker.Logo().
+    Fast custom code for plotting a motif with polygons. This is faster than using
+    logomaker.Logo().
 
     Args:
         motif_df: A pd.DataFrame of the motif.
@@ -475,7 +474,7 @@ def _plot_logo_on_axis_fast(motif_df: pd.DataFrame, ax: matplotlib.axes.Axes) ->
 
 
 def _plot_a(x, y, width, height, ax) -> None:
-    """Plots adenine."""
+    """Plots adenine in the specified rectangle on the provided Axes."""
     dx = width / 4
     dy = height / 6
     # left
@@ -523,7 +522,7 @@ def _plot_a(x, y, width, height, ax) -> None:
 
 
 def _plot_t(x, y, width, height, ax) -> None:
-    """Plots thyamine."""
+    """Plots thyamine in the specified rectangle on the provided Axes."""
     dx = width / 8
     dy = height / 6
     # top
@@ -541,7 +540,7 @@ def _plot_t(x, y, width, height, ax) -> None:
 
 
 def _plot_c(x, y, width, height, ax) -> None:
-    """Plots cytosine."""
+    """Plots cytosine in the specified rectangle on the provided Axes."""
     dx = width / 4
     dy = height / 6
     # right bottom lip
@@ -611,11 +610,10 @@ def _plot_c(x, y, width, height, ax) -> None:
     #     facecolor="mediumblue",
     #     aa=False
     # ))
-    return
 
 
 def _plot_g(x, y, width, height, ax) -> None:
-    """Plots guanine."""
+    """Plots guanine in the specified rectangle on the provided Axes."""
     dx = width / 4
     dy = height / 6
     # right bottom lip
@@ -691,13 +689,10 @@ def _plot_g(x, y, width, height, ax) -> None:
     #     facecolor="orange",
     #     aa=False
     # ))
-    return
 
 
 def _transfer_axis_content(source_ax, target_ax):
-    """
-    Transfer all content from source_ax to target_ax
-    """
+    """Transfer all content from source_ax to target_ax."""
     # Transfer patches (rectangles, polygons, etc)
     for patch in source_ax.patches[
         :

@@ -26,6 +26,6 @@ docs/build/
 docs/source/tutorials/tutorial_outputs/
 
 # Personal
-tests/
+personal_tests/
 !tutorials/tutorial_outputs/*.html
 !tutorials/tutorial_outputs/*.png

@@ -41,6 +41,7 @@ def which_file_load_failed(func):
 
 def load_modiscos(
     modisco_dict: dict[str, str],
+    *,
     load_subpatterns: bool = False,
     normalize_over_seqlets: bool = False,
     modisco_region_width: int = 400,
@@ -48,8 +49,8 @@ def load_modiscos(
     """Load motifs, names, and other per-motif metadata from multiple Modisco files.
 
     Motifs and per-motif metadata from each Modisco file are extracted by calling
-      load_modisco(). The results are then concatenated. Parallelizes the loading if
-      config.get_max_cpus() > 1.
+    load_modisco(). The results are then concatenated. Parallelizes the loading if
+    utils_config.get_max_cpus() > 1.
 
     Args:
         modisco_dict: A dictionary from model name to Modisco file path.
@@ -129,8 +130,8 @@ def load_modisco(
     """Load motifs, names, and other per-motif metadata from a single Modisco file.
 
     Each motif from the specified Modisco file is extracted. The motifs alongside per-
-      motif metadata are returned. By default, the motifs are returned as is, but they
-      can optionally be returned as normalized, seqlet-averaged motifs.
+    motif metadata are returned. By default, the motifs are returned as is, but they can
+    optionally be returned as normalized, seqlet-averaged motifs.
 
     Args:
         modisco_file: A Modisco file path.
@@ -237,7 +238,9 @@ def load_modisco(
                         )
                     )
     # Concatenate motifs and create metadata
-    motifs = np.stack(motifs, axis=0) if len(motifs) > 1 else motifs[0][np.newaxis, :, :]
+    motifs = (
+        np.stack(motifs, axis=0) if len(motifs) > 1 else motifs[0][np.newaxis, :, :]
+    )
     metadata = pd.DataFrame(
         {
             "name": motif_names,
@@ -253,20 +256,21 @@ def load_modisco(
 
 def load_pfms(
     pfm_dict: dict[str, str],
+    *,
     motif_length: int | None = None,
 ) -> tuple[np.ndarray, pd.DataFrame]:
     """Load motifs and names from multiple files containing PFMs.
 
     Motifs from each file containing Position Frequency Matrices (PFMs) are extracted
-      by calling load_pfm(). The results are then concatenated. Files in PFM or MEME
-      format are supported. Parallelizes the loading if config.get_max_cpus() > 1.
+    by calling load_pfm(). The results are then concatenated. Files in PFM or MEME format
+    are supported. Parallelizes the loading if utils_config.get_max_cpus() > 1.
 
     Args:
         pfm_dict: A dictionary from model name to path of file specyfing PFMs in PFM or
           MEME format.
         motif_length: If specified, all motifs will be set to this length using
-          utils_motif.resize_motif(). If None, the motifs will be resized to match the
-          length of the longest motif.
+          utils_motif.resize_motif(). If not provided, the motifs will be resized to
+          match the length of the longest motif.
 
     Returns:
         A tuple of motifs and motif names. The motifs are returned as a (N, L, 4) motif
@@ -315,7 +319,7 @@ def load_pfms(
 
 @which_file_load_failed
 def load_pfm(
-    pfm_file: str, motif_length: int | None = None
+    pfm_file: str, *, motif_length: int | None = None
 ) -> tuple[np.ndarray, pd.DataFrame]:
     """Load motifs and per-motif metadata from a single file containing PFMs.
 
@@ -364,9 +368,6 @@ def _normalized_motif_from_seqlets(seqlets: np.ndarray) -> np.ndarray:
 
     Returns:
         An (L, 4) sequence importance matrix.
-
-    Note:
-        The returned motif will be non-negative and have an absolute sum of 1.
     """
     normalized_seqlets = seqlets / np.sum(np.abs(seqlets), axis=(1, 2), keepdims=True)
     averaged_normalized_seqlets = np.mean(normalized_seqlets, axis=0)
@@ -420,7 +421,9 @@ def _load_pfm_file_pfm_format(
                 current_motif = {"A": [], "C": [], "G": [], "T": []}
     # Concatenate motifs and create metadata
     motifs = [utils_motif.pad_motif(x, longest_motif_length) for x in motifs]
-    motifs = np.stack(motifs, axis=0) if len(motifs) > 1 else motifs[0][np.newaxis, :, :]
+    motifs = (
+        np.stack(motifs, axis=0) if len(motifs) > 1 else motifs[0][np.newaxis, :, :]
+    )
     metadata = pd.DataFrame({"name": names})
     # Return
     return motifs, metadata
@@ -493,7 +496,9 @@ def _load_meme_file_meme_format(
                         active_motif = False
     # Concatenate motifs and create metadata
     motifs = [utils_motif.pad_motif(x, longest_motif_length) for x in motifs]
-    motifs = np.stack(motifs, axis=0) if len(motifs) > 1 else motifs[0][np.newaxis, :, :]
+    motifs = (
+        np.stack(motifs, axis=0) if len(motifs) > 1 else motifs[0][np.newaxis, :, :]
+    )
     metadata = pd.DataFrame({"name": names})
     # Return
     return motifs, metadata

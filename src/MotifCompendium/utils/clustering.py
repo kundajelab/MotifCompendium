@@ -1,3 +1,4 @@
+from typing import Literal
 import warnings
 
 import igraph as ig
@@ -9,19 +10,37 @@ import sklearn.cluster
 import MotifCompendium.utils.config as utils_config
 
 
+ClusterType = Literal[
+    "mod_leiden",
+    "modularity_leiden",
+    "rb_leiden",
+    "cpm",
+    "cpm_leiden",
+    "constant_potts_leiden",
+    "leiden",
+    "leidenalg",
+    "cc",
+    "connected_components",
+    "dcc",
+    "dense_cc",
+    "densely_connected_components",
+    "spectral",
+]
+
+
 ######################
 # CLUSTERING HANDLER #
 ######################
 def cluster(
     similarity_matrix: np.ndarray,
     similarity_threshold: float,
-    algorithm: str,
+    algorithm: ClusterType,
     **kwargs,
 ) -> list[int]:
     """Cluster a similarity matrix.
 
     Given a similarity matrix, a similarity threshold, and a choice of algorithm, return
-      a clustering of the similarity matrix. The clustering is a list that assigns each
+    a clustering of the similarity matrix. The clustering is a list that assigns each
       index in the similarity matrix to a number number.
 
     Args:
@@ -29,6 +48,7 @@ def cluster(
         similarity_threshold: The threshold above which two motifs are considered to be
           similar.
         algorithm: Which clustering algorithm to use. Supported options:
+            - "mod_leiden": Leiden clustering with modularity as the quality function.
             - "leiden": Leiden clustering with Reichardt & Bornholdt's quality function
                 and a configuration model as a null.
             - "cpm" or "cpm_leiden": Leiden clustering with the constant Potts model.
