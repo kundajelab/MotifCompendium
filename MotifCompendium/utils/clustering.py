@@ -8,6 +8,7 @@ import scipy.sparse
 import sklearn.cluster
 
 import MotifCompendium.utils.config as utils_config
+import MotifCompendium.utils.motif as utils_motif
 import MotifCompendium.utils.similarity as utils_similarity
 
 
@@ -735,7 +736,7 @@ def _update_assignment_threshold(
     membership: np.ndarray,
     similarity_matrix_motif_cluster: np.ndarray,
     assignment_threshold: float,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """Assign points to clusters, if new assignment improvement in similarity is greater than the threshold."""
     membership_hyp = similarity_matrix_motif_cluster.argmax(axis=1)  # (N,)
     similarity_motif_cluster_hyp = similarity_matrix_motif_cluster.max(axis=1)  # (N,)
@@ -763,6 +764,94 @@ def _remap_membership(membership: np.ndarray) -> np.ndarray:
     return membership_remapped
 
 
+def _cluster_idxs(membership: np.ndarray) -> list[np.ndarray]:
+    """Group motif indices by cluster label, ordered by label.
+
+    Group j holds the members of label j, so that a stack of per-cluster representations
+      lines up column-for-column with the labels in membership. _remap_membership() must
+      have been applied first, so that labels are contiguous and 0-based.
+    """
+    order = np.argsort(membership, kind="stable")
+    boundaries = np.flatnonzero(np.diff(membership[order])) + 1
+    return np.split(order, boundaries)
+
+
+class _ConvergenceTracker:
+    """Tracks a clustering objective across iterations, to stop on a stall or a cycle.
+
+    Lloyd-style clustering only improves monotonically when the step computing cluster
+      representations optimizes the same objective the assignment step evaluates. That
+      does not hold exactly when representations are averaged motifs, because averaging is
+      lossy (see resize_motif()), so the objective may fail to improve and membership may
+      cycle instead of reaching a fixed point. Exact membership equality alone therefore
+      cannot be relied on to terminate a run. This additionally stops when membership
+      repeats, when the objective stops improving, or when an iteration cap is reached, and
+      retains the best-scoring iteration so a stopped run still returns its best state.
+
+    Args:
+        n_iterations: The number of iterations to run. -1 iterates until convergence.
+        max_iterations: A hard cap on iterations, applied even when n_iterations is -1.
+        tol: The minimum objective improvement that counts as progress.
+        algorithm: The algorithm name, used in warning messages.
+    """
+
+    def __init__(
+        self, n_iterations: int, max_iterations: int, tol: float, algorithm: str
+    ) -> None:
+        if not (
+            isinstance(n_iterations, (int, np.integer))
+            and ((n_iterations == -1) or (n_iterations >= 1))
+        ):
+            raise ValueError(
+                "n_iterations must be -1 (iterate until convergence) or a positive integer."
+            )
+        if not (
+            isinstance(max_iterations, (int, np.integer)) and (max_iterations >= 1)
+        ):
+            raise ValueError("max_iterations must be a positive integer.")
+        self.cap = (
+            max_iterations if n_iterations == -1 else min(n_iterations, max_iterations)
+        )
+        self.tol = tol
+        self.algorithm = algorithm
+        self.best_score = -np.inf
+        self.best_membership = None
+        self._previous_score = -np.inf
+        self._seen = set()
+
+    def record(self, membership: np.ndarray, score: float) -> None:
+        """Retain membership if it is the best-scoring iteration seen so far."""
+        if score > self.best_score:
+            self.best_score = score
+            self.best_membership = membership
+
+    def should_stop(self, membership: np.ndarray, score: float) -> bool:
+        """Whether to stop because membership is cycling or the objective has stalled."""
+        key = membership.tobytes()
+        if key in self._seen:
+            warnings.warn(
+                f"{self.algorithm}: membership is cycling; "
+                "returning the best-scoring iteration."
+            )
+            return True
+        if score <= self._previous_score + self.tol:
+            warnings.warn(
+                f"{self.algorithm}: objective stopped improving; "
+                "returning the best-scoring iteration."
+            )
+            return True
+        self._seen.add(key)
+        self._previous_score = score
+        return False
+
+    def exhausted(self) -> None:
+        """Warn that the run hit its iteration cap without converging."""
+        warnings.warn(
+            f"{self.algorithm}: did not converge within {self.cap} iterations; "
+            "returning the best-scoring iteration."
+        )
+
+
 ## K-CENTROIDS CLUSTERING ##
 def k_centroids_clustering(
     motifs: np.ndarray,
@@ -775,6 +864,9 @@ def k_centroids_clustering(
     init_method: str = "kmeans++",
     assignment_threshold: float = 0.0,
     n_iterations: int = -1,
+    max_iterations: int = 100,
+    tol: float = 1e-9,
+    reference: str = "medoid",
     seeds: list[int] = [100, 200],
 ) -> np.ndarray:
     """K-means clustering, by taking the mean of the cluster ("centroid") as the cluster representation, 
@@ -803,7 +895,17 @@ def k_centroids_clustering(
           a new cluster. If the closest centroid is not at least this much more similar, 
           then the motif will not switch clusters.
         n_iterations: The max number of iterations to run k-means, per run/seed. 
-          If -1, run until convergence.
+          If -1, run until convergence, bounded by max_iterations.
+        max_iterations: A hard cap on the iterations run per seed, applied even when
+          n_iterations is -1. Averaging motifs is lossy, so the objective is not guaranteed
+          to improve monotonically and membership may cycle rather than reach a fixed
+          point; this cap guarantees termination.
+        tol: The minimum increase in the weighted objective that counts as progress. Once an
+          iteration fails to improve on the previous one by more than tol, the run stops and
+          the best-scoring iteration is returned.
+        reference: Which member of a cluster provides the alignment frame used to bootstrap
+          the first set of centroids, before any centroid exists to align against. See
+          select_alignments().
         seeds: Seeds with which to run clustering. Each seed will correspond to an
           independent run of clustering. The clustering from the run with the highest
           quality will be returned. The length of seeds is equal to the number of
@@ -813,9 +915,14 @@ def k_centroids_clustering(
         A numpy array of integers where each element represents the cluster that index
           corresponds to. All elements with the same value have been assigned to the
           same cluster.
+
+    Notes:
+        After the first iteration each motif is aligned to the centroid it is assigned to,
+          rather than to one of its fellow cluster members, so that a centroid depends only
+          on which motifs are in its cluster and not on their ordering, and so that the
+          averaging step optimizes the same objective the assignment step evaluates.
+        Clusters left empty are dropped, so a run may return fewer than k clusters.
     """
-    # Import libraries (avoid circular imports)
-    from MotifCompendium.MotifCompendium import MotifCompendium
     N = similarity_matrix.shape[0]
 
     # Initialization: Similarity, Motif, Membership
@@ -838,7 +945,7 @@ def k_centroids_clustering(
 
     # Run K-centroids clustering:
     global_membership = []
-    global_score = 0
+    global_score = -np.inf
     for seed in seeds:
         # Initialize
         if init_method is not None:
@@ -848,59 +955,75 @@ def k_centroids_clustering(
                 seed=seed,
                 method=init_method,
             )
-        # Build MotifCompendium object
-        mc = MotifCompendium(
-            motifs,
-            similarity_matrix,
-            alignment_rc_matrix,
-            alignment_h_matrix,
-            pd.DataFrame({
-                "membership": init_membership,
-                "weights": weights,
-            }),
-            pd.DataFrame(),
-            safe=False,
-        )
         # Run clustering
-        membership_old = init_membership
-        score_old = 0
-        iteration = 0
-        while iteration != n_iterations:
-            membership_old = _remap_membership(membership_old)
-            mc["membership"] = membership_old
+        membership = _remap_membership(init_membership)
+        tracker = _ConvergenceTracker(n_iterations, max_iterations, tol, "k_centroids")
+        # Alignment of every motif into the frame of the centroid it is assigned to. No
+        #   centroid exists yet on the first iteration, so that one is bootstrapped from a
+        #   member of each cluster instead.
+        alignment_rc, alignment_h = None, None
+        for _ in range(tracker.cap):
+            cluster_idxs = _cluster_idxs(membership)
+            if alignment_rc is None:
+                alignment_rc, alignment_h = utils_motif.select_alignments(
+                    alignment_rc_matrix,
+                    alignment_h_matrix,
+                    cluster_idxs,
+                    similarity_matrix=similarity_matrix,
+                    weights=weights,
+                    reference=reference,
+                )
             # Compute cluster representations: Centroids
-            mc_average = mc.cluster_averages(
-                clustering="membership",
-                weight_col="weights",
-                aggregations=[],
+            centroids = utils_motif.average_motifs(
+                motifs,
+                alignment_rc,
+                alignment_h,
+                weights=weights,
+                cluster_idxs=cluster_idxs,
             )
-            # Calculate distance matrix: Motif to clusters
-            similarity_matrix_motif_cluster, _, _ = utils_similarity.compute_similarities(
-                [mc.motifs, mc_average.motifs], [(0, 1)]
-            )[0]  # (N, k)
+            # Calculate distance matrices: Motif to centroid, and centroid to motif. Both
+            #   blocks come from a single computation, as each is the other transposed.
+            (
+                (similarity_matrix_motif_cluster, _, _),
+                (_, centroid_motif_rc, centroid_motif_h),
+            ) = utils_similarity.compute_similarities(
+                [motifs, centroids], [(0, 1), (1, 0)]
+            )  # (N, k) and (k, N)
             # Update membership, distance, and score, with threshold
             membership_new, similarity_motif_cluster = _update_assignment_threshold(
-                membership=membership_old,
+                membership=membership,
                 similarity_matrix_motif_cluster=similarity_matrix_motif_cluster,
                 assignment_threshold=assignment_threshold,
             )  # (N,) (N,)
-            mc["membership"] = membership_new
-            score_new = similarity_motif_cluster.sum()
+            # Score the objective the assignment step just evaluated. Weighted, to match
+            #   the weighted averaging that produces the centroids.
+            score = float(np.sum(weights * similarity_motif_cluster))
+            tracker.record(membership_new, score)
             # Check for convergence: Across steps
-            if np.array_equal(membership_old, membership_new):
+            if np.array_equal(membership, membership_new):
                 break
-            # Update best score and membership
-            else:
-                membership_old = membership_new
-                score_old = score_new
-                iteration += 1
+            membership_next = _remap_membership(membership_new)
+            if tracker.should_stop(membership_next, score):
+                break
+            # Re-frame every motif against the centroid it has just been assigned to, so
+            #   the next averaging step optimizes the objective scored above. Indexed with
+            #   membership_new, whose labels still address the centroids computed above.
+            alignment_rc = centroid_motif_rc[membership_new, np.arange(N)]
+            alignment_h = centroid_motif_h[membership_new, np.arange(N)]
+            membership = membership_next
+        else:
+            tracker.exhausted()
         # Check for convergence: Across seeds
-        if score_new >= global_score:
-            global_membership = membership_new
-            global_score = score_new
-    # Remove temp columns
-    mc.delete_columns(["membership", "weights"])
-
+        if tracker.best_score > global_score:
+            global_membership = tracker.best_membership
+            global_score = tracker.best_score
+    global_membership = _remap_membership(global_membership)
+    n_clusters = len(np.unique(global_membership))
+    if (k is not None) and (n_clusters < k):
+        warnings.warn(
+            f"k_centroids: returning {n_clusters} clusters rather than the requested {k}, "
+            "as clusters left empty are dropped."
+        )
     return global_membership
 
 
@@ -930,6 +1053,8 @@ def k_medoids_clustering(
     init_method: str = "kmeans++",
     assignment_threshold: float = 0.0,
     n_iterations: int = -1,
+    max_iterations: int = 100,
+    tol: float = 1e-9,
     seeds: list[int] = [100, 200],
 ) -> np.ndarray:
     """K-medoids clustering, by taking the motif with the closest similarity to all other motifs 
@@ -953,7 +1078,13 @@ def k_medoids_clustering(
           a new cluster. If the closest centroid is not at least this much more similar, 
           then the motif will not switch clusters.
         n_iterations: The max number of iterations to run k-means, per run/seed. 
-          If -1, run until convergence.
+          If -1, run until convergence, bounded by max_iterations.
+        max_iterations: A hard cap on the iterations run per seed, applied even when
+          n_iterations is -1, which guarantees termination if the objective stops
+          improving or membership begins to cycle.
+        tol: The minimum increase in the objective that counts as progress. Once an
+          iteration fails to improve on the previous one by more than tol, the run
+          stops and the best-scoring iteration is returned.
         seeds: Seeds with which to run clustering. Each seed will correspond to an
           independent run of clustering. The clustering from the run with the highest
           quality will be returned. The length of seeds is equal to the number of
@@ -979,7 +1110,7 @@ def k_medoids_clustering(
 
     # Run K-medoids clustering:
     global_membership = []
-    global_score = 0
+    global_score = -np.inf
     for seed in seeds:
         # Initialize: 
         if init_method is not None:
@@ -991,39 +1122,39 @@ def k_medoids_clustering(
             )
 
         # Run clustering
-        membership_old = init_membership
-        score_old = 0
-        iteration = 0
-        while iteration != n_iterations:
-            membership_old = _remap_membership(membership_old)
+        membership = _remap_membership(init_membership)
+        tracker = _ConvergenceTracker(n_iterations, max_iterations, tol, "k_medoids")
+        for _ in range(tracker.cap):
             # Compute cluster representations: Medoids
             medoids = _find_k_medoids(
-                memberships=membership_old,
+                memberships=membership,
                 similarity_matrix=similarity_matrix,
             )
             # Calculate distance matrix: Motif to clusters
             similarity_matrix_motif_cluster = similarity_matrix[:, medoids]  # (N, k)
             # Update membership, distance, and score, with threshold
             membership_new, similarity_motif_cluster = _update_assignment_threshold(
-                membership=membership_old,
+                membership=membership,
                 similarity_matrix_motif_cluster=similarity_matrix_motif_cluster,
                 assignment_threshold=assignment_threshold,
             )  # (N,) (N,)
-            score_new = similarity_motif_cluster.sum()
+            score = float(similarity_motif_cluster.sum())
+            tracker.record(membership_new, score)
             # Check for convergence: Across steps
-            if np.array_equal(membership_old, membership_new):
+            if np.array_equal(membership, membership_new):
                 break
-            # Update best score and membership
-            else:
-                membership_old = membership_new
-                score_old = score_new
-                iteration += 1
+            membership_next = _remap_membership(membership_new)
+            if tracker.should_stop(membership_next, score):
+                break
+            membership = membership_next
+        else:
+            tracker.exhausted()
         # Check for convergence: Across seeds
-        if score_new >= global_score:
-            global_membership = membership_new
-            global_score = score_new
+        if tracker.best_score > global_score:
+            global_membership = tracker.best_membership
+            global_score = tracker.best_score
 
-    return global_membership
+    return _remap_membership(global_membership)
 
 
 ## K-MEAN DISTANCE CLUSTERING ##
@@ -1054,6 +1185,8 @@ def k_mean_distance_clustering(
     init_method: str = "kmeans++",
     assignment_threshold: float = 0.0,
     n_iterations: int = -1,
+    max_iterations: int = 100,
+    tol: float = 1e-9,
     seeds: list[int] = [100, 200],
 ) -> np.ndarray:
     """K-means clustering, by taking the mean distance across all motifs in the cluster as the 
@@ -1080,7 +1213,13 @@ def k_mean_distance_clustering(
           a new cluster. If the closest centroid is not at least this much more similar, 
           then the motif will not switch clusters.
         n_iterations: The max number of iterations to run k-means, per run/seed. 
-          If -1, run until convergence.
+          If -1, run until convergence, bounded by max_iterations.
+        max_iterations: A hard cap on the iterations run per seed, applied even when
+          n_iterations is -1, which guarantees termination if the objective stops
+          improving or membership begins to cycle.
+        tol: The minimum increase in the objective that counts as progress. Once an
+          iteration fails to improve on the previous one by more than tol, the run
+          stops and the best-scoring iteration is returned.
         seeds: Seeds with which to run clustering. Each seed will correspond to an
           independent run of clustering. The clustering from the run with the highest
           quality will be returned. The length of seeds is equal to the number of
@@ -1112,7 +1251,7 @@ def k_mean_distance_clustering(
 
     # Run K-mean distance clustering:
     global_membership = []
-    global_score = 0
+    global_score = -np.inf
     for seed in seeds:
         # Initialize
         if init_method is not None:
@@ -1124,38 +1263,38 @@ def k_mean_distance_clustering(
             )
 
         # Run clustering
-        membership_old = init_membership
-        score_old = 0
-        iteration = 0
-        while iteration != n_iterations:
-            membership_old = _remap_membership(membership_old)
+        membership = _remap_membership(init_membership)
+        tracker = _ConvergenceTracker(n_iterations, max_iterations, tol, "k_mean_distance")
+        for _ in range(tracker.cap):
             # Calculate distance matrix: Motif to clusters
             similarity_matrix_motif_cluster = _calculate_k_mean_distance(
-                memberships=membership_old,
+                memberships=membership,
                 similarity_matrix=similarity_matrix,
                 weights=weights,
             )  # (N, k)
             # Update membership, distance, and score, with threshold
             membership_new, similarity_motif_cluster = _update_assignment_threshold(
-                membership=membership_old,
+                membership=membership,
                 similarity_matrix_motif_cluster=similarity_matrix_motif_cluster,
                 assignment_threshold=assignment_threshold,
             )  # (N,) (N,)
-            score_new = similarity_motif_cluster.sum()
+            score = float(np.sum(weights * similarity_motif_cluster))
+            tracker.record(membership_new, score)
             # Check for convergence: Across steps
-            if np.array_equal(membership_old, membership_new):
+            if np.array_equal(membership, membership_new):
                 break
-            # Update best score and membership
-            else:
-                membership_old = membership_new
-                score_old = score_new
-                iteration += 1
+            membership_next = _remap_membership(membership_new)
+            if tracker.should_stop(membership_next, score):
+                break
+            membership = membership_next
+        else:
+            tracker.exhausted()
         # Check for convergence: Across seeds
-        if score_new >= global_score:
-            global_membership = membership_new
-            global_score = score_new
+        if tracker.best_score > global_score:
+            global_membership = tracker.best_membership
+            global_score = tracker.best_score
 
-    return global_membership
+    return _remap_membership(global_membership)
 
 
 ## K-MEDIAN DISTANCE CLUSTERING ##
@@ -1183,6 +1322,8 @@ def k_median_distance_clustering(
     init_method: str = "kmeans++",
     assignment_threshold: float = 0.0,
     n_iterations: int = -1,
+    max_iterations: int = 100,
+    tol: float = 1e-9,
     seeds: list[int] = [100, 200],
 ) -> np.ndarray:
     """K-medoid clustering, by taking the median distance across all motifs in the cluster as the 
@@ -1206,7 +1347,13 @@ def k_median_distance_clustering(
           a new cluster. If the closest centroid is not at least this much more similar, 
           then the motif will not switch clusters.
         n_iterations: The max number of iterations to run k-means, per run/seed. 
-          If -1, run until convergence.
+          If -1, run until convergence, bounded by max_iterations.
+        max_iterations: A hard cap on the iterations run per seed, applied even when
+          n_iterations is -1, which guarantees termination if the objective stops
+          improving or membership begins to cycle.
+        tol: The minimum increase in the objective that counts as progress. Once an
+          iteration fails to improve on the previous one by more than tol, the run
+          stops and the best-scoring iteration is returned.
         seeds: Seeds with which to run clustering. Each seed will correspond to an
           independent run of clustering. The clustering from the run with the highest
           quality will be returned. The length of seeds is equal to the number of
@@ -1232,7 +1379,7 @@ def k_median_distance_clustering(
 
     # Run K-median distance clustering:
     global_membership = []
-    global_score = 0
+    global_score = -np.inf
     for seed in seeds:
         # Initialize
         if init_method is not None:
@@ -1244,34 +1391,34 @@ def k_median_distance_clustering(
             )
         
         # Run clustering
-        membership_old = init_membership
-        score_old = 0
-        iteration = 0
-        while iteration != n_iterations:
-            membership_old = _remap_membership(membership_old)
+        membership = _remap_membership(init_membership)
+        tracker = _ConvergenceTracker(n_iterations, max_iterations, tol, "k_median_distance")
+        for _ in range(tracker.cap):
             # Calculate distance matrix: Motif to clusters
             similarity_matrix_motif_cluster = _calculate_k_median_distance(
-                memberships=membership_old,
+                memberships=membership,
                 similarity_matrix=similarity_matrix,
             )  # (N, k)
             # Update membership, distance, and score, with threshold
             membership_new, similarity_motif_cluster = _update_assignment_threshold(
-                membership=membership_old,
+                membership=membership,
                 similarity_matrix_motif_cluster=similarity_matrix_motif_cluster,
                 assignment_threshold=assignment_threshold,
             )  # (N,) (N,)
-            score_new = similarity_motif_cluster.sum()
+            score = float(similarity_motif_cluster.sum())
+            tracker.record(membership_new, score)
             # Check for convergence: Across steps
-            if np.array_equal(membership_old, membership_new):
+            if np.array_equal(membership, membership_new):
                 break
-            # Update best score and membership
-            else:
-                membership_old = membership_new
-                score_old = score_new
-                iteration += 1
+            membership_next = _remap_membership(membership_new)
+            if tracker.should_stop(membership_next, score):
+                break
+            membership = membership_next
+        else:
+            tracker.exhausted()
         # Check for convergence: Across seeds
-        if score_new >= global_score:
-            global_membership = membership_new
-            global_score = score_new
+        if tracker.best_score > global_score:
+            global_membership = tracker.best_membership
+            global_score = tracker.best_score
 
-    return global_membership
+    return _remap_membership(global_membership)
