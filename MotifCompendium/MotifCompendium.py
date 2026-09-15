@@ -1847,8 +1847,9 @@ class MotifCompendium:
 
         max_external_centroid_scores = cluster_cluster_similarity.max(axis=1)
         max_external_centroid_cluster_idxs = cluster_cluster_similarity.argmax(axis=1)
+        cluster_names_arr = mc_avg.metadata["name"].to_numpy()[mc_avg_idx]
         stats_metadata["max_external_centroid-centroid_similarity_score"] = max_external_centroid_scores
-        stats_metadata["max_external_centroid-centroid_similarity_cluster"] = mc_avg.cluster_names[max_external_centroid_cluster_idxs]
+        stats_metadata["max_external_centroid-centroid_similarity_cluster"] = cluster_names_arr[max_external_centroid_cluster_idxs]
         stats_motifs["max_external_centroid-centroid_similarity_motif"] = aligned_logos(
             cluster_cluster_rc, source_idx, max_external_centroid_cluster_idxs
         )
@@ -1862,6 +1863,7 @@ class MotifCompendium:
         aggregations: list[tuple[str]] = [("name", "count", "num_constituents")],
         weight_col: str | None = None,
         compute_quality_stats: bool = False,
+        reference: str = "medoid",
     ) -> MotifCompendium:
         """Creates a MotifCompendium where each motif represents a cluster of motifs.
 
@@ -1898,6 +1900,11 @@ class MotifCompendium:
             compute_quality_stats: Whether or not to compute quality statistics for the
               clustering. If True, the quality statistics will be saved in the metadata
               of the returned MotifCompendium.
+            reference: Which member of each cluster provides the alignment frame that the
+              cluster average is built in. "medoid" uses the member with the highest
+              weighted similarity to the rest of its cluster, and so depends only on
+              cluster membership. "first" uses the lowest-indexed member, reproducing
+              historical behaviour at the cost of depending on motif ordering.
                 - "min_internal_motif-motif_similarity_score": The lowest internal motif-motif 
                     similarity score between motifs within the cluster.
                 - "min_internal_motif-motif_similarity_motif1_name": The name of the first motif
@@ -1979,27 +1986,27 @@ class MotifCompendium:
             cluster_idxs[c].append(i)
         # Perform averaging per cluster
         clusters = sorted(cluster_idxs.keys())
-        cluster_motif_avgs, cluster_names = [], []
-        for c in clusters:
-            # Cluster name
-            cluster_names.append(f"{clustering}#{c}")
-            # Cluster average motif
-            c_idxs = cluster_idxs[c]
-            motifs_c = self.motifs[c_idxs, :, :]
-            alignment_rc_c = self.alignment_rc[c_idxs, :][:, c_idxs][
-                0, :
-            ]  # vector of alignment
-            alignment_h_c = self.alignment_h[c_idxs, :][:, c_idxs][
-                0, :
-            ]  # vector of alignment
-            weights_c = (
-                None if weights is None else weights[c_idxs]
-            )  # vector of weights (if using weights)
-            # Average motifs
-            motif_avg_c = utils_motif.average_motifs(
-                motifs_c, alignment_rc_c, alignment_h_c, weights=weights_c
-            )
-            cluster_motif_avgs.append(motif_avg_c)
+        cluster_member_idxs = [np.asarray(cluster_idxs[c]) for c in clusters]
+        cluster_names = [f"{clustering}#{c}" for c in clusters]
+        # Select each cluster's alignment reference frame, then average within that frame
+        alignment_rc_ref, alignment_h_ref = utils_motif.select_alignments(
+            self.alignment_rc,
+            self.alignment_h,
+            cluster_member_idxs,
+            similarity_matrix=self.similarity,
+            weights=weights,
+            reference=reference,
+        )
+        cluster_motif_avgs = utils_motif.average_motifs(
+            self.motifs,
+            alignment_rc_ref,
+            alignment_h_ref,
+            weights=weights,
+            cluster_idxs=cluster_member_idxs,
+        )
+        # Aggregate metadata per cluster
+        for c_idxs in cluster_member_idxs:
+            weights_c = None if weights is None else weights[c_idxs]
             # Aggregations
             for agg_dict in aggregations_dicts:
                 agg_c_data = self.metadata.loc[c_idxs, agg_dict["source"]]
@@ -2033,7 +2040,6 @@ class MotifCompendium:
                             f"{agg_dict['method']} is not a supported aggregation method."
                         )
         # Construct cluster average MotifCompendium
-        cluster_motif_avgs = np.stack(cluster_motif_avgs, axis=0)
         metadata = pd.DataFrame()
         metadata["name"] = cluster_names
         metadata["source_cluster"] = clusters
@@ -2052,7 +2058,7 @@ class MotifCompendium:
             # Add logos into images
             for stats_logo in stats_motifs.columns:
                 mc_avg.add_logos(
-                    motifs=stats_motifs[stats_logo],
+                    motifs=np.stack(stats_motifs[stats_logo].to_list(), axis=0),
                     image_name=stats_logo,
                 )
         return mc_avg

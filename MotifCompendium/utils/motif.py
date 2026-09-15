@@ -361,17 +361,75 @@ def view_motif_from_position_range(
     return motif[:, new_min_idx : new_max_idx + 1, :]
 
 
+def select_alignments(
+    alignment_rc_matrix: np.ndarray,
+    alignment_h_matrix: np.ndarray,
+    cluster_idxs: list[np.ndarray],
+    similarity_matrix: np.ndarray | None = None,
+    weights: np.ndarray | None = None,
+    reference: str = "medoid",
+) -> tuple[np.ndarray, np.ndarray]:
+    """Select per-motif alignment vectors placing each motif in its cluster's frame.
+
+    Pairwise alignment matrices describe how any motif aligns to any other motif. Averaging
+      a cluster requires collapsing that down to one vector per motif, relative to a single
+      reference motif per cluster. This picks that reference and reads off its row.
+
+    Args:
+        alignment_rc_matrix: An (N, N) forward/reverse complement alignment matrix.
+        alignment_h_matrix: An (N, N) horizontal alignment matrix.
+        cluster_idxs: One array of member indices per cluster.
+        similarity_matrix: An (N, N) similarity matrix. Required for reference="medoid".
+        weights: An optional (N, ) vector of motif weights.
+        reference: Which member provides each cluster's reference frame. "medoid" uses the
+          member with the highest weighted similarity to the rest of its cluster. "first"
+          uses the lowest-indexed member.
+
+    Returns:
+        A tuple of an (N, ) alignment_rc vector and an (N, ) alignment_h vector.
+
+    Notes:
+        "medoid" depends only on which motifs are in a cluster, never on their ordering, so
+          a cluster average is stable under row permutations. "first" reproduces the
+          historical behaviour, in which the average jumps whenever the lowest-indexed
+          member leaves the cluster.
+    """
+    if reference not in ("medoid", "first"):
+        raise ValueError(
+            f"{reference} is not a supported reference. Use 'medoid' or 'first'."
+        )
+    if reference == "medoid" and similarity_matrix is None:
+        raise ValueError("similarity_matrix is required when reference='medoid'.")
+    N = alignment_rc_matrix.shape[0]
+    alignment_rc = np.zeros(N, dtype=alignment_rc_matrix.dtype)
+    alignment_h = np.zeros(N, dtype=alignment_h_matrix.dtype)
+    for c_idxs in cluster_idxs:
+        c_idxs = np.asarray(c_idxs)
+        if reference == "first":
+            ref_idx = c_idxs[0]
+        else:
+            weights_c = np.ones(c_idxs.shape[0]) if weights is None else weights[c_idxs]
+            similarity_c = similarity_matrix[np.ix_(c_idxs, c_idxs)].astype(np.double)
+            np.fill_diagonal(similarity_c, 0)  # centrality is about the rest of the cluster
+            # argmax breaks ties toward the lowest index, keeping the choice deterministic
+            ref_idx = c_idxs[np.argmax(similarity_c @ weights_c)]
+        alignment_rc[c_idxs] = alignment_rc_matrix[ref_idx, c_idxs]
+        alignment_h[c_idxs] = alignment_h_matrix[ref_idx, c_idxs]
+    return alignment_rc, alignment_h
+
+
 def average_motifs(
     motif_stack: np.ndarray,
     alignment_rc: np.ndarray,
     alignment_h: np.ndarray,
     match_original_length: bool = True,
     weights: np.ndarray | None = None,
+    cluster_idxs: list[np.ndarray] | None = None,
 ) -> np.ndarray:
-    """Compute the average motif of a stack of motifs.
+    """Compute the average motif of a stack of motifs, or of each cluster within it.
 
     Calls align_motifs() to compute an aligned motif stack, then averages the aligned
-      motifs. If weights are provided, a weighted average is computed. Then,
+      motifs. If weights are provided, a weighted average is computed.
 
     Args:
         motif_stack: A (N, L, K) motif stack to be averaged.
@@ -380,12 +438,55 @@ def average_motifs(
         match_original_length: Whether to match the original length of the motifs. If
           True, the average motif will be made to be the same length as the original
           motifs. If False, the average motif will have the length of the aligned motif
-          stack.
+          stack. Must be True when averaging clusters.
+        weights: An optional (N, ) vector of motif weights.
+        cluster_idxs: If given, one array of member indices per cluster. Each cluster is
+          averaged separately and the averages are returned as a stack. If None, the whole
+          motif stack is averaged into a single motif.
 
     Returns:
-        The average motif.
+        The average motif, of shape (L, K), or a (k, L, K) stack of per-cluster averages
+          when cluster_idxs is given.
+
+    Notes:
+        alignment_rc and alignment_h must already be expressed relative to the reference
+          that each average is built around; see select_alignments().
     """
     validate_motif_stack(motif_stack)
+    if cluster_idxs is None:
+        return _average_motif_stack(
+            motif_stack, alignment_rc, alignment_h, match_original_length, weights
+        )
+    if not match_original_length:
+        raise ValueError(
+            "match_original_length must be True when averaging clusters, as averages of "
+            "differing lengths cannot be stacked."
+        )
+    if len(cluster_idxs) == 0:
+        return np.zeros((0, motif_stack.shape[1], motif_stack.shape[2]))
+    return np.stack(
+        [
+            _average_motif_stack(
+                motif_stack[c_idxs, :, :],
+                alignment_rc[c_idxs],
+                alignment_h[c_idxs],
+                match_original_length,
+                None if weights is None else weights[c_idxs],
+            )
+            for c_idxs in cluster_idxs
+        ],
+        axis=0,
+    )
+
+
+def _average_motif_stack(
+    motif_stack: np.ndarray,
+    alignment_rc: np.ndarray,
+    alignment_h: np.ndarray,
+    match_original_length: bool,
+    weights: np.ndarray | None,
+) -> np.ndarray:
+    """Align a motif stack and average it down to a single motif."""
     aligned_motifs = align_motifs(motif_stack, alignment_rc, alignment_h)
     if weights is None:
         weights = np.ones(aligned_motifs.shape[0])
