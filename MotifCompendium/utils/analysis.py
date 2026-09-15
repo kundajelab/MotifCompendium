@@ -389,6 +389,7 @@ def export_compendium_meme(
     mc: MotifCompendium,
     save_loc: str,
     name_col: str = "name",
+    trim_importance: float | int | None = 0,
 ) -> None:
     """Exports MotifCompendium in the MEME file format.
 
@@ -419,8 +420,8 @@ def export_compendium_meme(
         for i in range(len(mc)):
             name = motif_names[i]
             motif = motifs[i]
-            # Remove empty flanks
-            motif = utils_motif.trim_motif(motif, 0)  # Remove zero flanks
+            # Trim motif
+            motif = utils_motif.trim_motif(motif, trim_importance)
             # Write motif
             f.write(f"\nMOTIF {name}\n")
             motif_size_line = f"letter-probability matrix: alength= {motif.shape[1]} w= {motif.shape[0]}"

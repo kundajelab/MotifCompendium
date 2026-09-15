@@ -20,11 +20,11 @@ import MotifCompendium.utils.plotting as utils_plotting
 import MotifCompendium.utils.similarity as utils_similarity
 import MotifCompendium.utils.visualization as utils_visualization
 
-import configs
+import pipeline.basic.configs as configs
 
 
 def setup_parser():
-    parser = argparse.ArgumentParser(description="Run the MotifCompendium pipeline.")
+    parser = argparse.ArgumentParser(description="Run a MotifCompendium pipeline: Basic.")
 
     parser.add_argument("-im", "--input-mc", type=str, default=None, help="Path to the input MotifCompendium object.")
     parser.add_argument("-io", "--input-old-mc", type=str, default=None, help="Path to the input old MotifCompendium object.")
