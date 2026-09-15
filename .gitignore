@@ -2,12 +2,9 @@
 *.html
 *.mc
 *.npy
-*.png
 *.pyc
 *.sh
 *.tsv
-*.txt
-*.meme
 */.ipynb_checkpoints
 */__pycache__/*
 MotifCompendium.egg-info/*
