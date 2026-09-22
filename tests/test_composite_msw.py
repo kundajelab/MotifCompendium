@@ -289,10 +289,10 @@ def test_general_vs_legacy(new, n_cases=100, seed=3):
         motif, fingers = make_case(rng, F, 3, L)
         legacy = new._run_modified_smith_waterman(
             motif=motif, finger_ppm_ic=fingers, finger_length=3,
-            calculate_fn=new.calculate_modified_smith_waterman_znf, **NEUTRAL)
+            calculate_fn=new.calculate_modified_smith_waterman_znf, return_matrices=False, **NEUTRAL)
         general = new._run_modified_smith_waterman(
             motif=motif, finger_ppm_ic=fingers, finger_length=3,
-            calculate_fn=new.calculate_modified_smith_waterman, **NEUTRAL)
+            calculate_fn=new.calculate_modified_smith_waterman, return_matrices=False, **NEUTRAL)
         if compare(legacy, general):
             n_diff += 1
     print(f"4. generalized vs frozen at M=3: {n_cases - n_diff}/{n_cases} identical "

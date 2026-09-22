@@ -21,6 +21,7 @@ def run_modified_smith_waterman_znf(
     skip_penalty_f1=-0.1, skip_penalty_f2=-0.1,
     skip_penalty_l1=-0.02, skip_penalty_l2=-0.1,
     finger_length=3,
+    return_matrices=False,
 ):
     '''
     Aligns a chain of B1H zinc-finger motifs against a CWM.
@@ -44,6 +45,8 @@ def run_modified_smith_waterman_znf(
         skip_penalty_l1: Penalty for skipping a CWM position (1 bp) - float
         skip_penalty_l2: Penalty for skipping a CWM position (2 bp or more) - float
         finger_length: Length of each finger motif - int (M)
+        return_matrices: Also return the full DP matrices. They are large and no known caller
+            reads them, so they default to None - bool
 
     Returns:
         msw_score: Modified Smith Waterman score of optimal alignment - float
@@ -54,8 +57,8 @@ def run_modified_smith_waterman_znf(
         msw_align_l: CWM alignment indices - list of int
         msw_scale_f: Finger scaling projection - np.array of shape (F,)
         msw_actions: Optimal alignment arrangement - list of str
-        H_final: Final score matrix - np.array of shape (F+1, L+M)
-        A_final: Final arrangement matrix - list of list of str
+        H_final: Final score matrix - np.array of shape (F+1, L+M), None unless requested
+        A_final: Final arrangement matrix - list of list of str, None unless requested
     '''
     if finger_length == 3:
         calculate_fn = calculate_modified_smith_waterman_znf
@@ -76,6 +79,7 @@ def run_modified_smith_waterman_znf(
         skip_penalty_l2=skip_penalty_l2,
         finger_length=finger_length,
         calculate_fn=calculate_fn,
+        return_matrices=return_matrices,
     )
 
 
@@ -87,6 +91,7 @@ def run_modified_smith_waterman(
     skip_penalty_f1=-0.1, skip_penalty_f2=-0.1,
     skip_penalty_l1=-0.02, skip_penalty_l2=-0.1,
     finger_length=3,
+    return_matrices=False,
 ):
     '''
     Aligns a chain of fixed-length finger motifs against a motif, for any finger length M > 1.
@@ -106,6 +111,8 @@ def run_modified_smith_waterman(
         skip_penalty_l1: Penalty for skipping a motif position (1 bp) - float
         skip_penalty_l2: Penalty for skipping a motif position (2 bp or more) - float
         finger_length: Length of each finger motif - int (M)
+        return_matrices: Also return the full DP matrices. They are large and no known caller
+            reads them, so they default to None - bool
 
     Returns:
         msw_score: Modified Smith Waterman score of optimal alignment - float
@@ -116,8 +123,8 @@ def run_modified_smith_waterman(
         msw_align_l: Motif alignment indices - list of int
         msw_scale_f: Finger scaling projection - np.array of shape (F,)
         msw_actions: Optimal alignment arrangement - list of str
-        H_final: Final score matrix - np.array of shape (F+1, L+M)
-        A_final: Final arrangement matrix - list of list of str
+        H_final: Final score matrix - np.array of shape (F+1, L+M), None unless requested
+        A_final: Final arrangement matrix - list of list of str, None unless requested
     '''
     return _run_modified_smith_waterman(
         motif=motif,
@@ -133,6 +140,7 @@ def run_modified_smith_waterman(
         skip_penalty_l2=skip_penalty_l2,
         finger_length=finger_length,
         calculate_fn=calculate_modified_smith_waterman,
+        return_matrices=return_matrices,
     )
 
 
@@ -145,6 +153,7 @@ def _run_modified_smith_waterman(
     skip_penalty_l1, skip_penalty_l2,
     finger_length,
     calculate_fn,
+    return_matrices,
 ):
     '''
     Shared body of run_modified_smith_waterman() and run_modified_smith_waterman_znf().
@@ -205,6 +214,7 @@ def _run_modified_smith_waterman(
         skip_penalty_l2=skip_penalty_l2,
         alignment_type="local",
         initial_score=0.0,
+        return_matrices=return_matrices,
     )
 
     ## Add remaining global alignment
@@ -235,13 +245,15 @@ def _run_modified_smith_waterman(
             initial_f_idx=remain_f,
             initial_l_idx=remain_l,
             orientations=(msw_orient,),
+            return_matrices=return_matrices,
         )
 
         # Update final alignments
         msw_actions = msw_actions + remain_actions
-        H_final[remain_f + 1:, remain_l + M:] = H_remain  # With local shifts
-        for remain_fi, remain_row in enumerate(A_remain):  # With local shifts
-            A_final[remain_f + 1 + remain_fi][remain_l + M:] = remain_row
+        if return_matrices:
+            H_final[remain_f + 1:, remain_l + M:] = H_remain  # With local shifts
+            for remain_fi, remain_row in enumerate(A_remain):  # With local shifts
+                A_final[remain_f + 1 + remain_fi][remain_l + M:] = remain_row
 
     ## Retrieve alignments
     if len(msw_actions) == 0:  # No alignment found: Return empty alignment
@@ -495,6 +507,25 @@ def _overlap_actions(f, l, num_overlap, initial_f_idx, initial_l_idx):
     ]
 
 
+def _diagonal_actions(f, l, k, num_overlap, initial_f_idx, initial_l_idx, guard_negative):
+    '''
+    Arrangement added by diagonal k: the overlap gaps, the match, and the k-1 skipped
+    motif positions the diagonal steps over.
+
+    guard_negative drops skipped positions that fall before the start of the matrix. The
+    frozen 3 bp recurrence emits them unguarded, so it passes False to stay bit-identical.
+    '''
+    actions = (
+        _overlap_actions(f, l, num_overlap, initial_f_idx, initial_l_idx)
+        + [f"F{f + initial_f_idx}@match@L{l + initial_l_idx}"]
+    )
+    for i in range(1, k):
+        if guard_negative and l - i < 0:
+            continue
+        actions.append(f"F{f + initial_f_idx}@L-skip@L{l - i + initial_l_idx}")
+    return actions
+
+
 def _calculate_finger_skip_penalty(prev_actions, skip_penalty_f1, skip_penalty_f2):
     '''
     Penalty for leaving a finger unused. A run of g consecutively skipped fingers costs
@@ -546,6 +577,7 @@ def calculate_modified_smith_waterman(
     initial_f_idx=0,
     initial_l_idx=0,
     orientations=("for", "rev"),
+    return_matrices=False,
 ):
     '''
     Modified Smith-Waterman, for any finger length M > 1.
@@ -580,12 +612,13 @@ def calculate_modified_smith_waterman(
         initial_f_idx: Initial finger index - int
         initial_l_idx: Initial motif position index - int
         orientations: Which orientation(s) to evaluate - tuple of "for"/"rev"
+        return_matrices: Also return H_final/A_final; None unless requested - bool
     Returns:
         msw_score: Optimal alignment score - float
         msw_orient: Optimal orientation ("for" or "rev") - str
         msw_actions: Optimal alignment arrangement - list of str
-        H_final: Final score matrix - np.array of shape (F+shift_f, L+shift_l)
-        A_final: Final arrangement matrix - list of list of str
+        H_final: Final score matrix - np.array (F+shift_f, L+shift_l), None unless requested
+        A_final: Final arrangement matrix - list of list of str, None unless requested
     '''
     assert matrix_f.shape[-1] == matrix_l.shape[-1]
     assert sim_for.shape == sim_rev.shape
@@ -616,8 +649,8 @@ def calculate_modified_smith_waterman(
         shift_idx_l = 0
 
     # Record final
-    H_final = np.zeros((F + shift_idx_f, L + shift_idx_l)) + initial_score # Optimal score (float) (F + shift_idx_f, L + shift_idx_l)
-    A_final = [[[] for _ in range(L + shift_idx_l)] for _ in range(F + shift_idx_f)] # Optimal arrangement (str) (F + shift_idx_f, L + shift_idx_l)
+    H_final = None # Optimal score (float) (F + shift_idx_f, L + shift_idx_l), if requested
+    A_final = None # Optimal arrangement (str) (F + shift_idx_f, L + shift_idx_l), if requested
 
     msw_score = -np.inf
     msw_actions = []
@@ -653,9 +686,10 @@ def calculate_modified_smith_waterman(
                         # F: Overlap; L: Skip penalty
                         diag_penalty = match_score
                         for action in diag_prev_actions:
-                            if action.split("@")[1] != "match":
+                            parts = action.split("@")
+                            if parts[1] != "match":
                                 continue
-                            l_j = int(action.split("@")[-1][1:]) - initial_l_idx  # Nearest previous finger
+                            l_j = int(parts[-1][1:]) - initial_l_idx  # Nearest previous finger
                             assert l - l_j >= k, f"Previous finger at {l_j} is ahead of diagonal {k} at {l}"
                             # Overlap: (M - d) bp (from previous finger)
                             if l - l_j < M:
@@ -693,8 +727,9 @@ def calculate_modified_smith_waterman(
                 right_penalty = skip_penalty_l1
                 right_action = [f"F{f + initial_f_idx}@L-skip@L{l + initial_l_idx}"]
                 for action in right_prev_actions:
-                    action_type = action.split("@")[1]
-                    l_j = int(action.split("@")[-1][1:]) - initial_l_idx
+                    parts = action.split("@")
+                    action_type = parts[1]
+                    l_j = int(parts[-1][1:]) - initial_l_idx
                     if action_type == "match":
                         if l - l_j < M:
                             right_penalty = 0 # Inside match: No penalty
@@ -707,13 +742,13 @@ def calculate_modified_smith_waterman(
                 right_score = right_prev_score + right_penalty
 
                 # Consider all options
-                options_score = np.array(diag_scores + [
+                options_score = diag_scores + [
                     down_score,  # Option 2: Keep finger f unused
                     right_score,  # Option 3: Bind finger f previous to l
-                ])  # Options 1-k: Bind finger f @ l (from state: [-1, -k])
+                ]  # Options 1-k: Bind finger f @ l (from state: [-1, -k])
 
-                # Select best option
-                bestoption_idx = int(np.argmax(options_score))
+                # Select best option (first maximum, as np.argmax)
+                bestoption_idx = max(range(len(options_score)), key=options_score.__getitem__)
                 bestoption_score = options_score[bestoption_idx]
                 if alignment_type == "local":
                     bestoption_score = max(bestoption_score, initial_score) # Local alignment: No negative scores
@@ -722,11 +757,8 @@ def calculate_modified_smith_waterman(
                 if bestoption_idx < M:
                     k = bestoption_idx + 1
                     _, diag_prev_actions = _previous_state(H, A, idx_f-1, idx_l-k, initial_score)
-                    diag_action = (
-                        _overlap_actions(f, l, diag_overlaps[k-1], initial_f_idx, initial_l_idx)
-                        + [f"F{f + initial_f_idx}@match@L{l + initial_l_idx}"]
-                        + [f"F{f + initial_f_idx}@L-skip@L{l - i + initial_l_idx}" for i in range(1, k) if l - i >= 0]
-                    )
+                    diag_action = _diagonal_actions(
+                        f, l, k, diag_overlaps[k-1], initial_f_idx, initial_l_idx, guard_negative=True)
                     bestoption_actions = diag_action + diag_prev_actions
                 elif bestoption_idx == M:
                     bestoption_actions = down_action + down_prev_actions
@@ -747,8 +779,9 @@ def calculate_modified_smith_waterman(
 
         # Record final optimal
         if best_score >= msw_score:
-            H_final = H # Full matrix: Scores
-            A_final = A # Full matrix: Actions
+            if return_matrices:  # Otherwise never read: skip, and let the matrices be freed
+                H_final = H # Full matrix: Scores
+                A_final = A # Full matrix: Actions
             msw_score = float(best_score) # Final score
             msw_actions = best_actions[::-1] # Reorder: Start to end
             msw_orient = orient # Orientation
@@ -769,6 +802,7 @@ def calculate_modified_smith_waterman_znf(
     initial_f_idx=0,
     initial_l_idx=0,
     orientations=("for", "rev"),
+    return_matrices=False,
 ):
     '''
     Modified Smith-Waterman, for the 3 bp zinc-finger case only.
@@ -809,8 +843,8 @@ def calculate_modified_smith_waterman_znf(
         shift_idx_l = 0
 
     # Record final
-    H_final = np.zeros((F + shift_idx_f, L + shift_idx_l)) + initial_score # Optimal score (float) (F + shift_idx_f, L + shift_idx_l)
-    A_final = [[[] for _ in range(L + shift_idx_l)] for _ in range(F + shift_idx_f)] # Optimal arrangement (str) (F + shift_idx_f, L + shift_idx_l)
+    H_final = None # Optimal score (float) (F + shift_idx_f, L + shift_idx_l), if requested
+    A_final = None # Optimal arrangement (str) (F + shift_idx_f, L + shift_idx_l), if requested
 
     msw_score = -np.inf
     msw_actions = []
@@ -836,7 +870,7 @@ def calculate_modified_smith_waterman_znf(
                 sim_score = sim[f, l]
                 match_score = scale_factor[l] * sim_score
                 diag1_score, diag2_score, diag3_score = -np.inf, -np.inf, -np.inf
-                diag1_actions, diag2_actions, diag3_actions = [], [], []
+                diag_overlaps = [0, 0, 0]
 
                 if sim_score > sim_threshold:
                     ## Diagonal 1: [-1, -1] ----------
@@ -844,11 +878,10 @@ def calculate_modified_smith_waterman_znf(
 
                     # F: Overlap: 2,1 bp; L: Skip penalty
                     diag1_penalty = match_score
-                    diag1_action = [f"F{f + initial_f_idx}@match@L{l + initial_l_idx}"]
                     for action in diag1_prev_actions:
-                        action_type = action.split("@")[1]
-                        l_j = int(action.split("@")[-1][1:]) - initial_l_idx
-                        if action_type == "match":
+                        parts = action.split("@")
+                        l_j = int(parts[-1][1:]) - initial_l_idx
+                        if parts[1] == "match":
                             # Overlap: 2,1 bp (from previous finger)
                             if l - l_j < 3:
                                 overlap_penalties = _calculate_overlap_penalties(
@@ -860,25 +893,23 @@ def calculate_modified_smith_waterman_znf(
                                 if len(overlap_penalties) > 0:
                                     for overlap_penalty in overlap_penalties:
                                         diag1_penalty = diag1_penalty + overlap_penalty
-                                    diag1_action = _overlap_actions(f, l, len(overlap_penalties), initial_f_idx, initial_l_idx) + diag1_action
+                                    diag_overlaps[0] = len(overlap_penalties)
                                     break
                             elif l - l_j > 2:
                                 break
 
                     diag1_score = diag1_prev_score + diag1_penalty
-                    diag1_actions = diag1_action + diag1_prev_actions
 
                     ## Diagonal 2: [-1, -2] ----------
                     diag2_prev_score, diag2_prev_actions = _previous_state(H, A, idx_f-1, idx_l-2, initial_score)
 
                     # Check for overlap (1bp)
                     diag2_penalty = match_score
-                    diag2_action = [f"F{f + initial_f_idx}@match@L{l + initial_l_idx}"] + [f"F{f + initial_f_idx}@L-skip@L{l-1 + initial_l_idx}"]
                     for action in diag2_prev_actions:
-                        action_type = action.split("@")[1]
-                        l_j = int(action.split("@")[-1][1:]) - initial_l_idx
+                        parts = action.split("@")
+                        l_j = int(parts[-1][1:]) - initial_l_idx
                         # F: Overlap: 1 bp; L: Skip penalty
-                        if action_type == "match":
+                        if parts[1] == "match":
                             if l - l_j == 2:
                                 overlap_penalties = _calculate_overlap_penalties(
                                     l, l_j, diag2_prev_actions, 3,
@@ -889,7 +920,7 @@ def calculate_modified_smith_waterman_znf(
                                 if len(overlap_penalties) > 0:
                                     for overlap_penalty in overlap_penalties:
                                         diag2_penalty = diag2_penalty + overlap_penalty
-                                    diag2_action = _overlap_actions(f, l, len(overlap_penalties), initial_f_idx, initial_l_idx) + diag2_action
+                                    diag_overlaps[1] = len(overlap_penalties)
                                     break
                             elif l - l_j == 3:
                                 continue
@@ -901,18 +932,16 @@ def calculate_modified_smith_waterman_znf(
                                 break
 
                     diag2_score = diag2_prev_score + diag2_penalty
-                    diag2_actions = diag2_action + diag2_prev_actions
 
                     ## Diagonal 3: [-1, -3] ----------
                     diag3_prev_score, diag3_prev_actions = _previous_state(H, A, idx_f-1, idx_l-3, initial_score)
 
                     diag3_penalty = match_score
-                    diag3_action = [f"F{f + initial_f_idx}@match@L{l + initial_l_idx}"] + [f"F{f + initial_f_idx}@L-skip@L{l-1 + initial_l_idx}"] + [f"F{f + initial_f_idx}@L-skip@L{l-2 + initial_l_idx}"]
                     for action in diag3_prev_actions:
-                        action_type = action.split("@")[1]
-                        l_j = int(action.split("@")[-1][1:]) - initial_l_idx
+                        parts = action.split("@")
+                        l_j = int(parts[-1][1:]) - initial_l_idx
                         # F: No overlap; L: Skip penalty
-                        if action_type == "match":
+                        if parts[1] == "match":
                             if l - l_j == 4:
                                 diag3_penalty = diag3_penalty + skip_penalty_l1
                                 break
@@ -921,7 +950,6 @@ def calculate_modified_smith_waterman_znf(
                                 break
 
                     diag3_score = diag3_prev_score + diag3_penalty
-                    diag3_actions = diag3_action + diag3_prev_actions
 
                 ## Down: Skip finger -----------------------------------------------------------
                 down_prev_score, down_prev_actions = _previous_state(H, A, idx_f-1, idx_l, initial_score) # Previous states
@@ -931,7 +959,6 @@ def calculate_modified_smith_waterman_znf(
                 down_action = [f"F{f + initial_f_idx}@F-skip@L{l + initial_l_idx}"]
 
                 down_score = down_prev_score + down_penalty
-                down_actions = down_action + down_prev_actions
 
                 ## Right: Skip motif position -----------------------------------------------------------
                 right_prev_score, right_prev_actions = _previous_state(H, A, idx_f, idx_l-1, initial_score) # Previous states
@@ -940,8 +967,9 @@ def calculate_modified_smith_waterman_znf(
                 right_penalty = skip_penalty_l1
                 right_action = [f"F{f + initial_f_idx}@L-skip@L{l + initial_l_idx}"]
                 for action in right_prev_actions:
-                    action_type = action.split("@")[1]
-                    l_j = int(action.split("@")[-1][1:]) - initial_l_idx
+                    parts = action.split("@")
+                    action_type = parts[1]
+                    l_j = int(parts[-1][1:]) - initial_l_idx
                     if action_type == "match":
                         if l - l_j < 3:
                             right_penalty = 0 # Inside match: No penalty
@@ -952,31 +980,33 @@ def calculate_modified_smith_waterman_znf(
                             break
 
                 right_score = right_prev_score + right_penalty
-                right_actions = right_action + right_prev_actions
 
                 # Consider all options
-                options_score = np.array([
+                options_score = [
                     diag1_score,  # Option 1-1: Bind finger f @ l (from state: [-1, -1])
                     diag2_score,  # Option 1-2: Bind finger f @ l (from state: [-1, -2])
                     diag3_score,  # Option 1-3: Bind finger f @ l (from state: [-1, -3])
                     down_score,  # Option 2: Keep finger f unused
                     right_score,  # Option 3: Bind finger f previous to l
-                ])
-
-                options_actions = [
-                    diag1_actions,
-                    diag2_actions,
-                    diag3_actions,
-                    down_actions,
-                    right_actions,
                 ]
 
-                # Select best option
-                bestoption_idx = np.argmax(options_score)
+                # Select best option (first maximum, as np.argmax)
+                bestoption_idx = max(range(5), key=options_score.__getitem__)
                 bestoption_score = options_score[bestoption_idx]
                 if alignment_type == "local":
                     bestoption_score = max(bestoption_score, initial_score) # Local alignment: No negative scores
-                bestoption_actions = options_actions[bestoption_idx]
+
+                # Build the arrangement: Only for the best option
+                if bestoption_idx < 3:
+                    k = bestoption_idx + 1
+                    _, diag_prev_actions = _previous_state(H, A, idx_f-1, idx_l-k, initial_score)
+                    diag_action = _diagonal_actions(
+                        f, l, k, diag_overlaps[k-1], initial_f_idx, initial_l_idx, guard_negative=False)
+                    bestoption_actions = diag_action + diag_prev_actions
+                elif bestoption_idx == 3:
+                    bestoption_actions = down_action + down_prev_actions
+                else:
+                    bestoption_actions = right_action + right_prev_actions
 
                 # Record
                 H[idx_f, idx_l] = bestoption_score
@@ -992,8 +1022,9 @@ def calculate_modified_smith_waterman_znf(
 
         # Record final optimal
         if best_score >= msw_score:
-            H_final = H # Full matrix: Scores
-            A_final = A # Full matrix: Actions
+            if return_matrices:  # Otherwise never read: skip, and let the matrices be freed
+                H_final = H # Full matrix: Scores
+                A_final = A # Full matrix: Actions
             msw_score = float(best_score) # Final score
             msw_actions = best_actions[::-1] # Reorder: Start to end
             msw_orient = orient # Orientation
