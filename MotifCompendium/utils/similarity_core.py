@@ -61,7 +61,7 @@ def compute_similarity_and_align(
 ####################
 _CUPY_IMPORT = None
 _RIGHT_TENSOR = None
-_LEFT_TENSOR = None
+_LEFT_INDEX = None
 
 
 def _get_array_module():
@@ -142,11 +142,17 @@ def _compute_similarity(motif_set_1, motif_set_2, xp):
 
 def _compute_similarity_left_side_i(motifs, xp):
     """Prepares the left side of the similarity calculation."""
+    # Each row is the motif written into a (3L-2) buffer at every shift i, i.e.
+    # out[m, i, j] = motifs[m, j-i] where that index is inside the motif, else 0.
+    # This used to be a matmul against a (2L-1, 3L-2, L) tensor of ones and zeros.
+    # That tensor is O(L^3) -- 11 MB at L=62 -- so each call streamed megabytes of
+    # mostly zeros to gather a few thousand values, and it dominated the runtime of
+    # every compute_similarities() call. Gathering directly is the same arithmetic
+    # at the size of the output.
     M, L = motifs.shape
-    left_side_matrix = _tensor3_matmul_tensor2(
-        _LEFTTENSOR(L, xp), motifs.T, xp
-    )  # (2L-1, 3L-2, M)
-    left_side_matrix = xp.transpose(left_side_matrix, axes=(2, 0, 1))  # (M, 2L-1, 3L-2)
+    offsets, inside = _LEFTINDEX(L, xp)
+    left_side_matrix = motifs[:, offsets]  # (M, 2L-1, 3L-2)
+    left_side_matrix *= inside
     assert left_side_matrix.shape == (M, 2 * L - 1, 3 * L - 2)
     return left_side_matrix  # (M, 2L-1, 3L-2)
 
@@ -168,22 +174,18 @@ def _compute_similarity_right_side(motifs, xp):
     return right_side_matrices  # (3L-2, N) K times
 
 
-def _LEFTTENSOR(L, xp):
-    """Produces the LEFTTENSOR needed for the left side of the similarity calculation."""
-    global _LEFT_TENSOR
-    create_tensor = False
-    if _LEFT_TENSOR is None:
-        create_tensor = True
-    if (not isinstance(_LEFT_TENSOR, xp.ndarray)) or (_LEFT_TENSOR.shape[2] != L):
-        del _LEFT_TENSOR  # Free up memory
-        create_tensor = True
-    if create_tensor:
-        _LEFT_TENSOR = xp.zeros(
-            (2 * L - 1, 3 * L - 2, L), dtype=xp.float64
-        )  # default (59, 88, 30)
-        for i in range(2 * L - 1):  # default 59
-            _LEFT_TENSOR[i, i : i + L, :] = xp.eye(L, dtype=xp.float64)  # default 30
-    return _LEFT_TENSOR  # (2L-1, 3L-2, L)
+def _LEFTINDEX(L, xp):
+    """Produces the gather indices needed for the left side of the similarity calculation."""
+    global _LEFT_INDEX
+    if (
+        _LEFT_INDEX is None
+        or (not isinstance(_LEFT_INDEX[0], xp.ndarray))
+        or _LEFT_INDEX[0].shape != (2 * L - 1, 3 * L - 2)
+    ):
+        offsets = xp.arange(3 * L - 2)[None, :] - xp.arange(2 * L - 1)[:, None]
+        inside = (offsets >= 0) & (offsets < L)
+        _LEFT_INDEX = (xp.where(inside, offsets, 0), inside)  # (2L-1, 3L-2) each
+    return _LEFT_INDEX
 
 
 def _RIGHTTENSOR(L, xp):
