@@ -15,36 +15,143 @@ import MotifCompendium.utils.config as utils_config
 ###########################
 def run_modified_smith_waterman_znf(
     cwm, b1h_ppm_ic,
-    sim_threshold,
-    overlap_penalty_f1, overlap_penalty_f2,
-    skip_penalty_f, skip_penalty_l1, skip_penalty_l2,
+    sim_threshold=0.0,
+    overlap_penalty_l1=-0.02, overlap_penalty_l2=-0.1,
+    overlap_penalty_f1=1.0, overlap_penalty_f2=1.0,
+    skip_penalty_f1=-0.1, skip_penalty_f2=-0.1,
+    skip_penalty_l1=-0.02, skip_penalty_l2=-0.1,
     finger_length=3,
 ):
     '''
+    Aligns a chain of B1H zinc-finger motifs against a CWM.
+
+    With finger_length = 3 this uses the frozen 3 bp recurrence
+    (calculate_modified_smith_waterman_znf); any other finger length uses the
+    generalized recurrence (calculate_modified_smith_waterman).
+
     Arguments:
         cwm: CWM motif matrix (as CWM) - np.array of shape (L, D)
         b1h_ppm_ic: Finger motif matrix (as IC-scaled PPM) - np.array of shape (F*M, D)
         sim_threshold: Minimum similarity to consider a match - float
-        overlap_penalty_f1: Penalty for 1 bp overlap (finger) - float
-        overlap_penalty_f2: Penalty for 2 bp overlap (finger) - float
-        skip_penalty_f: Penalty for skipping a finger - float
+        overlap_penalty_l1: Penalty for 1 bp overlap - float
+        overlap_penalty_l2: Penalty for 2 bp or more overlap - float
+        overlap_penalty_f1: Penalty multiplier x overlap_penalty_l1 or overlap_penalty_l2 at each
+            overlapping position, when overlap occurs due to only 2 fingers overlapping - float
+        overlap_penalty_f2: Penalty multiplier x overlap_penalty_l1 or overlap_penalty_l2 at each
+            overlapping position, when the overlapping position has 3 or more overlapping fingers - float
+        skip_penalty_f1: Penalty for skipping 1 finger - float
+        skip_penalty_f2: Penalty for skipping 2 or more fingers - float
         skip_penalty_l1: Penalty for skipping a CWM position (1 bp) - float
         skip_penalty_l2: Penalty for skipping a CWM position (2 bp or more) - float
         finger_length: Length of each finger motif - int (M)
-    
+
     Returns:
         msw_score: Modified Smith Waterman score of optimal alignment - float
         sim_score: MotifCompendium similarity score of optimal alignment - float
-        aligned_motif_fs: Aligned finger motifs - np.array of shape (F, L+2, D)
+        aligned_motif_fs: Aligned finger motifs - np.array of shape (F, L+M-1, D)
         msw_orient: Optimal orientation ("for" or "rev") - str
         msw_align_f: Finger alignment indices - list of int
         msw_align_l: CWM alignment indices - list of int
-        msw_scale_f: Finger scaling projection - np.array of shape (F,) 
+        msw_scale_f: Finger scaling projection - np.array of shape (F,)
         msw_actions: Optimal alignment arrangement - list of str
-        H_final: Final score matrix - np.array of shape (F+1, L+1)
+        H_final: Final score matrix - np.array of shape (F+1, L+M)
         A_final: Final arrangement matrix - list of list of str
-        A_f_final: Final finger alignment matrix - list of list of str
-        A_l_final: Final CWM alignment matrix - list of list of str
+    '''
+    if finger_length == 3:
+        calculate_fn = calculate_modified_smith_waterman_znf
+    else:
+        calculate_fn = calculate_modified_smith_waterman
+
+    return _run_modified_smith_waterman(
+        motif=cwm,
+        finger_ppm_ic=b1h_ppm_ic,
+        sim_threshold=sim_threshold,
+        overlap_penalty_l1=overlap_penalty_l1,
+        overlap_penalty_l2=overlap_penalty_l2,
+        overlap_penalty_f1=overlap_penalty_f1,
+        overlap_penalty_f2=overlap_penalty_f2,
+        skip_penalty_f1=skip_penalty_f1,
+        skip_penalty_f2=skip_penalty_f2,
+        skip_penalty_l1=skip_penalty_l1,
+        skip_penalty_l2=skip_penalty_l2,
+        finger_length=finger_length,
+        calculate_fn=calculate_fn,
+    )
+
+
+def run_modified_smith_waterman(
+    motif, finger_ppm_ic,
+    sim_threshold=0.0,
+    overlap_penalty_l1=-0.02, overlap_penalty_l2=-0.1,
+    overlap_penalty_f1=1.0, overlap_penalty_f2=1.0,
+    skip_penalty_f1=-0.1, skip_penalty_f2=-0.1,
+    skip_penalty_l1=-0.02, skip_penalty_l2=-0.1,
+    finger_length=3,
+):
+    '''
+    Aligns a chain of fixed-length finger motifs against a motif, for any finger length M > 1.
+
+    Arguments:
+        motif: Motif matrix (as CWM) - np.array of shape (L, D)
+        finger_ppm_ic: Finger motif matrix (as IC-scaled PPM) - np.array of shape (F*M, D)
+        sim_threshold: Minimum similarity to consider a match - float
+        overlap_penalty_l1: Penalty for 1 bp overlap - float
+        overlap_penalty_l2: Penalty for 2 bp or more overlap - float
+        overlap_penalty_f1: Penalty multiplier x overlap_penalty_l1 or overlap_penalty_l2 at each
+            overlapping position, when overlap occurs due to only 2 fingers overlapping - float
+        overlap_penalty_f2: Penalty multiplier x overlap_penalty_l1 or overlap_penalty_l2 at each
+            overlapping position, when the overlapping position has 3 or more overlapping fingers - float
+        skip_penalty_f1: Penalty for skipping 1 finger - float
+        skip_penalty_f2: Penalty for skipping 2 or more fingers - float
+        skip_penalty_l1: Penalty for skipping a motif position (1 bp) - float
+        skip_penalty_l2: Penalty for skipping a motif position (2 bp or more) - float
+        finger_length: Length of each finger motif - int (M)
+
+    Returns:
+        msw_score: Modified Smith Waterman score of optimal alignment - float
+        sim_score: MotifCompendium similarity score of optimal alignment - float
+        aligned_motif_fs: Aligned finger motifs - np.array of shape (F, L+M-1, D)
+        msw_orient: Optimal orientation ("for" or "rev") - str
+        msw_align_f: Finger alignment indices - list of int
+        msw_align_l: Motif alignment indices - list of int
+        msw_scale_f: Finger scaling projection - np.array of shape (F,)
+        msw_actions: Optimal alignment arrangement - list of str
+        H_final: Final score matrix - np.array of shape (F+1, L+M)
+        A_final: Final arrangement matrix - list of list of str
+    '''
+    return _run_modified_smith_waterman(
+        motif=motif,
+        finger_ppm_ic=finger_ppm_ic,
+        sim_threshold=sim_threshold,
+        overlap_penalty_l1=overlap_penalty_l1,
+        overlap_penalty_l2=overlap_penalty_l2,
+        overlap_penalty_f1=overlap_penalty_f1,
+        overlap_penalty_f2=overlap_penalty_f2,
+        skip_penalty_f1=skip_penalty_f1,
+        skip_penalty_f2=skip_penalty_f2,
+        skip_penalty_l1=skip_penalty_l1,
+        skip_penalty_l2=skip_penalty_l2,
+        finger_length=finger_length,
+        calculate_fn=calculate_modified_smith_waterman,
+    )
+
+
+def _run_modified_smith_waterman(
+    motif, finger_ppm_ic,
+    sim_threshold,
+    overlap_penalty_l1, overlap_penalty_l2,
+    overlap_penalty_f1, overlap_penalty_f2,
+    skip_penalty_f1, skip_penalty_f2,
+    skip_penalty_l1, skip_penalty_l2,
+    finger_length,
+    calculate_fn,
+):
+    '''
+    Shared body of run_modified_smith_waterman() and run_modified_smith_waterman_znf().
+
+    Arguments:
+        calculate_fn: Recurrence to use - calculate_modified_smith_waterman(_znf)
+        (all others: see run_modified_smith_waterman())
     '''
     # Setting: IC-scale off (store)
     if utils_config.get_ic_scale():
@@ -52,43 +159,48 @@ def run_modified_smith_waterman_znf(
         utils_config.set_ic_scale(False)
     else:
         ic_scale = False
-    
+
+    M = int(finger_length)
+    assert M > 1, f"finger_length must be an int > 1, got {finger_length}"
+
     ## Preprocess motifs
-    # CWMs
-    cwm = np.abs(cwm)  # Absolute value (L, D)
-    cwm_norm = cwm/np.linalg.norm(cwm, axis=(0, 1), keepdims=True)  # L2 normalize, per motif
+    # Motif (as CWM)
+    motif = np.abs(motif)  # Absolute value (L, D)
+    assert motif.shape[0] >= M, f"Motif length {motif.shape[0]} is shorter than finger length {M}"
+    motif_norm = motif/np.linalg.norm(motif, axis=(0, 1), keepdims=True)  # L2 normalize, per motif
 
-    unrolled_cwm_norm = unroll_motif_np(cwm_norm, finger_length) # (L-M+1, finger_length M, D)
-    unrolled_cwm_norm_cp = unroll_motif_cp(cp.asarray(cwm_norm), finger_length)
-    unrolled_importance = (unrolled_cwm_norm * unrolled_cwm_norm).sum(axis=(1, 2)) # (L-M+1) (L2 norm, of each M-mer, before IC-scaling)
+    unrolled_motif_norm = unroll_motif_np(motif_norm, M) # (L-M+1, finger_length M, D)
+    unrolled_motif_norm_cp = unroll_motif_cp(cp.asarray(motif_norm), M)
+    unrolled_importance = (unrolled_motif_norm * unrolled_motif_norm).sum(axis=(1, 2)) # (L-M+1) (L2 norm, of each M-mer, before IC-scaling)
 
-    # B1H
-    b1h_ppm_ic = np.abs(b1h_ppm_ic)  # Absolute value (F*M, D)
-    # b1h_ppm_ic = b1h_ppm_ic / np.sum(b1h_ppm_ic, axis=1, keepdims=True)
-    # b1h_ppm_ic = utils_motif.ic_scale(b1h_ppm_ic)
-    b1h_ppm_ic_n = unroll_znf_b1h(b1h_ppm_ic) # (num_fingers F, M, D)
-    b1h_ppm_ic_n_cp = cp.asarray(b1h_ppm_ic_n)
+    # Fingers
+    finger_ppm_ic = np.abs(finger_ppm_ic)  # Absolute value (F*M, D)
+    finger_ppm_ic_n = unroll_fingers(finger_ppm_ic, M) # (num_fingers F, M, D)
+    finger_ppm_ic_n_cp = cp.asarray(finger_ppm_ic_n)
 
     ## Calculate similarities
-    sims_ff = compute_aligned_similarity(b1h_ppm_ic_n_cp, unrolled_cwm_norm_cp) # (F, L-M+1)
-    sims_fr = compute_aligned_similarity(b1h_ppm_ic_n_cp, unrolled_cwm_norm_cp[:, ::-1, ::-1]) # (F, L-M+1)
+    sims_ff = compute_aligned_similarity(finger_ppm_ic_n_cp, unrolled_motif_norm_cp) # (F, L-M+1)
+    sims_fr = compute_aligned_similarity(finger_ppm_ic_n_cp, unrolled_motif_norm_cp[:, ::-1, ::-1]) # (F, L-M+1)
 
     ## Dimensions
-    F, M, D = b1h_ppm_ic_n.shape # (F, M, D)
-    L, D = cwm.shape # (L, D)
+    F, M, D = finger_ppm_ic_n.shape # (F, M, D)
+    L, D = motif.shape # (L, D)
     L_M_1 = L - M + 1 # (L-M+1)
 
     ## Run Modified Smith-Waterman: Local
-    (msw_score, msw_orient, msw_actions, H_final, A_final) = calculate_modified_smith_waterman(
-        matrix_f=b1h_ppm_ic_n,
-        matrix_l=cwm_norm,
+    (msw_score, msw_orient, msw_actions, H_final, A_final) = calculate_fn(
+        matrix_f=finger_ppm_ic_n,
+        matrix_l=motif_norm,
         sim_for=sims_ff,
         sim_rev=sims_fr,
         scale_factor=unrolled_importance,
         sim_threshold=sim_threshold,
+        overlap_penalty_l1=overlap_penalty_l1,
+        overlap_penalty_l2=overlap_penalty_l2,
         overlap_penalty_f1=overlap_penalty_f1,
         overlap_penalty_f2=overlap_penalty_f2,
-        skip_penalty_f=skip_penalty_f,
+        skip_penalty_f1=skip_penalty_f1,
+        skip_penalty_f2=skip_penalty_f2,
         skip_penalty_l1=skip_penalty_l1,
         skip_penalty_l2=skip_penalty_l2,
         alignment_type="local",
@@ -96,24 +208,26 @@ def run_modified_smith_waterman_znf(
     )
 
     ## Add remaining global alignment
-    remain_f = int(msw_actions[-1].split("@")[0][1:]) + 1  # Get last unused finger index
-    remain_l = int(msw_actions[-1].split("@")[-1][1:]) + 1 # Get last unused CWM index
+    remain_f, remain_l = _next_unused_indices(msw_actions, M)  # First unused finger / motif index
     if msw_orient == "rev":
         remain_sim = sims_fr
     else:
         remain_sim = sims_ff
-    
-    if remain_f < F and remain_l < L_M_1:
-        (_, _, remain_actions, H_remain, A_remain) = calculate_modified_smith_waterman(
-            matrix_f=b1h_ppm_ic_n[remain_f:],
-            matrix_l=cwm_norm[remain_l:],
+
+    if len(msw_actions) > 0 and remain_f < F and remain_l < L_M_1:
+        (_, _, remain_actions, H_remain, A_remain) = calculate_fn(
+            matrix_f=finger_ppm_ic_n[remain_f:],
+            matrix_l=motif_norm[remain_l:],
             sim_for=remain_sim[remain_f:, remain_l:],
             sim_rev=remain_sim[remain_f:, remain_l:],
             scale_factor=unrolled_importance[remain_l:],
             sim_threshold=sim_threshold,
+            overlap_penalty_l1=overlap_penalty_l1,
+            overlap_penalty_l2=overlap_penalty_l2,
             overlap_penalty_f1=overlap_penalty_f1,
             overlap_penalty_f2=overlap_penalty_f2,
-            skip_penalty_f=skip_penalty_f,
+            skip_penalty_f1=skip_penalty_f1,
+            skip_penalty_f2=skip_penalty_f2,
             skip_penalty_l1=skip_penalty_l1,
             skip_penalty_l2=skip_penalty_l2,
             alignment_type="global",
@@ -125,48 +239,88 @@ def run_modified_smith_waterman_znf(
 
         # Update final alignments
         msw_actions = msw_actions + remain_actions
-        H_final[remain_f + 1:, remain_l + 3:] = H_remain  # With local shifts
+        H_final[remain_f + 1:, remain_l + M:] = H_remain  # With local shifts
         for remain_fi, remain_row in enumerate(A_remain):  # With local shifts
-            A_final[remain_f + 1 + remain_fi][remain_l + 3:] = remain_row
+            A_final[remain_f + 1 + remain_fi][remain_l + M:] = remain_row
 
     ## Retrieve alignments
-    (aligned_motif_fs, msw_scale_f, msw_align_f, msw_align_l) = get_alignment_modified_smith_waterman(
-        matrix_f=b1h_ppm_ic_n,
-        matrix_l=cwm_norm,
-        scale_factor=unrolled_importance,
-        msw_actions=msw_actions,
-    )
+    if len(msw_actions) == 0:  # No alignment found: Return empty alignment
+        aligned_motif_fs = np.zeros((F, L + M - 1, D))
+        msw_scale_f = np.zeros(F)
+        msw_align_f = [f_i for f_i in range(M*F)]
+        msw_align_l = [l_j for l_j in range(L)]
+        sim_score = 0.0
+    else:
+        (aligned_motif_fs, msw_scale_f, msw_align_f, msw_align_l) = get_alignment_modified_smith_waterman(
+            matrix_f=finger_ppm_ic_n,
+            matrix_l=motif_norm,
+            scale_factor=unrolled_importance,
+            msw_actions=msw_actions,
+        )
 
-    ## Calculate similarity score
-    aligned_motif_fs_collapse = aligned_motif_fs.sum(axis=0)
-    max_len = max(cwm.shape[0], aligned_motif_fs_collapse.shape[0])
-    sim_score, _, _ = utils_similarity.compute_similarities(
-        [utils_motif.pad_motif(aligned_motif_fs_collapse[np.newaxis, :, :], max_len), utils_motif.pad_motif(cwm[np.newaxis, :, :], max_len)],
-        [(0, 1)],
-    )[0]
-    
+        ## Calculate similarity score
+        aligned_motif_fs_collapse = aligned_motif_fs.sum(axis=0)
+        max_len = max(motif.shape[0], aligned_motif_fs_collapse.shape[0])
+        sim_score, _, _ = utils_similarity.compute_similarities(
+            [utils_motif.pad_motif(aligned_motif_fs_collapse[np.newaxis, :, :], max_len), utils_motif.pad_motif(motif[np.newaxis, :, :], max_len)],
+            [(0, 1)],
+        )[0]
+
     # Restore IC-scale setting
     if ic_scale:
         utils_config.set_ic_scale(True)
 
     return msw_score, sim_score, aligned_motif_fs, msw_orient, msw_align_f, msw_align_l, msw_scale_f, msw_actions, H_final, A_final
 
+
+def _next_unused_indices(msw_actions, finger_length):
+    '''
+    First unused finger index and first unused motif position, after an alignment.
+
+    A matched finger occupies finger_length positions, so the motif index advances past the
+    whole footprint of the last match (the final action itself may be an F-overlap or a skip).
+
+    Arguments:
+        msw_actions: Alignment arrangement - list of str
+        finger_length: Length of each finger motif - int (M)
+    Returns:
+        remain_f: First unused finger index - int
+        remain_l: First unused motif position - int
+    '''
+    if len(msw_actions) == 0:
+        return 0, 0
+
+    last_action = msw_actions[-1]
+    remain_f = int(last_action.split("@")[0][1:]) + 1  # Last used finger index
+    remain_l = int(last_action.split("@")[-1][1:]) + 1  # Last used motif index
+
+    # Match: The finger occupies finger_length positions
+    for action in reversed(msw_actions):
+        if action.split("@")[1] == "match":
+            remain_l = max(remain_l, int(action.split("@")[-1][1:]) + finger_length)
+            break
+
+    return remain_f, remain_l
+
+
 ###########
 # FINGERS #
 ###########
-def unroll_znf_b1h(b1h_ppm):
+def unroll_fingers(ppm, finger_length):
     '''
     Argument:
-        b1h_ppm: np.array of shape (L, D)
+        ppm: Concatenated finger motif matrices - np.array of shape (F*M, D)
+        finger_length: Length of each finger motif - int (M)
     Returns:
-        b1h_ppm: np.array of shape (F, 3, D)
+        ppm_unroll: np.array of shape (F, M, D)
     '''
-    assert(len(b1h_ppm.shape) == 2 and b1h_ppm.shape[-1] == 4)
-    L = b1h_ppm.shape[0]
-    assert(L%3 == 0)
-    num_fingers = L // 3
-    b1h_ppm_unroll = b1h_ppm.reshape(num_fingers, 3, 4)
-    return b1h_ppm_unroll
+    assert(len(ppm.shape) == 2)
+    assert(finger_length > 1)
+    L, D = ppm.shape
+    assert(L % finger_length == 0)
+    num_fingers = L // finger_length
+    ppm_unroll = ppm.reshape(num_fingers, finger_length, D)
+    return ppm_unroll
 
 
 #############
@@ -269,12 +423,124 @@ def shuffle_motif_position(motif):
 ###################
 # SMITH-WATERMAN  #
 ###################
+def _previous_state(H, A, idx_f, idx_l, initial_score):
+    '''
+    Score and arrangement of a previous DP cell.
+
+    Out-of-range cells (reachable in global alignment, where the matrices are not padded)
+    are unvisited, not wrap-around neighbours.
+    '''
+    if idx_f < 0 or idx_l < 0:
+        return initial_score, []
+    return H[idx_f, idx_l], A[idx_f][idx_l]
+
+
+def _calculate_overlap_penalties(
+    l, l_j, prev_actions, finger_length,
+    overlap_penalty_l1, overlap_penalty_l2,
+    overlap_penalty_f1, overlap_penalty_f2,
+    initial_l_idx,
+):
+    '''
+    Penalty for placing a finger at motif position l, when the nearest previously placed
+    finger sits at motif position l_j (both in local coordinates).
+
+    The two fingers overlap over positions [l, l_j + M - 1]. The leftmost overlapping
+    position is charged overlap_penalty_l1 and the rest overlap_penalty_l2; each is
+    multiplied by overlap_penalty_f1 when exactly 2 fingers cover that position, or by
+    overlap_penalty_f2 when 3 or more do. The overlap is truncated at the start of the
+    matrix, so that it is always representable as gap positions before l.
+
+    Arguments:
+        l: Motif position of the finger being placed - int
+        l_j: Motif position of the nearest previously placed finger - int
+        prev_actions: Arrangement of the previous DP cell - list of str
+        finger_length: Length of each finger motif - int (M)
+        initial_l_idx: Initial motif position index - int
+    Returns:
+        penalties: Penalty for each overlapping position, left to right - list of float
+    '''
+    M = finger_length
+    num_overlap = min(M - (l - l_j), l)  # Truncate: Keep the gap positions inside the matrix
+    if num_overlap <= 0:
+        return []
+
+    # Neutral multipliers: No need to count overlapping fingers
+    if overlap_penalty_f1 == 1.0 and overlap_penalty_f2 == 1.0:
+        return [overlap_penalty_l1] + [overlap_penalty_l2] * (num_overlap - 1)
+
+    # Previously placed fingers that can reach the overlapping positions
+    prev_matches = []
+    for action in prev_actions:
+        if action.split("@")[1] != "match":
+            continue
+        l_i = int(action.split("@")[-1][1:]) - initial_l_idx
+        if l_i < l - M + 1:
+            break
+        prev_matches.append(l_i)
+
+    penalties = []
+    for i, p in enumerate(range(l, l + num_overlap)):
+        penalty_l = overlap_penalty_l1 if i == 0 else overlap_penalty_l2
+        num_fingers = 1 + sum(1 for l_i in prev_matches if l_i <= p <= l_i + M - 1)
+        penalties.append(penalty_l * (overlap_penalty_f1 if num_fingers <= 2 else overlap_penalty_f2))
+    return penalties
+
+
+def _overlap_actions(f, l, num_overlap, initial_f_idx, initial_l_idx):
+    '''Gap positions inserted into the motif, for an overlap of num_overlap positions.'''
+    return [
+        f"F{f + initial_f_idx}@F-overlap@L{l - num_overlap + i + initial_l_idx}"
+        for i in range(num_overlap)
+    ]
+
+
+def _calculate_finger_skip_penalty(prev_actions, skip_penalty_f1, skip_penalty_f2):
+    '''
+    Penalty for leaving a finger unused. A run of g consecutively skipped fingers costs
+    skip_penalty_f1 + (g-1) * skip_penalty_f2.
+
+    Consecutive finger skips all sit at the same motif position, so the run is detected from
+    the most recent action of the previous cell rather than from a position distance.
+    '''
+    if skip_penalty_f1 == skip_penalty_f2:
+        return skip_penalty_f1
+    if len(prev_actions) > 0 and prev_actions[0].split("@")[1] == "F-skip":
+        return skip_penalty_f2  # Repeated: Extra penalty
+    return skip_penalty_f1
+
+
+def _extract_best_alignment(H, A, alignment_type, F, L_M_1, shift_idx_f, shift_idx_l):
+    '''
+    Best score and arrangement of a filled DP matrix.
+
+    Only rows 0..F-1 and columns 0..L_M_1-1 (plus the shifts) are ever visited, so the global
+    alignment reads its final row and column from there rather than from the matrix edges.
+    '''
+    if alignment_type == 'local':
+        best_idx = H.argmax()
+        best_i, best_j = np.unravel_index(best_idx, H.shape)
+        best_score = float(H.flatten()[best_idx])
+        best_actions = A[best_i][best_j]
+    elif alignment_type == "global":
+        last_f = F - 1 + shift_idx_f
+        last_l = L_M_1 - 1 + shift_idx_l
+        last_H = np.concatenate([H[last_f, :last_l + 1], H[:last_f + 1, last_l]])
+        last_A = [A[last_f][j] for j in range(last_l + 1)] + [A[i][last_l] for i in range(last_f + 1)]
+        best_idx = last_H.argmax()
+        best_score = float(last_H.flatten()[best_idx])
+        best_actions = last_A[best_idx]
+    return best_score, best_actions
+
+
 def calculate_modified_smith_waterman(
     matrix_f, matrix_l,
-    sim_for, sim_rev, 
+    sim_for, sim_rev,
     scale_factor, sim_threshold,
+    overlap_penalty_l1, overlap_penalty_l2,
     overlap_penalty_f1, overlap_penalty_f2,
-    skip_penalty_f, skip_penalty_l1, skip_penalty_l2,
+    skip_penalty_f1, skip_penalty_f2,
+    skip_penalty_l1, skip_penalty_l2,
     alignment_type="local",
     initial_score=0.0,
     initial_f_idx=0,
@@ -282,42 +548,257 @@ def calculate_modified_smith_waterman(
     orientations=("for", "rev"),
 ):
     '''
+    Modified Smith-Waterman, for any finger length M > 1.
+
+    Each finger covers M motif positions, so a finger placed at motif position l can be
+    reached from M diagonals: diagonal k comes from the cell M - k positions earlier and
+    inserts k-1 skipped motif positions. Given the distance d = l - l_j to the nearest
+    previously placed finger:
+        d <  M: the fingers overlap over M - d positions
+        d == M: the fingers are adjacent
+        d >  M: the fingers are separated by a gap of d - M positions
+
     Arguments:
-        matrix_f: Finger motif matrices - np.array of shape (F, 3, D)
-        matrix_l: CWM motif matrix - np.array of shape (L, D)
+        matrix_f: Finger motif matrices - np.array of shape (F, M, D)
+        matrix_l: Motif matrix - np.array of shape (L, D)
         sim_for: Similarity scores (forward) - np.array of shape (F, L-M+1)
         sim_rev: Similarity scores (reverse) - np.array of shape (F, L-M+1)
-        scale_factor: Scaling factors for each CWM position - np.array of shape (L-M+1,)
+        scale_factor: Scaling factors for each motif position - np.array of shape (L-M+1,)
         sim_threshold: Minimum similarity to consider a match - float
-        overlap_penalty_f1: Penalty for 1 bp overlap (finger) - float
-        overlap_penalty_f2: Penalty for 2 bp overlap (finger) - float
-        skip_penalty_f: Penalty for skipping a finger - float
-        skip_penalty_l1: Penalty for skipping a CWM position by 1 - float
-        skip_penalty_l2: Penalty for skipping a CWM position by 2 or more - float
+        overlap_penalty_l1: Penalty for 1 bp overlap - float
+        overlap_penalty_l2: Penalty for 2 bp or more overlap - float
+        overlap_penalty_f1: Penalty multiplier x overlap_penalty_l1 or overlap_penalty_l2 at each
+            overlapping position, when overlap occurs due to only 2 fingers overlapping - float
+        overlap_penalty_f2: Penalty multiplier x overlap_penalty_l1 or overlap_penalty_l2 at each
+            overlapping position, when the overlapping position has 3 or more overlapping fingers - float
+        skip_penalty_f1: Penalty for skipping 1 finger - float
+        skip_penalty_f2: Penalty for skipping 2 or more fingers - float
+        skip_penalty_l1: Penalty for skipping a motif position by 1 - float
+        skip_penalty_l2: Penalty for skipping a motif position by 2 or more - float
         alignment_type: Type of alignment ("local" or "global") - str
         initial_score: Initial score for alignment - float
         initial_f_idx: Initial finger index - int
-        initial_l_idx: Initial CWM position index - int
+        initial_l_idx: Initial motif position index - int
         orientations: Which orientation(s) to evaluate - tuple of "for"/"rev"
     Returns:
         msw_score: Optimal alignment score - float
         msw_orient: Optimal orientation ("for" or "rev") - str
         msw_actions: Optimal alignment arrangement - list of str
-        H_final: Final score matrix - np.array of shape (F+1, L+1)
+        H_final: Final score matrix - np.array of shape (F+shift_f, L+shift_l)
         A_final: Final arrangement matrix - list of list of str
     '''
     assert matrix_f.shape[-1] == matrix_l.shape[-1]
     assert sim_for.shape == sim_rev.shape
+    assert sim_for.shape[0] == matrix_f.shape[0]
     assert sim_threshold < 1
-    assert overlap_penalty_f1 <= 0
-    assert overlap_penalty_f2 <= 0
-    assert skip_penalty_f <= 0
+    assert overlap_penalty_l1 <= 0
+    assert overlap_penalty_l2 <= 0
+    assert overlap_penalty_f1 >= 0
+    assert overlap_penalty_f2 >= 0
+    assert skip_penalty_f1 <= 0
+    assert skip_penalty_f2 <= 0
     assert skip_penalty_l1 <= 0
     assert skip_penalty_l2 <= 0
     assert alignment_type in ["local", "global"]
 
     F, L_M_1 = sim_for.shape # (F, L-M+1)
     L, D = matrix_l.shape # (L, D)
+    M = matrix_f.shape[1] # Finger length
+    assert M > 1
+    assert L_M_1 == L - M + 1
+
+    # Shift: Global, local
+    if alignment_type == 'local':
+        shift_idx_f = 1
+        shift_idx_l = M
+    elif alignment_type == 'global':
+        shift_idx_f = 0
+        shift_idx_l = 0
+
+    # Record final
+    H_final = np.zeros((F + shift_idx_f, L + shift_idx_l)) + initial_score # Optimal score (float) (F + shift_idx_f, L + shift_idx_l)
+    A_final = [[[] for _ in range(L + shift_idx_l)] for _ in range(F + shift_idx_f)] # Optimal arrangement (str) (F + shift_idx_f, L + shift_idx_l)
+
+    msw_score = -np.inf
+    msw_actions = []
+    msw_orient = None
+
+    orient_sims = {"for": sim_for, "rev": sim_rev}
+    for orient in orientations:
+        sim = orient_sims[orient]
+        # Initialize matrices
+        H = np.zeros((F + shift_idx_f, L + shift_idx_l)) + initial_score # Local optimal score (float) (F + shift_idx_f, L + shift_idx_l)
+        A = [[[] for _ in range(L + shift_idx_l)] for _ in range(F + shift_idx_f)] # Local optimal arrangement (str) (F + shift_idx_f, L + shift_idx_l)
+        best_score = -np.inf
+        best_actions = [] # Add in reverse order
+
+        # F: Fingers
+        for f in range(F):
+            # L: Motif Lengths
+            for l in range(L_M_1):
+                idx_f = f + shift_idx_f # f index for matrices (shifted by shift_idx_f)
+                idx_l = l + shift_idx_l # l index for matrices (shifted by shift_idx_l)
+
+                # Diagonals 1..M -----------------------------------------------------------------------
+                sim_score = sim[f, l]
+                match_score = scale_factor[l] * sim_score
+                diag_scores = [-np.inf] * M
+                diag_overlaps = [0] * M
+
+                if sim_score > sim_threshold:
+                    for k in range(1, M + 1):
+                        ## Diagonal k: [-1, -k] ----------
+                        diag_prev_score, diag_prev_actions = _previous_state(H, A, idx_f-1, idx_l-k, initial_score) # Previous states
+
+                        # F: Overlap; L: Skip penalty
+                        diag_penalty = match_score
+                        for action in diag_prev_actions:
+                            if action.split("@")[1] != "match":
+                                continue
+                            l_j = int(action.split("@")[-1][1:]) - initial_l_idx  # Nearest previous finger
+                            assert l - l_j >= k, f"Previous finger at {l_j} is ahead of diagonal {k} at {l}"
+                            # Overlap: (M - d) bp (from previous finger)
+                            if l - l_j < M:
+                                overlap_penalties = _calculate_overlap_penalties(
+                                    l, l_j, diag_prev_actions, M,
+                                    overlap_penalty_l1, overlap_penalty_l2,
+                                    overlap_penalty_f1, overlap_penalty_f2,
+                                    initial_l_idx,
+                                )
+                                diag_overlaps[k-1] = len(overlap_penalties)
+                                for overlap_penalty in overlap_penalties:
+                                    diag_penalty = diag_penalty + overlap_penalty
+                            # Gap: (d - M) bp (from previous finger)
+                            elif l - l_j == M + 1:
+                                diag_penalty = diag_penalty + skip_penalty_l1
+                            elif l - l_j > M + 1:
+                                diag_penalty = diag_penalty + skip_penalty_l2
+                            break
+
+                        diag_scores[k-1] = diag_prev_score + diag_penalty
+
+                ## Down: Skip finger -----------------------------------------------------------
+                down_prev_score, down_prev_actions = _previous_state(H, A, idx_f-1, idx_l, initial_score) # Previous states
+
+                # Skip type: Single, repeated
+                down_penalty = _calculate_finger_skip_penalty(down_prev_actions, skip_penalty_f1, skip_penalty_f2)
+                down_action = [f"F{f + initial_f_idx}@F-skip@L{l + initial_l_idx}"]
+
+                down_score = down_prev_score + down_penalty
+
+                ## Right: Skip motif position -----------------------------------------------------------
+                right_prev_score, right_prev_actions = _previous_state(H, A, idx_f, idx_l-1, initial_score) # Previous states
+
+                # Skip type: Inside finger, single, repeated
+                right_penalty = skip_penalty_l1
+                right_action = [f"F{f + initial_f_idx}@L-skip@L{l + initial_l_idx}"]
+                for action in right_prev_actions:
+                    action_type = action.split("@")[1]
+                    l_j = int(action.split("@")[-1][1:]) - initial_l_idx
+                    if action_type == "match":
+                        if l - l_j < M:
+                            right_penalty = 0 # Inside match: No penalty
+                            break
+                    elif action_type == "L-skip":
+                        if l - l_j > 1:
+                            right_penalty = skip_penalty_l2 # Repeated: Extra penalty
+                            break
+
+                right_score = right_prev_score + right_penalty
+
+                # Consider all options
+                options_score = np.array(diag_scores + [
+                    down_score,  # Option 2: Keep finger f unused
+                    right_score,  # Option 3: Bind finger f previous to l
+                ])  # Options 1-k: Bind finger f @ l (from state: [-1, -k])
+
+                # Select best option
+                bestoption_idx = int(np.argmax(options_score))
+                bestoption_score = options_score[bestoption_idx]
+                if alignment_type == "local":
+                    bestoption_score = max(bestoption_score, initial_score) # Local alignment: No negative scores
+
+                # Build the arrangement: Only for the best option
+                if bestoption_idx < M:
+                    k = bestoption_idx + 1
+                    _, diag_prev_actions = _previous_state(H, A, idx_f-1, idx_l-k, initial_score)
+                    diag_action = (
+                        _overlap_actions(f, l, diag_overlaps[k-1], initial_f_idx, initial_l_idx)
+                        + [f"F{f + initial_f_idx}@match@L{l + initial_l_idx}"]
+                        + [f"F{f + initial_f_idx}@L-skip@L{l - i + initial_l_idx}" for i in range(1, k) if l - i >= 0]
+                    )
+                    bestoption_actions = diag_action + diag_prev_actions
+                elif bestoption_idx == M:
+                    bestoption_actions = down_action + down_prev_actions
+                else:
+                    bestoption_actions = right_action + right_prev_actions
+
+                # Record
+                H[idx_f, idx_l] = bestoption_score
+                A[idx_f][idx_l] = bestoption_actions
+
+                # Local alignment: Record best score, so far
+                if bestoption_score > best_score:
+                    best_score = bestoption_score
+                    best_actions = bestoption_actions
+
+        # Global alignment: Take final cell
+        best_score, best_actions = _extract_best_alignment(H, A, alignment_type, F, L_M_1, shift_idx_f, shift_idx_l)
+
+        # Record final optimal
+        if best_score >= msw_score:
+            H_final = H # Full matrix: Scores
+            A_final = A # Full matrix: Actions
+            msw_score = float(best_score) # Final score
+            msw_actions = best_actions[::-1] # Reorder: Start to end
+            msw_orient = orient # Orientation
+
+    return (msw_score, msw_orient, msw_actions, H_final, A_final)
+
+
+def calculate_modified_smith_waterman_znf(
+    matrix_f, matrix_l,
+    sim_for, sim_rev,
+    scale_factor, sim_threshold,
+    overlap_penalty_l1, overlap_penalty_l2,
+    overlap_penalty_f1, overlap_penalty_f2,
+    skip_penalty_f1, skip_penalty_f2,
+    skip_penalty_l1, skip_penalty_l2,
+    alignment_type="local",
+    initial_score=0.0,
+    initial_f_idx=0,
+    initial_l_idx=0,
+    orientations=("for", "rev"),
+):
+    '''
+    Modified Smith-Waterman, for the 3 bp zinc-finger case only.
+
+    This is the original three-diagonal recurrence, kept frozen so that B1H zinc-finger
+    results do not change. calculate_modified_smith_waterman() is the general-M version;
+    the two do not agree exactly at M=3, because the general version applies the
+    overlap/adjacent/gap rule uniformly to every diagonal.
+
+    Arguments and returns: see calculate_modified_smith_waterman().
+    '''
+    assert matrix_f.shape[-1] == matrix_l.shape[-1]
+    assert sim_for.shape == sim_rev.shape
+    assert sim_for.shape[0] == matrix_f.shape[0]
+    assert sim_threshold < 1
+    assert overlap_penalty_l1 <= 0
+    assert overlap_penalty_l2 <= 0
+    assert overlap_penalty_f1 >= 0
+    assert overlap_penalty_f2 >= 0
+    assert skip_penalty_f1 <= 0
+    assert skip_penalty_f2 <= 0
+    assert skip_penalty_l1 <= 0
+    assert skip_penalty_l2 <= 0
+    assert alignment_type in ["local", "global"]
+
+    F, L_M_1 = sim_for.shape # (F, L-M+1)
+    L, D = matrix_l.shape # (L, D)
+    M = matrix_f.shape[1] # Finger length
+    assert M == 3, f"calculate_modified_smith_waterman_znf() requires a 3 bp finger, got {M}"
+    assert L_M_1 == L - M + 1
 
     # Shift: Global, local
     if alignment_type == 'local':
@@ -346,7 +827,7 @@ def calculate_modified_smith_waterman(
 
         # F: Fingers
         for f in range(F):
-            # L: CWM Lengths
+            # L: Motif Lengths
             for l in range(L_M_1):
                 idx_f = f + shift_idx_f # f index for matrices (shifted by shift_idx_f)
                 idx_l = l + shift_idx_l # l index for matrices (shifted by shift_idx_l)
@@ -359,56 +840,56 @@ def calculate_modified_smith_waterman(
 
                 if sim_score > sim_threshold:
                     ## Diagonal 1: [-1, -1] ----------
-                    diag1_prev_score = H[idx_f-1, idx_l-1] # Previous states
-                    diag1_prev_actions = A[idx_f-1][idx_l-1]
+                    diag1_prev_score, diag1_prev_actions = _previous_state(H, A, idx_f-1, idx_l-1, initial_score) # Previous states
 
                     # F: Overlap: 2,1 bp; L: Skip penalty
                     diag1_penalty = match_score
                     diag1_action = [f"F{f + initial_f_idx}@match@L{l + initial_l_idx}"]
                     for action in diag1_prev_actions:
                         action_type = action.split("@")[1]
-                        f_i = int(action.split("@")[0][1:])
-                        l_j = int(action.split("@")[-1][1:])
+                        l_j = int(action.split("@")[-1][1:]) - initial_l_idx
                         if action_type == "match":
-                            # Overlap: 2 bp (from previous finger)
-                            if l - l_j == 1:
-                                if l-2 >= 0:
-                                    diag1_penalty = diag1_penalty + overlap_penalty_f1 + overlap_penalty_f2
-                                    diag1_action = [f"F{f + initial_f_idx}@F-overlap@L{l-2 + initial_l_idx}"] + [f"F{f + initial_f_idx}@F-overlap@L{l-1 + initial_l_idx}"] + diag1_action
-                                    break
-                                elif l-1 >= 0:
-                                    diag1_penalty = diag1_penalty + overlap_penalty_f1
-                                    diag1_action = [f"F{f + initial_f_idx}@F-overlap@L{l-1 + initial_l_idx}"] + diag1_action
-                                    break
-                            # Overlap: 1 bp (from previous finger)
-                            elif l - l_j == 2:
-                                if l-1 >= 0:
-                                    diag1_penalty = diag1_penalty + overlap_penalty_f1
-                                    diag1_action = [f"F{f + initial_f_idx}@F-overlap@L{l-1 + initial_l_idx}"] + diag1_action
+                            # Overlap: 2,1 bp (from previous finger)
+                            if l - l_j < 3:
+                                overlap_penalties = _calculate_overlap_penalties(
+                                    l, l_j, diag1_prev_actions, 3,
+                                    overlap_penalty_l1, overlap_penalty_l2,
+                                    overlap_penalty_f1, overlap_penalty_f2,
+                                    initial_l_idx,
+                                )
+                                if len(overlap_penalties) > 0:
+                                    for overlap_penalty in overlap_penalties:
+                                        diag1_penalty = diag1_penalty + overlap_penalty
+                                    diag1_action = _overlap_actions(f, l, len(overlap_penalties), initial_f_idx, initial_l_idx) + diag1_action
                                     break
                             elif l - l_j > 2:
                                 break
-                    
+
                     diag1_score = diag1_prev_score + diag1_penalty
                     diag1_actions = diag1_action + diag1_prev_actions
 
                     ## Diagonal 2: [-1, -2] ----------
-                    diag2_prev_score = H[idx_f-1, idx_l-2]
-                    diag2_prev_actions = A[idx_f-1][idx_l-2]
+                    diag2_prev_score, diag2_prev_actions = _previous_state(H, A, idx_f-1, idx_l-2, initial_score)
 
                     # Check for overlap (1bp)
                     diag2_penalty = match_score
                     diag2_action = [f"F{f + initial_f_idx}@match@L{l + initial_l_idx}"] + [f"F{f + initial_f_idx}@L-skip@L{l-1 + initial_l_idx}"]
                     for action in diag2_prev_actions:
                         action_type = action.split("@")[1]
-                        f_i = int(action.split("@")[0][1:])
-                        l_j = int(action.split("@")[-1][1:])
+                        l_j = int(action.split("@")[-1][1:]) - initial_l_idx
                         # F: Overlap: 1 bp; L: Skip penalty
                         if action_type == "match":
                             if l - l_j == 2:
-                                if l-1 >= 0:
-                                    diag2_penalty = diag2_penalty + overlap_penalty_f1
-                                    diag2_action = [f"F{f + initial_f_idx}@F-overlap@L{l-1 + initial_l_idx}"] + diag2_action
+                                overlap_penalties = _calculate_overlap_penalties(
+                                    l, l_j, diag2_prev_actions, 3,
+                                    overlap_penalty_l1, overlap_penalty_l2,
+                                    overlap_penalty_f1, overlap_penalty_f2,
+                                    initial_l_idx,
+                                )
+                                if len(overlap_penalties) > 0:
+                                    for overlap_penalty in overlap_penalties:
+                                        diag2_penalty = diag2_penalty + overlap_penalty
+                                    diag2_action = _overlap_actions(f, l, len(overlap_penalties), initial_f_idx, initial_l_idx) + diag2_action
                                     break
                             elif l - l_j == 3:
                                 continue
@@ -423,15 +904,13 @@ def calculate_modified_smith_waterman(
                     diag2_actions = diag2_action + diag2_prev_actions
 
                     ## Diagonal 3: [-1, -3] ----------
-                    diag3_prev_score = H[idx_f-1, idx_l-3]
-                    diag3_prev_actions = A[idx_f-1][idx_l-3]
+                    diag3_prev_score, diag3_prev_actions = _previous_state(H, A, idx_f-1, idx_l-3, initial_score)
 
                     diag3_penalty = match_score
                     diag3_action = [f"F{f + initial_f_idx}@match@L{l + initial_l_idx}"] + [f"F{f + initial_f_idx}@L-skip@L{l-1 + initial_l_idx}"] + [f"F{f + initial_f_idx}@L-skip@L{l-2 + initial_l_idx}"]
                     for action in diag3_prev_actions:
                         action_type = action.split("@")[1]
-                        f_i = int(action.split("@")[0][1:])
-                        l_j = int(action.split("@")[-1][1:])
+                        l_j = int(action.split("@")[-1][1:]) - initial_l_idx
                         # F: No overlap; L: Skip penalty
                         if action_type == "match":
                             if l - l_j == 4:
@@ -445,26 +924,24 @@ def calculate_modified_smith_waterman(
                     diag3_actions = diag3_action + diag3_prev_actions
 
                 ## Down: Skip finger -----------------------------------------------------------
-                down_prev_score = H[idx_f-1, idx_l] # Previous states
-                down_prev_actions = A[idx_f-1][idx_l]
+                down_prev_score, down_prev_actions = _previous_state(H, A, idx_f-1, idx_l, initial_score) # Previous states
 
-                down_penalty = skip_penalty_f
+                # Skip type: Single, repeated
+                down_penalty = _calculate_finger_skip_penalty(down_prev_actions, skip_penalty_f1, skip_penalty_f2)
                 down_action = [f"F{f + initial_f_idx}@F-skip@L{l + initial_l_idx}"]
 
                 down_score = down_prev_score + down_penalty
                 down_actions = down_action + down_prev_actions
 
-                ## Right: Skip CWM position -----------------------------------------------------------
-                right_prev_score = H[idx_f, idx_l-1] # Previous states
-                right_prev_actions = A[idx_f][idx_l-1]
+                ## Right: Skip motif position -----------------------------------------------------------
+                right_prev_score, right_prev_actions = _previous_state(H, A, idx_f, idx_l-1, initial_score) # Previous states
 
                 # Skip type: Inside finger, single, repeated
                 right_penalty = skip_penalty_l1
                 right_action = [f"F{f + initial_f_idx}@L-skip@L{l + initial_l_idx}"]
                 for action in right_prev_actions:
                     action_type = action.split("@")[1]
-                    f_i = int(action.split("@")[0][1:])
-                    l_j = int(action.split("@")[-1][1:])
+                    l_j = int(action.split("@")[-1][1:]) - initial_l_idx
                     if action_type == "match":
                         if l - l_j < 3:
                             right_penalty = 0 # Inside match: No penalty
@@ -511,17 +988,7 @@ def calculate_modified_smith_waterman(
                     best_actions = bestoption_actions
 
         # Global alignment: Take final cell
-        if alignment_type == 'local':
-            best_idx = H.argmax()
-            best_i, best_j = np.unravel_index(best_idx, H.shape)
-            best_score = float(H.flatten()[best_idx])
-            best_actions = A[best_i][best_j]
-        elif alignment_type == "global":
-            last_H = np.concatenate([H[-1, :], H[:, -1]])
-            last_A = A[-1] + [A[i][-1] for i in range(H.shape[0])]
-            best_idx = last_H.argmax()
-            best_score = last_H.flatten()[best_idx]
-            best_actions = last_A[best_idx]
+        best_score, best_actions = _extract_best_alignment(H, A, alignment_type, F, L_M_1, shift_idx_f, shift_idx_l)
 
         # Record final optimal
         if best_score >= msw_score:
@@ -535,65 +1002,59 @@ def calculate_modified_smith_waterman(
 
 
 def get_alignment_modified_smith_waterman(
-    matrix_f, matrix_l, 
+    matrix_f, matrix_l,
     scale_factor,
     msw_actions,
 ):
     '''
     Arguments:
-        matrix_f: B1H finger motif matrices - np.array of shape (F, 3, D)
-        matrix_l: CWM motif matrix - np.array of shape (L, D)
-        scale_factor: Scaling factors for each CWM position - np.array of shape (L-M+1,)
+        matrix_f: Finger motif matrices - np.array of shape (F, M, D)
+        matrix_l: Motif matrix - np.array of shape (L, D)
+        scale_factor: Scaling factors for each motif position - np.array of shape (L-M+1,)
         msw_actions: Optimal alignment arrangement - list of str
-    
+
     Returns:
-        aligned_motif_fs: Aligned finger motifs - np.array of shape (F, L+2, D)
-        msw_scale_f: Scaling of B1H finger motifs - np.array of shape (F)
+        aligned_motif_fs: Aligned finger motifs - np.array of shape (F, L+M-1, D)
+        msw_scale_f: Scaling of finger motifs - np.array of shape (F)
         msw_align_f: Finger alignment indices - list of int
-        msw_align_l: CWM alignment indices - list of int
+        msw_align_l: Motif alignment indices - list of int
     '''
-    F = matrix_f.shape[0]
+    F, M, _ = matrix_f.shape
     L, D = matrix_l.shape
-    
+
     ## Traceback
-    aligned_motif_fs = np.zeros((F, L + 2, D)) # (F, L+2, D)
+    aligned_motif_fs = np.zeros((F, L + M - 1, D)) # (F, L+M-1, D)
     msw_scale_f = np.zeros(F)
-    msw_align_f = [f_i for f_i in range(3*F)]
+    msw_align_f = [f_i for f_i in range(M*F)]
     msw_align_l = [l_j for l_j in range(L)]
-    
+
     # First: Unused positions
     action = msw_actions[0]
     action_type = action.split("@")[1]
     f_i = int(action.split("@")[0][1:])
     l_j = int(action.split("@")[-1][1:])
-    if f_i == 0 and l_j == 0:  # Start together
-        pass
-    elif f_i > 0 and l_j == 0:  # Skipped fingers
+    if f_i > 0:  # Skipped fingers
         align_l_j = msw_align_l.index(l_j)
-        msw_align_l[align_l_j : align_l_j] = ['-'] * 3 * (f_i)
-    elif l_j > 0 and f_i == 0:  # Skipped CWMs
-        align_f_i = msw_align_f.index(3*f_i)
+        msw_align_l[align_l_j : align_l_j] = ['-'] * M * (f_i)
+    if l_j > 0:  # Skipped motif positions
+        align_f_i = msw_align_f.index(M*f_i)
         msw_align_f[align_f_i : align_f_i] = ['-'] * (l_j)
-    else:
-        print(msw_actions)
-        raise ValueError(f"Incomplete alignment: first action {action}")
-    
+
     # End: Unused positions
     action = msw_actions[-1]
     action_type = action.split("@")[1]
     f_i = int(action.split("@")[0][1:])
-    l_j = int(action.split("@")[-1][1:]) + 2  # 1 Finger = Matched position + 2 bp = 3bp
-    if (f_i + 1) == F and (l_j + 1) == L:  # End together
-        pass
-    elif (f_i + 1) < F and (l_j + 1) == L: # Skipped fingers
+    l_j = int(action.split("@")[-1][1:]) + M - 1  # 1 Finger = Matched position + (M-1) bp
+    for last_action in reversed(msw_actions):  # The final action may sit before the last match
+        if last_action.split("@")[1] == "match":
+            l_j = max(l_j, int(last_action.split("@")[-1][1:]) + M - 1)
+            break
+    if (F - f_i - 1) > 0:  # Skipped fingers
         align_l_j = msw_align_l.index(l_j)
-        msw_align_l[align_l_j + 1 : align_l_j + 1] = ['-'] * 3 * (F - f_i - 1)
-    elif (l_j + 1) < L and (f_i + 1) == F:  # Skipped CWMs
-        align_f_i = msw_align_f.index(3*(f_i))
-        msw_align_f[align_f_i + 3 : align_f_i + 3] = ['-'] * (L - l_j - 1)
-    else:
-        print(msw_actions)
-        raise ValueError(f"Incomplete alignment: final action {action}")
+        msw_align_l[align_l_j + 1 : align_l_j + 1] = ['-'] * M * (F - f_i - 1)
+    if (L - l_j - 1) > 0:  # Skipped motif positions
+        align_f_i = msw_align_f.index(M*(f_i))
+        msw_align_f[align_f_i + M : align_f_i + M] = ['-'] * (L - l_j - 1)
 
     # Middle actions
     last_match = (0, "match", 0)
@@ -604,21 +1065,21 @@ def get_alignment_modified_smith_waterman(
         # Match: Place scaled finger
         if action_type == "match":
             scale_ij = scale_factor[l_j]
-            aligned_motif_fs[f_i, l_j:l_j+3, :] = matrix_f[f_i] * scale_ij
+            aligned_motif_fs[f_i, l_j:l_j+M, :] = matrix_f[f_i] * scale_ij
             msw_scale_f[f_i] = scale_ij
             last_match = (f_i, action_type, l_j)
-        # F-overlap: Insert gap in CWM
+        # F-overlap: Insert gap in motif
         elif action_type == "F-overlap":
             align_l_j = msw_align_l.index(l_j)
             msw_align_l[align_l_j:align_l_j] = ['-']
-        # F-skip: Insert 3 x gaps in CWM
+        # F-skip: Insert M x gaps in motif
         elif action_type == "F-skip":
             align_l_j = msw_align_l.index(l_j)
-            msw_align_l[align_l_j:align_l_j] = ['-'] * 3
+            msw_align_l[align_l_j:align_l_j] = ['-'] * M
         # L-skip: Insert gap in finger
         elif action_type == "L-skip":
-            if l_j > last_match[-1] + 2:
-                align_f_i = msw_align_f.index(3*(f_i)) # Only add if not inside match
+            if l_j > last_match[-1] + M - 1:
+                align_f_i = msw_align_f.index(M*(f_i)) # Only add if not inside match
                 msw_align_f[align_f_i:align_f_i] = ['-']
 
     return aligned_motif_fs, msw_scale_f, msw_align_f, msw_align_l
@@ -661,8 +1122,8 @@ def visualize_motif(motif, save_path):
 def visualize_motifs_n(motifs, save_path):
     """
     motifs: np.array of shape (N, L, 4)
-    Draws all motifs vertically stacked, and adds 
-    vertical alignment lines where each motif's non-zero 
+    Draws all motifs vertically stacked, and adds
+    vertical alignment lines where each motif's non-zero
     region begins and ends (computed per motif, drawn on all axes).
     """
 
@@ -713,7 +1174,7 @@ def visualize_motifs_n(motifs, save_path):
         else:
             df = pd.DataFrame(motif, columns=["A", "C", "G", "T"])
             logomaker.Logo(df, ax=ax)
-        
+
         # Keep y-axis scale
         if i > 1:
             ax.set_ylim(0, max_height)

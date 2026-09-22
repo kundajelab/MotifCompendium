@@ -1599,7 +1599,7 @@ def run_tf_sequential(args):
     mc_qc.metadata[SmithWatermanArgs.msw_orient_col] = None
     mc_qc.metadata[SmithWatermanArgs.msw_align_col] = None
     mc_qc.metadata[SmithWatermanArgs.msw_action_col] = None
-    aligned_motifs = np.zeros((mc_qc.motifs.shape[0], mc_qc.motifs.shape[1] + 2, mc_qc.motifs.shape[2]))
+    aligned_motifs = np.zeros((mc_qc.motifs.shape[0], mc_qc.motifs.shape[1] + SmithWatermanArgs.finger_length - 1, mc_qc.motifs.shape[2]))
 
     # Per TF
     for i, row_b1h in mc_b1h.metadata.iterrows():
@@ -1628,12 +1628,15 @@ def run_tf_sequential(args):
                     cwm=cwm_ij,
                     b1h_ppm_ic=b1h_ppm_ic_i,
                     sim_threshold=SmithWatermanArgs.msw_sim_threshold,
-                    overlap_penalty_f1=SmithWatermanArgs.overlap_penalty_f1, 
+                    overlap_penalty_l1=SmithWatermanArgs.overlap_penalty_l1, 
+                    overlap_penalty_l2=SmithWatermanArgs.overlap_penalty_l2,
+                    overlap_penalty_f1=SmithWatermanArgs.overlap_penalty_f1,
                     overlap_penalty_f2=SmithWatermanArgs.overlap_penalty_f2,
-                    skip_penalty_f=SmithWatermanArgs.skip_penalty_f, 
+                    skip_penalty_f1=SmithWatermanArgs.skip_penalty_f1, 
+                    skip_penalty_f2=SmithWatermanArgs.skip_penalty_f2,
                     skip_penalty_l1=SmithWatermanArgs.skip_penalty_l1, 
                     skip_penalty_l2=SmithWatermanArgs.skip_penalty_l2,
-                    finger_length=3,
+                    finger_length=SmithWatermanArgs.finger_length,
                 )
                 
                 # Aligned B1H motif (collapsed)
@@ -3308,7 +3311,7 @@ def run_tf_sequential(args):
     ## Run Modified Smith-Waterman
     aligned_motifs = np.zeros((
         mc_cluster_direct_beta_zf.motifs.shape[0], 
-        mc_cluster_direct_beta_zf.motifs.shape[1] + 2, 
+        mc_cluster_direct_beta_zf.motifs.shape[1] + SmithWatermanArgs.finger_length - 1, 
         mc_cluster_direct_beta_zf.motifs.shape[2]
     ))
 
@@ -3336,12 +3339,15 @@ def run_tf_sequential(args):
                     cwm=cwm_ij,
                     b1h_ppm_ic=b1h_ppm_ic_i,
                     sim_threshold=SmithWatermanArgs.msw_sim_threshold,
-                    overlap_penalty_f1=SmithWatermanArgs.overlap_penalty_f1, 
+                    overlap_penalty_l1=SmithWatermanArgs.overlap_penalty_l1, 
+                    overlap_penalty_l2=SmithWatermanArgs.overlap_penalty_l2,
+                    overlap_penalty_f1=SmithWatermanArgs.overlap_penalty_f1,
                     overlap_penalty_f2=SmithWatermanArgs.overlap_penalty_f2,
-                    skip_penalty_f=SmithWatermanArgs.skip_penalty_f, 
+                    skip_penalty_f1=SmithWatermanArgs.skip_penalty_f1, 
+                    skip_penalty_f2=SmithWatermanArgs.skip_penalty_f2,
                     skip_penalty_l1=SmithWatermanArgs.skip_penalty_l1, 
                     skip_penalty_l2=SmithWatermanArgs.skip_penalty_l2,
-                    finger_length=3,
+                    finger_length=SmithWatermanArgs.finger_length,
                 )
 
                 # Aligned B1H motif (collapsed)
@@ -5321,11 +5327,15 @@ def run_tf_sequential(args):
         "msw_action_col": SmithWatermanArgs.msw_action_col,
         "msw_logo_col": SmithWatermanArgs.msw_logo_col,
         "msw_sim_threshold": SmithWatermanArgs.msw_sim_threshold,
+        "overlap_penalty_l1": SmithWatermanArgs.overlap_penalty_l1,
+        "overlap_penalty_l2": SmithWatermanArgs.overlap_penalty_l2,
         "overlap_penalty_f1": SmithWatermanArgs.overlap_penalty_f1,
         "overlap_penalty_f2": SmithWatermanArgs.overlap_penalty_f2,
-        "skip_penalty_f": SmithWatermanArgs.skip_penalty_f,
+        "skip_penalty_f1": SmithWatermanArgs.skip_penalty_f1,
+        "skip_penalty_f2": SmithWatermanArgs.skip_penalty_f2,
         "skip_penalty_l1": SmithWatermanArgs.skip_penalty_l1,
         "skip_penalty_l2": SmithWatermanArgs.skip_penalty_l2,
+        "finger_length": SmithWatermanArgs.finger_length,
         "min_msw_score": SmithWatermanArgs.min_msw_score,
         "min_topk_msw_score": SmithWatermanArgs.min_topk_msw_score,
         "topk": SmithWatermanArgs.topk,
