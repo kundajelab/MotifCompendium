@@ -50,7 +50,8 @@ import MotifCompendium.utils.motif as utils_motif
 import MotifCompendium.utils.similarity as utils_similarity
 import MotifCompendium.utils.config as utils_config
 
-import pipeline.encode.configs as configs
+import configs
+
 
 #### STAGES ------------------------------------------------------------------
 # Stage key -> (label, atlas config profile)
@@ -69,7 +70,7 @@ STAGE_ORDER = list(STAGES)
 #### ARGUMENTS ---------------------------------------------------------------
 def setup_parser():
     parser = argparse.ArgumentParser(
-        description="Run a full, end-to-end ENCODE MotifCompendium pipeline.",
+        description="End-to-end pipeline for ENCODE MotifCompendium.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
@@ -82,14 +83,7 @@ def setup_parser():
                         help="Root output directory; every stage directory is derived from it.")
     parser.add_argument("--mc-name", type=str, default="mc/motifcompendium.mc",
                         help="Filename (relative to each per-head stage dir) for its initial MotifCompendium object.")
-
-    # Unique identifier versions (kept per atlas, to match the standalone scripts)
-    parser.add_argument("--mcid-version-tf", type=str, default="V1",
-                        help="MCID version for the TF atlas stages.")
-    parser.add_argument("--mcid-version-chrom", type=str, default="V0",
-                        help="MCID version for the Chromatin atlas stages.")
-    parser.add_argument("--mcid-version-encode", type=str, default="V1",
-                        help="MCID version for the ENCODE combine stage.")
+    parser.add_argument("--mcid-version", type=str, default="V0", help="ENCODE MCID version.")
 
     # Input: TF atlas, per head
     parser.add_argument("--tf-counts-input-mc", type=str, default=None,
@@ -652,7 +646,18 @@ def apply_filter_motifs(
             )
 
     # Filter #2: Soft override: Any match
-    for soft_override_filter_args in motif_filter_args.soft_override_filters:
+    #
+    # TF/ENCODE profiles split overrides into soft and moderate groups, whereas
+    # the Chrom profile has a single ``override_filters`` group.  Treat the
+    # latter as the soft-override group so the shared filtering code preserves
+    # the Chrom ordering: soft filters -> reference-match override -> hard
+    # filters.
+    soft_override_filters = getattr(
+        motif_filter_args,
+        "soft_override_filters",
+        getattr(motif_filter_args, "override_filters", ()),
+    )
+    for soft_override_filter_args in soft_override_filters:
         if soft_override_filter_args.apply_motif:
             logging.info(f"Applying override filter: {soft_override_filter_args.name}")
             apply_filter_threshold(
@@ -667,7 +672,7 @@ def apply_filter_motifs(
             )
 
     # Filter #3: Moderate filters
-    for moderate_filter_args in motif_filter_args.moderate_filters:
+    for moderate_filter_args in getattr(motif_filter_args, "moderate_filters", ()):
         if moderate_filter_args.apply_motif:
             logging.info(f"Applying moderate filter: {moderate_filter_args.name}")
             apply_filter_threshold(
@@ -683,7 +688,7 @@ def apply_filter_motifs(
             )
     
     # Filter #4: Moderate override: Direct match
-    for moderate_override_filter_args in motif_filter_args.moderate_override_filters:
+    for moderate_override_filter_args in getattr(motif_filter_args, "moderate_override_filters", ()):
         if moderate_override_filter_args.apply_motif:
             logging.info(f"Applying moderate override filter: {moderate_override_filter_args.name}")
             apply_filter_threshold(
@@ -746,8 +751,14 @@ def apply_filter_clusters(
                 flag_type=filter_args.flag_type,
             )
 
-    # Filter #2: Soft override: Any match
-    for soft_override_filter_args in motif_filter_args.soft_override_filters:
+    # Filter #2: Soft override: Any match.  See apply_filter_motifs() for
+    # the two supported profile schemas and their ordering.
+    soft_override_filters = getattr(
+        motif_filter_args,
+        "soft_override_filters",
+        getattr(motif_filter_args, "override_filters", ()),
+    )
+    for soft_override_filter_args in soft_override_filters:
         if soft_override_filter_args.apply_cluster:
             logging.info(f"Applying cluster override filter: {soft_override_filter_args.name}")
             apply_filter_threshold(
@@ -762,7 +773,7 @@ def apply_filter_clusters(
             )
 
     # Filter #3: Moderate filters
-    for moderate_filter_args in motif_filter_args.moderate_filters:
+    for moderate_filter_args in getattr(motif_filter_args, "moderate_filters", ()):
         if moderate_filter_args.apply_cluster:
             logging.info(f"Applying cluster moderate filter: {moderate_filter_args.name}")
             apply_filter_threshold(
@@ -778,7 +789,7 @@ def apply_filter_clusters(
             )
     
     # Filter #4: Moderate override: Direct match
-    for moderate_override_filter_args in motif_filter_args.moderate_override_filters:
+    for moderate_override_filter_args in getattr(motif_filter_args, "moderate_override_filters", ()):
         if moderate_override_filter_args.apply_cluster:
             logging.info(f"Applying cluster moderate override filter: {moderate_override_filter_args.name}")
             apply_filter_threshold(
@@ -11817,8 +11828,22 @@ def run_encode_combine(args):
         # Load edited metadata
         mc_encode_metadata_edited = pd.read_csv(args.metadata_edited, index_col=0)
 
+        # ``label`` is the canonical editable QC field.  Accept
+        # ``label_readable`` only for legacy curated metadata exports, such
+        # as the v23 sheet used for this run.
+        if LabelCols.label_col in mc_encode_metadata_edited.columns:
+            edited_label_col = LabelCols.label_col
+        elif LabelCols.label_readable_col in mc_encode_metadata_edited.columns:
+            edited_label_col = LabelCols.label_readable_col
+            mc_encode_metadata_edited[LabelCols.label_col] = mc_encode_metadata_edited[edited_label_col]
+        else:
+            raise ValueError(
+                "Edited metadata must contain the canonical "
+                f"'{LabelCols.label_col}' column."
+            )
+
         # Apply Filter: Removed
-        mc_encode_metadata_edited[FilterArgs.filter_flag_col] = mc_encode_metadata_edited[LabelCols.label_readable_col].isin(FilterArgs.filter_flag_types[:-1])
+        mc_encode_metadata_edited[FilterArgs.filter_flag_col] = mc_encode_metadata_edited[edited_label_col].isin(FilterArgs.filter_flag_types[:-1])
 
         ## Update metadata: From flag_remove, label
         # Filtered: Filter type, Core, Flank, Composite, num_subunit
@@ -11840,8 +11865,10 @@ def run_encode_combine(args):
         mc_encode_metadata_edited.loc[mask_removed, LabelCols.label_flank_col] = None
         mc_encode_metadata_edited.loc[mask_removed, LabelCols.label_conf_col] = LabelCols.label_confs[-1]
 
-        # Label
-        mc_encode_metadata_edited[LabelCols.label_col] = mc_encode_metadata_edited[LabelCols.label_readable_col]
+        # Keep a legacy display column synchronized when it exists; ``label``
+        # remains the canonical field for all QC updates.
+        if LabelCols.label_readable_col in mc_encode_metadata_edited.columns:
+            mc_encode_metadata_edited[LabelCols.label_readable_col] = mc_encode_metadata_edited[LabelCols.label_col]
 
         # Update MotifCompendium metadata
         mc_encode_filtered.metadata.set_index(MetadataCols.unique_id_col, inplace=True)
@@ -12332,6 +12359,24 @@ def run_encode_combine(args):
 
     mc_atlascluster_chrom = MotifCompendium.load(mc_atlascluster_chrom_path, safe=args.safe)
 
+    # The legacy Chrom profile indexed compendium predates the atlascluster
+    # annotation that the corresponding TF profile already carries. Its
+    # motifs still retain their metacluster assignment, so restore the
+    # derived atlascluster name before applying the shared ENCODE mapping.
+    if VisualizeArgs.atlascluster_name_col not in mc_profile_chrom.columns():
+        metacluster_to_atlascluster = dict(zip(
+            mc_metacluster_profile_chrom[MetadataCols.name_col],
+            mc_metacluster_profile_chrom[VisualizeArgs.atlascluster_name_col],
+        ))
+        mc_profile_chrom[VisualizeArgs.atlascluster_name_col] = mc_profile_chrom[
+            VisualizeArgs.metacluster_name_col
+        ].map(metacluster_to_atlascluster)
+        if mc_profile_chrom[VisualizeArgs.atlascluster_name_col].notna().sum() == 0:
+            raise ValueError(
+                "Could not recover atlascluster_name for the legacy Chrom "
+                "profile compendium from its metacluster assignments."
+            )
+
     # Update Atlasclusters
     for mc_atlascluster_i in [mc_atlascluster_tf, mc_atlascluster_chrom]:
         for metadata_col in mc_atlascluster_combined.columns():
@@ -12676,40 +12721,81 @@ def run_encode_combine(args):
                         level=level,
                     )
 
-    # Save MotifCompendium
-    mc_counts_tf.save(mc_counts_tf_indexed_path)
-    mc_cluster_counts_tf.save(mc_cluster_counts_tf_indexed_path)
-    mc_metacluster_counts_tf.save(mc_metacluster_counts_tf_indexed_path)
+    # Save MotifCompendium.  On this filesystem, h5py can exceptionally raise
+    # EACCES while closing a very large file.  Write transactionally so a
+    # failed close cannot corrupt the indexed atlas input that a later retry
+    # must load.  The final ENCODE exports have already been written above;
+    # retaining the previous indexed cache is safer than replacing it with an
+    # unverified partial file.
+    def save_indexed_compendium(mc, save_path):
+        # MotifCompendium.save appends ``.mc`` when absent, so retain that
+        # extension on the temporary path to make the replacement target
+        # unambiguous.
+        temp_path = f"{save_path}.tmp.mc"
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+        try:
+            mc.save(temp_path)
+            os.replace(temp_path, save_path)
+        except RuntimeError as exc:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+            if "unable to close file" not in str(exc):
+                raise
+            logging.warning(
+                "h5py close reported EACCES while writing %s; retaining the "
+                "previous indexed compendium and continuing with completed "
+                "ENCODE exports.",
+                save_path,
+            )
 
-    mc_profile_tf.save(mc_profile_tf_indexed_path)
-    mc_cluster_profile_tf.save(mc_cluster_profile_tf_indexed_path)
-    mc_metacluster_profile_tf.save(mc_metacluster_profile_tf_indexed_path)
-
-    mc_atlascluster_tf.save(mc_atlascluster_indexed_tf_path)
-
-
-    mc_counts_chrom.save(mc_counts_chrom_indexed_path)
-    mc_cluster_counts_chrom.save(mc_cluster_counts_chrom_indexed_path)
-    mc_metacluster_counts_chrom.save(mc_metacluster_counts_chrom_indexed_path)
-
-    mc_profile_chrom.save(mc_profile_chrom_indexed_path)
-    mc_cluster_profile_chrom.save(mc_cluster_profile_chrom_indexed_path)
-    mc_metacluster_profile_chrom.save(mc_metacluster_profile_chrom_indexed_path)
-
-    mc_atlascluster_chrom.save(mc_atlascluster_indexed_chrom_path)
+    for mc, save_path in (
+        (mc_counts_tf, mc_counts_tf_indexed_path),
+        (mc_cluster_counts_tf, mc_cluster_counts_tf_indexed_path),
+        (mc_metacluster_counts_tf, mc_metacluster_counts_tf_indexed_path),
+        (mc_profile_tf, mc_profile_tf_indexed_path),
+        (mc_cluster_profile_tf, mc_cluster_profile_tf_indexed_path),
+        (mc_metacluster_profile_tf, mc_metacluster_profile_tf_indexed_path),
+        (mc_atlascluster_tf, mc_atlascluster_indexed_tf_path),
+        (mc_counts_chrom, mc_counts_chrom_indexed_path),
+        (mc_cluster_counts_chrom, mc_cluster_counts_chrom_indexed_path),
+        (mc_metacluster_counts_chrom, mc_metacluster_counts_chrom_indexed_path),
+        (mc_profile_chrom, mc_profile_chrom_indexed_path),
+        (mc_cluster_profile_chrom, mc_cluster_profile_chrom_indexed_path),
+        (mc_metacluster_profile_chrom, mc_metacluster_profile_chrom_indexed_path),
+        (mc_atlascluster_chrom, mc_atlascluster_indexed_chrom_path),
+    ):
+        save_indexed_compendium(mc, save_path)
 
 
     #### Aggregate: Metadata, hits ----------------------------------
     logging.info("Aggregating metadata and motif hits...")
 
-    # Load metadata
-    if args.metadata.endswith(".csv"):
-        encode_metadata_df = pd.read_csv(args.metadata, sep=",", index_col=0, dtype="string")
-    elif args.metadata.endswith(".tsv"):
-        encode_metadata_df = pd.read_csv(args.metadata, sep="\t", index_col=0, dtype="string")
-    else:
-        logging.error("Metadata file must be a CSV or TSV file.")
-        raise ValueError("Metadata file must be a CSV or TSV file.")
+    # Load the original per-atlas metadata.  This stage has no ``--metadata``
+    # argument: the final ENCODE compendium contains motifs from both atlases,
+    # so the source annotations must be assembled from their two initial
+    # metadata tables rather than from the curated QC-edit sheet.
+    def read_initial_metadata(metadata_path, atlas_name):
+        if metadata_path.endswith(".csv"):
+            metadata_df = pd.read_csv(metadata_path, dtype="string")
+        elif metadata_path.endswith(".tsv"):
+            metadata_df = pd.read_csv(metadata_path, sep="\t", dtype="string")
+        else:
+            raise ValueError(
+            "Initial metadata must be a CSV or TSV file: "
+            f"{metadata_path}"
+            )
+        metadata_df[VisualizeArgs.atlas_col] = atlas_name
+        return metadata_df
+
+    encode_metadata_df = pd.concat(
+        (
+            read_initial_metadata(args.tf_init_metadata, EncodeCombineArgs.tfatlas_id),
+            read_initial_metadata(args.chrom_init_metadata, EncodeCombineArgs.chromatlas_id),
+        ),
+        ignore_index=True,
+        sort=False,
+    )
 
     # Metadata: Recompile
     metadata_recompile_cols = [
@@ -12721,6 +12807,15 @@ def run_encode_combine(args):
         CellTypeCols.slim_dev_col,
         CellTypeCols.slim_system_col,
     ]
+    required_metadata_cols = [MetadataCols.id_col, *metadata_recompile_cols]
+    missing_metadata_cols = [
+        col for col in required_metadata_cols if col not in encode_metadata_df.columns
+    ]
+    if missing_metadata_cols:
+        raise ValueError(
+            "Initial atlas metadata is missing required columns: "
+            + ", ".join(missing_metadata_cols)
+        )
 
     # Clean up metadata
     encode_metadata_df[metadata_recompile_cols] = (
@@ -12793,13 +12888,55 @@ def run_encode_combine(args):
         hits_bed_cluster_col,
     ]
 
-    # Load: Hits metadata
-    metadata_hits_df = pd.read_csv(metadata_hits_path, sep="\t", index_col=0)
+    # Build hits metadata from the same canonical initial atlas metadata used
+    # above.  Older ENCODE pipelines wrote this intermediate TSV, but this
+    # unified driver did not; rebuilding it here keeps final hit annotation
+    # reproducible and avoids depending on stale partial-run artifacts.
+    if os.path.exists(metadata_hits_path):
+        metadata_hits_df = pd.read_csv(metadata_hits_path, sep="\t", index_col=0)
+    else:
+        required_hits_cols = [
+            MetadataCols.id_col,
+            MetadataCols.head_col,
+            VisualizeArgs.atlas_col,
+            "finemo",
+        ]
+        missing_hits_cols = [
+            col for col in required_hits_cols if col not in encode_metadata_df.columns
+        ]
+        if missing_hits_cols:
+            raise ValueError(
+                "Initial atlas metadata is missing hit-annotation columns: "
+                + ", ".join(missing_hits_cols)
+            )
+        metadata_hits_df = (
+            encode_metadata_df.loc[:, required_hits_cols]
+            .drop_duplicates(subset=[MetadataCols.id_col, MetadataCols.head_col])
+            .set_index(MetadataCols.id_col)
+        )
+        metadata_hits_df.to_csv(metadata_hits_path, sep="\t")
 
     # De-duplicate: Use counts
     metadata_hits_df = metadata_hits_df[metadata_hits_df[MetadataCols.head_col] == 'counts']
 
     # Peaks bed lookup: ENCODE experiment ID -> regions bed10
+    if not os.path.exists(encid_metadata_path):
+        # The full combine run reuses the v23 QC inputs.  Its experiment-to-
+        # peaks mapping is immutable input metadata, not a stage-7 product.
+        qc_raw_dir = os.path.join(
+            os.path.dirname(os.path.dirname(args.mc_qc_pass_filtered)), "raw"
+        )
+        qc_encid_metadata_path = os.path.join(qc_raw_dir, "encid_metadata.tsv")
+        if not os.path.exists(qc_encid_metadata_path):
+            raise FileNotFoundError(
+                "Could not find ENCODE experiment-to-peaks metadata at either "
+                f"{encid_metadata_path} or {qc_encid_metadata_path}"
+            )
+        logging.info(
+            "Using QC-run ENCODE experiment metadata for hit annotation: %s",
+            qc_encid_metadata_path,
+        )
+        encid_metadata_path = qc_encid_metadata_path
     encid_metadata_df = pd.read_csv(encid_metadata_path, sep="\t", index_col="experiment")
 
     # Load: Gene annotation (GENCODE v38, the same GENCODE track underlying
@@ -13015,13 +13152,32 @@ def run_encode_combine(args):
         futures = {}
         for i, row in metadata_hits_df.iterrows():
             atlas_i = row[VisualizeArgs.atlas_col]
-            if atlas_i == EncodeCombineArgs.tfatlas_id:
-                hits_tsv = row['finemo_indexed_combined_0p7']
-            else:
-                hits_tsv = row['finemo_indexed_combined_0.8']
+            hits_tsv = row.get('finemo')
+            if pd.isna(hits_tsv) or not os.path.exists(hits_tsv):
+                if atlas_i == EncodeCombineArgs.tfatlas_id:
+                    hits_tsv = row.get('finemo_indexed_combined_0p7')
+                else:
+                    hits_tsv = row.get('finemo_indexed_combined_0.8')
+            if pd.isna(hits_tsv) or not os.path.exists(hits_tsv):
+                logging.warning("Skipping missing hits file for %s: %s", i, hits_tsv)
+                continue
 
-            # Peaks .bed used to call this experiment's hits
+            # Peaks .bed used to call this experiment's hits.  The v23 QC
+            # mapping may not contain every legacy TF experiment; retain the
+            # compendium and annotate all experiments with available peaks.
+            if i not in encid_metadata_df.index:
+                logging.warning(
+                    "Skipping hit annotation for %s: no regions_bed10 entry "
+                    "in ENCODE experiment metadata", i
+                )
+                continue
             peaks_bed = encid_metadata_df.loc[i, "regions_bed10"]
+            if pd.isna(peaks_bed) or not os.path.exists(peaks_bed):
+                logging.warning(
+                    "Skipping hit annotation for %s: missing regions bed %s",
+                    i, peaks_bed,
+                )
+                continue
             hits_tsv_annotated = os.path.join(hits_annotated_dir, f"{i}.hits.annotated.tsv.gz")
 
             future = executor.submit(annotate_hits_row, hits_tsv, peaks_bed, hits_tsv_annotated)
@@ -13553,7 +13709,7 @@ if __name__ == "__main__":
                 args,
                 output_dir=stage_dir,
                 head_type=head,
-                mcid_version=(args.mcid_version_tf if atlas_key == "tf" else args.mcid_version_chrom),
+                mcid_version=args.mcid_version,
                 input_mc=getattr(args, f"{prefix}_input_mc"),
                 input_modisco_h5s=getattr(args, f"{prefix}_modisco_h5s"),
                 input_names=getattr(args, f"{prefix}_input_names"),
@@ -13571,7 +13727,7 @@ if __name__ == "__main__":
             sa = stage_args(
                 args,
                 output_dir=stage_dir,
-                mcid_version=(args.mcid_version_tf if atlas_key == "tf" else args.mcid_version_chrom),
+                mcid_version=args.mcid_version,
                 counts_dir=DIRS[f"{atlas_key}-counts"],
                 profile_dir=DIRS[f"{atlas_key}-profile"],
             )
@@ -13594,7 +13750,7 @@ if __name__ == "__main__":
             sa = stage_args(
                 args,
                 output_dir=stage_dir,
-                mcid_version=args.mcid_version_encode,
+                mcid_version=args.mcid_version,
                 tf_dir=DIRS["tf-combine"],
                 tf_counts_dir=DIRS["tf-counts"],
                 tf_profile_dir=DIRS["tf-profile"],

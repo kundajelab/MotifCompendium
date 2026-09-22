@@ -779,14 +779,11 @@ def _cluster_idxs(membership: np.ndarray) -> list[np.ndarray]:
 class _ConvergenceTracker:
     """Tracks a clustering objective across iterations, to stop on a stall or a cycle.
 
-    Lloyd-style clustering only improves monotonically when the step computing cluster
-      representations optimizes the same objective the assignment step evaluates. That
-      does not hold exactly when representations are averaged motifs, because averaging is
-      lossy (see resize_motif()), so the objective may fail to improve and membership may
-      cycle instead of reaching a fixed point. Exact membership equality alone therefore
-      cannot be relied on to terminate a run. This additionally stops when membership
-      repeats, when the objective stops improving, or when an iteration cap is reached, and
-      retains the best-scoring iteration so a stopped run still returns its best state.
+    Tracks membership convergence until one of the following occurs:
+      - Membership repeats 
+      - Objective stops improving
+      - Iteration cap is reached
+      Retains the best-scoring iteration so a stopped run still returns its best state.
 
     Args:
         n_iterations: The number of iterations to run. -1 iterates until convergence.

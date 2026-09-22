@@ -910,7 +910,7 @@ class MotifCompendium:
                 raise KeyError(f"Labels not found in index: {missing}")
         elif isinstance(key, pd.Series) and pd.api.types.is_bool_dtype(key):
             keep_idxs = list(self.metadata[key].index)
-        elif isinstance(key, np.ndarray) and key.dtype == bool:
+        elif isinstance(key, np.ndarray) and np.issubdtype(key.dtype, np.bool_):
             if len(key) != len(self.metadata):
                 raise ValueError("Boolean mask must be same length as metadata.")
             keep_idxs = list(np.where(key)[0])
@@ -920,10 +920,13 @@ class MotifCompendium:
             keep_idxs = [i for i, x in enumerate(key) if x]
         elif isinstance(key, slice):
             keep_idxs = list(range(*key.indices(len(self.metadata))))
-        elif isinstance(key, int):
-            keep_idxs = [key]
-        elif isinstance(key, list) and all(isinstance(i, int) for i in key):
-            keep_idxs = key
+        elif isinstance(key, (int, np.integer)):
+            keep_idxs = [int(key)]
+        elif isinstance(key, (list, np.ndarray)) and all(
+            isinstance(i, (int, np.integer)) and not isinstance(i, (bool, np.bool_))
+            for i in key
+        ):
+            keep_idxs = [int(i) for i in key]
         elif len(key) == 0:
             keep_idxs = []
         else:
@@ -1808,6 +1811,7 @@ class MotifCompendium:
         if np.any(mc_avg_idx < 0):
             raise ValueError("`mc_avg` does not contain an average motif for every cluster.")
         mc_avg_motifs = mc_avg.motifs[mc_avg_idx]  # Reorder rows
+        mc_avg_names = mc_avg.metadata["name"].to_numpy()[mc_avg_idx]  # Reorder rows
 
         cluster_labels = self.metadata[clustering].to_numpy()
         membership = cluster_labels[None, :] == clusters_arr[:, None]
@@ -1847,9 +1851,8 @@ class MotifCompendium:
 
         max_external_centroid_scores = cluster_cluster_similarity.max(axis=1)
         max_external_centroid_cluster_idxs = cluster_cluster_similarity.argmax(axis=1)
-        cluster_names_arr = mc_avg.metadata["name"].to_numpy()[mc_avg_idx]
         stats_metadata["max_external_centroid-centroid_similarity_score"] = max_external_centroid_scores
-        stats_metadata["max_external_centroid-centroid_similarity_cluster"] = cluster_names_arr[max_external_centroid_cluster_idxs]
+        stats_metadata["max_external_centroid-centroid_similarity_cluster"] = mc_avg_names[max_external_centroid_cluster_idxs]
         stats_motifs["max_external_centroid-centroid_similarity_motif"] = aligned_logos(
             cluster_cluster_rc, source_idx, max_external_centroid_cluster_idxs
         )
