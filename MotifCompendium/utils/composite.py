@@ -339,63 +339,34 @@ def unroll_fingers(ppm, finger_length):
 # UNROLLING #
 #############
 def unroll_motif_np(motif, U):
-    L, K = motif.shape
-    unrolled_motif = _tensor3_matmul_tensor2(_UNRAVELLER_NP(L, U), motif)
-    unrolled_motif = unrolled_motif.transpose((1, 0, 2))
-    assert(unrolled_motif.shape == (L-U+1, U, K))
-    return unrolled_motif
+    return _unroll_motif(motif, U, np)
 
 
 def unroll_motif_cp(motif, U):
+    return _unroll_motif(motif, U, cp)
+
+
+def _unroll_motif(motif, U, xp):
+    '''
+    Unravels (L, K) --> (L-U+1, U, K), by gathering each window directly.
+
+    The previous implementation multiplied by a (U, L-U+1, L) tensor of ones and zeros,
+    which costs O(U * L^2) to build and was cached on the exact shape -- so it was rebuilt
+    for every distinct motif length. The gather gives the same values at the size of the
+    output (the matmul summed one value and zeros).
+
+    Gather as (U, L-U+1, K) and transpose, rather than gathering (L-U+1, U, K) directly:
+    that reproduces the memory layout of the old matmul-then-transpose. The values are
+    equal either way, but downstream reductions (the importance sum, the similarity
+    normalisation) sum in memory order, so a C-contiguous result rounds differently in the
+    last bit and perturbs argmax ties in the DP.
+    '''
     L, K = motif.shape
-    unrolled_motif = _tensor3_matmul_tensor2(_UNRAVELLER_CP(L, U), motif)
-    unrolled_motif = unrolled_motif.transpose((1, 0, 2))
+    assert L >= U
+    windows = xp.arange(U)[:, None] + xp.arange(L - U + 1)[None, :]  # (U, L-U+1)
+    unrolled_motif = motif[windows].transpose((1, 0, 2))  # (L-U+1, U, K)
     assert(unrolled_motif.shape == (L-U+1, U, K))
     return unrolled_motif
-
-
-_UNRAVELLER_TENSOR_NP = None
-def _UNRAVELLER_NP(L, U):
-    # L = length of input sequence
-    # U = length to unravel to
-    # Unravels (L, K) --> (L-U+1, U, K)
-    global _UNRAVELLER_TENSOR_NP
-    create_tensor = False
-    if _UNRAVELLER_TENSOR_NP is None:
-        create_tensor = True
-    elif _UNRAVELLER_TENSOR_NP.shape != (U, L-U+1, L):
-        create_tensor = True
-    if create_tensor:
-        _UNRAVELLER_TENSOR_NP = np.zeros((U, L-U+1, L))
-        for i in range(U):
-            _UNRAVELLER_TENSOR_NP[i, :, i:i+L-U+1] = np.eye(L-U+1)
-    return _UNRAVELLER_TENSOR_NP
-
-_UNRAVELLER_TENSOR_CP = None
-def _UNRAVELLER_CP(L, U):
-    # L = length of input sequence
-    # U = length to unravel to
-    # Unravels (L, K) --> (L-U+1, U, K)
-    global _UNRAVELLER_TENSOR_CP
-    create_tensor = False
-    if _UNRAVELLER_TENSOR_CP is None:
-        create_tensor = True
-    elif _UNRAVELLER_TENSOR_CP.shape != (U, L-U+1, L):
-        create_tensor = True
-    if create_tensor:
-        _UNRAVELLER_TENSOR_CP = cp.zeros((U, L-U+1, L))
-        for i in range(U):
-            _UNRAVELLER_TENSOR_CP[i, :, i:i+L-U+1] = cp.eye(L-U+1)
-    return _UNRAVELLER_TENSOR_CP
-
-
-def _tensor3_matmul_tensor2(x, y):
-    """Multiplies a (N, L, K) tensor with a (K, M) tensor efficiently."""
-    N, L, K = x.shape
-    M = y.shape[1]
-    x_flat = x.reshape(N * L, K)  # (NL, K)
-    result = x_flat @ y  # (NL, M)
-    return result.reshape(N, L, M)  # (N, L, M)
 
 
 ##############
