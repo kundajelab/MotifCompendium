@@ -298,8 +298,7 @@ def _run_modified_smith_waterman(
     if len(msw_actions) == 0:  # No alignment found: Return empty alignment
         aligned_motif_fs = np.zeros((F, L + M - 1, D))
         msw_scale_f = np.zeros(F)
-        msw_align_f = [f_i for f_i in range(M*F)]
-        msw_align_l = [l_j for l_j in range(L)]
+        msw_align_f, msw_align_l = _alignment_tracks([], F, M, L)
         sim_score = 0.0
     else:
         (aligned_motif_fs, msw_scale_f, msw_align_f, msw_align_l) = get_alignment_modified_smith_waterman(
@@ -1127,73 +1126,94 @@ def get_alignment_modified_smith_waterman(
     Returns:
         aligned_motif_fs: Aligned finger motifs - np.array of shape (F, L+M-1, D)
         msw_scale_f: Scaling of finger motifs - np.array of shape (F)
-        msw_align_f: Finger alignment indices - list of int
-        msw_align_l: Motif alignment indices - list of int
+        msw_align_f: Finger alignment track - list of int and '-'
+        msw_align_l: Motif alignment track - list of int and '-'
     '''
     F, M, _ = matrix_f.shape
     L, D = matrix_l.shape
 
-    ## Traceback
+    ## Place scaled fingers
     aligned_motif_fs = np.zeros((F, L + M - 1, D)) # (F, L+M-1, D)
     msw_scale_f = np.zeros(F)
-    msw_align_f = [f_i for f_i in range(M*F)]
-    msw_align_l = [l_j for l_j in range(L)]
-
-    # First: Unused positions
-    action = msw_actions[0]
-    action_type = action.split("@")[1]
-    f_i = int(action.split("@")[0][1:])
-    l_j = int(action.split("@")[-1][1:])
-    if f_i > 0:  # Skipped fingers
-        align_l_j = msw_align_l.index(l_j)
-        msw_align_l[align_l_j : align_l_j] = ['-'] * M * (f_i)
-    if l_j > 0:  # Skipped motif positions
-        align_f_i = msw_align_f.index(M*f_i)
-        msw_align_f[align_f_i : align_f_i] = ['-'] * (l_j)
-
-    # End: Unused positions
-    action = msw_actions[-1]
-    action_type = action.split("@")[1]
-    f_i = int(action.split("@")[0][1:])
-    l_j = int(action.split("@")[-1][1:]) + M - 1  # 1 Finger = Matched position + (M-1) bp
-    for last_action in reversed(msw_actions):  # The final action may sit before the last match
-        if last_action.split("@")[1] == "match":
-            l_j = max(l_j, int(last_action.split("@")[-1][1:]) + M - 1)
-            break
-    if (F - f_i - 1) > 0:  # Skipped fingers
-        align_l_j = msw_align_l.index(l_j)
-        msw_align_l[align_l_j + 1 : align_l_j + 1] = ['-'] * M * (F - f_i - 1)
-    if (L - l_j - 1) > 0:  # Skipped motif positions
-        align_f_i = msw_align_f.index(M*(f_i))
-        msw_align_f[align_f_i + M : align_f_i + M] = ['-'] * (L - l_j - 1)
-
-    # Middle actions
-    last_match = (0, "match", 0)
     for action in msw_actions:
-        action_type = action.split("@")[1]
-        f_i = int(action.split("@")[0][1:])
-        l_j = int(action.split("@")[-1][1:])
-        # Match: Place scaled finger
-        if action_type == "match":
+        parts = action.split("@")
+        if parts[1] == "match":
+            f_i = int(parts[0][1:])
+            l_j = int(parts[-1][1:])
             scale_ij = scale_factor[l_j]
             aligned_motif_fs[f_i, l_j:l_j+M, :] = matrix_f[f_i] * scale_ij
             msw_scale_f[f_i] = scale_ij
-            last_match = (f_i, action_type, l_j)
-        # F-overlap: Insert gap in motif
-        elif action_type == "F-overlap":
-            align_l_j = msw_align_l.index(l_j)
-            msw_align_l[align_l_j:align_l_j] = ['-']
-        # F-skip: Insert M x gaps in motif
-        elif action_type == "F-skip":
-            align_l_j = msw_align_l.index(l_j)
-            msw_align_l[align_l_j:align_l_j] = ['-'] * M
-        # L-skip: Insert gap in finger
-        elif action_type == "L-skip":
-            if l_j > last_match[-1] + M - 1:
-                align_f_i = msw_align_f.index(M*(f_i)) # Only add if not inside match
-                msw_align_f[align_f_i:align_f_i] = ['-']
+
+    ## Alignment tracks
+    msw_align_f, msw_align_l = _alignment_tracks(msw_actions, F, M, L)
 
     return aligned_motif_fs, msw_scale_f, msw_align_f, msw_align_l
+
+
+def _alignment_tracks(msw_actions, F, M, L):
+    '''
+    The alignment as two equal-length tracks, one entry per column: msw_align_f holds
+    finger columns (column k of finger f is f*M + k) and msw_align_l motif positions,
+    with '-' where a track has nothing in that column.
+
+    Built from where each finger was placed, so a matched finger's columns sit over exactly
+    the motif positions it covers. Every finger column and every motif position appears
+    once, in order. Where fingers overlap, the shared motif position is shown under the
+    earlier finger, and the later finger's overlapping columns face '-'. An unmatched finger
+    faces '-' where it was skipped, or beside the nearest matched finger if the alignment
+    never reached it. Motif positions under no finger face '-'.
+
+    Arguments:
+        msw_actions: Optimal alignment arrangement - list of str
+        F: Number of fingers - int
+        M: Finger length - int
+        L: Motif length - int
+    Returns:
+        msw_align_f: Finger alignment track - list of int and '-'
+        msw_align_l: Motif alignment track - list of int and '-'
+    '''
+    placed = {}   # Finger -> motif position of its match
+    skipped = {}  # Finger -> motif position where it was skipped
+    for action in msw_actions:
+        parts = action.split("@")
+        if parts[1] == "match":
+            placed[int(parts[0][1:])] = int(parts[-1][1:])
+        elif parts[1] == "F-skip":
+            skipped.setdefault(int(parts[0][1:]), int(parts[-1][1:]))
+
+    msw_align_f, msw_align_l = [], []
+    next_l = 0  # Next motif position to show
+
+    def show_motif_until(l):
+        nonlocal next_l
+        while next_l < l:  # Motif positions under no finger
+            msw_align_f.append('-')
+            msw_align_l.append(next_l)
+            next_l += 1
+
+    for f in range(F):
+        if f in placed:
+            l = placed[f]
+            show_motif_until(l)
+            num_overlap = min(next_l - l, M)  # Already shown under earlier fingers
+            for k in range(M):
+                msw_align_f.append(f*M + k)
+                if k < num_overlap:
+                    msw_align_l.append('-')
+                else:
+                    msw_align_l.append(next_l)  # == l + k
+                    next_l += 1
+        else:
+            if f in skipped:
+                show_motif_until(skipped[f])
+            elif placed and f < min(placed):  # Before the alignment: Beside the first match
+                show_motif_until(placed[min(placed)])
+            for k in range(M):
+                msw_align_f.append(f*M + k)
+                msw_align_l.append('-')
+    show_motif_until(L)
+
+    return msw_align_f, msw_align_l
 
 ##############
 # VISUALIZE  #

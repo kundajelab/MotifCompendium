@@ -69,6 +69,8 @@ NEUTRAL = dict(
 
 OUTPUTS = ["msw_score", "sim_score", "aligned_motif_fs", "msw_orient",
            "msw_align_f", "msw_align_l", "msw_scale_f", "msw_actions"]
+# The alignment tracks were rebuilt after the snapshot, deliberately; see test_alignment_tracks
+SNAPSHOT_FIELDS = [name for name in OUTPUTS if name not in ("msw_align_f", "msw_align_l")]
 
 
 def differing(out_a, out_b, fields=OUTPUTS):
@@ -244,13 +246,79 @@ def test_matches_snapshot(new, snap, n_cases=30, seed=4):
             ]
             for label, out_new, out_snap in runs:
                 n_runs += 1
-                diffs = differing(out_new, out_snap)
+                diffs = differing(out_new, out_snap, fields=SNAPSHOT_FIELDS)
                 if diffs:
                     n_diff += 1
                     if n_diff <= 3:
                         print(f"  [diff] {label} {cfg}: {diffs}")
-    print(f"2. vs snapshot, {len(configs)} penalty configs x 3 paths: {n_runs - n_diff}/{n_runs} bit-identical")
+    print(f"2. vs snapshot, {len(configs)} penalty configs x 3 paths: {n_runs - n_diff}/{n_runs} bit-identical "
+          f"(all outputs but the rebuilt alignment tracks)")
     return n_diff
+
+
+def track_violations(align_f, align_l, actions, F, M, L):
+    """Ways a pair of alignment tracks fails to line up with the placements in actions."""
+    problems = []
+    if len(align_f) != len(align_l):
+        return [f"lengths {len(align_f)} != {len(align_l)}"]
+    if [x for x in align_f if x != '-'] != list(range(F * M)):
+        problems.append("finger track is not every finger column once, in order")
+    if [x for x in align_l if x != '-'] != list(range(L)):
+        problems.append("motif track is not every motif position once, in order")
+    if any(a == '-' and b == '-' for a, b in zip(align_f, align_l)):
+        problems.append("a column with nothing in either track")
+    placed = {}
+    for action in actions:
+        parts = action.split("@")
+        if parts[1] == "match":
+            placed[int(parts[0][1:])] = int(parts[-1][1:])
+    faces = {a: b for a, b in zip(align_f, align_l) if a != '-'}  # Finger column -> what it faces
+    covered_earlier = set()
+    for f in range(F):
+        for k in range(M):
+            shown = faces.get(f * M + k)
+            if f not in placed:
+                if shown != '-':
+                    problems.append(f"unmatched finger {f} column {k} faces {shown}")
+            elif shown == '-':
+                if placed[f] + k not in covered_earlier:
+                    problems.append(f"finger {f} column {k} faces '-' but position {placed[f] + k} is not an overlap")
+            elif shown != placed[f] + k:
+                problems.append(f"finger {f} column {k} faces {shown}, placed at {placed[f] + k}")
+        if f in placed:
+            covered_earlier.update(range(placed[f], placed[f] + M))
+    return problems
+
+
+def test_alignment_tracks(new, n_cases=200, seed=6):
+    """7. The alignment tracks line up with the placements, on every path and penalty mode."""
+    rng = np.random.default_rng(seed)
+    modes = [dict(), {k: 0.0 for k in ("overlap_penalty_l1", "overlap_penalty_l2", "skip_penalty_l1",
+                                         "skip_penalty_l2", "skip_penalty_f1", "skip_penalty_f2")},
+             dict(overlap_penalty_l1="gm", overlap_penalty_l2="gm")]
+    n_bad = n_runs = n_overlap = 0
+    for i in range(n_cases):
+        M = (3, 3, 2, 4, 5)[i % 5]
+        F = int(rng.integers(1, 11))
+        L = int(rng.integers(max(M + 1, 12), 61))
+        motif, fingers = make_case(rng, F, M, L)
+        for mode in modes:
+            out = call_znf(new, motif, fingers, **mode) if M == 3 else call_general(new, motif, fingers, M, **mode)
+            n_runs += 1
+            n_overlap += any("F-overlap" in a for a in out[7])
+            problems = track_violations(out[4], out[5], out[7], F, M, L)
+            if problems:
+                n_bad += 1
+                if n_bad <= 3:
+                    print(f"  [FAIL] M={M} F={F} L={L} {mode}: {problems[:2]}")
+    for F, M, L in ((1, 3, 3), (4, 3, 20), (3, 5, 9)):  # No alignment at all
+        a_f, a_l = new._alignment_tracks([], F, M, L)
+        if track_violations(a_f, a_l, [], F, M, L):
+            print(f"  [FAIL] empty alignment F={F} M={M} L={L}")
+            n_bad += 1
+    print(f"7. alignment tracks: {n_runs - n_bad}/{n_runs} line up with the placements "
+          f"({n_overlap} of them contain overlaps); empty alignments ok")
+    return n_bad
 
 
 def test_new_params_noop(new, n_cases=100, seed=1):
@@ -423,6 +491,8 @@ if __name__ == "__main__":
     if hasattr(new, "_parse_overlap_penalty"):
         failures += test_geometric_mean(new)
     failures += test_general_m(new)
+    if hasattr(new, "_alignment_tracks"):
+        failures += test_alignment_tracks(new)
     test_general_vs_frozen(new)
 
     print(f"\n{'PASS' if failures == 0 else f'FAIL ({failures})'}")
