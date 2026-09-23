@@ -27,21 +27,27 @@ def make_workload(mod, n_cases=40, M=3, seed=11):
     return workload
 
 
-def time_core(fn, workload, legacy):
-    shared_extra = (dict(skip_penalty_f=NEUTRAL["skip_penalty_f1"]) if legacy else
-                    dict(skip_penalty_f1=NEUTRAL["skip_penalty_f1"],
-                         skip_penalty_f2=NEUTRAL["skip_penalty_f2"],
-                         overlap_penalty_f1=1.0, overlap_penalty_f2=1.0,
-                         return_matrices=False))
+ZERO_PENALTIES = dict(overlap_penalty_l1=0.0, overlap_penalty_l2=0.0, skip_penalty_l1=0.0,
+                      skip_penalty_l2=0.0, skip_penalty_f1=0.0, skip_penalty_f2=0.0)
+
+
+def time_core(fn, workload, legacy, overrides=None):
+    kwargs = dict(sim_threshold=0.0,
+                  overlap_penalty_l1=NEUTRAL["overlap_penalty_l1"],
+                  overlap_penalty_l2=NEUTRAL["overlap_penalty_l2"],
+                  skip_penalty_l1=NEUTRAL["skip_penalty_l1"],
+                  skip_penalty_l2=NEUTRAL["skip_penalty_l2"],
+                  alignment_type="local", initial_score=0.0)
+    if legacy:
+        kwargs.update(skip_penalty_f=NEUTRAL["skip_penalty_f1"])
+    else:
+        kwargs.update(skip_penalty_f1=NEUTRAL["skip_penalty_f1"], skip_penalty_f2=NEUTRAL["skip_penalty_f2"],
+                      overlap_penalty_f1=1.0, overlap_penalty_f2=1.0, return_matrices=False)
+    kwargs.update(overrides or {})
     start = time.perf_counter()
-    for _, _, fingers_n, motif_norm, sim_for, sim_rev, importance in workload:
+    for fingers_n, motif_norm, sim_for, sim_rev, importance in (w[2:] for w in workload):
         fn(matrix_f=fingers_n, matrix_l=motif_norm, sim_for=sim_for, sim_rev=sim_rev,
-           scale_factor=importance, sim_threshold=0.0,
-           overlap_penalty_l1=NEUTRAL["overlap_penalty_l1"],
-           overlap_penalty_l2=NEUTRAL["overlap_penalty_l2"],
-           skip_penalty_l1=NEUTRAL["skip_penalty_l1"],
-           skip_penalty_l2=NEUTRAL["skip_penalty_l2"],
-           alignment_type="local", initial_score=0.0, **shared_extra)
+           scale_factor=importance, **kwargs)
     return time.perf_counter() - start
 
 
@@ -70,9 +76,11 @@ if __name__ == "__main__":
 
     t_new_core = time_core(new.calculate_modified_smith_waterman_znf, workload, legacy=False)
     t_new_gen = time_core(new.calculate_modified_smith_waterman, workload, legacy=False)
+    t_new_zero = time_core(new.calculate_modified_smith_waterman, workload, legacy=False, overrides=ZERO_PENALTIES)
     t_new_e2e = time_end_to_end(new, workload, legacy=False)
     print(f"new  frozen core      {t_new_core:7.3f}s  ({1000 * t_new_core / n:6.1f} ms/case)")
     print(f"new  generalized core {t_new_gen:7.3f}s  ({1000 * t_new_gen / n:6.1f} ms/case)")
+    print(f"new  generalized, all penalties zero {t_new_zero:7.3f}s  ({1000 * t_new_zero / n:6.1f} ms/case)")
     print(f"new  end to end       {t_new_e2e:7.3f}s  ({1000 * t_new_e2e / n:6.1f} ms/case)")
 
     if len(sys.argv) > 1:
