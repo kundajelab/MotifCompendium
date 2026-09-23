@@ -682,6 +682,12 @@ def calculate_modified_smith_waterman(
     else:
         finger_row_norms = None
 
+    # Zero penalties: Skip their logic entirely. Overlaps are still detected, because the
+    # F-overlap actions (gaps in the motif alignment) depend on them, not on the penalty.
+    use_overlap = not (overlap_penalty_l1 == 0 and overlap_penalty_l2 == 0) and not (overlap_penalty_f1 == 0 and overlap_penalty_f2 == 0)
+    use_skip_l = not (skip_penalty_l1 == 0 and skip_penalty_l2 == 0)
+    use_skip_f = not (skip_penalty_f1 == 0 and skip_penalty_f2 == 0)
+
     # Shift: Global, local
     if alignment_type == 'local':
         shift_idx_f = 1
@@ -735,21 +741,25 @@ def calculate_modified_smith_waterman(
                             assert l - l_j >= k, f"Previous finger at {l_j} is ahead of diagonal {k} at {l}"
                             # Overlap: (M - d) bp (from previous finger)
                             if l - l_j < M:
-                                overlap_penalties = _calculate_overlap_penalties(
-                                    f, l, l_j, diag_prev_actions, M,
-                                    overlap_penalty_l1, overlap_penalty_l2,
-                                    overlap_penalty_f1, overlap_penalty_f2,
-                                    finger_row_norms, scale_factor,
-                                    initial_f_idx, initial_l_idx,
-                                )
-                                diag_overlaps[k-1] = len(overlap_penalties)
-                                for overlap_penalty in overlap_penalties:
-                                    diag_penalty = diag_penalty + overlap_penalty
+                                if use_overlap:
+                                    overlap_penalties = _calculate_overlap_penalties(
+                                        f, l, l_j, diag_prev_actions, M,
+                                        overlap_penalty_l1, overlap_penalty_l2,
+                                        overlap_penalty_f1, overlap_penalty_f2,
+                                        finger_row_norms, scale_factor,
+                                        initial_f_idx, initial_l_idx,
+                                    )
+                                    diag_overlaps[k-1] = len(overlap_penalties)
+                                    for overlap_penalty in overlap_penalties:
+                                        diag_penalty = diag_penalty + overlap_penalty
+                                else:
+                                    diag_overlaps[k-1] = max(0, _num_overlap(l, l_j, M))
                             # Gap: (d - M) bp (from previous finger)
-                            elif l - l_j == M + 1:
-                                diag_penalty = diag_penalty + skip_penalty_l1
-                            elif l - l_j > M + 1:
-                                diag_penalty = diag_penalty + skip_penalty_l2
+                            elif use_skip_l:
+                                if l - l_j == M + 1:
+                                    diag_penalty = diag_penalty + skip_penalty_l1
+                                elif l - l_j > M + 1:
+                                    diag_penalty = diag_penalty + skip_penalty_l2
                             break
 
                         diag_scores[k-1] = diag_prev_score + diag_penalty
@@ -758,7 +768,7 @@ def calculate_modified_smith_waterman(
                 down_prev_score, down_prev_actions = _previous_state(H, A, idx_f-1, idx_l, initial_score) # Previous states
 
                 # Skip type: Single, repeated
-                down_penalty = _calculate_finger_skip_penalty(down_prev_actions, skip_penalty_f1, skip_penalty_f2)
+                down_penalty = _calculate_finger_skip_penalty(down_prev_actions, skip_penalty_f1, skip_penalty_f2) if use_skip_f else 0.0
                 down_action = [f"F{f + initial_f_idx}@F-skip@L{l + initial_l_idx}"]
 
                 down_score = down_prev_score + down_penalty
@@ -767,9 +777,9 @@ def calculate_modified_smith_waterman(
                 right_prev_score, right_prev_actions = _previous_state(H, A, idx_f, idx_l-1, initial_score) # Previous states
 
                 # Skip type: Inside finger, single, repeated
-                right_penalty = skip_penalty_l1
                 right_action = [f"F{f + initial_f_idx}@L-skip@L{l + initial_l_idx}"]
-                for action in right_prev_actions:
+                right_penalty = skip_penalty_l1 if use_skip_l else 0.0
+                for action in (right_prev_actions if use_skip_l else ()):
                     parts = action.split("@")
                     action_type = parts[1]
                     l_j = int(parts[-1][1:]) - initial_l_idx
@@ -883,6 +893,12 @@ def calculate_modified_smith_waterman_znf(
     else:
         finger_row_norms = None
 
+    # Zero penalties: Skip their logic entirely. Overlaps are still detected, because the
+    # F-overlap actions (gaps in the motif alignment) depend on them, not on the penalty.
+    use_overlap = not (overlap_penalty_l1 == 0 and overlap_penalty_l2 == 0) and not (overlap_penalty_f1 == 0 and overlap_penalty_f2 == 0)
+    use_skip_l = not (skip_penalty_l1 == 0 and skip_penalty_l2 == 0)
+    use_skip_f = not (skip_penalty_f1 == 0 and skip_penalty_f2 == 0)
+
     # Shift: Global, local
     if alignment_type == 'local':
         shift_idx_f = 1
@@ -933,17 +949,22 @@ def calculate_modified_smith_waterman_znf(
                         if parts[1] == "match":
                             # Overlap: 2,1 bp (from previous finger)
                             if l - l_j < 3:
-                                overlap_penalties = _calculate_overlap_penalties(
-                                    f, l, l_j, diag1_prev_actions, 3,
-                                    overlap_penalty_l1, overlap_penalty_l2,
-                                    overlap_penalty_f1, overlap_penalty_f2,
-                                    finger_row_norms, scale_factor,
-                                    initial_f_idx, initial_l_idx,
-                                )
-                                if len(overlap_penalties) > 0:
+                                if use_overlap:
+                                    overlap_penalties = _calculate_overlap_penalties(
+                                        f, l, l_j, diag1_prev_actions, 3,
+                                        overlap_penalty_l1, overlap_penalty_l2,
+                                        overlap_penalty_f1, overlap_penalty_f2,
+                                        finger_row_norms, scale_factor,
+                                        initial_f_idx, initial_l_idx,
+                                    )
+                                    num_overlap = len(overlap_penalties)
+                                else:
+                                    overlap_penalties = ()
+                                    num_overlap = max(0, _num_overlap(l, l_j, 3))
+                                if num_overlap > 0:
                                     for overlap_penalty in overlap_penalties:
                                         diag1_penalty = diag1_penalty + overlap_penalty
-                                    diag_overlaps[0] = len(overlap_penalties)
+                                    diag_overlaps[0] = num_overlap
                                     break
                             elif l - l_j > 2:
                                 break
@@ -961,25 +982,32 @@ def calculate_modified_smith_waterman_znf(
                         # F: Overlap: 1 bp; L: Skip penalty
                         if parts[1] == "match":
                             if l - l_j == 2:
-                                overlap_penalties = _calculate_overlap_penalties(
-                                    f, l, l_j, diag2_prev_actions, 3,
-                                    overlap_penalty_l1, overlap_penalty_l2,
-                                    overlap_penalty_f1, overlap_penalty_f2,
-                                    finger_row_norms, scale_factor,
-                                    initial_f_idx, initial_l_idx,
-                                )
-                                if len(overlap_penalties) > 0:
+                                if use_overlap:
+                                    overlap_penalties = _calculate_overlap_penalties(
+                                        f, l, l_j, diag2_prev_actions, 3,
+                                        overlap_penalty_l1, overlap_penalty_l2,
+                                        overlap_penalty_f1, overlap_penalty_f2,
+                                        finger_row_norms, scale_factor,
+                                        initial_f_idx, initial_l_idx,
+                                    )
+                                    num_overlap = len(overlap_penalties)
+                                else:
+                                    overlap_penalties = ()
+                                    num_overlap = max(0, _num_overlap(l, l_j, 3))
+                                if num_overlap > 0:
                                     for overlap_penalty in overlap_penalties:
                                         diag2_penalty = diag2_penalty + overlap_penalty
-                                    diag_overlaps[1] = len(overlap_penalties)
+                                    diag_overlaps[1] = num_overlap
                                     break
                             elif l - l_j == 3:
                                 continue
                             elif l - l_j == 4:
-                                diag2_penalty = diag2_penalty + skip_penalty_l1
+                                if use_skip_l:
+                                    diag2_penalty = diag2_penalty + skip_penalty_l1
                                 break
                             elif l - l_j > 4:
-                                diag2_penalty = diag2_penalty + skip_penalty_l2
+                                if use_skip_l:
+                                    diag2_penalty = diag2_penalty + skip_penalty_l2
                                 break
 
                     diag2_score = diag2_prev_score + diag2_penalty
@@ -988,7 +1016,7 @@ def calculate_modified_smith_waterman_znf(
                     diag3_prev_score, diag3_prev_actions = _previous_state(H, A, idx_f-1, idx_l-3, initial_score)
 
                     diag3_penalty = match_score
-                    for action in diag3_prev_actions:
+                    for action in (diag3_prev_actions if use_skip_l else ()):  # Gap penalties only
                         parts = action.split("@")
                         l_j = int(parts[-1][1:]) - initial_l_idx
                         # F: No overlap; L: Skip penalty
@@ -1006,7 +1034,7 @@ def calculate_modified_smith_waterman_znf(
                 down_prev_score, down_prev_actions = _previous_state(H, A, idx_f-1, idx_l, initial_score) # Previous states
 
                 # Skip type: Single, repeated
-                down_penalty = _calculate_finger_skip_penalty(down_prev_actions, skip_penalty_f1, skip_penalty_f2)
+                down_penalty = _calculate_finger_skip_penalty(down_prev_actions, skip_penalty_f1, skip_penalty_f2) if use_skip_f else 0.0
                 down_action = [f"F{f + initial_f_idx}@F-skip@L{l + initial_l_idx}"]
 
                 down_score = down_prev_score + down_penalty
@@ -1015,9 +1043,9 @@ def calculate_modified_smith_waterman_znf(
                 right_prev_score, right_prev_actions = _previous_state(H, A, idx_f, idx_l-1, initial_score) # Previous states
 
                 # Skip type: Inside finger, single, repeated
-                right_penalty = skip_penalty_l1
                 right_action = [f"F{f + initial_f_idx}@L-skip@L{l + initial_l_idx}"]
-                for action in right_prev_actions:
+                right_penalty = skip_penalty_l1 if use_skip_l else 0.0
+                for action in (right_prev_actions if use_skip_l else ()):
                     parts = action.split("@")
                     action_type = parts[1]
                     l_j = int(parts[-1][1:]) - initial_l_idx
