@@ -88,9 +88,9 @@ def run_modified_smith_waterman_znf(
     '''
     Aligns a chain of B1H zinc-finger motifs against a CWM.
 
-    With finger_length = 3 this uses the frozen 3 bp recurrence
-    (calculate_modified_smith_waterman_znf); any other finger length uses the
-    generalized recurrence (calculate_modified_smith_waterman).
+    Uses the frozen 3 bp recurrence (calculate_modified_smith_waterman_znf), so that B1H
+    zinc-finger results do not change. For any other finger length, unroll the fingers
+    with unroll_fingers() and call run_modified_smith_waterman().
 
     Arguments:
         cwm: CWM motif matrix (as CWM) - np.array of shape (L, D)
@@ -109,7 +109,7 @@ def run_modified_smith_waterman_znf(
         return_matrices: Also return the full DP matrices. They are large and no known caller
             reads them, so they default to None - bool
         label_unsigned: Use absolute value of motifs (unsigned) - bool
-        finger_length: Length of each finger motif - int (M)
+        finger_length: Length of each finger motif, must be 3 - int (M)
 
     Returns:
         msw_score: Modified Smith Waterman score of optimal alignment - float
@@ -123,6 +123,11 @@ def run_modified_smith_waterman_znf(
         H_final: Final score matrix - np.array of shape (F+1, L+M), None unless requested
         A_final: Final arrangement matrix - list of list of str, None unless requested
     '''
+    if finger_length != 3:
+        raise ValueError(
+            f"run_modified_smith_waterman_znf() is the 3 bp zinc-finger path, got finger_length={finger_length}; "
+            "use run_modified_smith_waterman() for other finger lengths")
+
     # Unroll fingers
     subunit_motif_stack = unroll_fingers(b1h_ppm_ic, finger_length) # (F, M, D)
 
@@ -209,7 +214,8 @@ def _run_modified_smith_waterman(
 
     # Normalize
     target_motif_norm = target_motif/np.linalg.norm(target_motif, axis=(0, 1), keepdims=True)  # L2 normalize, per motif
-    subunit_motif_stack_norm = subunit_motif_stack/np.linalg.norm(subunit_motif_stack, axis=(1, 2), keepdims=True)  # L2 normalize, per motif
+    subunit_motif_norms = np.linalg.norm(subunit_motif_stack, axis=(1, 2), keepdims=True)
+    subunit_motif_stack_norm = subunit_motif_stack/np.where(subunit_motif_norms == 0, 1, subunit_motif_norms)  # L2 normalize, per motif (all-zero subunits stay zero)
 
     # Target motif: Unroll
     target_motif_norm_unroll = _unroll_motif(target_motif_norm, M, np) # (L-M+1, finger_length M, D)
@@ -375,6 +381,9 @@ def _unroll_motif(motif, M, xp):
     '''
     L, K = motif.shape
     assert L >= M
+    # Gather as (M, L-M+1, K) then transpose, not (L-M+1, M, K) directly: the values are equal,
+    # but downstream sums reduce in memory order, and a C-contiguous result rounds differently
+    # in the last bit -- enough to flip argmax ties in the DP (changed 140/300 alignments).
     windows = xp.arange(M)[:, None] + xp.arange(L - M + 1)[None, :]  # (M, L-M+1)
     unrolled_motif = motif[windows].transpose((1, 0, 2))  # (L-M+1, M, K)
     assert(unrolled_motif.shape == (L-M+1, M, K))
