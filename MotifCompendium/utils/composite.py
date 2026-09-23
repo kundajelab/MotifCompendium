@@ -91,9 +91,9 @@ def run_modified_smith_waterman_znf(
     '''
     Aligns a chain of B1H zinc-finger motifs against a CWM.
 
-    Uses the frozen 3 bp recurrence (calculate_modified_smith_waterman_znf), so that B1H
-    zinc-finger results do not change. For any other finger length, unroll the fingers
-    with unroll_fingers() and call run_modified_smith_waterman().
+    With finger_length = 3 this uses the frozen 3 bp recurrence
+    (calculate_modified_smith_waterman_znf), so that B1H zinc-finger results do not change;
+    any other finger length uses the generalized recurrence (calculate_modified_smith_waterman).
 
     Arguments:
         cwm: CWM motif matrix (as CWM) - np.array of shape (L, D)
@@ -113,7 +113,7 @@ def run_modified_smith_waterman_znf(
         return_matrices: Also return the full DP matrices. They are large and no known caller
             reads them, so they default to None - bool
         label_unsigned: Use absolute value of motifs (unsigned) - bool
-        finger_length: Length of each finger motif, must be 3 - int (M)
+        finger_length: Length of each finger motif - int (M)
 
     Returns:
         msw_score: Modified Smith Waterman score of optimal alignment - float
@@ -127,10 +127,11 @@ def run_modified_smith_waterman_znf(
         H_final: Final score matrix - np.array of shape (F+1, L+M), None unless requested
         A_final: Final arrangement matrix - list of list of str, None unless requested
     '''
-    if finger_length != 3:
-        raise ValueError(
-            f"run_modified_smith_waterman_znf() is the 3 bp zinc-finger path, got finger_length={finger_length}; "
-            "use run_modified_smith_waterman() for other finger lengths")
+    # Recurrence: Frozen for 3 bp fingers, generalized otherwise
+    if finger_length == 3:
+        calculate_fn = calculate_modified_smith_waterman_znf
+    else:
+        calculate_fn = calculate_modified_smith_waterman
 
     # Unroll fingers
     subunit_motif_stack = unroll_fingers(b1h_ppm_ic, finger_length) # (F, M, D)
@@ -147,7 +148,7 @@ def run_modified_smith_waterman_znf(
         skip_penalty_f2=skip_penalty_f2,
         skip_penalty_l1=skip_penalty_l1,
         skip_penalty_l2=skip_penalty_l2,
-        calculate_fn=calculate_modified_smith_waterman_znf,
+        calculate_fn=calculate_fn,
         return_matrices=return_matrices,
         label_unsigned=label_unsigned,
     )

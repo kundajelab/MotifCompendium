@@ -381,12 +381,14 @@ def test_general_m(new, seed=2):
             print(f"  [FAIL] planted gap M={M}: got {matches}")
             n_fail += 1
 
-    try:
-        new.run_modified_smith_waterman_znf(cwm=np.ones((12, 4)), b1h_ppm_ic=np.ones((8, 4)), finger_length=4)
-        print("  [FAIL] ZNF wrapper accepted finger_length=4")
-        n_fail += 1
-    except ValueError:
-        pass
+    # The ZNF wrapper forwards other finger lengths to the generalized core
+    for M in [2, 4, 5]:
+        motif, fingers = make_case(rng, 4, M, int(rng.integers(4 * M, 8 * M)))
+        forwarded = new.run_modified_smith_waterman_znf(cwm=motif, b1h_ppm_ic=fingers, finger_length=M, **NEUTRAL)
+        diffs = differing(forwarded, call_general(new, motif, fingers, M))
+        if diffs:
+            print(f"  [FAIL] ZNF wrapper at M={M} differs from the generalized path: {diffs}")
+            n_fail += 1
     print(f"5. general M: {'ok' if n_fail == 0 else f'{n_fail} failures'}")
     return n_fail
 
