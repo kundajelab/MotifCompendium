@@ -1,4 +1,6 @@
 
+import math
+
 import numpy as np
 import cupy as cp
 import pandas as pd
@@ -30,8 +32,9 @@ def run_modified_smith_waterman(
         target_motif: Target motif - np.array of shape (L, D)
         subunit_motif_stack: Stack of subunit motifs - np.array of shape (F, M, D)
         sim_threshold: Minimum similarity to consider a match - float
-        overlap_penalty_l1: Penalty for 1 bp overlap - float
-        overlap_penalty_l2: Penalty for 2 bp or more overlap - float
+        overlap_penalty_l1: Penalty for 1 bp overlap - float, or 'gm' / 'geometric_mean' for minus the
+            geometric mean of the overlapping fingers' placed heights at that position
+        overlap_penalty_l2: Penalty for 2 bp or more overlap - float, or 'gm' / 'geometric_mean'
         overlap_penalty_f1: Penalty multiplier x overlap_penalty_l1 or overlap_penalty_l2 at each
             overlapping position, when overlap occurs due to only 2 fingers overlapping - float
         overlap_penalty_f2: Penalty multiplier x overlap_penalty_l1 or overlap_penalty_l2 at each
@@ -96,8 +99,9 @@ def run_modified_smith_waterman_znf(
         cwm: CWM motif matrix (as CWM) - np.array of shape (L, D)
         b1h_ppm_ic: Finger motif matrix (as IC-scaled PPM) - np.array of shape (F*M, D)
         sim_threshold: Minimum similarity to consider a match - float
-        overlap_penalty_l1: Penalty for 1 bp overlap - float
-        overlap_penalty_l2: Penalty for 2 bp or more overlap - float
+        overlap_penalty_l1: Penalty for 1 bp overlap - float, or 'gm' / 'geometric_mean' for minus the
+            geometric mean of the overlapping fingers' placed heights at that position
+        overlap_penalty_l2: Penalty for 2 bp or more overlap - float, or 'gm' / 'geometric_mean'
         overlap_penalty_f1: Penalty multiplier x overlap_penalty_l1 or overlap_penalty_l2 at each
             overlapping position, when overlap occurs due to only 2 fingers overlapping - float
         overlap_penalty_f2: Penalty multiplier x overlap_penalty_l1 or overlap_penalty_l2 at each
@@ -167,8 +171,9 @@ def _run_modified_smith_waterman(
         target_motif: Target motif - np.array of shape (L, D)
         subunit_motif_stack: Stack of subunit motifs - np.array of shape (F, M, D)
         sim_threshold: Minimum similarity to consider a match - float
-        overlap_penalty_l1: Penalty for 1 bp overlap - float
-        overlap_penalty_l2: Penalty for 2 bp or more overlap - float
+        overlap_penalty_l1: Penalty for 1 bp overlap - float, or 'gm' / 'geometric_mean' for minus the
+            geometric mean of the overlapping fingers' placed heights at that position
+        overlap_penalty_l2: Penalty for 2 bp or more overlap - float, or 'gm' / 'geometric_mean'
         overlap_penalty_f1: Penalty multiplier x overlap_penalty_l1 or overlap_penalty_l2 at each
             overlapping position, when overlap occurs due to only 2 fingers overlapping - float
         overlap_penalty_f2: Penalty multiplier x overlap_penalty_l1 or overlap_penalty_l2 at each
@@ -439,11 +444,33 @@ def _previous_state(H, A, idx_f, idx_l, initial_score):
     return H[idx_f, idx_l], A[idx_f][idx_l]
 
 
+_GEOMETRIC_MEAN = "gm"
+
+
+def _parse_overlap_penalty(penalty, name):
+    '''
+    An overlap penalty: a fixed penalty (a number <= 0), or 'gm' / 'geometric_mean'
+    (any case) for the geometric mean of the overlapping fingers, returned as "gm".
+    '''
+    if isinstance(penalty, str):
+        if penalty.lower() in ("gm", "geometric_mean"):
+            return _GEOMETRIC_MEAN
+        raise ValueError(f"{name} must be a number <= 0, or 'gm' / 'geometric_mean', got {penalty!r}")
+    assert penalty <= 0, f"{name} must be <= 0, got {penalty}"
+    return penalty
+
+
+def _num_overlap(l, l_j, finger_length):
+    '''Positions shared by fingers at l and l_j, truncated at the start of the matrix.'''
+    return min(finger_length - (l - l_j), l)
+
+
 def _calculate_overlap_penalties(
-    l, l_j, prev_actions, finger_length,
+    f, l, l_j, prev_actions, finger_length,
     overlap_penalty_l1, overlap_penalty_l2,
     overlap_penalty_f1, overlap_penalty_f2,
-    initial_l_idx,
+    finger_row_norms, scale_factor,
+    initial_f_idx, initial_l_idx,
 ):
     '''
     Penalty for placing a finger at motif position l, when the nearest previously placed
@@ -455,39 +482,55 @@ def _calculate_overlap_penalties(
     overlap_penalty_f2 when 3 or more do. The overlap is truncated at the start of the
     matrix, so that it is always representable as gap positions before l.
 
+    A "gm" rule charges, instead of a fixed penalty, minus the geometric mean of the placed
+    heights of the n fingers covering that position: -(h_1 * ... * h_n)^(1/n), where a
+    finger matched at l_c has height ||its row at p - l_c||_2 * scale_factor[l_c] there --
+    what is drawn in the aligned motif. It vanishes wherever any covering finger is empty.
+
     Arguments:
+        f: Finger being placed - int (local)
         l: Motif position of the finger being placed - int
         l_j: Motif position of the nearest previously placed finger - int
         prev_actions: Arrangement of the previous DP cell - list of str
         finger_length: Length of each finger motif - int (M)
+        finger_row_norms: L2 norm of each finger row, needed for "gm" - np.array of shape (F, M), or None
+        scale_factor: Scaling factors for each motif position - np.array of shape (L-M+1,)
+        initial_f_idx: Initial finger index - int
         initial_l_idx: Initial motif position index - int
     Returns:
         penalties: Penalty for each overlapping position, left to right - list of float
     '''
     M = finger_length
-    num_overlap = min(M - (l - l_j), l)  # Truncate: Keep the gap positions inside the matrix
+    num_overlap = _num_overlap(l, l_j, M)
     if num_overlap <= 0:
         return []
 
-    # Neutral multipliers: No need to count overlapping fingers
-    if overlap_penalty_f1 == 1.0 and overlap_penalty_f2 == 1.0:
+    # Fixed penalties, neutral multipliers: No need to find the overlapping fingers
+    fixed = not isinstance(overlap_penalty_l1, str) and not isinstance(overlap_penalty_l2, str)
+    if fixed and overlap_penalty_f1 == 1.0 and overlap_penalty_f2 == 1.0:
         return [overlap_penalty_l1] + [overlap_penalty_l2] * (num_overlap - 1)
 
     # Previously placed fingers that can reach the overlapping positions
-    prev_matches = []
+    prev_matches = []  # (finger, motif position), local
     for action in prev_actions:
-        if action.split("@")[1] != "match":
+        parts = action.split("@")
+        if parts[1] != "match":
             continue
-        l_i = int(action.split("@")[-1][1:]) - initial_l_idx
+        l_i = int(parts[-1][1:]) - initial_l_idx
         if l_i < l - M + 1:
             break
-        prev_matches.append(l_i)
+        prev_matches.append((int(parts[0][1:]) - initial_f_idx, l_i))
 
     penalties = []
     for i, p in enumerate(range(l, l + num_overlap)):
-        penalty_l = overlap_penalty_l1 if i == 0 else overlap_penalty_l2
-        num_fingers = 1 + sum(1 for l_i in prev_matches if l_i <= p <= l_i + M - 1)
-        penalties.append(penalty_l * (overlap_penalty_f1 if num_fingers <= 2 else overlap_penalty_f2))
+        rule = overlap_penalty_l1 if i == 0 else overlap_penalty_l2
+        covering = [(f, l)] + [(f_i, l_i) for f_i, l_i in prev_matches if l_i <= p <= l_i + M - 1]
+        if isinstance(rule, str):  # Geometric mean of the placed heights
+            heights = [finger_row_norms[f_c, p - l_c] * scale_factor[l_c] for f_c, l_c in covering]
+            penalty_l = -math.prod(heights) ** (1.0 / len(heights))
+        else:
+            penalty_l = rule
+        penalties.append(penalty_l * (overlap_penalty_f1 if len(covering) <= 2 else overlap_penalty_f2))
     return penalties
 
 
@@ -589,8 +632,9 @@ def calculate_modified_smith_waterman(
         sim_rev: Similarity scores (reverse) - np.array of shape (F, L-M+1)
         scale_factor: Scaling factors for each motif position - np.array of shape (L-M+1,)
         sim_threshold: Minimum similarity to consider a match - float
-        overlap_penalty_l1: Penalty for 1 bp overlap - float
-        overlap_penalty_l2: Penalty for 2 bp or more overlap - float
+        overlap_penalty_l1: Penalty for 1 bp overlap - float, or 'gm' / 'geometric_mean' for minus the
+            geometric mean of the overlapping fingers' placed heights at that position
+        overlap_penalty_l2: Penalty for 2 bp or more overlap - float, or 'gm' / 'geometric_mean'
         overlap_penalty_f1: Penalty multiplier x overlap_penalty_l1 or overlap_penalty_l2 at each
             overlapping position, when overlap occurs due to only 2 fingers overlapping - float
         overlap_penalty_f2: Penalty multiplier x overlap_penalty_l1 or overlap_penalty_l2 at each
@@ -616,8 +660,8 @@ def calculate_modified_smith_waterman(
     assert sim_for.shape == sim_rev.shape
     assert sim_for.shape[0] == matrix_f.shape[0]
     assert sim_threshold < 1
-    assert overlap_penalty_l1 <= 0
-    assert overlap_penalty_l2 <= 0
+    overlap_penalty_l1 = _parse_overlap_penalty(overlap_penalty_l1, "overlap_penalty_l1")
+    overlap_penalty_l2 = _parse_overlap_penalty(overlap_penalty_l2, "overlap_penalty_l2")
     assert overlap_penalty_f1 >= 0
     assert overlap_penalty_f2 >= 0
     assert skip_penalty_f1 <= 0
@@ -631,6 +675,12 @@ def calculate_modified_smith_waterman(
     M = matrix_f.shape[1] # Finger length
     assert M > 1
     assert L_M_1 == L - M + 1
+
+    # Geometric-mean overlap penalty: Norm of each finger row
+    if isinstance(overlap_penalty_l1, str) or isinstance(overlap_penalty_l2, str):
+        finger_row_norms = np.linalg.norm(matrix_f, axis=2) # (F, M)
+    else:
+        finger_row_norms = None
 
     # Shift: Global, local
     if alignment_type == 'local':
@@ -686,10 +736,11 @@ def calculate_modified_smith_waterman(
                             # Overlap: (M - d) bp (from previous finger)
                             if l - l_j < M:
                                 overlap_penalties = _calculate_overlap_penalties(
-                                    l, l_j, diag_prev_actions, M,
+                                    f, l, l_j, diag_prev_actions, M,
                                     overlap_penalty_l1, overlap_penalty_l2,
                                     overlap_penalty_f1, overlap_penalty_f2,
-                                    initial_l_idx,
+                                    finger_row_norms, scale_factor,
+                                    initial_f_idx, initial_l_idx,
                                 )
                                 diag_overlaps[k-1] = len(overlap_penalties)
                                 for overlap_penalty in overlap_penalties:
@@ -810,8 +861,8 @@ def calculate_modified_smith_waterman_znf(
     assert sim_for.shape == sim_rev.shape
     assert sim_for.shape[0] == matrix_f.shape[0]
     assert sim_threshold < 1
-    assert overlap_penalty_l1 <= 0
-    assert overlap_penalty_l2 <= 0
+    overlap_penalty_l1 = _parse_overlap_penalty(overlap_penalty_l1, "overlap_penalty_l1")
+    overlap_penalty_l2 = _parse_overlap_penalty(overlap_penalty_l2, "overlap_penalty_l2")
     assert overlap_penalty_f1 >= 0
     assert overlap_penalty_f2 >= 0
     assert skip_penalty_f1 <= 0
@@ -825,6 +876,12 @@ def calculate_modified_smith_waterman_znf(
     M = matrix_f.shape[1] # Finger length
     assert M == 3, f"calculate_modified_smith_waterman_znf() requires a 3 bp finger, got {M}"
     assert L_M_1 == L - M + 1
+
+    # Geometric-mean overlap penalty: Norm of each finger row
+    if isinstance(overlap_penalty_l1, str) or isinstance(overlap_penalty_l2, str):
+        finger_row_norms = np.linalg.norm(matrix_f, axis=2) # (F, M)
+    else:
+        finger_row_norms = None
 
     # Shift: Global, local
     if alignment_type == 'local':
@@ -877,10 +934,11 @@ def calculate_modified_smith_waterman_znf(
                             # Overlap: 2,1 bp (from previous finger)
                             if l - l_j < 3:
                                 overlap_penalties = _calculate_overlap_penalties(
-                                    l, l_j, diag1_prev_actions, 3,
+                                    f, l, l_j, diag1_prev_actions, 3,
                                     overlap_penalty_l1, overlap_penalty_l2,
                                     overlap_penalty_f1, overlap_penalty_f2,
-                                    initial_l_idx,
+                                    finger_row_norms, scale_factor,
+                                    initial_f_idx, initial_l_idx,
                                 )
                                 if len(overlap_penalties) > 0:
                                     for overlap_penalty in overlap_penalties:
@@ -904,10 +962,11 @@ def calculate_modified_smith_waterman_znf(
                         if parts[1] == "match":
                             if l - l_j == 2:
                                 overlap_penalties = _calculate_overlap_penalties(
-                                    l, l_j, diag2_prev_actions, 3,
+                                    f, l, l_j, diag2_prev_actions, 3,
                                     overlap_penalty_l1, overlap_penalty_l2,
                                     overlap_penalty_f1, overlap_penalty_f2,
-                                    initial_l_idx,
+                                    finger_row_norms, scale_factor,
+                                    initial_f_idx, initial_l_idx,
                                 )
                                 if len(overlap_penalties) > 0:
                                     for overlap_penalty in overlap_penalties:
