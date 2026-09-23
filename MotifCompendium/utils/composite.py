@@ -13,6 +13,67 @@ import MotifCompendium.utils.config as utils_config
 ###########################
 # MODIFIED SMITH-WATERMAN #
 ###########################
+def run_modified_smith_waterman(
+    target_motif, subunit_motif_stack,
+    sim_threshold=0.0,
+    overlap_penalty_l1=-0.0, overlap_penalty_l2=-0.0,
+    overlap_penalty_f1=1.0, overlap_penalty_f2=1.0,
+    skip_penalty_f1=-0.0, skip_penalty_f2=-0.0,
+    skip_penalty_l1=-0.0, skip_penalty_l2=-0.0,
+    return_matrices=False,
+    label_unsigned=True,
+):
+    '''
+    Aligns a chain of fixed-length finger motifs against a motif, for any finger length M > 1.
+
+    Arguments:
+        target_motif: Target motif - np.array of shape (L, D)
+        subunit_motif_stack: Stack of subunit motifs - np.array of shape (F, M, D)
+        sim_threshold: Minimum similarity to consider a match - float
+        overlap_penalty_l1: Penalty for 1 bp overlap - float
+        overlap_penalty_l2: Penalty for 2 bp or more overlap - float
+        overlap_penalty_f1: Penalty multiplier x overlap_penalty_l1 or overlap_penalty_l2 at each
+            overlapping position, when overlap occurs due to only 2 fingers overlapping - float
+        overlap_penalty_f2: Penalty multiplier x overlap_penalty_l1 or overlap_penalty_l2 at each
+            overlapping position, when the overlapping position has 3 or more overlapping fingers - float
+        skip_penalty_f1: Penalty for skipping 1 finger - float
+        skip_penalty_f2: Penalty for skipping 2 or more fingers - float
+        skip_penalty_l1: Penalty for skipping a motif position (1 bp) - float
+        skip_penalty_l2: Penalty for skipping a motif position (2 bp or more) - float
+        return_matrices: Also return the full DP matrices. They are large and no known caller
+            reads them, so they default to None - bool
+        label_unsigned: Use absolute value of motifs (unsigned) - bool
+
+    Returns:
+        msw_score: Modified Smith Waterman score of optimal alignment - float
+        sim_score: MotifCompendium similarity score of optimal alignment - float
+        aligned_motif_fs: Aligned finger motifs - np.array of shape (F, L+M-1, D)
+        msw_orient: Optimal orientation ("for" or "rev") - str
+        msw_align_f: Finger alignment indices - list of int
+        msw_align_l: Motif alignment indices - list of int
+        msw_scale_f: Finger scaling projection - np.array of shape (F,)
+        msw_actions: Optimal alignment arrangement - list of str
+        H_final: Final score matrix - np.array of shape (F+1, L+M), None unless requested
+        A_final: Final arrangement matrix - list of list of str, None unless requested
+    '''
+    return _run_modified_smith_waterman(
+        target_motif=target_motif,
+        subunit_motif_stack=subunit_motif_stack,
+        sim_threshold=sim_threshold,
+        overlap_penalty_l1=overlap_penalty_l1,
+        overlap_penalty_l2=overlap_penalty_l2,
+        overlap_penalty_f1=overlap_penalty_f1,
+        overlap_penalty_f2=overlap_penalty_f2,
+        skip_penalty_f1=skip_penalty_f1,
+        skip_penalty_f2=skip_penalty_f2,
+        skip_penalty_l1=skip_penalty_l1,
+        skip_penalty_l2=skip_penalty_l2,
+        calculate_fn=calculate_modified_smith_waterman,
+        return_matrices=return_matrices,
+        label_unsigned=label_unsigned,
+    )
+
+
 def run_modified_smith_waterman_znf(
     cwm, b1h_ppm_ic,
     sim_threshold=0.0,
@@ -20,8 +81,9 @@ def run_modified_smith_waterman_znf(
     overlap_penalty_f1=1.0, overlap_penalty_f2=1.0,
     skip_penalty_f1=-0.1, skip_penalty_f2=-0.1,
     skip_penalty_l1=-0.02, skip_penalty_l2=-0.1,
-    finger_length=3,
     return_matrices=False,
+    label_unsigned=True,
+    finger_length=3,
 ):
     '''
     Aligns a chain of B1H zinc-finger motifs against a CWM.
@@ -44,9 +106,10 @@ def run_modified_smith_waterman_znf(
         skip_penalty_f2: Penalty for skipping 2 or more fingers - float
         skip_penalty_l1: Penalty for skipping a CWM position (1 bp) - float
         skip_penalty_l2: Penalty for skipping a CWM position (2 bp or more) - float
-        finger_length: Length of each finger motif - int (M)
         return_matrices: Also return the full DP matrices. They are large and no known caller
             reads them, so they default to None - bool
+        label_unsigned: Use absolute value of motifs (unsigned) - bool
+        finger_length: Length of each finger motif - int (M)
 
     Returns:
         msw_score: Modified Smith Waterman score of optimal alignment - float
@@ -60,14 +123,12 @@ def run_modified_smith_waterman_znf(
         H_final: Final score matrix - np.array of shape (F+1, L+M), None unless requested
         A_final: Final arrangement matrix - list of list of str, None unless requested
     '''
-    if finger_length == 3:
-        calculate_fn = calculate_modified_smith_waterman_znf
-    else:
-        calculate_fn = calculate_modified_smith_waterman
+    # Unroll fingers
+    subunit_motif_stack = unroll_fingers(b1h_ppm_ic, finger_length) # (F, M, D)
 
     return _run_modified_smith_waterman(
-        motif=cwm,
-        finger_ppm_ic=b1h_ppm_ic,
+        target_motif=cwm,
+        subunit_motif_stack=subunit_motif_stack,
         sim_threshold=sim_threshold,
         overlap_penalty_l1=overlap_penalty_l1,
         overlap_penalty_l2=overlap_penalty_l2,
@@ -77,28 +138,29 @@ def run_modified_smith_waterman_znf(
         skip_penalty_f2=skip_penalty_f2,
         skip_penalty_l1=skip_penalty_l1,
         skip_penalty_l2=skip_penalty_l2,
-        finger_length=finger_length,
-        calculate_fn=calculate_fn,
+        calculate_fn=calculate_modified_smith_waterman_znf,
         return_matrices=return_matrices,
+        label_unsigned=label_unsigned,
     )
 
 
-def run_modified_smith_waterman(
-    motif, finger_ppm_ic,
-    sim_threshold=0.0,
-    overlap_penalty_l1=-0.02, overlap_penalty_l2=-0.1,
-    overlap_penalty_f1=1.0, overlap_penalty_f2=1.0,
-    skip_penalty_f1=-0.1, skip_penalty_f2=-0.1,
-    skip_penalty_l1=-0.02, skip_penalty_l2=-0.1,
-    finger_length=3,
-    return_matrices=False,
+def _run_modified_smith_waterman(
+    target_motif, subunit_motif_stack,
+    sim_threshold,
+    overlap_penalty_l1, overlap_penalty_l2,
+    overlap_penalty_f1, overlap_penalty_f2,
+    skip_penalty_f1, skip_penalty_f2,
+    skip_penalty_l1, skip_penalty_l2,
+    calculate_fn,
+    return_matrices,
+    label_unsigned,
 ):
     '''
     Aligns a chain of fixed-length finger motifs against a motif, for any finger length M > 1.
 
     Arguments:
-        motif: Motif matrix (as CWM) - np.array of shape (L, D)
-        finger_ppm_ic: Finger motif matrix (as IC-scaled PPM) - np.array of shape (F*M, D)
+        target_motif: Target motif - np.array of shape (L, D)
+        subunit_motif_stack: Stack of subunit motifs - np.array of shape (F, M, D)
         sim_threshold: Minimum similarity to consider a match - float
         overlap_penalty_l1: Penalty for 1 bp overlap - float
         overlap_penalty_l2: Penalty for 2 bp or more overlap - float
@@ -110,9 +172,9 @@ def run_modified_smith_waterman(
         skip_penalty_f2: Penalty for skipping 2 or more fingers - float
         skip_penalty_l1: Penalty for skipping a motif position (1 bp) - float
         skip_penalty_l2: Penalty for skipping a motif position (2 bp or more) - float
-        finger_length: Length of each finger motif - int (M)
         return_matrices: Also return the full DP matrices. They are large and no known caller
             reads them, so they default to None - bool
+        label_unsigned: Use absolute value of motifs (unsigned) - bool
 
     Returns:
         msw_score: Modified Smith Waterman score of optimal alignment - float
@@ -126,42 +188,6 @@ def run_modified_smith_waterman(
         H_final: Final score matrix - np.array of shape (F+1, L+M), None unless requested
         A_final: Final arrangement matrix - list of list of str, None unless requested
     '''
-    return _run_modified_smith_waterman(
-        motif=motif,
-        finger_ppm_ic=finger_ppm_ic,
-        sim_threshold=sim_threshold,
-        overlap_penalty_l1=overlap_penalty_l1,
-        overlap_penalty_l2=overlap_penalty_l2,
-        overlap_penalty_f1=overlap_penalty_f1,
-        overlap_penalty_f2=overlap_penalty_f2,
-        skip_penalty_f1=skip_penalty_f1,
-        skip_penalty_f2=skip_penalty_f2,
-        skip_penalty_l1=skip_penalty_l1,
-        skip_penalty_l2=skip_penalty_l2,
-        finger_length=finger_length,
-        calculate_fn=calculate_modified_smith_waterman,
-        return_matrices=return_matrices,
-    )
-
-
-def _run_modified_smith_waterman(
-    motif, finger_ppm_ic,
-    sim_threshold,
-    overlap_penalty_l1, overlap_penalty_l2,
-    overlap_penalty_f1, overlap_penalty_f2,
-    skip_penalty_f1, skip_penalty_f2,
-    skip_penalty_l1, skip_penalty_l2,
-    finger_length,
-    calculate_fn,
-    return_matrices,
-):
-    '''
-    Shared body of run_modified_smith_waterman() and run_modified_smith_waterman_znf().
-
-    Arguments:
-        calculate_fn: Recurrence to use - calculate_modified_smith_waterman(_znf)
-        (all others: see run_modified_smith_waterman())
-    '''
     # Setting: IC-scale off (store)
     if utils_config.get_ic_scale():
         ic_scale = True
@@ -169,40 +195,41 @@ def _run_modified_smith_waterman(
     else:
         ic_scale = False
 
-    M = int(finger_length)
-    assert M > 1, f"finger_length must be an int > 1, got {finger_length}"
+    ## Dimensions
+    F, M, D = subunit_motif_stack.shape # (F, M, D)
+    L, D = target_motif.shape # (L, D)
+    L_M_1 = L - M + 1 # (L-M+1)
+    assert L_M_1 > 0, f"Target motif length {L} is shorter than finger length {M}"
 
     ## Preprocess motifs
-    # Motif (as CWM)
-    motif = np.abs(motif)  # Absolute value (L, D)
-    assert motif.shape[0] >= M, f"Motif length {motif.shape[0]} is shorter than finger length {M}"
-    motif_norm = motif/np.linalg.norm(motif, axis=(0, 1), keepdims=True)  # L2 normalize, per motif
+    # Unsigned: Absolute value
+    if label_unsigned:
+        target_motif = np.abs(target_motif)  # Absolute value (L, D)
+        subunit_motif_stack = np.abs(subunit_motif_stack)  # Absolute value (F, M, D)
 
-    unrolled_motif_norm = unroll_motif_np(motif_norm, M) # (L-M+1, finger_length M, D)
-    unrolled_motif_norm_cp = unroll_motif_cp(cp.asarray(motif_norm), M)
-    unrolled_importance = (unrolled_motif_norm * unrolled_motif_norm).sum(axis=(1, 2)) # (L-M+1) (L2 norm, of each M-mer, before IC-scaling)
+    # Normalize
+    target_motif_norm = target_motif/np.linalg.norm(target_motif, axis=(0, 1), keepdims=True)  # L2 normalize, per motif
+    subunit_motif_stack_norm = subunit_motif_stack/np.linalg.norm(subunit_motif_stack, axis=(1, 2), keepdims=True)  # L2 normalize, per motif
 
-    # Fingers
-    finger_ppm_ic = np.abs(finger_ppm_ic)  # Absolute value (F*M, D)
-    finger_ppm_ic_n = unroll_fingers(finger_ppm_ic, M) # (num_fingers F, M, D)
-    finger_ppm_ic_n_cp = cp.asarray(finger_ppm_ic_n)
+    # Target motif: Unroll
+    target_motif_norm_unroll = _unroll_motif(target_motif_norm, M, np) # (L-M+1, finger_length M, D)
+    target_motif_norm_unroll_cp = _unroll_motif(cp.asarray(target_motif_norm), M, cp) # (L-M+1, finger_length M, D)
+    target_motif_norm_unroll_importance = (target_motif_norm_unroll * target_motif_norm_unroll).sum(axis=(1, 2)) # (L - M + 1) (L2 norm, of each M-mer)
+
+    # Subunit motifs
+    subunit_motif_stack_norm_cp = cp.asarray(subunit_motif_stack_norm) # (F, M, D)
 
     ## Calculate similarities
-    sims_ff = compute_aligned_similarity(finger_ppm_ic_n_cp, unrolled_motif_norm_cp) # (F, L-M+1)
-    sims_fr = compute_aligned_similarity(finger_ppm_ic_n_cp, unrolled_motif_norm_cp[:, ::-1, ::-1]) # (F, L-M+1)
-
-    ## Dimensions
-    F, M, D = finger_ppm_ic_n.shape # (F, M, D)
-    L, D = motif.shape # (L, D)
-    L_M_1 = L - M + 1 # (L-M+1)
+    sims_ff = compute_aligned_similarity(subunit_motif_stack_norm_cp, target_motif_norm_unroll_cp) # (F, L-M+1)
+    sims_fr = compute_aligned_similarity(subunit_motif_stack_norm_cp, target_motif_norm_unroll_cp[:, ::-1, ::-1]) # (F, L-M+1)
 
     ## Run Modified Smith-Waterman: Local
     (msw_score, msw_orient, msw_actions, H_final, A_final) = calculate_fn(
-        matrix_f=finger_ppm_ic_n,
-        matrix_l=motif_norm,
+        matrix_l=target_motif_norm,
+        matrix_f=subunit_motif_stack_norm,
         sim_for=sims_ff,
         sim_rev=sims_fr,
-        scale_factor=unrolled_importance,
+        scale_factor=target_motif_norm_unroll_importance,
         sim_threshold=sim_threshold,
         overlap_penalty_l1=overlap_penalty_l1,
         overlap_penalty_l2=overlap_penalty_l2,
@@ -226,11 +253,11 @@ def _run_modified_smith_waterman(
 
     if len(msw_actions) > 0 and remain_f < F and remain_l < L_M_1:
         (_, _, remain_actions, H_remain, A_remain) = calculate_fn(
-            matrix_f=finger_ppm_ic_n[remain_f:],
-            matrix_l=motif_norm[remain_l:],
+            matrix_l=target_motif_norm[remain_l:],
+            matrix_f=subunit_motif_stack_norm[remain_f:],
             sim_for=remain_sim[remain_f:, remain_l:],
             sim_rev=remain_sim[remain_f:, remain_l:],
-            scale_factor=unrolled_importance[remain_l:],
+            scale_factor=target_motif_norm_unroll_importance[remain_l:],
             sim_threshold=sim_threshold,
             overlap_penalty_l1=overlap_penalty_l1,
             overlap_penalty_l2=overlap_penalty_l2,
@@ -264,17 +291,17 @@ def _run_modified_smith_waterman(
         sim_score = 0.0
     else:
         (aligned_motif_fs, msw_scale_f, msw_align_f, msw_align_l) = get_alignment_modified_smith_waterman(
-            matrix_f=finger_ppm_ic_n,
-            matrix_l=motif_norm,
-            scale_factor=unrolled_importance,
+            matrix_l=target_motif_norm,
+            matrix_f=subunit_motif_stack_norm,
+            scale_factor=target_motif_norm_unroll_importance,
             msw_actions=msw_actions,
         )
 
         ## Calculate similarity score
         aligned_motif_fs_collapse = aligned_motif_fs.sum(axis=0)
-        max_len = max(motif.shape[0], aligned_motif_fs_collapse.shape[0])
+        max_len = max(L, aligned_motif_fs_collapse.shape[0])
         sim_score, _, _ = utils_similarity.compute_similarities(
-            [utils_motif.pad_motif(aligned_motif_fs_collapse[np.newaxis, :, :], max_len), utils_motif.pad_motif(motif[np.newaxis, :, :], max_len)],
+            [utils_motif.pad_motif(aligned_motif_fs_collapse[np.newaxis, :, :], max_len), utils_motif.pad_motif(target_motif[np.newaxis, :, :], max_len)],
             [(0, 1)],
         )[0]
 
@@ -338,34 +365,19 @@ def unroll_fingers(ppm, finger_length):
 #############
 # UNROLLING #
 #############
-def unroll_motif_np(motif, U):
-    return _unroll_motif(motif, U, np)
-
-
-def unroll_motif_cp(motif, U):
-    return _unroll_motif(motif, U, cp)
-
-
-def _unroll_motif(motif, U, xp):
+def _unroll_motif(motif, M, xp):
     '''
-    Unravels (L, K) --> (L-U+1, U, K), by gathering each window directly.
-
-    The previous implementation multiplied by a (U, L-U+1, L) tensor of ones and zeros,
-    which costs O(U * L^2) to build and was cached on the exact shape -- so it was rebuilt
-    for every distinct motif length. The gather gives the same values at the size of the
-    output (the matmul summed one value and zeros).
-
-    Gather as (U, L-U+1, K) and transpose, rather than gathering (L-U+1, U, K) directly:
-    that reproduces the memory layout of the old matmul-then-transpose. The values are
-    equal either way, but downstream reductions (the importance sum, the similarity
-    normalisation) sum in memory order, so a C-contiguous result rounds differently in the
-    last bit and perturbs argmax ties in the DP.
+    Unravels (L, K) --> (L-M+1, M, K), by gathering each window directly.
+    Arguments:
+        motif: np.array of shape (L, K)
+        M: Window size - int
+        xp: np or cp
     '''
     L, K = motif.shape
-    assert L >= U
-    windows = xp.arange(U)[:, None] + xp.arange(L - U + 1)[None, :]  # (U, L-U+1)
-    unrolled_motif = motif[windows].transpose((1, 0, 2))  # (L-U+1, U, K)
-    assert(unrolled_motif.shape == (L-U+1, U, K))
+    assert L >= M
+    windows = xp.arange(M)[:, None] + xp.arange(L - M + 1)[None, :]  # (M, L-M+1)
+    unrolled_motif = motif[windows].transpose((1, 0, 2))  # (L-M+1, M, K)
+    assert(unrolled_motif.shape == (L-M+1, M, K))
     return unrolled_motif
 
 
@@ -536,7 +548,7 @@ def _extract_best_alignment(H, A, alignment_type, F, L_M_1, shift_idx_f, shift_i
 
 
 def calculate_modified_smith_waterman(
-    matrix_f, matrix_l,
+    matrix_l, matrix_f,
     sim_for, sim_rev,
     scale_factor, sim_threshold,
     overlap_penalty_l1, overlap_penalty_l2,
@@ -562,8 +574,8 @@ def calculate_modified_smith_waterman(
         d >  M: the fingers are separated by a gap of d - M positions
 
     Arguments:
-        matrix_f: Finger motif matrices - np.array of shape (F, M, D)
         matrix_l: Motif matrix - np.array of shape (L, D)
+        matrix_f: Finger motif matrices - np.array of shape (F, M, D)
         sim_for: Similarity scores (forward) - np.array of shape (F, L-M+1)
         sim_rev: Similarity scores (reverse) - np.array of shape (F, L-M+1)
         scale_factor: Scaling factors for each motif position - np.array of shape (L-M+1,)
@@ -761,7 +773,7 @@ def calculate_modified_smith_waterman(
 
 
 def calculate_modified_smith_waterman_znf(
-    matrix_f, matrix_l,
+    matrix_l, matrix_f,
     sim_for, sim_rev,
     scale_factor, sim_threshold,
     overlap_penalty_l1, overlap_penalty_l2,
@@ -1004,14 +1016,14 @@ def calculate_modified_smith_waterman_znf(
 
 
 def get_alignment_modified_smith_waterman(
-    matrix_f, matrix_l,
+    matrix_l, matrix_f,
     scale_factor,
     msw_actions,
 ):
     '''
     Arguments:
-        matrix_f: Finger motif matrices - np.array of shape (F, M, D)
         matrix_l: Motif matrix - np.array of shape (L, D)
+        matrix_f: Finger motif matrices - np.array of shape (F, M, D)
         scale_factor: Scaling factors for each motif position - np.array of shape (L-M+1,)
         msw_actions: Optimal alignment arrangement - list of str
 
