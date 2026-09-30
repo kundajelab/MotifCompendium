@@ -10,7 +10,7 @@ frozen 3 bp core is still the original algorithm.
 SNAPSHOT_COMPOSITE is a composite.py from before the exact state DP and the target padding
 (one arrangement per cell, current API otherwise). Where the scoring did not change (zero
 penalties, general_penalty_f off), results are checked bit for bit against it, feeding it the
-target padded as the current code pads it.
+target padded as the current code pads it, with and without global_exact.
 """
 
 import importlib.util
@@ -222,13 +222,14 @@ def test_degenerate(new):
     ]
     n_fail = 0
     for name, motif, fingers in cases:
-        for config, general in itertools.product((NEUTRAL, ZERO), (False, True)):
+        for config, general, exact in itertools.product((NEUTRAL, ZERO), (False, True), (False, True)):
             try:
-                out = call_znf(new, motif, fingers, general_penalty_f=general, **config)
+                out = call_znf(new, motif, fingers, general_penalty_f=general, global_exact=exact, **config)
                 assert not np.isnan(out[0]) and not np.isnan(out[1]), "NaN score"
-                new.run_modified_smith_waterman_composite(motif, unroll(fingers, 3), general_penalty_f=general, **config)
+                new.run_modified_smith_waterman_composite(motif, unroll(fingers, 3), general_penalty_f=general,
+                                                          global_exact=exact, **config)
             except Exception as exc:
-                print(f"  [FAIL] {name} general={general}: {type(exc).__name__}: {exc}")
+                print(f"  [FAIL] {name} general={general} global_exact={exact}: {type(exc).__name__}: {exc}")
                 n_fail += 1
     print(f"1b. degenerate cases: {'ok' if n_fail == 0 else f'{n_fail} failures'}")
     return n_fail
@@ -245,58 +246,60 @@ def test_matches_snapshot(new, snap, n_cases=40, seed=4):
         motif4, fingers4 = make_case(rng, F, 4, int(rng.integers(20, 60)))
         motif2, fingers2 = make_case(rng, F, 2, int(rng.integers(10, 40)))
         runs = [
-            ("znf  M=3", 3, motif3, lambda mod, m: call_znf(mod, m, fingers3, **ZERO)),
-            ("gen  M=3", 3, motif3, lambda mod, m: call_general(mod, m, fingers3, 3, **ZERO)),
-            ("gen  M=4", 4, motif4, lambda mod, m: call_general(mod, m, fingers4, 4, **ZERO)),
+            ("znf  M=3", 3, motif3, lambda mod, m, **kw: call_znf(mod, m, fingers3, **kw, **ZERO)),
+            ("gen  M=3", 3, motif3, lambda mod, m, **kw: call_general(mod, m, fingers3, 3, **kw, **ZERO)),
+            ("gen  M=4", 4, motif4, lambda mod, m, **kw: call_general(mod, m, fingers4, 4, **kw, **ZERO)),
             ("gen  M=2 local only", 2, motif2,
-             lambda mod, m: call_general(mod, m, fingers2, 2, align_remaining=False, **ZERO)),
+             lambda mod, m, **kw: call_general(mod, m, fingers2, 2, align_remaining=False, **kw, **ZERO)),
         ]
-        for label, M, motif, run in runs:
+        for (label, M, motif, run), exact in itertools.product(runs, (True, False)):
             n_runs += 1
-            diffs = differing_from_snapshot(run(new, motif), run(snap, pad(motif, M)), len(motif) + 2 * M - 2)
+            diffs = differing_from_snapshot(run(new, motif, global_exact=exact), run(snap, pad(motif, M)),
+                                            len(motif) + 2 * M - 2)
             if diffs:
                 n_diff += 1
                 if n_diff <= 3:
-                    print(f"  [diff] {label}: {diffs}")
+                    print(f"  [diff] {label} global_exact={exact}: {diffs}")
 
         # The composite: the snapshot's frame is M-1 wider on the left
         stack = rng.random((int(rng.integers(1, 3)), 3, 4)) ** 2 + 0.01
         motif = rng.random((int(rng.integers(12, 30)), 4))
-        a = new.run_modified_smith_waterman_composite(motif, stack, general_penalty_f=False, **ZERO)
         b = snap.run_modified_smith_waterman_composite(pad(motif, 3), stack, **ZERO)
-        n_runs += 1
-        if not (a[0] == b[0] and abs(a[1] - b[1]) < 1e-12 and np.array_equal(a[3], b[3])
-                and np.array_equal(a[4], b[4]) and np.array_equal(a[5] + 2, b[5]) and np.array_equal(a[6], b[6])
-                and np.array_equal(a[2], b[2][:, 2:2 + len(motif) + 4])):
-            n_diff += 1
-            print("  [diff] composite")
-    print(f"2. vs snapshot on the padded target (zero penalties, general_penalty_f off), 5 paths: "
-          f"{n_runs - n_diff}/{n_runs} identical")
+        for exact in (True, False):
+            a = new.run_modified_smith_waterman_composite(motif, stack, general_penalty_f=False,
+                                                          global_exact=exact, **ZERO)
+            n_runs += 1
+            if not (a[0] == b[0] and abs(a[1] - b[1]) < 1e-12 and np.array_equal(a[3], b[3])
+                    and np.array_equal(a[4], b[4]) and np.array_equal(a[5] + 2, b[5])
+                    and np.array_equal(a[6], b[6]) and np.array_equal(a[2], b[2][:, 2:2 + len(motif) + 4])):
+                n_diff += 1
+                print(f"  [diff] composite global_exact={exact}")
+    print(f"2. vs snapshot on the padded target (zero penalties, general_penalty_f off), 5 paths x "
+          f"global_exact: {n_runs - n_diff}/{n_runs} identical")
     return n_diff
 
 
-def test_exact(new, n_cases=90, seed=11):
-    """a. The DP is exact: its score is the best over every chain of matches (brute force), and
-    its matches re-score to it, for every penalty configuration, with and without
-    general_penalty_f. Its state at the optimum decomposes the score."""
-    configs = {
-        "zero": ZERO,
-        "neutral": NEUTRAL,
-        "harsh f2": dict(NEUTRAL, skip_penalty_f2=-0.3),
-        "overlap": dict(ZERO, overlap_penalty_f1=-0.05, overlap_penalty_f2=-0.2),
-        "gap": dict(ZERO, skip_penalty_l1=-0.05, skip_penalty_l2=-0.15),
-        "l1 only": dict(ZERO, skip_penalty_l1=-0.1),
-        "f-skip": dict(ZERO, skip_penalty_f1=-0.05, skip_penalty_f2=-0.3),
-        "threshold": dict(NEUTRAL, sim_threshold=0.5),
-    }
+EXACT_CONFIGS = {
+    "zero": ZERO,
+    "neutral": NEUTRAL,
+    "harsh f2": dict(NEUTRAL, skip_penalty_f2=-0.3),
+    "overlap": dict(ZERO, overlap_penalty_f1=-0.05, overlap_penalty_f2=-0.2),
+    "gap": dict(ZERO, skip_penalty_l1=-0.05, skip_penalty_l2=-0.15),
+    "l1 only": dict(ZERO, skip_penalty_l1=-0.1),
+    "f-skip": dict(ZERO, skip_penalty_f1=-0.05, skip_penalty_f2=-0.3),
+    "threshold": dict(NEUTRAL, sim_threshold=0.5),
+}
+
+
+def brute_force_cases(n_cases, seed):
+    """Tiny random cores, and the best score over every chain of matches, by configuration."""
     rng = np.random.default_rng(seed)
-    n_bad = n_runs = 0
     for i in range(n_cases):
         M = (2, 3, 4)[i % 3]
         F, N = int(rng.integers(1, 5)), int(rng.integers(2, 9))
         sim = rng.random((F, N)) * 1.6 - 0.4
         scale = rng.random(N) * 0.5
-        for (name, p), general in itertools.product(configs.items(), (False, True)):
+        for (name, p), general in itertools.product(EXACT_CONFIGS.items(), (False, True)):
             best = 0.0  # The empty alignment
             for r in range(1, min(F, N) + 1):
                 for rows in itertools.combinations(range(F), r):
@@ -304,29 +307,78 @@ def test_exact(new, n_cases=90, seed=11):
                         chain = list(zip(rows, cols))
                         if all(sim[f, w] > p["sim_threshold"] for f, w in chain):
                             best = max(best, chain_score(chain, sim, scale, M, p, general))
-            out = call_core(new, sim, scale, M, general_penalty_f=general, return_matrices=True, **dict(p))
-            chain = match_chain(out[2])
-            state = out[3]
-            rescale = 1 / math.sqrt(state["F_total"]) if general and state["F_total"] > 0 else 1.0
-            problems = []
-            if abs(out[0] - best) > 1e-12:
-                problems.append(f"score {out[0]!r}, best chain {best!r}")
-            if chain and abs(chain_score(chain, sim, scale, M, p, general) - out[0]) > 1e-12:
-                problems.append("matches do not re-score to msw_score")
-            if state["F_total"] != len(chain):
-                problems.append(f"F_total {state['F_total']} for {len(chain)} matches")
-            if out[0] != (state["H_match"] * rescale + state["H_penalty_overlap_f"]
-                          + state["H_penalty_skip_f"] + state["H_penalty_skip_l"]):
-                problems.append("H != H_match*r + penalties")
-            if out[4].shape != (F + 1, N + 2 * M - 1) or out[4].max() != out[0]:
-                problems.append(f"H_final {out[4].shape}, max {out[4].max()!r}")
-            n_runs += 1
-            if problems:
-                n_bad += 1
-                if n_bad <= 5:
-                    print(f"  [FAIL] {name} general={general} M={M} F={F} N={N}: {problems}")
+            yield name, p, general, M, sim, scale, best
+
+
+def core_problems(out, sim, scale, M, p, general):
+    """Ways a core's output is inconsistent: its matches must re-score to msw_score, and its
+    state at the optimum must decompose it."""
+    F, N = sim.shape
+    chain = match_chain(out[2])
+    state = out[3]
+    rescale = 1 / math.sqrt(state["F_total"]) if general and state["F_total"] > 0 else 1.0
+    problems = []
+    if chain and abs(chain_score(chain, sim, scale, M, p, general) - out[0]) > 1e-12:
+        problems.append("matches do not re-score to msw_score")
+    if state["F_total"] != len(chain):
+        problems.append(f"F_total {state['F_total']} for {len(chain)} matches")
+    if out[0] != (state["H_match"] * rescale + state["H_penalty_overlap_f"]
+                  + state["H_penalty_skip_f"] + state["H_penalty_skip_l"]):
+        problems.append("H != H_match*r + penalties")
+    if out[4].shape != (F + 1, N + 2 * M - 1) or out[4].max() != out[0]:
+        problems.append(f"H_final {out[4].shape}, max {out[4].max()!r}")
+    return problems
+
+
+def test_exact(new, n_cases=90, seed=11):
+    """a. With global_exact, the DP is exact: its score is the best over every chain of matches
+    (brute force), and its matches re-score to it, for every penalty configuration, with and
+    without general_penalty_f. Its state at the optimum decomposes the score."""
+    n_bad = n_runs = 0
+    for name, p, general, M, sim, scale, best in brute_force_cases(n_cases, seed):
+        out = call_core(new, sim, scale, M, general_penalty_f=general, return_matrices=True, **dict(p))
+        problems = core_problems(out, sim, scale, M, p, general)
+        if abs(out[0] - best) > 1e-12:
+            problems.append(f"score {out[0]!r}, best chain {best!r}")
+        n_runs += 1
+        if problems:
+            n_bad += 1
+            if n_bad <= 5:
+                print(f"  [FAIL] {name} general={general} M={M} {sim.shape}: {problems}")
     print(f"a. exact DP: {n_runs - n_bad}/{n_runs} optimal (brute force), re-scored and decomposed, "
-          f"{len(configs)} penalty configurations x general_penalty_f")
+          f"{len(EXACT_CONFIGS)} penalty configurations x general_penalty_f")
+    return n_bad
+
+
+def test_one_state(new, n_cases=90, seed=11):
+    """b. Without global_exact (one alignment per cell): never above the best chain, consistent,
+    and the exact result whenever no penalty depends on the state (zero penalties, no
+    general_penalty_f). How often it misses the best alignment is reported."""
+    n_bad = n_runs = 0
+    missed, worst = {}, {}
+    for name, p, general, M, sim, scale, best in brute_force_cases(n_cases, seed):
+        out = call_core(new, sim, scale, M, general_penalty_f=general, global_exact=False,
+                        return_matrices=True, **dict(p))
+        problems = core_problems(out, sim, scale, M, p, general)
+        if out[0] > best + 1e-12:
+            problems.append(f"score {out[0]!r} above the best chain {best!r}")
+        if name == "zero" and not general:
+            exact = call_core(new, sim, scale, M, **dict(p))
+            if tuple(out[:3]) != tuple(exact[:3]):
+                problems.append("differs from global_exact without penalties")
+        key = f"{name}{', general' if general else ''}"
+        missed[key] = missed.get(key, 0) + (out[0] < best - 1e-12)
+        worst[key] = max(worst.get(key, 0.0), best - out[0])
+        n_runs += 1
+        if problems:
+            n_bad += 1
+            if n_bad <= 5:
+                print(f"  [FAIL] {name} general={general} M={M} {sim.shape}: {problems}")
+    per_config = n_runs // len(missed)
+    summary = ", ".join(f"{key} {missed[key]}/{per_config} (max -{worst[key]:.3g})"
+                        for key in missed if missed[key])
+    print(f"b. one state per cell: {n_runs - n_bad}/{n_runs} consistent, never above the best chain, "
+          f"exact without penalties; best alignment missed in: {summary or 'none'}")
     return n_bad
 
 
@@ -354,6 +406,10 @@ def test_general_penalty(new, seed=12):
     if abs(out[0] - math.sqrt(2)) > 1e-15 or match_chain(out[2]) != [(1, 2), (2, 4)]:
         n_bad += 1
         print(f"  [FAIL] one-state trap: {out[0]!r} {out[2]}")
+    out = call_core(new, sim, np.ones(6), 2, general_penalty_f=True, global_exact=False, **ZERO)
+    if abs(out[0] - 2.42 / math.sqrt(3)) > 1e-15 or match_chain(out[2]) != [(0, 0), (1, 2), (2, 4)]:
+        n_bad += 1
+        print(f"  [FAIL] one-state trap without global_exact: {out[0]!r} {out[2]}")
 
     # 'l2_norm' is gone
     motif, fingers = make_case(rng, 3, 3, 20)
@@ -448,7 +504,8 @@ def track_violations(align_f, align_l, actions, F, M, L):
 def test_alignment_tracks(new, n_cases=200, seed=6):
     """7. The alignment tracks line up with the placements, on every path and penalty mode."""
     rng = np.random.default_rng(seed)
-    modes = [dict(), ZERO, dict(ZERO, general_penalty_f=True)]
+    modes = [dict(), ZERO, dict(ZERO, general_penalty_f=True), dict(global_exact=False),
+             dict(general_penalty_f=True, global_exact=False)]
     n_bad = n_runs = n_overlap = 0
     for i in range(n_cases):
         M = (3, 3, 2, 4, 5)[i % 5]
@@ -591,6 +648,7 @@ def test_subunit_expansion(new, seed=8):
             assert kwargs["place_as_matched"] is True
             assert kwargs["align_remaining"] is False
             assert kwargs["general_penalty_f"] is True
+            assert kwargs["global_exact"] is False
     np.testing.assert_array_equal(stack, saved)
     for copies in (0, -1, 1.5, True, "2"):
         try:
@@ -713,7 +771,8 @@ def input_subunit_problems(out, ref, motif, stack, stack_subunit, stack_rc, M):
 def test_input_subunit_outputs(new, n_cases=48, seed=10):
     """9. Random cases: the composite wrapper's outputs are the core's on the expanded stack, by input subunit."""
     rng = np.random.default_rng(seed)
-    configs = [(ZERO, True), (ZERO, False), (NEUTRAL, False), (NEUTRAL, True)]
+    configs = [(ZERO, True, False), (ZERO, False, False), (NEUTRAL, False, False), (NEUTRAL, True, False),
+               (NEUTRAL, True, True)]
     flags = list(itertools.product((False, True), repeat=2))
     n_bad = n_runs = n_rev = n_rc = n_repeat = n_sim_up = n_overhang = 0
     for i in range(n_cases):
@@ -722,13 +781,13 @@ def test_input_subunit_outputs(new, n_cases=48, seed=10):
         F, copies = int(rng.integers(1, 4)), int(rng.integers(1, 4))
         motif, stack = make_mixed_case(rng, F, M, int(rng.integers(max(M + 1, 12), 40)))
         expanded, stack_subunit, stack_rc = expand(stack, copies, reverse_order, reverse_comp)
-        for cfg, general in configs[:3] if i % 3 else configs:  # Penalties + general_penalty_f: 1 in 3
+        for cfg, general, exact in configs[:4] if i % 3 else configs:  # Exact, penalties, general: 1 in 3
             out = new.run_modified_smith_waterman_composite(
-                motif, stack, max_homo_subunits=copies, general_penalty_f=general,
+                motif, stack, max_homo_subunits=copies, general_penalty_f=general, global_exact=exact,
                 allow_reverse_order=reverse_order, allow_reverse_comp=reverse_comp, **cfg)
             core = dict(target_motif=motif, subunit_motif_stack=expanded, return_matrices=False, label_unsigned=True,
                         orientations=("for", "rev") if reverse_comp else ("for",), align_remaining=False,
-                        general_penalty_f=general, **cfg)
+                        general_penalty_f=general, global_exact=exact, **cfg)
             ref = new._run_modified_smith_waterman(place_as_matched=True, **core)
             problems = input_subunit_problems(out, ref, motif, stack, stack_subunit, stack_rc, M)
             n_runs += 1
@@ -742,7 +801,7 @@ def test_input_subunit_outputs(new, n_cases=48, seed=10):
                 n_bad += 1
                 if n_bad <= 3:
                     print(f"  [FAIL] M={M} F={F} copies={copies} reverse order/comp={reverse_order}/{reverse_comp} "
-                          f"general={general} {cfg}: {problems[:2]}")
+                          f"general={general} global_exact={exact} {cfg}: {problems[:2]}")
     print(f"9. composite outputs: {n_runs - n_bad}/{n_runs} match the core on the expanded stack, over all 4 "
           f"reverse order / complement settings ({n_rc} with reverse complements, {n_repeat} with repeated "
           f"subunits, {n_overhang} overhanging an end, {n_rev} won by 'rev'; placing 'rev' matches as matched "
@@ -766,7 +825,7 @@ def test_composite_no_remaining(new, n_cases=20, seed=13):
         expanded, stack_subunit, stack_rc = expand(stack, 2, True, True)  # The composite's defaults
         out = new.run_modified_smith_waterman_composite(motif, stack, **cfg)
         core = dict(target_motif=motif, subunit_motif_stack=expanded, return_matrices=False, label_unsigned=True,
-                    place_as_matched=True, general_penalty_f=True, **cfg)
+                    place_as_matched=True, general_penalty_f=True, global_exact=False, **cfg)
         local = new._run_modified_smith_waterman(align_remaining=False, **core)
         forced = new._run_modified_smith_waterman(align_remaining=True, **core)
         n_forced += sum("@match@" in a for a in forced[7]) > sum("@match@" in a for a in local[7])
@@ -815,12 +874,12 @@ def test_general_m(new, seed=2):
     # is the alignment wrapper
     for M in [2, 3, 3, 3, 4, 5]:
         motif, fingers = make_case(rng, 4, M, int(rng.integers(4 * M, 8 * M)))
-        for general in (False, True):
+        for general, exact in itertools.product((False, True), (True, False)):
+            flags = dict(general_penalty_f=general, global_exact=exact)
             aligned = new.run_modified_smith_waterman_alignment(target_motif=motif, reference_motif=fingers,
-                                                                finger_length=M, general_penalty_f=general, **NEUTRAL)
-            for label, other in (("generalized path", call_general(new, motif, fingers, M, general_penalty_f=general)),
-                                 ("ZNF wrapper", call_znf(new, motif, fingers, finger_length=M,
-                                                          general_penalty_f=general))):
+                                                                finger_length=M, **flags, **NEUTRAL)
+            for label, other in (("generalized path", call_general(new, motif, fingers, M, **flags)),
+                                 ("ZNF wrapper", call_znf(new, motif, fingers, finger_length=M, **flags))):
                 diffs = differing(aligned, other)
                 if diffs:
                     print(f"  [FAIL] alignment wrapper at M={M} differs from the {label}: {diffs}")
@@ -843,6 +902,7 @@ if __name__ == "__main__":
     failures += test_degenerate(new)
     failures += test_new_params_noop(new)
     failures += test_exact(new)
+    failures += test_one_state(new)
     failures += test_general_penalty(new)
     failures += test_padding(new)
     failures += test_subunit_expansion(new)
