@@ -437,7 +437,7 @@ def test_match_count(new, n_cases=60, seed=14):
                 problems.append(f"best of the profile {profile.max()!r}, best alignment {default[0]!r}")
 
             counts = []
-            for penalty, fraction in itertools.product(penalties, (None, 0.9, 0.5)):
+            for penalty, fraction in itertools.product(penalties, (1.0, 0.9, 0.5)):
                 out = call_core(new, sim, scale, M, match_count_penalty=penalty, match_count_fraction=fraction,
                                 return_match_profile=True, **flags)
                 chosen = new._select_match_count(out[6], penalty, fraction)
@@ -446,7 +446,7 @@ def test_match_count(new, n_cases=60, seed=14):
                     problems.append(f"penalty {penalty} fraction {fraction}: {len(chain)} matches, chose {chosen}")
                 elif chain and abs(chain_score(chain, sim, scale, M, p, general) - out[0]) > 1e-12:
                     problems.append("chosen alignment does not re-score to msw_score")
-                if fraction is None:
+                if fraction == 1:
                     counts.append(chosen)
             if counts != sorted(counts, reverse=True):
                 problems.append(f"more matches with a larger penalty: {counts}")
@@ -460,11 +460,29 @@ def test_match_count(new, n_cases=60, seed=14):
 
     # The rule, by hand
     profile = np.array([0.0, 0.5, 0.8, 0.9, 0.95, -np.inf])
-    for penalty, fraction, chosen in ((-0.0, None, 4), (-0.08, None, 3), (-0.12, None, 2), (-0.35, None, 1), (-0.6, None, 0),
+    for penalty, fraction, chosen in ((-0.0, 1.0, 4), (-0.08, 1.0, 3), (-0.12, 1.0, 2), (-0.35, 1.0, 1), (-0.6, 1.0, 0),
                                       (-0.0, 0.9, 3), (-0.0, 0.8, 2), (-0.0, 0.5, 1), (-0.08, 0.5, 1)):
         if new._select_match_count(profile, penalty, fraction) != chosen:
             n_bad += 1
             print(f"  [FAIL] rule: penalty {penalty} fraction {fraction}")
+    # A fraction of 1 is the first maximum of the penalized profile (fewest matches), ties included
+    for _ in range(200):
+        profile = np.round(rng.random(int(rng.integers(1, 9))), 1)  # Rounded: Ties
+        profile[0] = 0.0
+        profile[rng.random(len(profile)) < 0.2] = -np.inf
+        profile[0] = 0.0
+        for penalty in (-0.0, -0.1, -0.25):
+            if new._select_match_count(profile, penalty, 1.0) != int(
+                    (profile + penalty * np.arange(len(profile))).argmax()):
+                n_bad += 1
+                print(f"  [FAIL] fraction 1 on {profile}, penalty {penalty}")
+    for fraction in (None, 0.0, 1.5, -0.5):
+        try:
+            call_core(new, np.ones((2, 4)), np.ones(4), 2, match_count_fraction=fraction)
+        except AssertionError:
+            continue
+        n_bad += 1
+        print(f"  [FAIL] accepted match_count_fraction {fraction!r}")
 
     # Wrappers: One more output, only when asked; the composite keeps fewer subunits as the penalty
     # grows. Without global_exact, a profile keeps one alignment per cell and F_total: without

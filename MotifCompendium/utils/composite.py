@@ -26,7 +26,7 @@ def run_modified_smith_waterman_composite(
     general_penalty_root=2,
     global_exact=False,
     match_count_penalty=-0.0,
-    match_count_fraction=None,
+    match_count_fraction=1.0,
     return_match_profile=False,
     label_unsigned=True,
     allow_reverse_order=True,
@@ -70,8 +70,8 @@ def run_modified_smith_waterman_composite(
         match_count_penalty: Penalty per subunit matched, for choosing the number of matches: keeps
             the alignment with the N that maximizes its best score with N matches +
             match_count_penalty * N (see calculate_modified_smith_waterman()) - float <= 0
-        match_count_fraction: Instead keep the fewest matches whose penalized best score reaches
-            this fraction of the maximum - float in (0, 1], or None
+        match_count_fraction: Keep the fewest matches whose penalized best score reaches this
+            fraction of the maximum; 1 keeps the maximum (default: 1) - float in (0, 1]
         return_match_profile: Also return msw_profile - bool
         label_unsigned: Use absolute value of motifs (unsigned) - bool
         allow_reverse_order: Also match the subunits in reverse order - bool
@@ -172,7 +172,7 @@ def run_modified_smith_waterman_alignment(
     general_penalty_root=2,
     global_exact=True,
     match_count_penalty=-0.0,
-    match_count_fraction=None,
+    match_count_fraction=1.0,
     return_match_profile=False,
     return_matrices=False,
     label_unsigned=True,
@@ -216,8 +216,8 @@ def run_modified_smith_waterman_alignment(
         match_count_penalty: Penalty per finger matched, for choosing the number of matches: keeps
             the alignment with the N that maximizes its best score with N matches +
             match_count_penalty * N (see calculate_modified_smith_waterman()) - float <= 0
-        match_count_fraction: Instead keep the fewest matches whose penalized best score reaches
-            this fraction of the maximum - float in (0, 1], or None
+        match_count_fraction: Keep the fewest matches whose penalized best score reaches this
+            fraction of the maximum; 1 keeps the maximum (default: 1) - float in (0, 1]
         return_match_profile: Also return msw_profile - bool
             Only the local alignment is chosen: the remaining alignment still adds the fingers
             left after it (see _run_modified_smith_waterman()).
@@ -278,7 +278,7 @@ def run_modified_smith_waterman_znf(
     general_penalty_root=2,
     global_exact=True,
     match_count_penalty=-0.0,
-    match_count_fraction=None,
+    match_count_fraction=1.0,
     return_match_profile=False,
     return_matrices=False,
     label_unsigned=True,
@@ -328,7 +328,7 @@ def _run_modified_smith_waterman(
     match_penalty_f=-0.0,
     global_exact=True,
     match_count_penalty=-0.0,
-    match_count_fraction=None,
+    match_count_fraction=1.0,
     return_match_profile=False,
     place_as_matched=False,
     orientations=("for", "rev"),
@@ -361,7 +361,7 @@ def _run_modified_smith_waterman(
         global_exact: Keep the best alignment of every state in each DP cell (exact), rather
             than one alignment per cell - bool
         match_count_penalty, match_count_fraction: Choose the number of matches of the local
-            alignment (see calculate_modified_smith_waterman()) - float <= 0, float in (0, 1] or None
+            alignment (see calculate_modified_smith_waterman()) - float <= 0, float in (0, 1]
         return_match_profile: Also return msw_profile - bool
         place_as_matched: Place each finger in the orientation it matched in (reverse
             complemented, when msw_orient is "rev"), rather than as given. The alignment and
@@ -1121,13 +1121,11 @@ def _best_by_count(score):
 def _select_match_count(msw_profile, match_count_penalty, match_count_fraction):
     '''
     Number of matches N to align with, from the best score with exactly N matches (msw_profile):
-    the first maximum of msw_profile[N] + match_count_penalty * N (the fewest matches, on ties),
-    or with match_count_fraction, the smallest N whose penalized score reaches that fraction of
-    the maximum. N = 0 (the empty alignment, score 0) is always a candidate.
+    the smallest N whose penalized score, msw_profile[N] + match_count_penalty * N, reaches
+    match_count_fraction of its maximum. With a fraction of 1, that is the N that maximizes it
+    (the fewest matches, on ties). N = 0 (the empty alignment, score 0) is always a candidate.
     '''
     penalized = msw_profile + match_count_penalty * np.arange(len(msw_profile))
-    if match_count_fraction is None:
-        return int(penalized.argmax())
     return int(np.flatnonzero(penalized >= match_count_fraction * penalized.max())[0])
 
 
@@ -1442,7 +1440,7 @@ def calculate_modified_smith_waterman(
     match_penalty_f=-0.0,
     global_exact=True,
     match_count_penalty=-0.0,
-    match_count_fraction=None,
+    match_count_fraction=1.0,
     return_match_profile=False,
     alignment_type="local",
     initial_state=None,
@@ -1485,10 +1483,10 @@ def calculate_modified_smith_waterman(
     The number of matches can be chosen, rather than left to the best score (local alignment
     only). msw_profile[N] is the best score of an alignment with exactly N matches (0 for the
     empty alignment, -inf where impossible); it is exact with global_exact, and without it, by
-    keeping one alignment per cell and F_total. The alignment kept has the N that maximizes
-    msw_profile[N] + match_count_penalty * N (the fewest matches, on ties) or, with
-    match_count_fraction, the smallest N whose penalized score reaches that fraction of the
-    maximum. msw_score is its own score, unpenalized. Without global_exact, keeping one alignment
+    keeping one alignment per cell and F_total. The alignment kept has the smallest N whose
+    penalized score, msw_profile[N] + match_count_penalty * N, reaches match_count_fraction of
+    its maximum: with the default fraction, 1, the N that maximizes it (the fewest matches, on
+    ties). msw_score is its own score, unpenalized. Without global_exact, keeping one alignment
     per cell and F_total can find a better alignment than one per cell, so for a sweep of
     match_count_penalty, set return_match_profile at 0 too. Match scores are normalized (the matches
     of a tiling of the motif sum to about 1; with general_penalty_f, their rescaled sum), so
@@ -1514,9 +1512,9 @@ def calculate_modified_smith_waterman(
             one alignment per cell - bool
         match_count_penalty: Penalty per match, for choosing the number of matches - float <= 0
         match_count_fraction: Choose the fewest matches whose penalized score reaches this
-            fraction of the best - float in (0, 1], or None
-        return_match_profile: Compute msw_profile even without a match count penalty or
-            fraction - bool
+            fraction of the best (1: the best) - float in (0, 1]
+        return_match_profile: Compute msw_profile even without a match count penalty or a
+            fraction below 1 - bool
         alignment_type: Type of alignment ("local" or "global") - str
         initial_state: State of the alignment that a global alignment continues: H_match, the
             four penalty sums and F_total (as msw_state); None for an empty alignment - dict
@@ -1562,9 +1560,9 @@ def calculate_modified_smith_waterman(
     initial_state = {key: (initial_state or _EMPTY_STATE)[key] for key in _EMPTY_STATE}
     align = _align_all_states if global_exact else _align_one_state
     assert match_count_penalty <= 0, f"match_count_penalty must be <= 0, got {match_count_penalty}"
-    assert match_count_fraction is None or 0 < match_count_fraction <= 1, \
+    assert match_count_fraction is not None and 0 < match_count_fraction <= 1, \
         f"match_count_fraction must be in (0, 1], got {match_count_fraction}"
-    profile = return_match_profile or match_count_penalty != 0 or match_count_fraction is not None
+    profile = return_match_profile or match_count_penalty != 0 or match_count_fraction < 1
     assert local or not profile, "The number of matches is chosen for local alignment only"
 
     ## Align: Each orientation
