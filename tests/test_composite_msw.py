@@ -382,6 +382,118 @@ def test_one_state(new, n_cases=90, seed=11):
     return n_bad
 
 
+def brute_force_profile(sim, scale, M, p, general):
+    """Best score over chains of exactly N matches, by N (0: the empty alignment; -inf: none)."""
+    F, N = sim.shape
+    profile = np.full(min(F, N) + 1, -np.inf)
+    profile[0] = 0.0
+    for r in range(1, min(F, N) + 1):
+        for rows in itertools.combinations(range(F), r):
+            for cols in itertools.combinations(range(N), r):
+                chain = list(zip(rows, cols))
+                if all(sim[f, w] > p["sim_threshold"] for f, w in chain):
+                    profile[r] = max(profile[r], chain_score(chain, sim, scale, M, p, general))
+    return profile
+
+
+def test_match_count(new, n_cases=60, seed=14):
+    """e. Choosing the number of matches: the profile (best score with exactly N matches) is the
+    brute force's with global_exact, and never above it without; the alignment kept has the
+    chosen number of matches, its own score, and fewer matches as the penalty grows."""
+    rng = np.random.default_rng(seed)
+    n_bad = n_runs = 0
+    penalties = (-0.0, -0.01, -0.05, -0.2, -1.0)
+    for i in range(n_cases):
+        M = (2, 3, 4)[i % 3]
+        F, N = int(rng.integers(1, 5)), int(rng.integers(2, 9))
+        sim = rng.random((F, N)) * 1.6 - 0.4
+        scale = rng.random(N) * 0.5
+        for (name, p), general, exact in itertools.product(EXACT_CONFIGS.items(), (False, True), (True, False)):
+            flags = dict(p, general_penalty_f=general, global_exact=exact)
+            expected = brute_force_profile(sim, scale, M, p, general)
+            reachable = np.isfinite(expected)
+            problems = []
+            default = call_core(new, sim, scale, M, **flags)
+            if default[6] is not None:
+                problems.append("a profile without asking")
+            profile = call_core(new, sim, scale, M, return_match_profile=True, **flags)[6]
+            if profile.shape != expected.shape or np.isfinite(profile[~reachable]).any():
+                problems.append(f"profile {profile} for {expected}")
+            elif exact and not np.allclose(profile[reachable], expected[reachable], rtol=0, atol=1e-12):
+                problems.append(f"profile {profile}, brute force {expected}")
+            elif not exact and (profile[reachable] > expected[reachable] + 1e-12).any():
+                problems.append(f"profile {profile} above the brute force {expected}")
+            if not exact and name == "zero" and not np.array_equal(profile, call_core(
+                    new, sim, scale, M, return_match_profile=True, **dict(flags, global_exact=True))[6]):
+                problems.append("one state per count differs from global_exact without penalties")
+            if exact and abs(profile.max() - default[0]) > 1e-12:
+                problems.append(f"best of the profile {profile.max()!r}, best alignment {default[0]!r}")
+
+            counts = []
+            for penalty, fraction in itertools.product(penalties, (None, 0.9, 0.5)):
+                out = call_core(new, sim, scale, M, match_count_penalty=penalty, match_count_fraction=fraction,
+                                return_match_profile=True, **flags)
+                chosen = new._select_match_count(out[6], penalty, fraction)
+                chain = match_chain(out[2])
+                if len(chain) != chosen or out[0] != out[6][chosen] or out[3]["F_total"] != chosen:
+                    problems.append(f"penalty {penalty} fraction {fraction}: {len(chain)} matches, chose {chosen}")
+                elif chain and abs(chain_score(chain, sim, scale, M, p, general) - out[0]) > 1e-12:
+                    problems.append("chosen alignment does not re-score to msw_score")
+                if fraction is None:
+                    counts.append(chosen)
+            if counts != sorted(counts, reverse=True):
+                problems.append(f"more matches with a larger penalty: {counts}")
+            if counts[-1] != 0 and profile[1:].max() < 1.0:  # -1 per match: Only the empty alignment
+                problems.append(f"penalty -1 kept {counts[-1]} matches")
+            n_runs += 1
+            if problems:
+                n_bad += 1
+                if n_bad <= 5:
+                    print(f"  [FAIL] {name} general={general} global_exact={exact} M={M} {sim.shape}: {problems[:2]}")
+
+    # The rule, by hand
+    profile = np.array([0.0, 0.5, 0.8, 0.9, 0.95, -np.inf])
+    for penalty, fraction, chosen in ((-0.0, None, 4), (-0.08, None, 3), (-0.12, None, 2), (-0.35, None, 1), (-0.6, None, 0),
+                                      (-0.0, 0.9, 3), (-0.0, 0.8, 2), (-0.0, 0.5, 1), (-0.08, 0.5, 1)):
+        if new._select_match_count(profile, penalty, fraction) != chosen:
+            n_bad += 1
+            print(f"  [FAIL] rule: penalty {penalty} fraction {fraction}")
+
+    # Wrappers: One more output, only when asked; the composite keeps fewer subunits as the penalty
+    # grows. Without global_exact, a profile keeps one alignment per cell and F_total: without
+    # penalties (the composite's defaults), that is exact, so never below one per cell.
+    for j in range(8):
+        motif, stack = make_mixed_case(rng, 2, (3, 4)[j % 2], int(rng.integers(15, 30)))
+        base = new.run_modified_smith_waterman_composite(motif, stack)
+        out = new.run_modified_smith_waterman_composite(motif, stack, return_match_profile=True)
+        exact = new.run_modified_smith_waterman_composite(motif, stack, global_exact=True)
+        if (len(base) != 7 or len(out) != 8 or out[7][len(out[3])] != out[0] or out[0] != out[7].max()
+                or out[0] < base[0] - 1e-12 or abs(out[0] - exact[0]) > 1e-12):
+            n_bad += 1
+            print(f"  [FAIL] composite outputs {len(base)}, {len(out)}: {out[0]!r} {base[0]!r} {exact[0]!r}")
+        sizes = [len(new.run_modified_smith_waterman_composite(
+            motif, stack, match_count_penalty=penalty, return_match_profile=True)[3]) for penalty in penalties]
+        if sizes != sorted(sizes, reverse=True):
+            n_bad += 1
+            print(f"  [FAIL] composite: subunits by penalty {sizes}")
+        fingers = stack.reshape(-1, 4)
+        aligned = call_znf(new, motif, fingers, finger_length=stack.shape[1], return_match_profile=True)
+        if len(aligned) != 11 or len(call_znf(new, motif, fingers, finger_length=stack.shape[1])) != 10:
+            n_bad += 1
+            print(f"  [FAIL] alignment outputs {len(aligned)}")
+    try:
+        call_core(new, np.ones((2, 4)), np.ones(4), 2, alignment_type="global", match_count_penalty=-0.1)
+    except AssertionError:
+        pass
+    else:
+        n_bad += 1
+        print("  [FAIL] chose a number of matches for a global alignment")
+    print(f"e. number of matches: {n_runs - n_bad}/{n_runs} profiles and choices right ({len(EXACT_CONFIGS)} "
+          f"penalty configurations x general_penalty_f x global_exact); rule and wrappers "
+          f"{'ok' if n_bad == 0 else 'FAIL'}")
+    return n_bad
+
+
 def test_general_penalty(new, seed=12):
     """d. general_penalty_f by hand, the case a one-state DP gets wrong, and 'l2_norm' removed."""
     rng = np.random.default_rng(seed)
@@ -903,6 +1015,7 @@ if __name__ == "__main__":
     failures += test_new_params_noop(new)
     failures += test_exact(new)
     failures += test_one_state(new)
+    failures += test_match_count(new)
     failures += test_general_penalty(new)
     failures += test_padding(new)
     failures += test_subunit_expansion(new)
