@@ -560,22 +560,6 @@ class MotifFilterArgs:
 
 ## ATLAS-CLUSTER (COMBINE) FILTERS -------------------------------------------------------------------------------
 # Filters used by the atlas-cluster / combine stage (pipeline_chromatlas_combine.py).
-#
-# These come from combine_counts-profile.ipynb, which uses different GC/AT-bias thresholds
-# than MotifFilterArgs (used by the per-head pipeline, pipeline_chromatlas.py). They are kept in
-# a separate class so the two stages cannot silently drift into each other.
-#
-# Deltas vs MotifFilterArgs -- metric "copair_composition", operation ">":
-#   soft_filters  "7_gcbias_2": 0.45  (MotifFilterArgs: 0.4)
-#   hard_filters  "7_gcbias_2": 0.5   (MotifFilterArgs: 0.45)
-# Everything else (metrics, operations, invert / override / apply_motif / apply_cluster flags,
-# and every other threshold) is identical to MotifFilterArgs, so the groups below are derived
-# from it and only the thresholds listed above are overridden.
-#
-# DELIBERATE DEVIATION from combine_counts-profile.ipynb: flag_type stays "high-GC-AT" rather
-# than the notebook's "high-GC/AT". A "/" in flag_type reaches the cluster name / label columns
-# and raises "Motif names cannot have slashes (/) in them!" during the MoDISco HDF5 export
-# (h5py treats "/" as a path separator). See CHANGELOG 2026-08-31.
 _ATLAS_FILTER_THRESHOLD_OVERRIDES = {
     "soft_filters": {"7_gcbias_2": 0.45},   # MotifFilterArgs: 0.4
     "hard_filters": {"7_gcbias_2": 0.5},    # MotifFilterArgs: 0.45

@@ -1624,12 +1624,10 @@ def run_tf_sequential(args):
                 cwm_ij = utils_motif.trim_motif(cwm_i[j] , 0) # (L, 4), trim zeros
                 # logging.info(f"  CWM: {name_cwm}")
 
-                (msw_score, sim_score, msw_aligned_b1h, msw_orient, msw_align_b1h, msw_align_cwm, msw_scale_f, msw_action, _, _,) = utils_composite.run_modified_smith_waterman_znf(
+                (msw_score, sim_score, msw_aligned_b1h, msw_orient, msw_align_b1h, msw_align_cwm, msw_scale_f, msw_action, _, _,) = utils_composite.run_modified_smith_waterman_alignment(
                     cwm=cwm_ij,
                     b1h_ppm_ic=b1h_ppm_ic_i,
                     sim_threshold=SmithWatermanArgs.msw_sim_threshold,
-                    overlap_penalty_l1=SmithWatermanArgs.overlap_penalty_l1, 
-                    overlap_penalty_l2=SmithWatermanArgs.overlap_penalty_l2,
                     overlap_penalty_f1=SmithWatermanArgs.overlap_penalty_f1,
                     overlap_penalty_f2=SmithWatermanArgs.overlap_penalty_f2,
                     skip_penalty_f1=SmithWatermanArgs.skip_penalty_f1, 
@@ -3335,12 +3333,10 @@ def run_tf_sequential(args):
                 cwm_ij = utils_motif.trim_motif(cwm_i[j] , 0) # (L, 4), trim zeros
                 logging.info(f"  CWM: {name_cwm}")
                 
-                (msw_score, sim_score, msw_aligned_b1h, msw_orient, msw_align_b1h, msw_align_cwm, msw_scale_f, msw_action, _, _) = utils_composite.run_modified_smith_waterman_znf(
+                (msw_score, sim_score, msw_aligned_b1h, msw_orient, msw_align_b1h, msw_align_cwm, msw_scale_f, msw_action, _, _) = utils_composite.run_modified_smith_waterman_alignment(
                     cwm=cwm_ij,
                     b1h_ppm_ic=b1h_ppm_ic_i,
                     sim_threshold=SmithWatermanArgs.msw_sim_threshold,
-                    overlap_penalty_l1=SmithWatermanArgs.overlap_penalty_l1, 
-                    overlap_penalty_l2=SmithWatermanArgs.overlap_penalty_l2,
                     overlap_penalty_f1=SmithWatermanArgs.overlap_penalty_f1,
                     overlap_penalty_f2=SmithWatermanArgs.overlap_penalty_f2,
                     skip_penalty_f1=SmithWatermanArgs.skip_penalty_f1, 
@@ -5327,8 +5323,6 @@ def run_tf_sequential(args):
         "msw_action_col": SmithWatermanArgs.msw_action_col,
         "msw_logo_col": SmithWatermanArgs.msw_logo_col,
         "msw_sim_threshold": SmithWatermanArgs.msw_sim_threshold,
-        "overlap_penalty_l1": SmithWatermanArgs.overlap_penalty_l1,
-        "overlap_penalty_l2": SmithWatermanArgs.overlap_penalty_l2,
         "overlap_penalty_f1": SmithWatermanArgs.overlap_penalty_f1,
         "overlap_penalty_f2": SmithWatermanArgs.overlap_penalty_f2,
         "skip_penalty_f1": SmithWatermanArgs.skip_penalty_f1,
