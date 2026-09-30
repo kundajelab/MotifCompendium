@@ -9,7 +9,7 @@ frozen 3 bp core is still the original algorithm.
 
 SNAPSHOT_COMPOSITE is a composite.py from before the exact state DP and the target padding
 (one arrangement per cell, current API otherwise). Where the scoring did not change (zero
-penalties, general_penalty_f off), results are checked bit for bit against it, feeding it the
+penalties, no rescaling), results are checked bit for bit against it, feeding it the
 target padded as the current code pads it, with and without global_exact.
 """
 
@@ -128,6 +128,11 @@ def call_general(mod, motif, fingers, M, **kwargs):
         target_motif=motif, subunit_motif_stack=unroll(fingers, M), **params)
 
 
+def rooted(p, general):
+    """p, with the root of the rescaling: p's (2 by default) when general, else 0 (no rescaling)."""
+    return dict(p, general_penalty_root=p.get("general_penalty_root", 2) if general else 0)
+
+
 def call_core(mod, sim, scale, M, **kwargs):
     """The DP core alone, on given similarities (one orientation)."""
     F, N = sim.shape
@@ -224,10 +229,10 @@ def test_degenerate(new):
     for name, motif, fingers in cases:
         for config, general, exact in itertools.product((NEUTRAL, ZERO), (False, True), (False, True)):
             try:
-                out = call_znf(new, motif, fingers, general_penalty_f=general, global_exact=exact, **config)
+                out = call_znf(new, motif, fingers, global_exact=exact, **rooted(config, general))
                 assert not np.isnan(out[0]) and not np.isnan(out[1]), "NaN score"
-                new.run_modified_smith_waterman_composite(motif, unroll(fingers, 3), general_penalty_f=general,
-                                                          global_exact=exact, **config)
+                new.run_modified_smith_waterman_composite(motif, unroll(fingers, 3), global_exact=exact,
+                                                          **rooted(config, general))
             except Exception as exc:
                 print(f"  [FAIL] {name} general={general} global_exact={exact}: {type(exc).__name__}: {exc}")
                 n_fail += 1
@@ -236,7 +241,7 @@ def test_degenerate(new):
 
 
 def test_matches_snapshot(new, snap, n_cases=40, seed=4):
-    """2. Where the scoring did not change (zero penalties, general_penalty_f off), every path
+    """2. Where the scoring did not change (zero penalties, no rescaling), every path
     matches the snapshot run on the padded target, bit for bit."""
     rng = np.random.default_rng(seed)
     n_diff = n_runs = 0
@@ -266,7 +271,7 @@ def test_matches_snapshot(new, snap, n_cases=40, seed=4):
         motif = rng.random((int(rng.integers(12, 30)), 4))
         b = snap.run_modified_smith_waterman_composite(pad(motif, 3), stack, **ZERO)
         for exact in (True, False):
-            a = new.run_modified_smith_waterman_composite(motif, stack, general_penalty_f=False,
+            a = new.run_modified_smith_waterman_composite(motif, stack, general_penalty_root=0,
                                                           global_exact=exact, **ZERO)
             n_runs += 1
             if not (a[0] == b[0] and abs(a[1] - b[1]) < 1e-12 and np.array_equal(a[3], b[3])
@@ -274,7 +279,7 @@ def test_matches_snapshot(new, snap, n_cases=40, seed=4):
                     and np.array_equal(a[6], b[6]) and np.array_equal(a[2], b[2][:, 2:2 + len(motif) + 4])):
                 n_diff += 1
                 print(f"  [diff] composite global_exact={exact}")
-    print(f"2. vs snapshot on the padded target (zero penalties, general_penalty_f off), 5 paths x "
+    print(f"2. vs snapshot on the padded target (zero penalties, no rescaling), 5 paths x "
           f"global_exact: {n_runs - n_diff}/{n_runs} identical")
     return n_diff
 
@@ -340,10 +345,10 @@ def core_problems(new, out, sim, scale, M, p, general):
 def test_exact(new, n_cases=90, seed=11):
     """a. With global_exact, the DP is exact: its score is the best over every chain of matches
     (brute force), and its matches re-score to it, for every penalty configuration, with and
-    without general_penalty_f. Its state at the optimum decomposes the score."""
+    without the rescaling (general_penalty_root). Its state at the optimum decomposes the score."""
     n_bad = n_runs = 0
     for name, p, general, M, sim, scale, best in brute_force_cases(n_cases, seed):
-        out = call_core(new, sim, scale, M, general_penalty_f=general, return_matrices=True, **dict(p))
+        out = call_core(new, sim, scale, M, return_matrices=True, **rooted(p, general))
         problems = core_problems(new, out, sim, scale, M, p, general)
         if abs(out[0] - best) > 1e-12:
             problems.append(f"score {out[0]!r}, best chain {best!r}")
@@ -353,19 +358,18 @@ def test_exact(new, n_cases=90, seed=11):
             if n_bad <= 5:
                 print(f"  [FAIL] {name} general={general} M={M} {sim.shape}: {problems}")
     print(f"a. exact DP: {n_runs - n_bad}/{n_runs} optimal (brute force), re-scored and decomposed, "
-          f"{len(EXACT_CONFIGS)} penalty configurations x general_penalty_f")
+          f"{len(EXACT_CONFIGS)} penalty configurations x rescaling")
     return n_bad
 
 
 def test_one_state(new, n_cases=90, seed=11):
     """b. Without global_exact (one alignment per cell): never above the best chain, consistent,
     and the exact result whenever no penalty depends on the state (zero penalties, no
-    general_penalty_f). How often it misses the best alignment is reported."""
+    no rescaling). How often it misses the best alignment is reported."""
     n_bad = n_runs = 0
     missed, worst = {}, {}
     for name, p, general, M, sim, scale, best in brute_force_cases(n_cases, seed):
-        out = call_core(new, sim, scale, M, general_penalty_f=general, global_exact=False,
-                        return_matrices=True, **dict(p))
+        out = call_core(new, sim, scale, M, global_exact=False, return_matrices=True, **rooted(p, general))
         problems = core_problems(new, out, sim, scale, M, p, general)
         if out[0] > best + 1e-12:
             problems.append(f"score {out[0]!r} above the best chain {best!r}")
@@ -416,7 +420,7 @@ def test_match_count(new, n_cases=60, seed=14):
         sim = rng.random((F, N)) * 1.6 - 0.4
         scale = rng.random(N) * 0.5
         for (name, p), general, exact in itertools.product(EXACT_CONFIGS.items(), (False, True), (True, False)):
-            flags = dict(p, general_penalty_f=general, global_exact=exact)
+            flags = dict(rooted(p, general), global_exact=exact)
             expected = brute_force_profile(sim, scale, M, p, general)
             reachable = np.isfinite(expected)
             problems = []
@@ -515,7 +519,7 @@ def test_match_count(new, n_cases=60, seed=14):
         n_bad += 1
         print("  [FAIL] chose a number of matches for a global alignment")
     print(f"e. number of matches: {n_runs - n_bad}/{n_runs} profiles and choices right ({len(EXACT_CONFIGS)} "
-          f"penalty configurations x general_penalty_f x global_exact); rule and wrappers "
+          f"penalty configurations x rescaling x global_exact); rule and wrappers "
           f"{'ok' if n_bad == 0 else 'FAIL'}")
     return n_bad
 
@@ -536,9 +540,9 @@ def test_match_cost_and_root(new, n_cases=60, seed=15):
             problems = []
             counts = []
             for cost in (-0.0, -0.01, -0.05, -0.2, -1.0):
-                cost_run = call_core(new, sim, scale, M, general_penalty_f=general, match_penalty_f=cost, **config)
-                chosen = call_core(new, sim, scale, M, general_penalty_f=general, match_count_penalty=cost,
-                                   return_match_profile=True, **config)
+                cost_run = call_core(new, sim, scale, M, match_penalty_f=cost, **rooted(config, general))
+                chosen = call_core(new, sim, scale, M, match_count_penalty=cost, return_match_profile=True,
+                                   **rooted(config, general))
                 chain = match_chain(cost_run[2])
                 counts.append(len(chain))
                 if (chain != match_chain(chosen[2]) or abs(cost_run[0] - (chosen[0] + cost * len(chain))) > 1e-12
@@ -547,8 +551,7 @@ def test_match_cost_and_root(new, n_cases=60, seed=15):
             if counts != sorted(counts, reverse=True):
                 problems.append(f"more matches with a larger cost: {counts}")
             if general and config is ZERO:  # With penalties, a smaller root can trade them for matches
-                roots = [len(match_chain(call_core(new, sim, scale, M, general_penalty_f=True,
-                                                   general_penalty_root=root, **config)[2]))
+                roots = [len(match_chain(call_core(new, sim, scale, M, general_penalty_root=root, **config)[2]))
                          for root in (3, 2, 1.5, 1)]
                 if roots != sorted(roots, reverse=True):
                     problems.append(f"more matches with a smaller root: {roots}")
@@ -562,12 +565,12 @@ def test_match_cost_and_root(new, n_cases=60, seed=15):
     sim = np.full((3, 6), -1.0)
     sim[0, 0], sim[1, 2], sim[2, 4] = 1.0, 0.8, 0.9
     for root, expected in ((1, [(0, 0)]), (2, [(0, 0), (1, 2), (2, 4)])):  # The average: only the best
-        out = call_core(new, sim, np.ones(6), 2, general_penalty_f=True, general_penalty_root=root, **ZERO)
+        out = call_core(new, sim, np.ones(6), 2, general_penalty_root=root, **ZERO)
         if match_chain(out[2]) != expected:
             n_bad += 1
             print(f"  [FAIL] root {root}: {out[2]}")
     # A very large root is no rescaling
-    out = call_core(new, sim, np.ones(6), 2, general_penalty_f=True, general_penalty_root=1e9, **ZERO)
+    out = call_core(new, sim, np.ones(6), 2, general_penalty_root=1e9, **ZERO)
     if match_chain(out[2]) != match_chain(call_core(new, sim, np.ones(6), 2, **ZERO)[2]):
         n_bad += 1
         print(f"  [FAIL] root 1e9: {out[2]}")
@@ -579,9 +582,9 @@ def test_match_cost_and_root(new, n_cases=60, seed=15):
         if match_chain(out[2]) != expected:
             n_bad += 1
             print(f"  [FAIL] cost {cost}: {out[2]}")
-    for bad in (dict(match_penalty_f=0.1), dict(general_penalty_root=0), dict(general_penalty_root=-2)):
+    for bad in (dict(match_penalty_f=0.1), dict(general_penalty_root=-2), dict(general_penalty_root=-0.5)):
         try:
-            call_core(new, np.ones((2, 4)), np.ones(4), 2, general_penalty_f=True, **dict(ZERO, **bad))
+            call_core(new, np.ones((2, 4)), np.ones(4), 2, **{**ZERO, "general_penalty_root": 2, **bad})
         except AssertionError:
             continue
         n_bad += 1
@@ -604,7 +607,7 @@ def test_match_cost_and_root(new, n_cases=60, seed=15):
 
 def test_storage(new, seed=16):
     """g. What the DP stores: only the parts its choices need (H, or H_match and H_penalty with
-    penalties and general_penalty_f), by state for global_exact and, without it, with only the
+    penalties and a general_penalty_root), by state for global_exact and, without it, with only the
     state fields a penalty depends on; both engines store the same thing without state axes."""
     rng = np.random.default_rng(seed)
     n_bad = 0
@@ -623,8 +626,8 @@ def test_storage(new, seed=16):
             axes = {name for name, on in (("L_skip", track_l), ("F_skip", track_f), ("F_total", general)) if on}
             outs = {}
             for exact in (True, False):
-                out = call_core(new, sim, scale, M, general_penalty_f=general, global_exact=exact,
-                                return_matrices=True, **config)
+                out = call_core(new, sim, scale, M, global_exact=exact, return_matrices=True,
+                                **rooted(config, general))
                 final = out[5]
                 parts = [key for key in final if key.startswith("H")]
                 fields = {key for key in final if key in ("L_skip", "F_skip", "F_total")}
@@ -657,14 +660,14 @@ _EMPTY = ("H_match", "H_penalty_overlap_f", "H_penalty_skip_f", "H_penalty_skip_
 
 
 def test_general_penalty(new, seed=12):
-    """d. general_penalty_f by hand, the case a one-state DP gets wrong, and 'l2_norm' removed."""
+    """d. general_penalty_root by hand, the case a one-state DP gets wrong, and 'l2_norm' removed."""
     rng = np.random.default_rng(seed)
     n_bad = 0
     # Two planted one-hot fingers: (m1 + m2)/sqrt(2), and every finger scaled by 1/sqrt(2)
     for M in (2, 3, 4, 5):
         fingers, motif = plant_one_hot(rng, 2, M)
         L = len(motif)
-        out = call_general(new, motif, fingers, M, general_penalty_f=True, orientations=("for",), **ZERO)
+        out = call_general(new, motif, fingers, M, general_penalty_root=2, orientations=("for",), **ZERO)
         if (not np.isclose(out[0], 2 * (M / L) / math.sqrt(2), rtol=0, atol=1e-14)
                 or not np.allclose(out[6], M / L / math.sqrt(2), rtol=0, atol=1e-14)
                 or not np.isclose(out[1], 1.0)
@@ -676,11 +679,11 @@ def test_general_penalty(new, seed=12):
     # best alignment continues the other one: 2/sqrt(2) = 1.414 > 2.42/sqrt(3) = 1.397
     sim = np.full((3, 6), -1.0)
     sim[0, 0], sim[1, 2], sim[2, 4] = 0.42, 1.0, 1.0
-    out = call_core(new, sim, np.ones(6), 2, general_penalty_f=True, **ZERO)
+    out = call_core(new, sim, np.ones(6), 2, general_penalty_root=2, **ZERO)
     if abs(out[0] - math.sqrt(2)) > 1e-15 or match_chain(out[2]) != [(1, 2), (2, 4)]:
         n_bad += 1
         print(f"  [FAIL] one-state trap: {out[0]!r} {out[2]}")
-    out = call_core(new, sim, np.ones(6), 2, general_penalty_f=True, global_exact=False, **ZERO)
+    out = call_core(new, sim, np.ones(6), 2, general_penalty_root=2, global_exact=False, **ZERO)
     if abs(out[0] - 2.42 / math.sqrt(3)) > 1e-15 or match_chain(out[2]) != [(0, 0), (1, 2), (2, 4)]:
         n_bad += 1
         print(f"  [FAIL] one-state trap without global_exact: {out[0]!r} {out[2]}")
@@ -699,7 +702,7 @@ def test_general_penalty(new, seed=12):
                 continue
             n_bad += 1
             print(f"  [FAIL] {label} accepted {spelling!r}")
-    print(f"d. general_penalty_f: hand cases, the one-state trap, 'l2_norm' rejected: "
+    print(f"d. general_penalty_root: hand cases, the one-state trap, 'l2_norm' rejected: "
           f"{'ok' if n_bad == 0 else f'{n_bad} failures'}")
     return n_bad
 
@@ -718,7 +721,7 @@ def test_padding(new):
             L = len(target)
             out = new.run_modified_smith_waterman_composite(
                 target, s[None], sim_threshold=0.5 / math.sqrt(M), max_homo_subunits=2,
-                allow_reverse_order=False, allow_reverse_comp=False, general_penalty_f=False, **{
+                allow_reverse_order=False, allow_reverse_comp=False, general_penalty_root=0, **{
                     k: v for k, v in ZERO.items() if k != "sim_threshold"})
             (_, _, stack, idx, rc, h, _) = out
             if list(h) != [0, L + M - 2] or stack.shape != (2, L + 2 * M - 2, 4):
@@ -778,8 +781,8 @@ def track_violations(align_f, align_l, actions, F, M, L):
 def test_alignment_tracks(new, n_cases=200, seed=6):
     """7. The alignment tracks line up with the placements, on every path and penalty mode."""
     rng = np.random.default_rng(seed)
-    modes = [dict(), ZERO, dict(ZERO, general_penalty_f=True), dict(global_exact=False),
-             dict(general_penalty_f=True, global_exact=False)]
+    modes = [dict(), ZERO, dict(ZERO, general_penalty_root=2), dict(global_exact=False),
+             dict(general_penalty_root=2, global_exact=False)]
     n_bad = n_runs = n_overlap = 0
     for i in range(n_cases):
         M = (3, 3, 2, 4, 5)[i % 5]
@@ -880,7 +883,7 @@ def planted_problems(new, subunits, target, expected, **kwargs):
     problems = []
     if not idx.dtype.kind == rc.dtype.kind == h.dtype.kind == "i":
         problems.append("subunit indices / orientations / positions are not integers")
-    rescale = 1 / math.sqrt(len(expected)) if kwargs.get("general_penalty_f", True) and expected else 1.0
+    rescale = 1 / math.sqrt(len(expected)) if kwargs.get("general_penalty_root", 2) != 0 and expected else 1.0
     if not np.allclose(scale, M / L * rescale, rtol=0, atol=1e-14):
         problems.append(f"scale {scale}")
     placed = np.zeros((len(expected), 2 * M + L - 2, 4))
@@ -921,7 +924,7 @@ def test_subunit_expansion(new, seed=8):
             assert kwargs["orientations"] == (("for", "rev") if reverse_comp else ("for",))
             assert kwargs["place_as_matched"] is True
             assert kwargs["align_remaining"] is False
-            assert kwargs["general_penalty_f"] is True
+            assert kwargs["general_penalty_root"] == 2
             assert kwargs["global_exact"] is False
     np.testing.assert_array_equal(stack, saved)
     for copies in (0, -1, 1.5, True, "2"):
@@ -958,7 +961,7 @@ def test_subunit_expansion(new, seed=8):
         target = np.concatenate([rc_of(a) if r else a for r in planted])
         for general in (True, False):
             check(f"planted={planted}", a[None], target, [(0, r, 4 * i) for i, r in enumerate(expected)],
-                  max_homo_subunits=copies, allow_reverse_order=False, general_penalty_f=general)
+                  max_homo_subunits=copies, allow_reverse_order=False, general_penalty_root=2 if general else 0)
     # Without reverse complements: Only the forward matches
     check("no reverse complements", a[None], np.concatenate([a, rc_of(a), a]), [(0, 0, 0), (0, 0, 8)],
           max_homo_subunits=2, allow_reverse_order=False, allow_reverse_comp=False)
@@ -1057,11 +1060,11 @@ def test_input_subunit_outputs(new, n_cases=48, seed=10):
         expanded, stack_subunit, stack_rc = expand(stack, copies, reverse_order, reverse_comp)
         for cfg, general, exact in configs[:4] if i % 3 else configs:  # Exact, penalties, general: 1 in 3
             out = new.run_modified_smith_waterman_composite(
-                motif, stack, max_homo_subunits=copies, general_penalty_f=general, global_exact=exact,
+                motif, stack, max_homo_subunits=copies, general_penalty_root=2 if general else 0, global_exact=exact,
                 allow_reverse_order=reverse_order, allow_reverse_comp=reverse_comp, **cfg)
             core = dict(target_motif=motif, subunit_motif_stack=expanded, return_matrices=False, label_unsigned=True,
                         orientations=("for", "rev") if reverse_comp else ("for",), align_remaining=False,
-                        general_penalty_f=general, global_exact=exact, **cfg)
+                        general_penalty_root=2 if general else 0, global_exact=exact, **cfg)
             ref = new._run_modified_smith_waterman(place_as_matched=True, **core)
             problems = input_subunit_problems(out, ref, motif, stack, stack_subunit, stack_rc, M)
             n_runs += 1
@@ -1099,7 +1102,7 @@ def test_composite_no_remaining(new, n_cases=20, seed=13):
         expanded, stack_subunit, stack_rc = expand(stack, 2, True, True)  # The composite's defaults
         out = new.run_modified_smith_waterman_composite(motif, stack, **cfg)
         core = dict(target_motif=motif, subunit_motif_stack=expanded, return_matrices=False, label_unsigned=True,
-                    place_as_matched=True, general_penalty_f=True, global_exact=False, **cfg)
+                    place_as_matched=True, general_penalty_root=2, global_exact=False, **cfg)
         local = new._run_modified_smith_waterman(align_remaining=False, **core)
         forced = new._run_modified_smith_waterman(align_remaining=True, **core)
         n_forced += sum("@match@" in a for a in forced[7]) > sum("@match@" in a for a in local[7])
@@ -1149,7 +1152,7 @@ def test_general_m(new, seed=2):
     for M in [2, 3, 3, 3, 4, 5]:
         motif, fingers = make_case(rng, 4, M, int(rng.integers(4 * M, 8 * M)))
         for general, exact in itertools.product((False, True), (True, False)):
-            flags = dict(general_penalty_f=general, global_exact=exact)
+            flags = dict(general_penalty_root=2 if general else 0, global_exact=exact)
             aligned = new.run_modified_smith_waterman_alignment(target_motif=motif, reference_motif=fingers,
                                                                 finger_length=M, **flags, **NEUTRAL)
             for label, other in (("generalized path", call_general(new, motif, fingers, M, **flags)),

@@ -22,7 +22,6 @@ def run_modified_smith_waterman_composite(
     skip_penalty_f1=-0.0, skip_penalty_f2=-0.0,
     skip_penalty_l1=-0.0, skip_penalty_l2=-0.0,
     match_penalty_f=-0.0,
-    general_penalty_f=True,
     general_penalty_root=2,
     global_exact=False,
     match_count_penalty=-0.0,
@@ -55,18 +54,18 @@ def run_modified_smith_waterman_composite(
         skip_penalty_f2: Penalty for each additional subunit skipped in a row - float
         skip_penalty_l1: Penalty for a gap of 1 motif position between two subunits - float
         skip_penalty_l2: Penalty for each motif position of a longer gap, but one - float
-        general_penalty_f: Rescale the summed match score by (number of subunits matched)^(-1/p),
-            p = general_penalty_root, so that every added subunit renormalizes all match scores
-            (default: True) - bool
-        general_penalty_root: p: 2 re-L2-normalizes (1/sqrt), 1 averages; a new subunit raises the
-            score only if it exceeds about 1/p of the average match (default: 2) - float > 0
+        general_penalty_root: p, to rescale the summed match score by (number of subunits
+            matched)^(-1/p), so that every added subunit renormalizes all match scores: 2
+            re-L2-normalizes them (1/sqrt), 1 averages them, and 0 turns the rescaling off. A new
+            subunit raises the score only if it exceeds about 1/p of the average match
+            (default: 2) - float >= 0
         match_penalty_f: Penalty for every subunit matched, in the score: a match must add more
             than it (match scores are normalized, so that a tiling of the target sums to about 1)
             - float <= 0
         global_exact: Find the best alignment exactly, keeping the best alignment of every state
             (motif positions and subunits skipped since the last match, subunits matched) in each
-            DP cell; otherwise keep one per cell, which is faster but, with a penalty or
-            general_penalty_f, can miss the best alignment (default: False) - bool
+            DP cell; otherwise keep one per cell, which is faster but, with a penalty or a
+            general_penalty_root, can miss the best alignment (default: False) - bool
         match_count_penalty: Penalty per subunit matched, for choosing the number of matches: keeps
             the alignment with the N that maximizes its best score with N matches +
             match_count_penalty * N (see calculate_modified_smith_waterman()) - float <= 0
@@ -91,8 +90,8 @@ def run_modified_smith_waterman_composite(
             (0: forward, 1: reverse complement) - np.array of shape (N,) of int
         aligned_subunit_alignment_h: Column of aligned_subunit_stack where each match starts
             (as oriented) - np.array of shape (N,) of int
-        aligned_subunit_scale: Scaling of each match, including 1/sqrt(N) with
-            general_penalty_f - np.array of shape (N,)
+        aligned_subunit_scale: Scaling of each match, including N^(-1/general_penalty_root)
+            - np.array of shape (N,)
         msw_profile: Best score of an alignment with exactly N matches, by N (0: empty; -inf:
             impossible) - np.array, only if return_match_profile
     '''
@@ -127,7 +126,6 @@ def run_modified_smith_waterman_composite(
         skip_penalty_l2=skip_penalty_l2,
         return_matrices=False,
         label_unsigned=label_unsigned,
-        general_penalty_f=general_penalty_f,
         general_penalty_root=general_penalty_root,
         match_penalty_f=match_penalty_f,
         global_exact=global_exact,
@@ -168,8 +166,7 @@ def run_modified_smith_waterman_alignment(
     skip_penalty_f1=-0.1, skip_penalty_f2=-0.1,
     skip_penalty_l1=-0.02, skip_penalty_l2=-0.1,
     match_penalty_f=-0.0,
-    general_penalty_f=False,
-    general_penalty_root=2,
+    general_penalty_root=0,
     global_exact=True,
     match_count_penalty=-0.0,
     match_count_fraction=1.0,
@@ -201,18 +198,18 @@ def run_modified_smith_waterman_alignment(
         skip_penalty_f2: Penalty for each additional finger skipped in a row - float
         skip_penalty_l1: Penalty for a gap of 1 CWM position between two fingers - float
         skip_penalty_l2: Penalty for each CWM position of a longer gap, but one - float
-        general_penalty_f: Rescale the summed match score by (number of fingers matched)^(-1/p),
-            p = general_penalty_root, so that every added finger renormalizes all match scores
-            (default: False) - bool
-        general_penalty_root: p: 2 re-L2-normalizes (1/sqrt), 1 averages; a new finger raises the
-            score only if it exceeds about 1/p of the average match (default: 2) - float > 0
+        general_penalty_root: p, to rescale the summed match score by (number of fingers
+            matched)^(-1/p), so that every added finger renormalizes all match scores: 2
+            re-L2-normalizes them (1/sqrt), 1 averages them, and 0 turns the rescaling off. A new
+            finger raises the score only if it exceeds about 1/p of the average match
+            (default: 0) - float >= 0
         match_penalty_f: Penalty for every finger matched, in the score: a match must add more
             than it (match scores are normalized, so that a tiling of the target sums to about 1)
             - float <= 0
         global_exact: Find the best alignment exactly, keeping the best alignment of every state
             (CWM positions and fingers skipped since the last match, fingers matched) in each DP
-            cell; otherwise keep one per cell, which is faster but, with a penalty or
-            general_penalty_f, can miss the best alignment (default: True) - bool
+            cell; otherwise keep one per cell, which is faster but, with a penalty or a
+            general_penalty_root, can miss the best alignment (default: True) - bool
         match_count_penalty: Penalty per finger matched, for choosing the number of matches: keeps
             the alignment with the N that maximizes its best score with N matches +
             match_count_penalty * N (see calculate_modified_smith_waterman()) - float <= 0
@@ -257,7 +254,6 @@ def run_modified_smith_waterman_alignment(
         skip_penalty_l2=skip_penalty_l2,
         return_matrices=return_matrices,
         label_unsigned=label_unsigned,
-        general_penalty_f=general_penalty_f,
         general_penalty_root=general_penalty_root,
         match_penalty_f=match_penalty_f,
         global_exact=global_exact,
@@ -274,8 +270,7 @@ def run_modified_smith_waterman_znf(
     skip_penalty_f1=-0.1, skip_penalty_f2=-0.1,
     skip_penalty_l1=-0.02, skip_penalty_l2=-0.1,
     match_penalty_f=-0.0,
-    general_penalty_f=False,
-    general_penalty_root=2,
+    general_penalty_root=0,
     global_exact=True,
     match_count_penalty=-0.0,
     match_count_fraction=1.0,
@@ -302,7 +297,6 @@ def run_modified_smith_waterman_znf(
         skip_penalty_f2=skip_penalty_f2,
         skip_penalty_l1=skip_penalty_l1,
         skip_penalty_l2=skip_penalty_l2,
-        general_penalty_f=general_penalty_f,
         general_penalty_root=general_penalty_root,
         match_penalty_f=match_penalty_f,
         global_exact=global_exact,
@@ -323,8 +317,7 @@ def _run_modified_smith_waterman(
     skip_penalty_l1, skip_penalty_l2,
     return_matrices,
     label_unsigned,
-    general_penalty_f=False,
-    general_penalty_root=2,
+    general_penalty_root=0,
     match_penalty_f=-0.0,
     global_exact=True,
     match_count_penalty=-0.0,
@@ -354,9 +347,9 @@ def _run_modified_smith_waterman(
         return_matrices: Also return the full DP matrices. They are large and no known caller
             reads them, so they default to None - bool
         label_unsigned: Use absolute value of motifs (unsigned) - bool
-        general_penalty_f: Rescale the match score by (number of fingers matched)^(-1/p), so that
-            every added finger renormalizes all match scores - bool
-        general_penalty_root: p, the root of the rescaling (2: 1/sqrt) - float > 0
+        general_penalty_root: p, to rescale the match score by (number of fingers matched)^(-1/p),
+            so that every added finger renormalizes all match scores (2: 1/sqrt; 0: no rescaling)
+            - float >= 0
         match_penalty_f: Penalty for every finger matched - float <= 0
         global_exact: Keep the best alignment of every state in each DP cell (exact), rather
             than one alignment per cell - bool
@@ -441,7 +434,6 @@ def _run_modified_smith_waterman(
         skip_penalty_f2=skip_penalty_f2,
         skip_penalty_l1=skip_penalty_l1,
         skip_penalty_l2=skip_penalty_l2,
-        general_penalty_f=general_penalty_f,
         general_penalty_root=general_penalty_root,
         match_penalty_f=match_penalty_f,
         global_exact=global_exact,
@@ -474,7 +466,6 @@ def _run_modified_smith_waterman(
             skip_penalty_f2=skip_penalty_f2,
             skip_penalty_l1=skip_penalty_l1,
             skip_penalty_l2=skip_penalty_l2,
-            general_penalty_f=general_penalty_f,
             general_penalty_root=general_penalty_root,
             match_penalty_f=match_penalty_f,
             global_exact=global_exact,
@@ -505,7 +496,7 @@ def _run_modified_smith_waterman(
         else:
             subunit_motif_stack_placed = subunit_motif_stack_norm
         # General finger penalty: Every finger is scaled by (number of fingers matched)^(-1/root)
-        if general_penalty_f and msw_state["F_total"] > 0:
+        if msw_state["F_total"] > 0:
             rescale_factor = _match_rescale(msw_state["F_total"], general_penalty_root)
         else:
             rescale_factor = 1.0
@@ -635,12 +626,12 @@ def _previous_state(H, A, idx_f, idx_l, initial_score):
 
 def _parse_overlap_penalty(penalty, name):
     '''
-    An overlap penalty: a number <= 0. ('l2_norm' was removed: general_penalty_f rescales the
-    match score by the number of fingers instead.)
+    An overlap penalty: a number <= 0. ('l2_norm' was removed: general_penalty_root rescales
+    the match score by the number of fingers instead.)
     '''
     if isinstance(penalty, str):
         raise ValueError(f"{name} must be a number <= 0, got {penalty!r} "
-                         f"('l2_norm' was removed; see general_penalty_f)")
+                         f"('l2_norm' was removed; see general_penalty_root)")
     assert penalty <= 0, f"{name} must be <= 0, got {penalty}"
     return penalty
 
@@ -765,7 +756,7 @@ def _state_space(
     An axis has a single value when no penalty depends on it, so zero penalties cost nothing.
 
     Of an alignment, a cell keeps only what its value needs (its parts): H, its score before
-    rescaling, or with split (general_penalty_f with penalties), H_match and H_penalty, the sum
+    rescaling, or with split (a general_penalty_root with penalties), H_match and H_penalty, the sum
     of its penalties, since only H_match is rescaled. (The four penalties of the alignment found
     are recovered from its moves: see _path_state().)
 
@@ -879,9 +870,12 @@ def _state_value(parts, weight):
 
 def _match_rescale(num_matches, general_penalty_root):
     '''
-    Weight of the match score of an alignment with num_matches matches, with general_penalty_f:
-    num_matches^(-1/general_penalty_root) (1/sqrt(num_matches) for the default root, 2).
+    Weight of the match score of an alignment with num_matches matches:
+    num_matches^(-1/general_penalty_root) (1/sqrt(num_matches) for the root 2), or 1 for the
+    root 0 (no rescaling).
     '''
+    if general_penalty_root == 0:
+        return 1.0
     if general_penalty_root == 2:
         return 1 / math.sqrt(num_matches)
     return num_matches ** (-1 / general_penalty_root)
@@ -1110,7 +1104,7 @@ def _traceback(moves_at, i, j, row, finger_length, F, L_M_1):
     return steps[::-1]
 
 
-def _path_state(steps, space, match_scores, initial_state, general_penalty_f, general_penalty_root):
+def _path_state(steps, space, match_scores, initial_state, general_penalty_root):
     '''
     H_match, the four penalty sums and F_total of an alignment, and its score, from its moves:
     each move is charged as the DP charges it (see _cell_candidates()), in order, from
@@ -1119,8 +1113,8 @@ def _path_state(steps, space, match_scores, initial_state, general_penalty_f, ge
     Returns:
         state: H_match, H_penalty_overlap_f, H_penalty_skip_f, H_penalty_skip_l,
             H_penalty_match_f and F_total - dict
-        score: H_match * r + the four penalties, r = F_total^(-1/general_penalty_root) with
-            general_penalty_f (else 1) - float
+        score: H_match * r + the four penalties, r = F_total^(-1/general_penalty_root) (1 for
+            the root 0) - float
     '''
     M = space.M
     track_l = space.shape[0] > 1
@@ -1144,7 +1138,7 @@ def _path_state(steps, space, match_scores, initial_state, general_penalty_f, ge
         elif track_l and d > 0:  # L-skip
             d += 1
     rescale = 1.0
-    if general_penalty_f and state["F_total"] > 0:
+    if state["F_total"] > 0:
         rescale = _match_rescale(state["F_total"], general_penalty_root)
     score = (state["H_match"] * rescale + state["H_penalty_overlap_f"] + state["H_penalty_skip_f"]
              + state["H_penalty_skip_l"] + state["H_penalty_match_f"])
@@ -1242,13 +1236,13 @@ def _select_match_count(msw_profile, match_count_penalty, match_count_fraction):
     return int(np.flatnonzero(penalized >= match_count_fraction * penalized.max())[0])
 
 
-def _align_all_states(finger_length, penalties, general_penalty_f, general_penalty_root, match_scores,
-                      matchable, initial_state, allow_start, num_cols, return_matrices, profile=False):
+def _align_all_states(finger_length, penalties, general_penalty_root, match_scores, matchable,
+                      initial_state, allow_start, num_cols, return_matrices, profile=False):
     '''
     Best alignment of one orientation, exactly: each DP cell keeps the best alignment of every
     state (see _state_space()).
 
-    With general_penalty_f, the rescaling depends on the final F_total: without penalties, one
+    With a general_penalty_root, the rescaling depends on the final F_total: without penalties, one
     pass keeps the best H_match per F_total, rescaled at the end; with penalties, one pass per
     final F_total weighs every match by it.
 
@@ -1267,11 +1261,12 @@ def _align_all_states(finger_length, penalties, general_penalty_f, general_penal
     '''
     M = finger_length
     F, L_M_1 = match_scores.shape
-    split = general_penalty_f and any(penalties)
+    general = general_penalty_root != 0
+    split = general and any(penalties)
 
     # Passes: (F_total values, match weight, final weight by F_total, final F_total)
     num_f_total = initial_state["F_total"] + min(F, L_M_1) + 1
-    if not general_penalty_f:
+    if not general:
         passes = [(num_f_total if profile else 1, 1.0, 1.0, None)]
     elif not split:
         # No penalties: A larger H_match is better for the same F_total, so rescale at the end
@@ -1340,7 +1335,7 @@ def _one_state_row_candidates(space, parts, states, i, j0, j1, match_scores, mat
     space.shape, which covers only the states a penalty depends on).
 
     A row's value is H * rescale[F_total], or with split parts, H_match * rescale[F_total] +
-    H_penalty: with general_penalty_f, each alignment is rescaled by its own F_total.
+    H_penalty: with a general_penalty_root, each alignment is rescaled by its own F_total.
 
     Arguments:
         space: DP states - see _state_space()
@@ -1511,14 +1506,14 @@ def _one_state_matrices(space, parts, states, score):
     return score.max(axis=-1), state_final
 
 
-def _align_one_state(finger_length, penalties, general_penalty_f, general_penalty_root, match_scores,
-                     matchable, initial_state, allow_start, num_cols, return_matrices, profile=False):
+def _align_one_state(finger_length, penalties, general_penalty_root, match_scores, matchable,
+                     initial_state, allow_start, num_cols, return_matrices, profile=False):
     '''
     Best alignment of one orientation, keeping one alignment per DP cell (see
-    _one_state_row_candidates()). With general_penalty_f, each cell's alignment is rescaled by
-    its own F_total.
+    _one_state_row_candidates()). With a general_penalty_root, each cell's alignment is
+    rescaled by its own F_total.
 
-    Faster than _align_all_states(), and the same without penalties or general_penalty_f. With
+    Faster than _align_all_states(), and the same without penalties or a general_penalty_root. With
     them, the alignment a cell keeps is not always the one that continues best, so the best
     alignment can be missed.
 
@@ -1531,14 +1526,15 @@ def _align_one_state(finger_length, penalties, general_penalty_f, general_penalt
     '''
     M = finger_length
     F, L_M_1 = match_scores.shape
-    split = general_penalty_f and any(penalties)
+    general = general_penalty_root != 0
+    split = general and any(penalties)
     if profile and _state_space(M, *penalties, 1, 1.0).shape[:2] == (1, 1) and not split:
-        return _align_all_states(M, penalties, general_penalty_f, general_penalty_root, match_scores,
-                                 matchable, initial_state, allow_start, num_cols, return_matrices, profile=True)
+        return _align_all_states(M, penalties, general_penalty_root, match_scores, matchable,
+                                 initial_state, allow_start, num_cols, return_matrices, profile=True)
 
     num_f_total = initial_state["F_total"] + min(F, L_M_1) + 1
-    space = _state_space(M, *penalties, num_f_total if general_penalty_f or profile else 1, 1.0, split=split)
-    if general_penalty_f:
+    space = _state_space(M, *penalties, num_f_total if general or profile else 1, 1.0, split=split)
+    if general:
         rescale = [1.0] + [_match_rescale(n, general_penalty_root) for n in range(1, num_f_total)]
     else:
         rescale = [1.0] * num_f_total
@@ -1574,8 +1570,7 @@ def calculate_modified_smith_waterman(
     overlap_penalty_f1, overlap_penalty_f2,
     skip_penalty_f1, skip_penalty_f2,
     skip_penalty_l1, skip_penalty_l2,
-    general_penalty_f=False,
-    general_penalty_root=2,
+    general_penalty_root=0,
     match_penalty_f=-0.0,
     global_exact=True,
     match_count_penalty=-0.0,
@@ -1606,17 +1601,17 @@ def calculate_modified_smith_waterman(
     The score of an alignment is
         H = H_match * r + H_penalty_overlap_f + H_penalty_skip_f + H_penalty_skip_l + H_penalty_match_f,
     with H_match the sum of scale_factor * similarity over its matches, the four penalty sums,
-    and r = F_total^(-1/general_penalty_root) for F_total matches with general_penalty_f (else 1):
-    each added finger renormalizes all match scores (the root 2 re-L2-normalizes them; 1 averages
-    them). A new match then raises the score only if it exceeds about 1/general_penalty_root of
+    and r = F_total^(-1/general_penalty_root) for F_total matches (1 for the root 0): each added
+    finger renormalizes all match scores (the root 2 re-L2-normalizes them; 1 averages them; 0
+    leaves them). A new match then raises the score only if it exceeds about 1/general_penalty_root of
     the alignment's average match (before penalties), and n equal matches score as n^(1 - 1/root).
 
     With global_exact, the alignment found is the best one: each cell keeps the best alignment
-    of every state that decides how it can continue (see _state_space()), and with
-    general_penalty_f, r is that of the final F_total (see _align_all_states()). Without it, each
-    cell keeps only its best alignment, with its state, and r is that of the cell's own F_total
-    (see _align_one_state()): faster, and the same without penalties or general_penalty_f, but
-    with them the best alignment can be missed. Either way, the alignment is traced back by
+    of every state that decides how it can continue (see _state_space()), and r is that of the
+    final F_total (see _align_all_states()). Without it, each cell keeps only its best
+    alignment, with its state, and r is that of the cell's own F_total (see _align_one_state()):
+    faster, and the same without penalties or a general_penalty_root, but with them the best
+    alignment can be missed. Either way, the alignment is traced back by
     recomputing each move (see _cell_candidates()), so no matrix of moves is kept.
 
     The number of matches can be chosen, rather than left to the best score (local alignment
@@ -1628,7 +1623,7 @@ def calculate_modified_smith_waterman(
     ties). msw_score is its own score, unpenalized. Without global_exact, keeping one alignment
     per cell and F_total can find a better alignment than one per cell, so for a sweep of
     match_count_penalty, set return_match_profile at 0 too. Match scores are normalized (the matches
-    of a tiling of the motif sum to about 1; with general_penalty_f, their rescaled sum), so
+    of a tiling of the motif sum to about 1; with a general_penalty_root, their rescaled sum), so
     match_count_penalty = -0.02 keeps a match only if it raises the score by 0.02.
 
     Arguments:
@@ -1644,8 +1639,8 @@ def calculate_modified_smith_waterman(
         skip_penalty_f2: Penalty for each additional finger skipped in a row - float
         skip_penalty_l1: Penalty for a gap of 1 motif position - float
         skip_penalty_l2: Penalty for each motif position of a longer gap, but one - float
-        general_penalty_f: Rescale the match score by F_total^(-1/general_penalty_root) - bool
-        general_penalty_root: Root of the rescaling (2: 1/sqrt(F_total); 1: the average) - float > 0
+        general_penalty_root: Root p of the rescaling of the match score by F_total^(-1/p) (2:
+            1/sqrt(F_total); 1: the average; 0: no rescaling) - float >= 0
         match_penalty_f: Penalty for every match - float <= 0
         global_exact: Keep the best alignment of every state in each cell (exact), rather than
             one alignment per cell - bool
@@ -1693,7 +1688,7 @@ def calculate_modified_smith_waterman(
     assert M > 1
     assert L_M_1 == L - M + 1
     assert match_penalty_f <= 0
-    assert general_penalty_root > 0, f"general_penalty_root must be > 0, got {general_penalty_root}"
+    assert general_penalty_root >= 0, f"general_penalty_root must be >= 0, got {general_penalty_root}"
     local = alignment_type == "local"
     penalties = (overlap_penalty_f1, overlap_penalty_f2, skip_penalty_f1, skip_penalty_f2,
                  skip_penalty_l1, skip_penalty_l2, match_penalty_f)
@@ -1713,8 +1708,8 @@ def calculate_modified_smith_waterman(
         match_scores = scale_factor[None, :] * sim # (F, L-M+1)
         matchable = sim > sim_threshold # (F, L-M+1)
         results.append((orient, match_scores, align(
-            M, penalties, general_penalty_f, general_penalty_root, match_scores, matchable, initial_state,
-            local, L + M, return_matrices, profile=profile)))
+            M, penalties, general_penalty_root, match_scores, matchable, initial_state, local, L + M,
+            return_matrices, profile=profile)))
 
     ## Record final optimal
     msw_profile = None
@@ -1738,8 +1733,7 @@ def calculate_modified_smith_waterman(
 
     # The alignment's parts and score, from its moves (the DP keeps only what its choices need)
     rules = _state_space(M, *penalties, 1, 1.0)
-    msw_state, msw_score = _path_state(best_steps, rules, best_scores, initial_state, general_penalty_f,
-                                       general_penalty_root)
+    msw_state, msw_score = _path_state(best_steps, rules, best_scores, initial_state, general_penalty_root)
     msw_score = float(msw_score) # Final score
     msw_actions = _path_actions(best_steps, M, initial_f_idx, initial_l_idx) # Start to end
     H_final, state_final = best_matrices if return_matrices else (None, None)
@@ -2013,8 +2007,8 @@ def get_alignment_modified_smith_waterman(
         matrix_f: Finger motif matrices - np.array of shape (F, M, D)
         scale_factor: Scaling factors for each motif position - np.array of shape (L-M+1,)
         msw_actions: Optimal alignment arrangement - list of str
-        rescale_factor: Scaling of every finger, on top of scale_factor: 1/sqrt(number of
-            fingers matched) with general_penalty_f, else 1 - float
+        rescale_factor: Scaling of every finger, on top of scale_factor: (number of fingers
+            matched)^(-1/general_penalty_root), 1 for the root 0 - float
 
     Returns:
         aligned_motif_fs: Aligned finger motifs - np.array of shape (F, L, D)
