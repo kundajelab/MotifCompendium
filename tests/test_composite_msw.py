@@ -332,7 +332,7 @@ def core_problems(new, out, sim, scale, M, p, general):
     if out[0] != (state["H_match"] * rescale + state["H_penalty_overlap_f"]
                   + state["H_penalty_skip_f"] + state["H_penalty_skip_l"] + state["H_penalty_match_f"]):
         problems.append("H != H_match*r + penalties")
-    if out[4].shape != (F + 1, N + 2 * M - 1) or out[4].max() != out[0]:
+    if out[4].shape != (F + 1, N + 2 * M - 1) or abs(out[4].max() - out[0]) > 1e-12:
         problems.append(f"H_final {out[4].shape}, max {out[4].max()!r}")
     return problems
 
@@ -442,7 +442,7 @@ def test_match_count(new, n_cases=60, seed=14):
                                 return_match_profile=True, **flags)
                 chosen = new._select_match_count(out[6], penalty, fraction)
                 chain = match_chain(out[2])
-                if len(chain) != chosen or out[0] != out[6][chosen] or out[3]["F_total"] != chosen:
+                if len(chain) != chosen or abs(out[0] - out[6][chosen]) > 1e-12 or out[3]["F_total"] != chosen:
                     problems.append(f"penalty {penalty} fraction {fraction}: {len(chain)} matches, chose {chosen}")
                 elif chain and abs(chain_score(chain, sim, scale, M, p, general) - out[0]) > 1e-12:
                     problems.append("chosen alignment does not re-score to msw_score")
@@ -492,7 +492,8 @@ def test_match_count(new, n_cases=60, seed=14):
         base = new.run_modified_smith_waterman_composite(motif, stack)
         out = new.run_modified_smith_waterman_composite(motif, stack, return_match_profile=True)
         exact = new.run_modified_smith_waterman_composite(motif, stack, global_exact=True)
-        if (len(base) != 7 or len(out) != 8 or out[7][len(out[3])] != out[0] or out[0] != out[7].max()
+        if (len(base) != 7 or len(out) != 8 or abs(out[7][len(out[3])] - out[0]) > 1e-12
+                or abs(out[0] - out[7].max()) > 1e-12
                 or out[0] < base[0] - 1e-12 or abs(out[0] - exact[0]) > 1e-12):
             n_bad += 1
             print(f"  [FAIL] composite outputs {len(base)}, {len(out)}: {out[0]!r} {base[0]!r} {exact[0]!r}")
@@ -599,6 +600,60 @@ def test_match_cost_and_root(new, n_cases=60, seed=15):
     print(f"f. match cost and root: {n_runs - n_bad}/{n_runs} agree with choosing the number of matches and "
           f"shrink with the cost and the root; hand cases and wrappers {'ok' if n_bad == 0 else 'FAIL'}")
     return n_bad
+
+
+def test_storage(new, seed=16):
+    """g. What the DP stores: only the parts its choices need (H, or H_match and H_penalty with
+    penalties and general_penalty_f), by state for global_exact and, without it, with only the
+    state fields a penalty depends on; both engines store the same thing without state axes."""
+    rng = np.random.default_rng(seed)
+    n_bad = 0
+    for i in range(12):
+        M = (2, 3, 4)[i % 3]
+        F, N = int(rng.integers(2, 5)), int(rng.integers(4, 9))
+        sim = rng.random((F, N)) * 1.6 - 0.4
+        scale = rng.random(N) * 0.5
+        for config, general in itertools.product(
+                (ZERO, NEUTRAL, dict(ZERO, skip_penalty_f2=-0.3), dict(ZERO, overlap_penalty_f1=-0.1)), (False, True)):
+            track_l = any(config[k] != 0 for k in ("overlap_penalty_f1", "overlap_penalty_f2",
+                                                   "skip_penalty_l1", "skip_penalty_l2"))
+            track_f = config["skip_penalty_f1"] != config["skip_penalty_f2"]
+            split = general and any(config[k] != 0 for k in config if k != "sim_threshold")
+            names = ("H_match", "H_penalty") if split else ("H",)
+            axes = {name for name, on in (("L_skip", track_l), ("F_skip", track_f), ("F_total", general)) if on}
+            outs = {}
+            for exact in (True, False):
+                out = call_core(new, sim, scale, M, general_penalty_f=general, global_exact=exact,
+                                return_matrices=True, **config)
+                final = out[5]
+                parts = [key for key in final if key.startswith("H")]
+                fields = {key for key in final if key in ("L_skip", "F_skip", "F_total")}
+                problems = []
+                if tuple(parts) != names:
+                    problems.append(f"parts {parts}")
+                if exact and set(final["axes"]) != axes:
+                    problems.append(f"axes {set(final['axes'])}")
+                if exact and final[names[0]].shape != (F + 1, N + 2 * M - 1) + tuple(
+                        len(final["axes"][a]) for a in final["axes"]):
+                    problems.append(f"shape {final[names[0]].shape}")
+                if not exact and (fields != axes or final["axes"]
+                                  or final[names[0]].shape != (F + 1, N + 2 * M - 1)):
+                    problems.append(f"fields {fields}")
+                if set(out[3]) != set(_EMPTY) or out[3]["F_total"] != len(match_chain(out[2])):
+                    problems.append("msw_state")
+                outs[exact] = out
+                if problems:
+                    n_bad += 1
+                    print(f"  [FAIL] global_exact={exact} general={general} {config}: {problems}")
+            if not axes and not np.array_equal(outs[True][5]["H"], outs[False][5]["H"]):
+                n_bad += 1
+                print(f"  [FAIL] engines differ without state axes: {config}")
+    print(f"g. storage: parts and states as needed, same in both engines without state axes: "
+          f"{'ok' if n_bad == 0 else f'{n_bad} failures'}")
+    return n_bad
+
+
+_EMPTY = ("H_match", "H_penalty_overlap_f", "H_penalty_skip_f", "H_penalty_skip_l", "H_penalty_match_f", "F_total")
 
 
 def test_general_penalty(new, seed=12):
@@ -1124,6 +1179,7 @@ if __name__ == "__main__":
     failures += test_one_state(new)
     failures += test_match_count(new)
     failures += test_match_cost_and_root(new)
+    failures += test_storage(new)
     failures += test_general_penalty(new)
     failures += test_padding(new)
     failures += test_subunit_expansion(new)
