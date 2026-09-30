@@ -1401,7 +1401,7 @@ if __name__ == "__main__":
     mc_qc.metadata[SmithWatermanArgs.msw_orient_col] = None
     mc_qc.metadata[SmithWatermanArgs.msw_align_col] = None
     mc_qc.metadata[SmithWatermanArgs.msw_action_col] = None
-    aligned_motifs = np.zeros((mc_qc.motifs.shape[0], mc_qc.motifs.shape[1] + SmithWatermanArgs.finger_length - 1, mc_qc.motifs.shape[2]))
+    aligned_motifs = np.zeros((mc_qc.motifs.shape[0], mc_qc.motifs.shape[1] + 2 * (SmithWatermanArgs.finger_length - 1), mc_qc.motifs.shape[2]))
 
     # Per TF
     for i, row_b1h in mc_b1h.metadata.iterrows():
@@ -1427,8 +1427,8 @@ if __name__ == "__main__":
                 # logging.info(f"  CWM: {name_cwm}")
 
                 (msw_score, sim_score, msw_aligned_b1h, msw_orient, msw_align_b1h, msw_align_cwm, msw_scale_f, msw_action, _, _,) = utils_composite.run_modified_smith_waterman_alignment(
-                    cwm=cwm_ij,
-                    b1h_ppm_ic=b1h_ppm_ic_i,
+                    target_motif=cwm_ij,
+                    reference_motif=b1h_ppm_ic_i,
                     sim_threshold=SmithWatermanArgs.msw_sim_threshold,
                     overlap_penalty_f1=SmithWatermanArgs.overlap_penalty_f1,
                     overlap_penalty_f2=SmithWatermanArgs.overlap_penalty_f2,
@@ -2975,7 +2975,7 @@ if __name__ == "__main__":
     ## Run Modified Smith-Waterman
     aligned_motifs = np.zeros((
         mc_cluster_direct_beta_zf.motifs.shape[0], 
-        mc_cluster_direct_beta_zf.motifs.shape[1] + SmithWatermanArgs.finger_length - 1, 
+        mc_cluster_direct_beta_zf.motifs.shape[1] + 2 * (SmithWatermanArgs.finger_length - 1), 
         mc_cluster_direct_beta_zf.motifs.shape[2]
     ))
 
@@ -3000,8 +3000,8 @@ if __name__ == "__main__":
                 logging.info(f"  CWM: {name_cwm}")
                 
                 (msw_score, sim_score, msw_aligned_b1h, msw_orient, msw_align_b1h, msw_align_cwm, msw_scale_f, msw_action, _, _) = utils_composite.run_modified_smith_waterman_alignment(
-                    cwm=cwm_ij,
-                    b1h_ppm_ic=b1h_ppm_ic_i,
+                    target_motif=cwm_ij,
+                    reference_motif=b1h_ppm_ic_i,
                     sim_threshold=SmithWatermanArgs.msw_sim_threshold,
                     overlap_penalty_f1=SmithWatermanArgs.overlap_penalty_f1,
                     overlap_penalty_f2=SmithWatermanArgs.overlap_penalty_f2,
