@@ -158,7 +158,7 @@ def prepare(mod, motif, fingers, M):
 def chain_score(chain, sim, scale, M, p, general):
     """Score of a chain of matches (finger, motif position), by the documented rules."""
     raw = sum(scale[w] * sim[f, w] for f, w in chain)
-    penalty = 0.0
+    penalty = p.get("match_penalty_f", 0.0) * len(chain)
     for (fa, wa), (fb, wb) in zip(chain, chain[1:]):
         d, g = wb - wa, fb - fa - 1
         if d < M:  # Overlap of M - d bp
@@ -169,7 +169,7 @@ def chain_score(chain, sim, scale, M, p, general):
             penalty += (d - M - 1) * p["skip_penalty_l2"]
         if g >= 1:  # Run of g skipped fingers
             penalty += p["skip_penalty_f1"] + (g - 1) * p["skip_penalty_f2"]
-    return (raw / math.sqrt(len(chain)) if general else raw) + penalty
+    return (raw * len(chain) ** (-1 / p.get("general_penalty_root", 2)) if general else raw) + penalty
 
 
 def match_chain(actions):
@@ -288,6 +288,11 @@ EXACT_CONFIGS = {
     "l1 only": dict(ZERO, skip_penalty_l1=-0.1),
     "f-skip": dict(ZERO, skip_penalty_f1=-0.05, skip_penalty_f2=-0.3),
     "threshold": dict(NEUTRAL, sim_threshold=0.5),
+    "match cost": dict(ZERO, match_penalty_f=-0.05),
+    "match cost, neutral": dict(NEUTRAL, match_penalty_f=-0.02),
+    "root 1": dict(ZERO, general_penalty_root=1),
+    "root 1.5, neutral": dict(NEUTRAL, general_penalty_root=1.5),
+    "root 3, match cost": dict(ZERO, general_penalty_root=3, match_penalty_f=-0.02),
 }
 
 
@@ -310,20 +315,22 @@ def brute_force_cases(n_cases, seed):
             yield name, p, general, M, sim, scale, best
 
 
-def core_problems(out, sim, scale, M, p, general):
+def core_problems(new, out, sim, scale, M, p, general):
     """Ways a core's output is inconsistent: its matches must re-score to msw_score, and its
     state at the optimum must decompose it."""
     F, N = sim.shape
     chain = match_chain(out[2])
     state = out[3]
-    rescale = 1 / math.sqrt(state["F_total"]) if general and state["F_total"] > 0 else 1.0
+    rescale = 1.0
+    if general and state["F_total"] > 0:
+        rescale = new._match_rescale(state["F_total"], p.get("general_penalty_root", 2))
     problems = []
     if chain and abs(chain_score(chain, sim, scale, M, p, general) - out[0]) > 1e-12:
         problems.append("matches do not re-score to msw_score")
     if state["F_total"] != len(chain):
         problems.append(f"F_total {state['F_total']} for {len(chain)} matches")
     if out[0] != (state["H_match"] * rescale + state["H_penalty_overlap_f"]
-                  + state["H_penalty_skip_f"] + state["H_penalty_skip_l"]):
+                  + state["H_penalty_skip_f"] + state["H_penalty_skip_l"] + state["H_penalty_match_f"]):
         problems.append("H != H_match*r + penalties")
     if out[4].shape != (F + 1, N + 2 * M - 1) or out[4].max() != out[0]:
         problems.append(f"H_final {out[4].shape}, max {out[4].max()!r}")
@@ -337,7 +344,7 @@ def test_exact(new, n_cases=90, seed=11):
     n_bad = n_runs = 0
     for name, p, general, M, sim, scale, best in brute_force_cases(n_cases, seed):
         out = call_core(new, sim, scale, M, general_penalty_f=general, return_matrices=True, **dict(p))
-        problems = core_problems(out, sim, scale, M, p, general)
+        problems = core_problems(new, out, sim, scale, M, p, general)
         if abs(out[0] - best) > 1e-12:
             problems.append(f"score {out[0]!r}, best chain {best!r}")
         n_runs += 1
@@ -359,7 +366,7 @@ def test_one_state(new, n_cases=90, seed=11):
     for name, p, general, M, sim, scale, best in brute_force_cases(n_cases, seed):
         out = call_core(new, sim, scale, M, general_penalty_f=general, global_exact=False,
                         return_matrices=True, **dict(p))
-        problems = core_problems(out, sim, scale, M, p, general)
+        problems = core_problems(new, out, sim, scale, M, p, general)
         if out[0] > best + 1e-12:
             problems.append(f"score {out[0]!r} above the best chain {best!r}")
         if name == "zero" and not general:
@@ -491,6 +498,88 @@ def test_match_count(new, n_cases=60, seed=14):
     print(f"e. number of matches: {n_runs - n_bad}/{n_runs} profiles and choices right ({len(EXACT_CONFIGS)} "
           f"penalty configurations x general_penalty_f x global_exact); rule and wrappers "
           f"{'ok' if n_bad == 0 else 'FAIL'}")
+    return n_bad
+
+
+def test_match_cost_and_root(new, n_cases=60, seed=15):
+    """f. The per-match cost (match_penalty_f, in the score) and the root of the rescaling
+    (general_penalty_root): the cost keeps the alignment that choosing the number of matches
+    with the same penalty keeps (match_count_penalty), scored with it; fewer matches as the cost
+    grows or (without penalties) the root falls; and hand cases."""
+    rng = np.random.default_rng(seed)
+    n_bad = n_runs = 0
+    for i in range(n_cases):
+        M = (2, 3, 4)[i % 3]
+        F, N = int(rng.integers(1, 5)), int(rng.integers(2, 9))
+        sim = rng.random((F, N)) * 1.6 - 0.4
+        scale = rng.random(N) * 0.5
+        for config, general in itertools.product((ZERO, NEUTRAL), (False, True)):
+            problems = []
+            counts = []
+            for cost in (-0.0, -0.01, -0.05, -0.2, -1.0):
+                cost_run = call_core(new, sim, scale, M, general_penalty_f=general, match_penalty_f=cost, **config)
+                chosen = call_core(new, sim, scale, M, general_penalty_f=general, match_count_penalty=cost,
+                                   return_match_profile=True, **config)
+                chain = match_chain(cost_run[2])
+                counts.append(len(chain))
+                if (chain != match_chain(chosen[2]) or abs(cost_run[0] - (chosen[0] + cost * len(chain))) > 1e-12
+                        or abs(cost_run[3]["H_penalty_match_f"] - cost * len(chain)) > 1e-12):
+                    problems.append(f"cost {cost}: {chain} {cost_run[0]!r} vs {match_chain(chosen[2])} {chosen[0]!r}")
+            if counts != sorted(counts, reverse=True):
+                problems.append(f"more matches with a larger cost: {counts}")
+            if general and config is ZERO:  # With penalties, a smaller root can trade them for matches
+                roots = [len(match_chain(call_core(new, sim, scale, M, general_penalty_f=True,
+                                                   general_penalty_root=root, **config)[2]))
+                         for root in (3, 2, 1.5, 1)]
+                if roots != sorted(roots, reverse=True):
+                    problems.append(f"more matches with a smaller root: {roots}")
+            n_runs += 1
+            if problems:
+                n_bad += 1
+                if n_bad <= 5:
+                    print(f"  [FAIL] general={general} M={M} {sim.shape}: {problems[:2]}")
+
+    # By hand: 3 matches (1.0, 0.8, 0.9), adjacent
+    sim = np.full((3, 6), -1.0)
+    sim[0, 0], sim[1, 2], sim[2, 4] = 1.0, 0.8, 0.9
+    for root, expected in ((1, [(0, 0)]), (2, [(0, 0), (1, 2), (2, 4)])):  # The average: only the best
+        out = call_core(new, sim, np.ones(6), 2, general_penalty_f=True, general_penalty_root=root, **ZERO)
+        if match_chain(out[2]) != expected:
+            n_bad += 1
+            print(f"  [FAIL] root {root}: {out[2]}")
+    # A very large root is no rescaling
+    out = call_core(new, sim, np.ones(6), 2, general_penalty_f=True, general_penalty_root=1e9, **ZERO)
+    if match_chain(out[2]) != match_chain(call_core(new, sim, np.ones(6), 2, **ZERO)[2]):
+        n_bad += 1
+        print(f"  [FAIL] root 1e9: {out[2]}")
+    # Without the rescaling, a match is kept exactly if it adds more than the cost
+    sim = np.full((2, 4), -1.0)
+    sim[0, 0], sim[1, 2] = 0.3, 0.1
+    for cost, expected in ((-0.2, [(0, 0)]), (-0.05, [(0, 0), (1, 2)]), (-0.5, [])):
+        out = call_core(new, sim, np.ones(4), 2, match_penalty_f=cost, **ZERO)
+        if match_chain(out[2]) != expected:
+            n_bad += 1
+            print(f"  [FAIL] cost {cost}: {out[2]}")
+    for bad in (dict(match_penalty_f=0.1), dict(general_penalty_root=0), dict(general_penalty_root=-2)):
+        try:
+            call_core(new, np.ones((2, 4)), np.ones(4), 2, general_penalty_f=True, **dict(ZERO, **bad))
+        except AssertionError:
+            continue
+        n_bad += 1
+        print(f"  [FAIL] accepted {bad}")
+
+    # Wrappers: The composite keeps fewer subunits as the cost grows (exactly: global_exact)
+    for j in range(4):
+        motif, stack = make_mixed_case(rng, 2, 3, int(rng.integers(15, 25)))
+        sizes = [len(new.run_modified_smith_waterman_composite(motif, stack, match_penalty_f=cost, global_exact=True)[3])
+                 for cost in (-0.0, -0.02, -0.1)]
+        sizes_root = [len(new.run_modified_smith_waterman_composite(motif, stack, general_penalty_root=root,
+                                                                    global_exact=True)[3]) for root in (2, 1.5, 1)]
+        if sizes != sorted(sizes, reverse=True) or sizes_root != sorted(sizes_root, reverse=True):
+            n_bad += 1
+            print(f"  [FAIL] composite: subunits by cost {sizes}, by root {sizes_root}")
+    print(f"f. match cost and root: {n_runs - n_bad}/{n_runs} agree with choosing the number of matches and "
+          f"shrink with the cost and the root; hand cases and wrappers {'ok' if n_bad == 0 else 'FAIL'}")
     return n_bad
 
 
@@ -1016,6 +1105,7 @@ if __name__ == "__main__":
     failures += test_exact(new)
     failures += test_one_state(new)
     failures += test_match_count(new)
+    failures += test_match_cost_and_root(new)
     failures += test_general_penalty(new)
     failures += test_padding(new)
     failures += test_subunit_expansion(new)
