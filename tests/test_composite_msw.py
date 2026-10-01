@@ -241,7 +241,8 @@ def test_matches_previous(new, prev, n_cases=40, seed=17):
             runs = [("alignment", lambda mod, p: mod.run_modified_smith_waterman_alignment(
                         target_motif=motif, reference_motif=fingers, finger_length=M, **flags, **p)),
                     ("composite", lambda mod, p: mod.run_modified_smith_waterman_composite(
-                        motif, unroll(fingers, M)[:2], **flags, **p))]
+                        motif, unroll(fingers, M)[:2], **flags, **p,
+                        **({"match_count_max": None} if mod is new else {})))]
             for label, run in runs:
                 a, b = run(new, cfg), run(prev, negated(cfg))
                 n_runs += 1
@@ -384,7 +385,7 @@ def test_matches_snapshot(new, snap, n_cases=40, seed=4):
         b = snap.run_modified_smith_waterman_composite(pad(motif, 3), stack, **ZERO)
         for exact in (True, False):
             a = new.run_modified_smith_waterman_composite(motif, stack, general_penalty_root=0,
-                                                          global_exact=exact, **ZERO)
+                                                          global_exact=exact, match_count_max=None, **ZERO)
             n_runs += 1
             if not (a[0] == b[0] and abs(a[1] - b[1]) < 1e-12 and np.array_equal(a[3], b[3])
                     and np.array_equal(a[4], b[4]) and np.array_equal(a[5] + 2, b[5])
@@ -721,6 +722,86 @@ def test_match_cost_and_root(new, n_cases=60, seed=15):
     return n_bad
 
 
+def test_match_count_max(new, n_cases=60, seed=19):
+    """h. match_count_max limits the number of matches whatever the penalty and fraction: with
+    global_exact, msw_score is the best over every chain of at most that many matches (brute
+    force), minus the penalty; the profile stops at it; a limit of min(F, N) or more is no limit;
+    and the composite wrapper limits to 3 by default."""
+    rng = np.random.default_rng(seed)
+    n_bad = n_runs = 0
+    for i in range(n_cases):
+        M = (2, 3, 4)[i % 3]
+        F, N = int(rng.integers(1, 6)), int(rng.integers(2, 9))
+        sim = rng.random((F, N)) * 1.6 - 0.4
+        scale = rng.random(N) * 0.5
+        for (name, p), general in itertools.product(
+                [(k, EXACT_CONFIGS[k]) for k in ("zero", "neutral", "gap", "root 1.5, neutral")], (False, True)):
+            expected = brute_force_profile(sim, scale, M, p, general)
+            for cap, cost, exact in itertools.product((1, 2, 3), (0.0, 0.05), (True, False)):
+                out = call_core(new, sim, scale, M, match_count_max=cap, match_count_penalty=cost,
+                                return_match_profile=True, global_exact=exact, **rooted(p, general))
+                chain, profile = match_chain(out[2]), out[6]
+                n_runs += 1
+                problems = []
+                if len(chain) > cap or out[3]["F_total"] != len(chain):
+                    problems.append(f"{len(chain)} matches over the limit {cap}")
+                if len(profile) != min(F, N, cap) + 1:
+                    problems.append(f"profile of {len(profile)} for the limit {cap}")
+                capped = expected[:min(F, N, cap) + 1]
+                best = (capped - cost * np.arange(len(capped))).max()
+                if exact and (abs(out[0] - best) > 1e-12 or not np.allclose(
+                        profile[np.isfinite(capped)], capped[np.isfinite(capped)], rtol=0, atol=1e-12)):
+                    problems.append(f"score {out[0]!r}, best of at most {cap} {best!r}")
+                if not exact and out[0] > best + 1e-12:
+                    problems.append(f"score {out[0]!r} above the best of at most {cap} {best!r}")
+                if problems:
+                    n_bad += 1
+                    if n_bad <= 5:
+                        print(f"  [FAIL] {name} general={general} cap={cap} cost={cost} exact={exact} M={M} "
+                              f"{sim.shape}: {problems[:2]}")
+            # A limit of min(F, N) or more is no limit
+            for exact in (True, False):
+                free = call_core(new, sim, scale, M, return_match_profile=True, global_exact=exact, **rooted(p, general))
+                big = call_core(new, sim, scale, M, return_match_profile=True, global_exact=exact,
+                                match_count_max=min(F, N) + int(rng.integers(0, 3)), **rooted(p, general))
+                n_runs += 1
+                if free[:3] != big[:3] or not np.array_equal(free[6], big[6]):
+                    n_bad += 1
+                    print(f"  [FAIL] {name} general={general} exact={exact}: a limit of min(F, N) or more changed the result")
+    for bad in (0, -1, 1.5, True, "2"):
+        try:
+            call_core(new, np.ones((2, 4)), np.ones(4), 2, match_count_max=bad, **ZERO)
+        except ValueError:
+            continue
+        n_bad += 1
+        print(f"  [FAIL] accepted match_count_max={bad!r}")
+    try:
+        call_core(new, np.ones((2, 4)), np.ones(4), 2, alignment_type="global", match_count_max=2, **ZERO)
+    except AssertionError:
+        pass
+    else:
+        n_bad += 1
+        print("  [FAIL] limited the number of matches of a global alignment")
+
+    # Wrappers: The composite limits to 3 by default (here: 5 planted subunits); the alignment
+    # wrapper does not limit by default, and its limit holds for its local alignment
+    for j in range(6):
+        subunits, target, planted = plant_subunits(rng, 2, (3, 4, 5)[j % 3], 5)
+        kw = dict(sim_threshold=0.99, max_homo_subunits=5)
+        sizes = [len(new.run_modified_smith_waterman_composite(target, subunits, **kw, **extra)[3])
+                 for extra in ({}, dict(match_count_max=None), dict(match_count_max=2), dict(match_count_max=5))]
+        if sizes != [3, 5, 2, 5]:
+            n_bad += 1
+            print(f"  [FAIL] composite: matches by limit (default, None, 2, 5) {sizes}")
+    motif, fingers = make_case(rng, 6, 3, 30)
+    if differing(call_znf(new, motif, fingers), call_znf(new, motif, fingers, match_count_max=None)):
+        n_bad += 1
+        print("  [FAIL] alignment wrapper: the default is not no limit")
+    print(f"h. match_count_max: {n_runs - n_bad}/{n_runs} within the limit and optimal under it (brute force), "
+          f"no-op at min(F, N); validation and wrappers {'ok' if n_bad == 0 else 'FAIL'}")
+    return n_bad
+
+
 def test_storage(new, seed=16):
     """g. What the DP stores: only the parts its choices need (H, or H_match and H_penalty with
     penalties and a general_penalty_root), by state for global_exact and, without it, with only the
@@ -989,7 +1070,7 @@ def planted_problems(new, subunits, target, expected, **kwargs):
     """Ways the composite wrapper fails to report exactly the expected (subunit, rc, start) matches."""
     F, M, _ = subunits.shape
     L = len(target)
-    out, orient = run_composite(new, target, subunits, sim_threshold=0.99, **kwargs)
+    out, orient = run_composite(new, target, subunits, sim_threshold=0.99, **{"match_count_max": None, **kwargs})
     if len(out) != 7:
         return [f"{len(out)} outputs"], orient
     (_, sim, stack, idx, rc, h, scale) = out
@@ -1042,6 +1123,7 @@ def test_subunit_expansion(new, seed=8):
             assert kwargs["align_remaining"] is False
             assert kwargs["general_penalty_root"] == 2
             assert kwargs["global_exact"] is False
+            assert kwargs["match_count_max"] == 3
     np.testing.assert_array_equal(stack, saved)
     for copies in (0, -1, 1.5, True, "2"):
         try:
@@ -1177,7 +1259,7 @@ def test_input_subunit_outputs(new, n_cases=48, seed=10):
         for cfg, general, exact in configs[:4] if i % 3 else configs:  # Exact, penalties, general: 1 in 3
             out = new.run_modified_smith_waterman_composite(
                 motif, stack, max_homo_subunits=copies, general_penalty_root=2 if general else 0, global_exact=exact,
-                allow_reverse_order=reverse_order, allow_reverse_comp=reverse_comp, **cfg)
+                allow_reverse_order=reverse_order, allow_reverse_comp=reverse_comp, match_count_max=None, **cfg)
             core = dict(target_motif=motif, subunit_motif_stack=expanded, return_matrices=False, label_unsigned=True,
                         orientations=("for", "rev") if reverse_comp else ("for",), align_remaining=False,
                         general_penalty_root=2 if general else 0, global_exact=exact, **cfg)
@@ -1216,7 +1298,7 @@ def test_composite_no_remaining(new, n_cases=20, seed=13):
         gap = rng.random((int(rng.integers(3, 16)), 4)) * 0.05
         motif = np.concatenate([motif, gap, far, rng.random((2, 4)) * 0.05])
         expanded, stack_subunit, stack_rc = expand(stack, 2, True, True)  # The composite's defaults
-        out = new.run_modified_smith_waterman_composite(motif, stack, **cfg)
+        out = new.run_modified_smith_waterman_composite(motif, stack, match_count_max=None, **cfg)
         core = dict(target_motif=motif, subunit_motif_stack=expanded, return_matrices=False, label_unsigned=True,
                     place_as_matched=True, general_penalty_root=2, global_exact=False, **cfg)
         local = new._run_modified_smith_waterman(align_remaining=False, **core)
@@ -1302,6 +1384,7 @@ if __name__ == "__main__":
     failures += test_one_state(new)
     failures += test_match_count(new)
     failures += test_match_cost_and_root(new)
+    failures += test_match_count_max(new)
     failures += test_storage(new)
     failures += test_general_penalty(new)
     failures += test_padding(new)

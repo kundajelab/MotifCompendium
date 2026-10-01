@@ -25,6 +25,7 @@ def run_modified_smith_waterman_composite(
     global_exact=False,
     match_count_penalty=0.0,
     match_count_fraction=1.0,
+    match_count_max=3,
     return_match_profile=False,
     label_unsigned=True,
     allow_reverse_order=True,
@@ -71,6 +72,9 @@ def run_modified_smith_waterman_composite(
             calculate_modified_smith_waterman()) - float >= 0
         match_count_fraction: Keep the fewest matches whose penalized best score reaches this
             fraction of the maximum; 1 keeps the maximum (default: 1) - float in (0, 1]
+        match_count_max: Most subunits matched, whatever the penalty and fraction: the
+            alignment is the best with at most this many matches (None: no limit) (default: 3)
+            - int >= 1, or None
         return_match_profile: Also return msw_profile - bool
         label_unsigned: Use absolute value of motifs (unsigned) - bool
         allow_reverse_order: Also match the subunits in reverse order - bool
@@ -93,7 +97,7 @@ def run_modified_smith_waterman_composite(
         aligned_subunit_scale: Scaling of each match, including N^(-1/general_penalty_root)
             - np.array of shape (N,)
         msw_profile: Best score of an alignment with exactly N matches, by N (0: empty; -inf:
-            impossible) - np.array, only if return_match_profile
+            impossible; up to match_count_max) - np.array, only if return_match_profile
     '''
     if (isinstance(max_homo_subunits, (bool, np.bool_))
             or not isinstance(max_homo_subunits, (int, np.integer))
@@ -130,6 +134,7 @@ def run_modified_smith_waterman_composite(
         global_exact=global_exact,
         match_count_penalty=match_count_penalty,
         match_count_fraction=match_count_fraction,
+        match_count_max=match_count_max,
         return_match_profile=return_match_profile,
         place_as_matched=True,
         orientations=("for", "rev") if allow_reverse_comp else ("for",),
@@ -168,6 +173,7 @@ def run_modified_smith_waterman_alignment(
     global_exact=True,
     match_count_penalty=0.0,
     match_count_fraction=1.0,
+    match_count_max=None,
     return_match_profile=False,
     return_matrices=False,
     label_unsigned=True,
@@ -213,8 +219,10 @@ def run_modified_smith_waterman_alignment(
             - float >= 0
         match_count_fraction: Keep the fewest matches whose penalized best score reaches this
             fraction of the maximum; 1 keeps the maximum (default: 1) - float in (0, 1]
+        match_count_max: Most fingers matched, whatever the penalty and fraction (None: no
+            limit) (default: None) - int >= 1, or None
         return_match_profile: Also return msw_profile - bool
-            Only the local alignment is chosen: the remaining alignment still adds the fingers
+            Only the local alignment is chosen (and limited): the remaining alignment still adds the fingers
             left after it (see _run_modified_smith_waterman()).
         return_matrices: Also return the full DP matrices. They are large and no known caller
             reads them, so they default to None - bool
@@ -256,6 +264,7 @@ def run_modified_smith_waterman_alignment(
         global_exact=global_exact,
         match_count_penalty=match_count_penalty,
         match_count_fraction=match_count_fraction,
+        match_count_max=match_count_max,
         return_match_profile=return_match_profile,
     )
 
@@ -270,6 +279,7 @@ def run_modified_smith_waterman_znf(
     global_exact=True,
     match_count_penalty=0.0,
     match_count_fraction=1.0,
+    match_count_max=None,
     return_match_profile=False,
     return_matrices=False,
     label_unsigned=True,
@@ -297,6 +307,7 @@ def run_modified_smith_waterman_znf(
         global_exact=global_exact,
         match_count_penalty=match_count_penalty,
         match_count_fraction=match_count_fraction,
+        match_count_max=match_count_max,
         return_match_profile=return_match_profile,
         return_matrices=return_matrices,
         label_unsigned=label_unsigned,
@@ -316,6 +327,7 @@ def _run_modified_smith_waterman(
     global_exact=True,
     match_count_penalty=0.0,
     match_count_fraction=1.0,
+    match_count_max=None,
     return_match_profile=False,
     place_as_matched=False,
     orientations=("for", "rev"),
@@ -346,8 +358,9 @@ def _run_modified_smith_waterman(
             - float >= 0
         global_exact: Keep the best alignment of every state in each DP cell (exact), rather
             than one alignment per cell - bool
-        match_count_penalty, match_count_fraction: Choose the number of matches of the local
-            alignment (see calculate_modified_smith_waterman()) - float >= 0, float in (0, 1]
+        match_count_penalty, match_count_fraction, match_count_max: Choose (and limit) the number
+            of matches of the local alignment (see calculate_modified_smith_waterman()) - float
+            >= 0, float in (0, 1], int >= 1 or None
         return_match_profile: Also return msw_profile - bool
         place_as_matched: Place each finger in the orientation it matched in (reverse
             complemented, when msw_orient is "rev"), rather than as given. The alignment and
@@ -431,6 +444,7 @@ def _run_modified_smith_waterman(
         global_exact=global_exact,
         match_count_penalty=match_count_penalty,
         match_count_fraction=match_count_fraction,
+        match_count_max=match_count_max,
         return_match_profile=return_match_profile,
         alignment_type="local",
         orientations=orientations,
@@ -1246,8 +1260,16 @@ def _select_match_count(msw_profile, match_count_penalty, match_count_fraction):
     return int(np.flatnonzero(penalized >= match_count_fraction * penalized.max())[0])
 
 
+def _max_matches(F, L_M_1, max_count):
+    '''
+    Most matches an alignment can have: one per finger and per motif position, and at most
+    max_count (None: no limit). The F_total axis stops there, so no alignment with more is kept.
+    '''
+    return min(F, L_M_1) if max_count is None else min(F, L_M_1, max_count)
+
+
 def _align_all_states(finger_length, penalties, general_penalty_root, match_scores, matchable,
-                      initial_state, allow_start, num_cols, return_matrices, profile=False):
+                      initial_state, allow_start, num_cols, return_matrices, profile=False, max_count=None):
     '''
     Best alignment of one orientation, exactly: each DP cell keeps the best alignment of every
     state (see _state_space()).
@@ -1275,7 +1297,7 @@ def _align_all_states(finger_length, penalties, general_penalty_root, match_scor
     split = general and any(penalties)
 
     # Passes: (F_total values, match weight, final weight by F_total, final F_total)
-    num_f_total = initial_state["F_total"] + min(F, L_M_1) + 1
+    num_f_total = initial_state["F_total"] + _max_matches(F, L_M_1, max_count) + 1
     if not general:
         passes = [(num_f_total if profile else 1, 1.0, 1.0, None)]
     elif not split:
@@ -1517,7 +1539,7 @@ def _one_state_matrices(space, parts, states, score):
 
 
 def _align_one_state(finger_length, penalties, general_penalty_root, match_scores, matchable,
-                     initial_state, allow_start, num_cols, return_matrices, profile=False):
+                     initial_state, allow_start, num_cols, return_matrices, profile=False, max_count=None):
     '''
     Best alignment of one orientation, keeping one alignment per DP cell (see
     _one_state_row_candidates()). With a general_penalty_root, each cell's alignment is
@@ -1540,9 +1562,10 @@ def _align_one_state(finger_length, penalties, general_penalty_root, match_score
     split = general and any(penalties)
     if profile and _state_space(M, *penalties, 1, 1.0).shape[:2] == (1, 1) and not split:
         return _align_all_states(M, penalties, general_penalty_root, match_scores, matchable,
-                                 initial_state, allow_start, num_cols, return_matrices, profile=True)
+                                 initial_state, allow_start, num_cols, return_matrices, profile=True,
+                                 max_count=max_count)
 
-    num_f_total = initial_state["F_total"] + min(F, L_M_1) + 1
+    num_f_total = initial_state["F_total"] + _max_matches(F, L_M_1, max_count) + 1
     space = _state_space(M, *penalties, num_f_total if general or profile else 1, 1.0, split=split)
     if general:
         rescale = [1.0] + [_match_rescale(n, general_penalty_root) for n in range(1, num_f_total)]
@@ -1584,6 +1607,7 @@ def calculate_modified_smith_waterman(
     global_exact=True,
     match_count_penalty=0.0,
     match_count_fraction=1.0,
+    match_count_max=None,
     return_match_profile=False,
     alignment_type="local",
     initial_state=None,
@@ -1635,7 +1659,9 @@ def calculate_modified_smith_waterman(
     of a tiling of the motif sum to about 1; with a general_penalty_root, their rescaled sum), so
     match_count_penalty = 0.02 keeps a match only if it raises the score by more than 0.02. With
     global_exact, this is a per-match penalty in the score, found without one DP pass per final
-    number of matches.
+    number of matches. match_count_max limits N whatever the penalty and fraction: the DP keeps
+    no alignment with more matches, so msw_profile stops at it, and the alignment found is the
+    best (exactly, with global_exact) of at most match_count_max matches.
 
     Arguments:
         matrix_l: Motif matrix - np.array of shape (L, D)
@@ -1658,8 +1684,10 @@ def calculate_modified_smith_waterman(
             from msw_score - float >= 0
         match_count_fraction: Choose the fewest matches whose penalized score reaches this
             fraction of the best (1: the best) - float in (0, 1]
-        return_match_profile: Compute msw_profile even without a match count penalty or a
-            fraction below 1 - bool
+        match_count_max: Most matches, whatever the penalty and fraction (None: no limit)
+            - int >= 1, or None
+        return_match_profile: Compute msw_profile even without a match count penalty, a
+            fraction below 1 or a match_count_max - bool
         alignment_type: Type of alignment ("local" or "global") - str
         initial_state: State of the alignment that a global alignment continues: H_match, the
             three penalty sums and F_total (as msw_state); None for an empty alignment - dict
@@ -1680,8 +1708,9 @@ def calculate_modified_smith_waterman(
             _state_space()) by DP cell and state (see _state_matrices()), or without
             global_exact, by DP cell with the state fields a penalty depends on (see
             _one_state_matrices()), None unless requested - dict
-        msw_profile: Best score with exactly N matches, by N - np.array (min(F, L-M+1) + 1,),
-            None unless a match count penalty, fraction or return_match_profile
+        msw_profile: Best score with exactly N matches, by N - np.array (min(F, L-M+1,
+            match_count_max) + 1,), None unless a match count penalty, fraction, maximum or
+            return_match_profile
     '''
     assert matrix_f.shape[-1] == matrix_l.shape[-1]
     assert sim_for.shape == sim_rev.shape
@@ -1705,7 +1734,12 @@ def calculate_modified_smith_waterman(
     align = _align_all_states if global_exact else _align_one_state
     assert match_count_fraction is not None and 0 < match_count_fraction <= 1, \
         f"match_count_fraction must be in (0, 1], got {match_count_fraction}"
-    profile = return_match_profile or match_count_penalty != 0 or match_count_fraction < 1
+    if match_count_max is not None and (isinstance(match_count_max, (bool, np.bool_))
+                                        or not isinstance(match_count_max, (int, np.integer))
+                                        or match_count_max < 1):
+        raise ValueError(f"match_count_max must be a positive integer or None, got {match_count_max!r}")
+    profile = (return_match_profile or match_count_penalty != 0 or match_count_fraction < 1
+               or match_count_max is not None)
     assert local or not profile, "The number of matches is chosen for local alignment only"
 
     ## Align: Each orientation
@@ -1717,7 +1751,7 @@ def calculate_modified_smith_waterman(
         matchable = sim > sim_threshold # (F, L-M+1)
         results.append((orient, match_scores, align(
             M, penalties, general_penalty_root, match_scores, matchable, initial_state, local, L + M,
-            return_matrices, profile=profile)))
+            return_matrices, profile=profile, max_count=match_count_max)))
 
     ## Record final optimal
     msw_profile = None
