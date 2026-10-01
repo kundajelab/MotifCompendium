@@ -240,7 +240,8 @@ def test_matches_previous(new, prev, n_cases=40, seed=17):
             flags = dict(general_penalty_root=root, global_exact=exact)
             runs = [("alignment", lambda mod, p: mod.run_modified_smith_waterman_alignment(
                         target_motif=motif, reference_motif=fingers, finger_length=M, **flags, **p)),
-                    ("composite", lambda mod, p: mod.run_modified_smith_waterman_composite(
+                    ("composite", lambda mod, p: getattr(mod, "run_modified_smith_waterman_composite_fixlen",
+                                                         mod.run_modified_smith_waterman_composite)(
                         motif, unroll(fingers, M)[:2], **flags, **p,
                         **({"match_count_max": None} if mod is new else {})))]
             for label, run in runs:
@@ -298,7 +299,7 @@ def test_penalty_signs(new):
         for label, run in (
                 ("core", lambda: call_core(new, np.ones((2, 4)), np.ones(4), 2, **{name: -0.1})),
                 ("alignment", lambda: call_znf(new, motif, fingers, **{name: -0.1})),
-                ("composite", lambda: new.run_modified_smith_waterman_composite(
+                ("composite", lambda: new.run_modified_smith_waterman_composite_fixlen(
                     motif, unroll(fingers, 3), **{name: -0.1}))):
             try:
                 run()
@@ -310,7 +311,7 @@ def test_penalty_signs(new):
             n_bad += 1
             print(f"  [FAIL] {label} accepted {name}=-0.1")
     for label, run in (("alignment", lambda: call_znf(new, motif, fingers, match_penalty_f=0.1)),
-                       ("composite", lambda: new.run_modified_smith_waterman_composite(
+                       ("composite", lambda: new.run_modified_smith_waterman_composite_fixlen(
                            motif, unroll(fingers, 3), match_penalty_f=0.1))):
         try:
             run()
@@ -344,7 +345,7 @@ def test_degenerate(new):
             try:
                 out = call_znf(new, motif, fingers, global_exact=exact, **rooted(config, general))
                 assert not np.isnan(out[0]) and not np.isnan(out[1]), "NaN score"
-                new.run_modified_smith_waterman_composite(motif, unroll(fingers, 3), global_exact=exact,
+                new.run_modified_smith_waterman_composite_fixlen(motif, unroll(fingers, 3), global_exact=exact,
                                                           **rooted(config, general))
             except Exception as exc:
                 print(f"  [FAIL] {name} general={general} global_exact={exact}: {type(exc).__name__}: {exc}")
@@ -384,7 +385,7 @@ def test_matches_snapshot(new, snap, n_cases=40, seed=4):
         motif = rng.random((int(rng.integers(12, 30)), 4))
         b = snap.run_modified_smith_waterman_composite(pad(motif, 3), stack, **ZERO)
         for exact in (True, False):
-            a = new.run_modified_smith_waterman_composite(motif, stack, general_penalty_root=0,
+            a = new.run_modified_smith_waterman_composite_fixlen(motif, stack, general_penalty_root=0,
                                                           global_exact=exact, match_count_max=None, **ZERO)
             n_runs += 1
             if not (a[0] == b[0] and abs(a[1] - b[1]) < 1e-12 and np.array_equal(a[3], b[3])
@@ -609,15 +610,15 @@ def test_match_count(new, n_cases=60, seed=14):
     # penalties (the composite's defaults), that is exact, so never below one per cell.
     for j in range(8):
         motif, stack = make_mixed_case(rng, 2, (3, 4)[j % 2], int(rng.integers(15, 30)))
-        base = new.run_modified_smith_waterman_composite(motif, stack)
-        out = new.run_modified_smith_waterman_composite(motif, stack, return_match_profile=True)
-        exact = new.run_modified_smith_waterman_composite(motif, stack, global_exact=True)
+        base = new.run_modified_smith_waterman_composite_fixlen(motif, stack)
+        out = new.run_modified_smith_waterman_composite_fixlen(motif, stack, return_match_profile=True)
+        exact = new.run_modified_smith_waterman_composite_fixlen(motif, stack, global_exact=True)
         if (len(base) != 7 or len(out) != 8 or abs(out[7][len(out[3])] - out[0]) > 1e-12
                 or abs(out[0] - out[7].max()) > 1e-12
                 or out[0] < base[0] - 1e-12 or abs(out[0] - exact[0]) > 1e-12):
             n_bad += 1
             print(f"  [FAIL] composite outputs {len(base)}, {len(out)}: {out[0]!r} {base[0]!r} {exact[0]!r}")
-        sizes = [len(new.run_modified_smith_waterman_composite(
+        sizes = [len(new.run_modified_smith_waterman_composite_fixlen(
             motif, stack, match_count_penalty=penalty, return_match_profile=True)[3]) for penalty in penalties]
         if sizes != sorted(sizes, reverse=True):
             n_bad += 1
@@ -710,9 +711,9 @@ def test_match_cost_and_root(new, n_cases=60, seed=15):
     # Wrappers: The composite keeps fewer subunits as the cost grows (exactly: global_exact)
     for j in range(4):
         motif, stack = make_mixed_case(rng, 2, 3, int(rng.integers(15, 25)))
-        sizes = [len(new.run_modified_smith_waterman_composite(motif, stack, match_count_penalty=cost, global_exact=True)[3])
+        sizes = [len(new.run_modified_smith_waterman_composite_fixlen(motif, stack, match_count_penalty=cost, global_exact=True)[3])
                  for cost in (0.0, 0.02, 0.1)]
-        sizes_root = [len(new.run_modified_smith_waterman_composite(motif, stack, general_penalty_root=root,
+        sizes_root = [len(new.run_modified_smith_waterman_composite_fixlen(motif, stack, general_penalty_root=root,
                                                                     global_exact=True)[3]) for root in (2, 1.5, 1)]
         if sizes != sorted(sizes, reverse=True) or sizes_root != sorted(sizes_root, reverse=True):
             n_bad += 1
@@ -788,7 +789,7 @@ def test_match_count_max(new, n_cases=60, seed=19):
     for j in range(6):
         subunits, target, planted = plant_subunits(rng, 2, (3, 4, 5)[j % 3], 5)
         kw = dict(sim_threshold=0.99, max_homo_subunits=5)
-        sizes = [len(new.run_modified_smith_waterman_composite(target, subunits, **kw, **extra)[3])
+        sizes = [len(new.run_modified_smith_waterman_composite_fixlen(target, subunits, **kw, **extra)[3])
                  for extra in ({}, dict(match_count_max=None), dict(match_count_max=2), dict(match_count_max=5))]
         if sizes != [3, 5, 2, 5]:
             n_bad += 1
@@ -825,7 +826,7 @@ def test_signed(new, seed=20):
             seen.append((x.shape[-1], y.shape[-1]))
             return core(x, y)
         with patch.object(new, "compute_aligned_similarity", side_effect=record):
-            new.run_modified_smith_waterman_composite(motif, stack, label_unsigned=unsigned)
+            new.run_modified_smith_waterman_composite_fixlen(motif, stack, label_unsigned=unsigned)
         if not seen or any(c != (channels, channels) for c in seen):
             n_bad += 1
             print(f"  [FAIL] label_unsigned={unsigned}: similarity on channels {seen}")
@@ -836,8 +837,8 @@ def test_signed(new, seed=20):
         stack = np.stack([a, b, -b])
         kw = dict(sim_threshold=0.9, max_homo_subunits=1, allow_reverse_order=False, allow_reverse_comp=False,
                   match_count_max=None)
-        signed = new.run_modified_smith_waterman_composite(target, stack, label_unsigned=False, **kw)
-        unsigned = new.run_modified_smith_waterman_composite(target, stack, label_unsigned=True, **kw)
+        signed = new.run_modified_smith_waterman_composite_fixlen(target, stack, label_unsigned=False, **kw)
+        unsigned = new.run_modified_smith_waterman_composite_fixlen(target, stack, label_unsigned=True, **kw)
         starts = list(signed[5] - (M - 1))
         if list(signed[3]) != [0, 2] or starts != [0, M + 3]:
             n_bad += 1
@@ -848,6 +849,201 @@ def test_signed(new, seed=20):
     print(f"i. label_unsigned: 8-channel signed similarity, 4-channel unsigned, signs respected: "
           f"{'ok' if n_bad == 0 else f'{n_bad} failures'}")
     return n_bad
+
+
+def overlap_cost(prev, cur, lengths, W):
+    """Summed weight of the positions of cur that prev (the previous candidate) overlaps."""
+    (c0, l0), (c, l) = prev, cur
+    end = min(l0 + lengths[c0], l + lengths[c])
+    return W[end] - W[l] if end > l else 0.0
+
+
+def brute_force_chains(scores, matchable, lengths, penalty, root, max_count, weight):
+    """Best score with exactly N matches over every chain of (candidate, start) with strictly
+    increasing starts, by N: H_match * N^(-1/root) - penalty * the weight the consecutive
+    candidates overlap."""
+    W = np.concatenate([[0.0], np.cumsum(np.concatenate([weight, np.zeros(int(max(lengths)) + 2)]))])
+    pairs = [(c, l) for c, l in zip(*np.nonzero(matchable))]
+    pairs.sort(key=lambda x: x[1])
+    top = len({l for _, l in pairs}) if max_count is None else min(len({l for _, l in pairs}), max_count)
+    profile = np.full(top + 1, -np.inf)
+    profile[0] = 0.0
+    def extend(chain, h, pen):
+        n = len(chain)
+        if n:
+            r = 1.0 if root == 0 else n ** (-1 / root)
+            profile[n] = max(profile[n], h * r - pen)
+        if n == top:
+            return
+        for c, l in pairs:
+            if chain and l <= chain[-1][1]:
+                continue
+            o = overlap_cost(chain[-1], (c, l), lengths, W) if chain else 0.0
+            extend(chain + [(c, l)], h + scores[c, l], pen + penalty * o)
+    extend([], 0.0, 0.0)
+    return profile
+
+
+def test_composite_varlen(new, seed=21):
+    """j. run_modified_smith_waterman_composite(): subunits of any lengths (motif_trim), ordered by
+    position. The chain DP is the best over every chain (brute force), by number of matches, with
+    a per-bp overlap penalty, the rescaling and a limit; untrimmed and without an overlap penalty,
+    it scores as the fixed-length wrapper with enough copies; planted composites of mixed lengths,
+    in any order, orientation and repetition, are recovered; and signed motifs, trimming and the
+    default limit of 3."""
+    import MotifCompendium.utils.motif as utils_motif
+    rng = np.random.default_rng(seed)
+    n_bad = n_runs = 0
+    # (a) The chain DP, against brute force
+    for i in range(150):
+        C, S = int(rng.integers(1, 5)), int(rng.integers(3, 9))
+        lengths = rng.integers(1, 5, size=C)
+        scores = rng.random((C, S))
+        matchable = rng.random((C, S)) < 0.5
+        penalty = (0.0, 0.05, 0.3)[i % 3]
+        root = (0, 2, 1.5)[(i // 3) % 3]
+        max_count = (None, 1, 2, 3)[(i // 9) % 4]
+        weight = np.ones(S) if i % 2 else rng.random(S)  # Per bp, or a random energy profile
+        penalty = penalty * (1 if i % 2 else 3)
+        profile, trace = new._chain_composite(scores, matchable, lengths, penalty, weight, root, max_count)
+        expected = brute_force_chains(scores, matchable, lengths, penalty, root, max_count, weight)
+        W = np.concatenate([[0.0], np.cumsum(np.concatenate([weight, np.zeros(int(max(lengths)) + 2)]))])
+        n_runs += 1
+        problems = []
+        if profile.shape != expected.shape or not np.allclose(profile, expected, rtol=0, atol=1e-12):
+            problems.append(f"profile {np.round(profile, 4)} vs brute force {np.round(expected, 4)}")
+        else:
+            for n in range(1, len(profile)):
+                if not np.isfinite(profile[n]):
+                    continue
+                chain = trace(n)
+                h = sum(scores[c, l] for c, l in chain)
+                o = sum(overlap_cost(a, b, lengths, W) for a, b in zip(chain, chain[1:]))
+                r = 1.0 if root == 0 else n ** (-1 / root)
+                if (len(chain) != n or any(not matchable[c, l] for c, l in chain)
+                        or any(b[1] <= a[1] for a, b in zip(chain, chain[1:]))
+                        or abs(h * r - penalty * o - profile[n]) > 1e-12):
+                    problems.append(f"traced chain {chain} does not re-score to {profile[n]!r}")
+        if problems:
+            n_bad += 1
+            if n_bad <= 5:
+                print(f"  [FAIL] chain C={C} S={S} p={penalty} root={root} max={max_count}: {problems[:1]}")
+    # (b) Untrimmed, no overlap penalty: as the fixed-length wrapper with enough copies
+    for i in range(24):
+        M = (3, 4)[i % 2]
+        stack = rng.random((int(rng.integers(1, 4)), M, 4)) ** 2 + 0.01
+        motif = rng.random((int(rng.integers(M + 2, 14)), 4))
+        for root in (0, 2):
+            a = new.run_modified_smith_waterman_composite(motif, stack, motif_trim=False, overlap_penalty=0.0,
+                                                          general_penalty_root=root, match_count_max=None,
+                                                          return_match_profile=True, sim_threshold=0.5)
+            b = new.run_modified_smith_waterman_composite_fixlen(motif, stack, general_penalty_root=root,
+                                                                 global_exact=True, match_count_max=None,
+                                                                 max_homo_subunits=8, return_match_profile=True,
+                                                                 sim_threshold=0.5, **ZERO_PEN)
+            n_runs += 1
+            if abs(a[0] - b[0]) > 1e-12 or len(a[3]) != len(b[3]):
+                n_bad += 1
+                if n_bad <= 8:
+                    print(f"  [FAIL] vs fixlen M={M} root={root}: {a[0]!r} ({len(a[3])}) vs {b[0]!r} ({len(b[3])})")
+    # (c) Trimming: As logo_trimming
+    stack = np.zeros((3, 8, 4))
+    stack[0, 2:5] = rng.random((3, 4)) + 0.1
+    stack[1, :8] = rng.random((8, 4)) * np.array([0.01, 1, 1, 1, 1, 1, 1, 0.01])[:, None]
+    stack[2, 1:7] = rng.random((6, 4)) + 0.05
+    for trim, expected in ((False, [8, 8, 8]), (0, [3, 8, 6]), (True, None), (0.1, None)):
+        got = [len(x) for x in new._trim_subunits(stack, trim)]
+        if expected is None:
+            threshold = 1 / 8 if trim is True else trim
+            expected = [len(utils_motif.trim_motif(stack[f], threshold)) for f in range(3)]
+        if got != expected:
+            n_bad += 1
+            print(f"  [FAIL] motif_trim={trim!r}: lengths {got}, expected {expected}")
+    for bad in (-0.1, 1.5, "1", None):
+        try:
+            new._trim_subunits(stack, bad)
+        except ValueError:
+            continue
+        n_bad += 1
+        print(f"  [FAIL] accepted motif_trim={bad!r}")
+    try:
+        new._trim_subunits(np.zeros((1, 4, 4)), 0)
+    except ValueError:
+        pass
+    else:
+        n_bad += 1
+        print("  [FAIL] accepted a subunit trimmed away entirely")
+    # (d) Planted composites of mixed lengths, in any order, orientation and repetition
+    for i in range(30):
+        M = 8
+        F = int(rng.integers(1, 4))
+        for _ in range(200):
+            subunits = [np.eye(4)[rng.integers(0, 4, size=int(rng.integers(3, M + 1)))] for _ in range(F)]
+            planted = [(int(rng.integers(F)), int(rng.random() < 0.5)) for _ in range(int(rng.integers(1, 4)))]
+            pieces = [subunits[f][::-1, ::-1] if rc else subunits[f] for f, rc in planted]
+            gaps = [int(rng.integers(0, 3)) for _ in planted]
+            target = np.concatenate([np.concatenate([np.full((g, 4), 0.0), p]) for g, p in zip(gaps, pieces)])
+            # Distinct oriented subunits, each found on the target only where it is planted
+            oriented = {(subunits[f][::-1, ::-1] if rc else subunits[f]).tobytes(): (f, rc) for f in range(F) for rc in (0, 1)}
+            sites, pos = set(), 0
+            for g, x, (f, rc) in zip(gaps, pieces, planted):
+                sites.add((f, rc, pos + g))
+                pos += g + len(x)
+            found = {(f, rc, st) for f in range(F) for rc in (0, 1)
+                     for x in [subunits[f][::-1, ::-1] if rc else subunits[f]]
+                     for st in range(len(target) - len(x) + 1) if np.array_equal(target[st:st + len(x)], x)}
+            if len(oriented) == 2 * F and {(f, st) for f, _, st in found} == {(f, st) for f, _, st in sites}:
+                break
+        stack = np.zeros((F, M, 4))
+        offsets = [int(rng.integers(0, M - len(x) + 1)) for x in subunits]
+        for f, (x, o) in enumerate(zip(subunits, offsets)):
+            stack[f, o:o + len(x)] = x
+        out = new.run_modified_smith_waterman_composite(target, stack, motif_trim=0, sim_threshold=0.99,
+                                                        overlap_penalty=1.0, match_count_max=None,
+                                                        general_penalty_root=0)  # Every planted subunit adds
+        starts, pos = [], 0
+        for g, x in zip(gaps, pieces):
+            starts.append(pos + g)
+            pos += g + len(x)
+        expected = [(f, rc, st) for (f, rc), st in zip(planted, starts)]
+        reported = [(int(f), int(rc), int(h) - (M - 1)) for f, rc, h in zip(out[3], out[4], out[5])]
+        n_runs += 1
+        # A palindromic subunit may be reported in either orientation
+        same = len(reported) == len(expected) and all(
+            r[0] == e[0] and r[2] == e[2] and (r[1] == e[1] or np.array_equal(subunits[e[0]], subunits[e[0]][::-1, ::-1]))
+            for r, e in zip(reported, expected))
+        if not same:
+            n_bad += 1
+            if n_bad <= 10:
+                print(f"  [FAIL] planted {expected}: reported {reported}")
+        elif not np.isclose(float(np.ravel(out[1])[0]), 1.0):
+            n_bad += 1
+            print(f"  [FAIL] planted {expected}: complete reconstruction has sim_score {out[1]}")
+    # (e) Signed: A positive subunit a and a negated b only match a and -b
+    for M in (3, 4, 5):
+        a, b = np.eye(4)[[0] * (M - 1) + [1]], np.eye(4)[[2] + [3] * (M - 1)]
+        target = np.concatenate([a, np.full((3, 4), 0.01), -b])
+        stack = np.stack([a, b, -b])
+        out = new.run_modified_smith_waterman_composite(target, stack, motif_trim=0, sim_threshold=0.9,
+                                                        allow_reverse_comp=False, label_unsigned=False)
+        if list(out[3]) != [0, 2] or list(out[5] - (M - 1)) != [0, M + 3]:
+            n_bad += 1
+            print(f"  [FAIL] signed M={M}: subunits {list(out[3])} at {list(out[5] - (M - 1))}")
+    # (f) At most 3 matches by default
+    x = np.eye(4)[[0, 1, 2, 3]]
+    target = np.concatenate([x] * 5)
+    out = new.run_modified_smith_waterman_composite(target, x[None], motif_trim=0, sim_threshold=0.99)
+    if len(out[3]) != 3:
+        n_bad += 1
+        print(f"  [FAIL] default limit: {len(out[3])} matches")
+    print(f"j. variable-length composite: {n_runs - n_bad}/{n_runs} chains optimal (brute force), as fixlen "
+          f"untrimmed, planted recovered; trimming, signs and the default limit "
+          f"{'ok' if n_bad == 0 else f'FAIL ({n_bad})'}")
+    return n_bad
+
+
+ZERO_PEN = dict(overlap_penalty_f1=0.0, overlap_penalty_f2=0.0, skip_penalty_f1=0.0, skip_penalty_f2=0.0,
+                skip_penalty_l1=0.0, skip_penalty_l2=0.0)
 
 
 def test_storage(new, seed=16):
@@ -939,7 +1135,7 @@ def test_general_penalty(new, seed=12):
         for label, run in (
                 ("core", lambda: call_core(new, np.ones((2, 4)), np.ones(4), 2, overlap_penalty_f1=spelling)),
                 ("alignment", lambda: call_znf(new, motif, fingers, overlap_penalty_f2=spelling)),
-                ("composite", lambda: new.run_modified_smith_waterman_composite(
+                ("composite", lambda: new.run_modified_smith_waterman_composite_fixlen(
                     motif, unroll(fingers, 3), overlap_penalty_f1=spelling))):
             try:
                 run()
@@ -964,7 +1160,7 @@ def test_padding(new):
             # has cosine 1/sqrt(M), and every other window 0
             target = np.concatenate([s[M - 1:], np.eye(4)[[3] * middle], s[:1]])
             L = len(target)
-            out = new.run_modified_smith_waterman_composite(
+            out = new.run_modified_smith_waterman_composite_fixlen(
                 target, s[None], sim_threshold=0.5 / math.sqrt(M), max_homo_subunits=2,
                 allow_reverse_order=False, allow_reverse_comp=False, general_penalty_root=0, **{
                     k: v for k, v in ZERO.items() if k != "sim_threshold"})
@@ -979,7 +1175,7 @@ def test_padding(new):
                 print(f"  [FAIL] M={M} L={L}: overhanging bp misplaced")
     for M, L in ((3, 1), (3, 2), (5, 3)):
         rng = np.random.default_rng(M * 10 + L)
-        out = new.run_modified_smith_waterman_composite(rng.random((L, 4)), rng.random((2, M, 4)))
+        out = new.run_modified_smith_waterman_composite_fixlen(rng.random((L, 4)), rng.random((2, M, 4)))
         aligned = call_znf(new, rng.random((L, 4)), rng.random((2 * M, 4)), finger_length=M)
         if out[2].shape[1:] != (L + 2 * M - 2, 4) or aligned[2].shape != (2, L + 2 * M - 2, 4):
             n_bad += 1
@@ -1110,7 +1306,7 @@ def run_composite(new, target, subunits, **kwargs):
         return cores[-1]
 
     with patch.object(new, "_run_modified_smith_waterman", side_effect=record):
-        out = new.run_modified_smith_waterman_composite(target, subunits, **kwargs)
+        out = new.run_modified_smith_waterman_composite_fixlen(target, subunits, **kwargs)
     return out, cores[-1][3]
 
 
@@ -1154,7 +1350,7 @@ def test_subunit_expansion(new, seed=8):
         for reverse_order, reverse_comp in itertools.product((False, True), repeat=2):
             with patch.object(new, "_run_modified_smith_waterman", side_effect=Captured) as run:
                 try:
-                    new.run_modified_smith_waterman_composite(
+                    new.run_modified_smith_waterman_composite_fixlen(
                         np.ones((10, 4)), stack, max_homo_subunits=copies,
                         allow_reverse_order=reverse_order, allow_reverse_comp=reverse_comp)
                 except Captured:
@@ -1175,7 +1371,7 @@ def test_subunit_expansion(new, seed=8):
     np.testing.assert_array_equal(stack, saved)
     for copies in (0, -1, 1.5, True, "2"):
         try:
-            new.run_modified_smith_waterman_composite(np.ones((10, 4)), stack, max_homo_subunits=copies)
+            new.run_modified_smith_waterman_composite_fixlen(np.ones((10, 4)), stack, max_homo_subunits=copies)
         except ValueError:
             pass
         else:
@@ -1305,7 +1501,7 @@ def test_input_subunit_outputs(new, n_cases=48, seed=10):
         motif, stack = make_mixed_case(rng, F, M, int(rng.integers(max(M + 1, 12), 40)))
         expanded, stack_subunit, stack_rc = expand(stack, copies, reverse_order, reverse_comp)
         for cfg, general, exact in configs[:4] if i % 3 else configs:  # Exact, penalties, general: 1 in 3
-            out = new.run_modified_smith_waterman_composite(
+            out = new.run_modified_smith_waterman_composite_fixlen(
                 motif, stack, max_homo_subunits=copies, general_penalty_root=2 if general else 0, global_exact=exact,
                 allow_reverse_order=reverse_order, allow_reverse_comp=reverse_comp, match_count_max=None, **cfg)
             core = dict(target_motif=motif, subunit_motif_stack=expanded, return_matrices=False, label_unsigned=True,
@@ -1346,7 +1542,7 @@ def test_composite_no_remaining(new, n_cases=20, seed=13):
         gap = rng.random((int(rng.integers(3, 16)), 4)) * 0.05
         motif = np.concatenate([motif, gap, far, rng.random((2, 4)) * 0.05])
         expanded, stack_subunit, stack_rc = expand(stack, 2, True, True)  # The composite's defaults
-        out = new.run_modified_smith_waterman_composite(motif, stack, match_count_max=None, **cfg)
+        out = new.run_modified_smith_waterman_composite_fixlen(motif, stack, match_count_max=None, **cfg)
         core = dict(target_motif=motif, subunit_motif_stack=expanded, return_matrices=False, label_unsigned=True,
                     place_as_matched=True, general_penalty_root=2, global_exact=False, **cfg)
         local = new._run_modified_smith_waterman(align_remaining=False, **core)
@@ -1434,6 +1630,7 @@ if __name__ == "__main__":
     failures += test_match_cost_and_root(new)
     failures += test_match_count_max(new)
     failures += test_signed(new)
+    failures += test_composite_varlen(new)
     failures += test_storage(new)
     failures += test_general_penalty(new)
     failures += test_padding(new)
