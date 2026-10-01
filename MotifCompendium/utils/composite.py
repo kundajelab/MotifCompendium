@@ -915,16 +915,22 @@ def _row_candidates(space, parts, i, j0, j1, match_scores, matchable):
     # Diagonal k: Match, to L_skip = 0, F_skip = 0 and F_total + 1, from the best source state
     if matchable.any():
         n_from, n_to = (slice(0, 1), slice(0, 1)) if nN == 1 else (slice(0, nN - 1), slice(1, nN))
-        for k in range(1, M + 1):
+        # Without L_skip states, the right move is free and keeps the state, so row i-1 never
+        # decreases along j: diagonal 1 is never beaten (and wins ties), so it is the only one tried
+        for k in range(1, M + 1 if nD > 1 else 2):
             candidate = parts[i - 1, j0 - k:j1 - k].copy()
             candidate[..., 0] += match_scores[:, None, None, None]
             candidate[..., pen] += space.overlap_f[k][None, :, None, None]
             candidate[..., pen] += space.skip_l[k][None, :, None, None]
             candidate[~matchable, ..., 0] = -np.inf
             candidate = candidate.reshape(n, nD * nF, nN, space.num_parts)
-            first = _state_value(candidate, space.weight).argmax(axis=1)  # By cell and F_total
-            picked = np.take_along_axis(candidate, first[:, None, :, None], axis=1)[:, 0]
-            picked_source = space.states.reshape(nD * nF, nN)[first, np.arange(nN)]
+            if nD * nF == 1:  # One source state per F_total: Nothing to choose
+                picked = candidate[:, 0]
+                picked_source = np.broadcast_to(space.states.reshape(1, nN), (n, nN))
+            else:
+                first = _state_value(candidate, space.weight).argmax(axis=1)  # By cell and F_total
+                picked = np.take_along_axis(candidate, first[:, None, :, None], axis=1)[:, 0]
+                picked_source = space.states.reshape(nD * nF, nN)[first, np.arange(nN)]
             _offer(best, cells + (space.d0, 0, n_to), picked[:, n_from], k - 1,
                    picked_source[:, n_from], space.weight)
 
@@ -1017,7 +1023,13 @@ def _fill_modified_smith_waterman(space, match_scores, matchable, initial_state,
     initial = (slice(None), slice(None), 0, 0, initial_state["F_total"] if space.shape[2] > 1 else 0)
     parts[initial] = _initial_parts(space, initial_state)
 
+    # A row that cannot match, under a free finger skip, is the row above: its cells take the
+    # cell above (down, first) or the cell to the left, which the row above already took
+    free_down = space.shape[1] == 1 and space.skip_f1 == 0
     for f in range(F):
+        if free_down and not matchable[f].any():
+            parts[f + 1] = parts[f]
+            continue
         row = _row_candidates(space, parts, f + 1, M, M + L_M_1, match_scores[f], matchable[f])
         for l in range(L_M_1):
             best = _cell_candidates(space, parts, f + 1, l + M, match_scores[f, l], matchable[f, l],
@@ -1209,10 +1221,18 @@ def _best_by_count(score):
         best_cell: Its (cell, state), by F_total - list of tuple of int
     '''
     num_n = score.shape[-1]
-    flat = score.reshape(-1, num_n)
-    rows = flat.argmax(axis=0)
+    by_row = score.reshape(score.shape[0], -1, num_n)  # DP row by DP row: argmax(axis=0) is strided
+    best = np.full(num_n, -np.inf)
+    rows = np.zeros(num_n, dtype=np.int64)
+    for i in range(by_row.shape[0]):
+        block = by_row[i]
+        row_max = block.max(axis=0)
+        better = np.flatnonzero(row_max > best)  # Strictly: The first maximum wins, as np.argmax
+        if better.size:
+            best[better] = row_max[better]
+            rows[better] = i * block.shape[0] + block[:, better].argmax(axis=0)
     best_cell = [tuple(int(x) for x in np.unravel_index(r * num_n + n, score.shape)) for n, r in enumerate(rows)]
-    return flat[rows, np.arange(num_n)], best_cell
+    return best, best_cell
 
 
 def _select_match_count(msw_profile, match_count_penalty, match_count_fraction):
