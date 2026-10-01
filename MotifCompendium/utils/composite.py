@@ -15,6 +15,173 @@ import MotifCompendium.utils.config as utils_config
 ###########################
 # MODIFIED SMITH-WATERMAN #
 ###########################
+def run_modified_smith_waterman_composite(
+    target_motif, subunit_motif_stack,
+    sim_threshold=0.0,
+    overlap_penalty=1.0,
+    general_penalty_root=2,
+    match_count_penalty=0.0,
+    match_count_fraction=1.0,
+    match_count_max=3,
+    subunit_motif_trim=True,
+    return_match_profile=False,
+    label_unsigned=True,
+    allow_reverse_comp=True,
+):
+    '''
+    Aligns a composite of subunit motifs of any lengths against a motif: each subunit is trimmed
+    to its own length (subunit_motif_trim), and the matches are ordered by position on the motif alone.
+
+    A candidate is a subunit, as given or reverse complemented (allow_reverse_comp), placed at a
+    start on the motif; it may overhang either end, overlapping the motif by as little as 1 bp.
+    An alignment is up to match_count_max candidates with strictly increasing starts: any
+    subunits, in any order and orientation, repeated or not. A candidate's match score is the
+    motif energy of its window (its own length) times its similarity to the window. Two
+    consecutive candidates (in position order) that overlap are both credited for the motif
+    energy of the overlapping positions, so the overlap costs overlap_penalty times that energy:
+    1 takes it back once. The alignment found is the best one exactly (see _chain_composite()).
+
+    run_modified_smith_waterman_composite_fixlen() aligns subunits of one fixed length instead,
+    chained in the order of an expanded stack, with the penalties of
+    run_modified_smith_waterman_alignment().
+
+    Arguments:
+        target_motif: Target motif - np.array of shape (L, D)
+        subunit_motif_stack: Stack of subunit motifs, padded to a common length M - np.array of
+            shape (F, M, D)
+        sim_threshold: Minimum similarity to consider a match - float
+        overlap_penalty: Penalty on the motif energy (of the L2-normalized motif, which sums to
+            1) of the positions that two consecutive subunits overlap, subtracted from the score:
+            1 takes back the energy both are credited for (default: 1) - float >= 0
+        general_penalty_root: p, to rescale the summed match score by (number of subunits
+            matched)^(-1/p): 2 re-L2-normalizes, 1 averages, and 0 turns the rescaling off
+            (default: 2) - float >= 0
+        match_count_penalty: Penalty per subunit matched: keeps the alignment with the N that
+            maximizes its best score with N matches - match_count_penalty * N, and subtracts
+            match_count_penalty * N from msw_score - float >= 0
+        match_count_fraction: Keep the fewest matches whose penalized best score reaches this
+            fraction of the maximum; 1 keeps the maximum (default: 1) - float in (0, 1]
+        match_count_max: Most subunits matched (None: no limit) (default: 3) - int >= 1, or None
+        return_match_profile: Also return msw_profile - bool
+        subunit_motif_trim: How to trim each subunit, as logo_trimming in
+            assign_label_from_other_compendium(): False keeps all M positions; True trims the
+            flanks at the standard threshold of 1/M; a number in [0, 1] is the threshold of
+            utils_motif.trim_motif() (0 trims only all-zero positions) (default: True)
+            - bool, float or int
+        label_unsigned: Compare the absolute values of the motifs (unsigned); if False, compare
+            the signed motifs on 8 channels, so that a negative region only matches a negative
+            subunit (default: True) - bool
+        allow_reverse_comp: Also match the subunits reverse complemented - bool
+
+    Returns:
+        msw_score: Score of the optimal alignment, minus match_count_penalty * N - float
+        sim_score: MotifCompendium similarity score of the optimal alignment - float
+        aligned_subunit_stack: Each matched subunit (trimmed), scaled, in the orientation it
+            matched in, left to right. The target spans columns M-1 to L+M-2, leaving M-1
+            columns past either end - np.array of shape (N, 2*M + L - 2, D)
+        aligned_subunit_idx: Subunit of each match, as an index into subunit_motif_stack
+            - np.array of shape (N,) of int
+        aligned_subunit_alignment_rc: Orientation of each match (0: forward, 1: reverse
+            complement) - np.array of shape (N,) of int
+        aligned_subunit_alignment_h: Column of aligned_subunit_stack where each match starts
+            (as oriented, trimmed) - np.array of shape (N,) of int
+        aligned_subunit_scale: Scaling of each match: the projection of its window on the
+            (normalized) subunit, its least-squares weight, so that subunits of any lengths
+            reconstruct the target; times N^(-1/general_penalty_root) - np.array of shape (N,)
+        msw_profile: Best score of an alignment with exactly N matches, by N (0: empty; -inf:
+            impossible), before match_count_penalty - np.array, only if return_match_profile
+    '''
+    ## Check arguments
+    F, M, D = subunit_motif_stack.shape
+    L = target_motif.shape[0]
+    overlap_penalty = _check_penalty(overlap_penalty, "overlap_penalty")
+    match_count_penalty = _check_penalty(match_count_penalty, "match_count_penalty")
+    assert general_penalty_root >= 0, f"general_penalty_root must be >= 0, got {general_penalty_root}"
+    assert match_count_fraction is not None and 0 < match_count_fraction <= 1, \
+        f"match_count_fraction must be in (0, 1], got {match_count_fraction}"
+    assert sim_threshold < 1
+    _check_match_count_max(match_count_max)
+
+    # Setting: IC-scale off (store)
+    ic_scale = utils_config.get_ic_scale()
+    if ic_scale:
+        utils_config.set_ic_scale(False)
+
+    # Unsigned: Absolute value
+    if label_unsigned:
+        target_motif = np.abs(target_motif)
+        subunit_motif_stack = np.abs(subunit_motif_stack)
+
+    ## Candidates: Each subunit, trimmed, as given and reverse complemented
+    subunits = _trim_subunits(subunit_motif_stack, subunit_motif_trim)
+    orients = (0, 1) if allow_reverse_comp else (0,)
+    cand_subunit = np.array([f for f in range(F) for _ in orients], dtype=int)
+    cand_rc = np.array([rc for _ in range(F) for rc in orients], dtype=int)
+    cand_motif = []
+    for f, rc in zip(cand_subunit, cand_rc):
+        motif = subunits[f][::-1, ::-1] if rc else subunits[f]
+        norm = np.linalg.norm(motif)
+        cand_motif.append(motif / norm if norm > 0 else motif)  # L2 normalize (all-zero subunits stay zero)
+    cand_len = np.array([len(motif) for motif in cand_motif], dtype=int)
+
+    ## Target: Pad M-1 zeros on either side, so that a subunit may overhang either end
+    target_padded = np.pad(target_motif, ((M - 1, M - 1), (0, 0)))  # (L+2M-2, D)
+    target_norm = target_padded / np.linalg.norm(target_padded)
+    num_starts = len(target_norm)
+
+    ## Similarities and match scores, by candidate and start (padded positions)
+    sim = np.zeros((len(cand_motif), num_starts))
+    energy = np.zeros((len(cand_motif), num_starts))
+    valid = np.zeros((len(cand_motif), num_starts), dtype=bool)
+    for m in np.unique(cand_len):
+        cands = np.flatnonzero(cand_len == m)
+        windows = _unroll_motif(target_norm, m, np)  # (L+2M-1-m, m, D)
+        stack_m = np.stack([cand_motif[c] for c in cands])
+        if not label_unsigned:  # 8 channels: Each base's positive and negative part apart
+            stack_m, windows_sim = utils_motif.motif_4_to_8(stack_m), utils_motif.motif_4_to_8(windows)
+        else:
+            windows_sim = windows
+        sim[cands, :len(windows)] = compute_aligned_similarity(cp.asarray(stack_m), cp.asarray(windows_sim))
+        energy[cands, :len(windows)] = (windows * windows).sum(axis=(1, 2))[None, :]
+        valid[cands, :len(windows)] = True
+    match_scores = energy * sim
+    matchable = valid & (sim > sim_threshold)
+
+    ## Align: The best alignment with N matches, for every N; then N
+    position_energy = (target_norm * target_norm).sum(axis=1)  # (L+2M-2,), sums to 1
+    msw_profile, trace = _chain_composite(match_scores, matchable, cand_len, overlap_penalty, position_energy,
+                                          general_penalty_root, match_count_max)
+    n = _select_match_count(msw_profile, match_count_penalty, match_count_fraction)
+    matches = trace(n)  # (candidate, start), left to right
+    msw_score = float(msw_profile[n] - match_count_penalty * n)
+
+    ## Aligned subunits: One per match, scaled by its projection, <s, w> = |w| * similarity
+    rescale = _match_rescale(n, general_penalty_root) if n > 0 else 1.0
+    aligned_subunit_stack = np.zeros((n, num_starts, D))
+    aligned_subunit_scale = np.zeros(n)
+    for i, (c, l) in enumerate(matches):
+        aligned_subunit_scale[i] = np.sqrt(energy[c, l]) * sim[c, l] * rescale
+        aligned_subunit_stack[i, l:l + cand_len[c]] = cand_motif[c] * aligned_subunit_scale[i]
+    aligned_subunit_idx = np.array([cand_subunit[c] for c, _ in matches], dtype=int)
+    aligned_subunit_alignment_rc = np.array([cand_rc[c] for c, _ in matches], dtype=int)
+    aligned_subunit_alignment_h = np.array([l for _, l in matches], dtype=int)
+
+    ## Similarity score: The collapsed alignment against the target
+    if n == 0:
+        sim_score = 0.0
+    else:
+        sim_score, _, _ = utils_similarity.compute_similarities(
+            [aligned_subunit_stack.sum(axis=0)[np.newaxis], target_padded[np.newaxis]], [(0, 1)])[0]
+
+    # Restore IC-scale setting
+    if ic_scale:
+        utils_config.set_ic_scale(True)
+
+    outputs = (msw_score, sim_score, aligned_subunit_stack, aligned_subunit_idx,
+               aligned_subunit_alignment_rc, aligned_subunit_alignment_h, aligned_subunit_scale)
+    return outputs + (msw_profile,) if return_match_profile else outputs
+
+
 def run_modified_smith_waterman_composite_fixlen(
     target_motif, subunit_motif_stack,
     sim_threshold=0.0,
@@ -168,174 +335,7 @@ def run_modified_smith_waterman_composite_fixlen(
             aligned_subunit_alignment_rc, aligned_subunit_alignment_h, aligned_subunit_scale) + outputs[10:]
 
 
-def run_modified_smith_waterman_composite(
-    target_motif, subunit_motif_stack,
-    motif_trim=True,
-    sim_threshold=0.0,
-    overlap_penalty=1.0,
-    general_penalty_root=2,
-    match_count_penalty=0.0,
-    match_count_fraction=1.0,
-    match_count_max=3,
-    return_match_profile=False,
-    label_unsigned=True,
-    allow_reverse_comp=True,
-):
-    '''
-    Aligns a composite of subunit motifs of any lengths against a motif: each subunit is trimmed
-    to its own length (motif_trim), and the matches are ordered by position on the motif alone.
-
-    A candidate is a subunit, as given or reverse complemented (allow_reverse_comp), placed at a
-    start on the motif; it may overhang either end, overlapping the motif by as little as 1 bp.
-    An alignment is up to match_count_max candidates with strictly increasing starts: any
-    subunits, in any order and orientation, repeated or not. A candidate's match score is the
-    motif energy of its window (its own length) times its similarity to the window. Two
-    consecutive candidates (in position order) that overlap are both credited for the motif
-    energy of the overlapping positions, so the overlap costs overlap_penalty times that energy:
-    1 takes it back once. The alignment found is the best one exactly (see _chain_composite()).
-
-    run_modified_smith_waterman_composite_fixlen() aligns subunits of one fixed length instead,
-    chained in the order of an expanded stack, with the penalties of
-    run_modified_smith_waterman_alignment().
-
-    Arguments:
-        target_motif: Target motif - np.array of shape (L, D)
-        subunit_motif_stack: Stack of subunit motifs, padded to a common length M - np.array of
-            shape (F, M, D)
-        motif_trim: How to trim each subunit, as logo_trimming in
-            assign_label_from_other_compendium(): False keeps all M positions; True trims the
-            flanks at the standard threshold of 1/M; a number in [0, 1] is the threshold of
-            utils_motif.trim_motif() (0 trims only all-zero positions) (default: True)
-            - bool, float or int
-        sim_threshold: Minimum similarity to consider a match - float
-        overlap_penalty: Penalty on the motif energy (of the L2-normalized motif, which sums to
-            1) of the positions that two consecutive subunits overlap, subtracted from the score:
-            1 takes back the energy both are credited for (default: 1) - float >= 0
-        general_penalty_root: p, to rescale the summed match score by (number of subunits
-            matched)^(-1/p): 2 re-L2-normalizes, 1 averages, and 0 turns the rescaling off
-            (default: 2) - float >= 0
-        match_count_penalty: Penalty per subunit matched: keeps the alignment with the N that
-            maximizes its best score with N matches - match_count_penalty * N, and subtracts
-            match_count_penalty * N from msw_score - float >= 0
-        match_count_fraction: Keep the fewest matches whose penalized best score reaches this
-            fraction of the maximum; 1 keeps the maximum (default: 1) - float in (0, 1]
-        match_count_max: Most subunits matched (None: no limit) (default: 3) - int >= 1, or None
-        return_match_profile: Also return msw_profile - bool
-        label_unsigned: Compare the absolute values of the motifs (unsigned); if False, compare
-            the signed motifs on 8 channels, so that a negative region only matches a negative
-            subunit (default: True) - bool
-        allow_reverse_comp: Also match the subunits reverse complemented - bool
-
-    Returns:
-        msw_score: Score of the optimal alignment, minus match_count_penalty * N - float
-        sim_score: MotifCompendium similarity score of the optimal alignment - float
-        aligned_subunit_stack: Each matched subunit (trimmed), scaled, in the orientation it
-            matched in, left to right. The target spans columns M-1 to L+M-2, leaving M-1
-            columns past either end - np.array of shape (N, 2*M + L - 2, D)
-        aligned_subunit_idx: Subunit of each match, as an index into subunit_motif_stack
-            - np.array of shape (N,) of int
-        aligned_subunit_alignment_rc: Orientation of each match (0: forward, 1: reverse
-            complement) - np.array of shape (N,) of int
-        aligned_subunit_alignment_h: Column of aligned_subunit_stack where each match starts
-            (as oriented, trimmed) - np.array of shape (N,) of int
-        aligned_subunit_scale: Scaling of each match: the projection of its window on the
-            (normalized) subunit, its least-squares weight, so that subunits of any lengths
-            reconstruct the target; times N^(-1/general_penalty_root) - np.array of shape (N,)
-        msw_profile: Best score of an alignment with exactly N matches, by N (0: empty; -inf:
-            impossible), before match_count_penalty - np.array, only if return_match_profile
-    '''
-    ## Check arguments
-    F, M, D = subunit_motif_stack.shape
-    L = target_motif.shape[0]
-    overlap_penalty = _check_penalty(overlap_penalty, "overlap_penalty")
-    match_count_penalty = _check_penalty(match_count_penalty, "match_count_penalty")
-    assert general_penalty_root >= 0, f"general_penalty_root must be >= 0, got {general_penalty_root}"
-    assert match_count_fraction is not None and 0 < match_count_fraction <= 1, \
-        f"match_count_fraction must be in (0, 1], got {match_count_fraction}"
-    assert sim_threshold < 1
-    _check_match_count_max(match_count_max)
-
-    # Setting: IC-scale off (store)
-    ic_scale = utils_config.get_ic_scale()
-    if ic_scale:
-        utils_config.set_ic_scale(False)
-
-    # Unsigned: Absolute value
-    if label_unsigned:
-        target_motif = np.abs(target_motif)
-        subunit_motif_stack = np.abs(subunit_motif_stack)
-
-    ## Candidates: Each subunit, trimmed, as given and reverse complemented
-    subunits = _trim_subunits(subunit_motif_stack, motif_trim)
-    orients = (0, 1) if allow_reverse_comp else (0,)
-    cand_subunit = np.array([f for f in range(F) for _ in orients], dtype=int)
-    cand_rc = np.array([rc for _ in range(F) for rc in orients], dtype=int)
-    cand_motif = []
-    for f, rc in zip(cand_subunit, cand_rc):
-        motif = subunits[f][::-1, ::-1] if rc else subunits[f]
-        norm = np.linalg.norm(motif)
-        cand_motif.append(motif / norm if norm > 0 else motif)  # L2 normalize (all-zero subunits stay zero)
-    cand_len = np.array([len(motif) for motif in cand_motif], dtype=int)
-
-    ## Target: Pad M-1 zeros on either side, so that a subunit may overhang either end
-    target_padded = np.pad(target_motif, ((M - 1, M - 1), (0, 0)))  # (L+2M-2, D)
-    target_norm = target_padded / np.linalg.norm(target_padded)
-    num_starts = len(target_norm)
-
-    ## Similarities and match scores, by candidate and start (padded positions)
-    sim = np.zeros((len(cand_motif), num_starts))
-    energy = np.zeros((len(cand_motif), num_starts))
-    valid = np.zeros((len(cand_motif), num_starts), dtype=bool)
-    for m in np.unique(cand_len):
-        cands = np.flatnonzero(cand_len == m)
-        windows = _unroll_motif(target_norm, m, np)  # (L+2M-1-m, m, D)
-        stack_m = np.stack([cand_motif[c] for c in cands])
-        if not label_unsigned:  # 8 channels: Each base's positive and negative part apart
-            stack_m, windows_sim = utils_motif.motif_4_to_8(stack_m), utils_motif.motif_4_to_8(windows)
-        else:
-            windows_sim = windows
-        sim[cands, :len(windows)] = compute_aligned_similarity(cp.asarray(stack_m), cp.asarray(windows_sim))
-        energy[cands, :len(windows)] = (windows * windows).sum(axis=(1, 2))[None, :]
-        valid[cands, :len(windows)] = True
-    match_scores = energy * sim
-    matchable = valid & (sim > sim_threshold)
-
-    ## Align: The best alignment with N matches, for every N; then N
-    position_energy = (target_norm * target_norm).sum(axis=1)  # (L+2M-2,), sums to 1
-    msw_profile, trace = _chain_composite(match_scores, matchable, cand_len, overlap_penalty, position_energy,
-                                          general_penalty_root, match_count_max)
-    n = _select_match_count(msw_profile, match_count_penalty, match_count_fraction)
-    matches = trace(n)  # (candidate, start), left to right
-    msw_score = float(msw_profile[n] - match_count_penalty * n)
-
-    ## Aligned subunits: One per match, scaled by its projection, <s, w> = |w| * similarity
-    rescale = _match_rescale(n, general_penalty_root) if n > 0 else 1.0
-    aligned_subunit_stack = np.zeros((n, num_starts, D))
-    aligned_subunit_scale = np.zeros(n)
-    for i, (c, l) in enumerate(matches):
-        aligned_subunit_scale[i] = np.sqrt(energy[c, l]) * sim[c, l] * rescale
-        aligned_subunit_stack[i, l:l + cand_len[c]] = cand_motif[c] * aligned_subunit_scale[i]
-    aligned_subunit_idx = np.array([cand_subunit[c] for c, _ in matches], dtype=int)
-    aligned_subunit_alignment_rc = np.array([cand_rc[c] for c, _ in matches], dtype=int)
-    aligned_subunit_alignment_h = np.array([l for _, l in matches], dtype=int)
-
-    ## Similarity score: The collapsed alignment against the target
-    if n == 0:
-        sim_score = 0.0
-    else:
-        sim_score, _, _ = utils_similarity.compute_similarities(
-            [aligned_subunit_stack.sum(axis=0)[np.newaxis], target_padded[np.newaxis]], [(0, 1)])[0]
-
-    # Restore IC-scale setting
-    if ic_scale:
-        utils_config.set_ic_scale(True)
-
-    outputs = (msw_score, sim_score, aligned_subunit_stack, aligned_subunit_idx,
-               aligned_subunit_alignment_rc, aligned_subunit_alignment_h, aligned_subunit_scale)
-    return outputs + (msw_profile,) if return_match_profile else outputs
-
-
-def _trim_subunits(subunit_motif_stack, motif_trim):
+def _trim_subunits(subunit_motif_stack, subunit_motif_trim):
     '''
     Each subunit, trimmed as logo_trimming (see run_modified_smith_waterman_composite()): False
     keeps it whole, True trims at 1/M, and a number in [0, 1] is the threshold of trim_motif().
@@ -344,19 +344,19 @@ def _trim_subunits(subunit_motif_stack, motif_trim):
         subunits: Trimmed subunits - list of np.array of shape (M_f, D)
     '''
     F, M, _ = subunit_motif_stack.shape
-    if isinstance(motif_trim, (bool, np.bool_)):
-        threshold = 1 / M if motif_trim else None
-    elif isinstance(motif_trim, (int, float, np.integer, np.floating)) and 0 <= motif_trim <= 1:
-        threshold = float(motif_trim)
+    if isinstance(subunit_motif_trim, (bool, np.bool_)):
+        threshold = 1 / M if subunit_motif_trim else None
+    elif isinstance(subunit_motif_trim, (int, float, np.integer, np.floating)) and 0 <= subunit_motif_trim <= 1:
+        threshold = float(subunit_motif_trim)
     else:
-        raise ValueError(f"motif_trim must be a bool or a number in [0, 1], got {motif_trim!r}")
+        raise ValueError(f"subunit_motif_trim must be a bool or a number in [0, 1], got {subunit_motif_trim!r}")
     if threshold is None:
         return [subunit_motif_stack[f] for f in range(F)]
     subunits = []
     for f in range(F):
         subunit = utils_motif.trim_motif(subunit_motif_stack[f], threshold)
         if subunit is None:
-            raise ValueError(f"Subunit {f} is trimmed away entirely (motif_trim={motif_trim!r})")
+            raise ValueError(f"Subunit {f} is trimmed away entirely (subunit_motif_trim={subunit_motif_trim!r})")
         subunits.append(subunit)
     return subunits
 

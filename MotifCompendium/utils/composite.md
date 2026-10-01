@@ -1012,17 +1012,17 @@ position, the problem becomes a chain of weighted intervals, which a much simple
 
 ### 19.1 Trimming (`_trim_subunits`, line 338)
 
-`motif_trim` has the meaning of `logo_trimming` in `assign_label_from_other_compendium`:
+`subunit_motif_trim` has the meaning of `logo_trimming` in `assign_label_from_other_compendium`:
 
-| `motif_trim` | Each subunit becomes |
+| `subunit_motif_trim` | Each subunit becomes |
 |---|---|
 | `False` | the whole M positions |
 | `True` (default) | `utils_motif.trim_motif(subunit, 1/M)`: flanks trimmed at the standard threshold 1/M |
-| a number in [0, 1] | `utils_motif.trim_motif(subunit, motif_trim)`; 0 trims only all-zero positions |
+| a number in [0, 1] | `utils_motif.trim_motif(subunit, subunit_motif_trim)`; 0 trims only all-zero positions |
 
 `trim_motif` keeps the positions between the first and last position whose share of the
 subunit's total absolute weight exceeds the threshold. A subunit trimmed away entirely raises a
-`ValueError` naming it; other values of `motif_trim` raise a `ValueError` too. Trimming runs on
+`ValueError` naming it; other values of `subunit_motif_trim` raise a `ValueError` too. Trimming runs on
 the subunits as given (after `np.abs` when unsigned).
 
 ### 19.2 Candidates
@@ -1186,7 +1186,7 @@ suffices: the best $H_\text{match}$ by n is rescaled at the end, as in regime B 
   per-bp or a random energy weight, λ from 0 to 0.9, root 0, 2 and 1.5, limits None, 1, 2, 3):
   every profile equal to within 1e-12, and every traced chain re-scoring to it (section j of the
   tests).
-- With `motif_trim=False` and λ = 0, the allowed chains are exactly those of the fixed-length
+- With `subunit_motif_trim=False` and λ = 0, the allowed chains are exactly those of the fixed-length
   wrapper with enough copies, all penalties 0 and `global_exact=True` (any order and orientation,
   strictly increasing starts, any overlap). The scores agreed to 1e-12 in 48 of 48 random cases.
 
@@ -1196,7 +1196,7 @@ suffices: the best $H_\text{match}$ by n is rescaled at the end, as in regime B 
 
 Line 171.
 
-**Defaults:** `motif_trim=True`, `sim_threshold=0`, `overlap_penalty=1`,
+**Defaults:** `subunit_motif_trim=True`, `sim_threshold=0`, `overlap_penalty=1`,
 `general_penalty_root=2`, `match_count_penalty=0`, `match_count_fraction=1`, `match_count_max=3`,
 `label_unsigned=True`, `allow_reverse_comp=True`. There is no `global_exact`: the DP is always
 exact.

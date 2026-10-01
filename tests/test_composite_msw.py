@@ -885,7 +885,7 @@ def brute_force_chains(scores, matchable, lengths, penalty, root, max_count, wei
 
 
 def test_composite_varlen(new, seed=21):
-    """j. run_modified_smith_waterman_composite(): subunits of any lengths (motif_trim), ordered by
+    """j. run_modified_smith_waterman_composite(): subunits of any lengths (subunit_motif_trim), ordered by
     position. The chain DP is the best over every chain (brute force), by number of matches, with
     a per-bp overlap penalty, the rescaling and a limit; untrimmed and without an overlap penalty,
     it scores as the fixed-length wrapper with enough copies; planted composites of mixed lengths,
@@ -934,7 +934,7 @@ def test_composite_varlen(new, seed=21):
         stack = rng.random((int(rng.integers(1, 4)), M, 4)) ** 2 + 0.01
         motif = rng.random((int(rng.integers(M + 2, 14)), 4))
         for root in (0, 2):
-            a = new.run_modified_smith_waterman_composite(motif, stack, motif_trim=False, overlap_penalty=0.0,
+            a = new.run_modified_smith_waterman_composite(motif, stack, subunit_motif_trim=False, overlap_penalty=0.0,
                                                           general_penalty_root=root, match_count_max=None,
                                                           return_match_profile=True, sim_threshold=0.5)
             b = new.run_modified_smith_waterman_composite_fixlen(motif, stack, general_penalty_root=root,
@@ -958,14 +958,14 @@ def test_composite_varlen(new, seed=21):
             expected = [len(utils_motif.trim_motif(stack[f], threshold)) for f in range(3)]
         if got != expected:
             n_bad += 1
-            print(f"  [FAIL] motif_trim={trim!r}: lengths {got}, expected {expected}")
+            print(f"  [FAIL] subunit_motif_trim={trim!r}: lengths {got}, expected {expected}")
     for bad in (-0.1, 1.5, "1", None):
         try:
             new._trim_subunits(stack, bad)
         except ValueError:
             continue
         n_bad += 1
-        print(f"  [FAIL] accepted motif_trim={bad!r}")
+        print(f"  [FAIL] accepted subunit_motif_trim={bad!r}")
     try:
         new._trim_subunits(np.zeros((1, 4, 4)), 0)
     except ValueError:
@@ -998,7 +998,7 @@ def test_composite_varlen(new, seed=21):
         offsets = [int(rng.integers(0, M - len(x) + 1)) for x in subunits]
         for f, (x, o) in enumerate(zip(subunits, offsets)):
             stack[f, o:o + len(x)] = x
-        out = new.run_modified_smith_waterman_composite(target, stack, motif_trim=0, sim_threshold=0.99,
+        out = new.run_modified_smith_waterman_composite(target, stack, subunit_motif_trim=0, sim_threshold=0.99,
                                                         overlap_penalty=1.0, match_count_max=None,
                                                         general_penalty_root=0)  # Every planted subunit adds
         starts, pos = [], 0
@@ -1024,7 +1024,7 @@ def test_composite_varlen(new, seed=21):
         a, b = np.eye(4)[[0] * (M - 1) + [1]], np.eye(4)[[2] + [3] * (M - 1)]
         target = np.concatenate([a, np.full((3, 4), 0.01), -b])
         stack = np.stack([a, b, -b])
-        out = new.run_modified_smith_waterman_composite(target, stack, motif_trim=0, sim_threshold=0.9,
+        out = new.run_modified_smith_waterman_composite(target, stack, subunit_motif_trim=0, sim_threshold=0.9,
                                                         allow_reverse_comp=False, label_unsigned=False)
         if list(out[3]) != [0, 2] or list(out[5] - (M - 1)) != [0, M + 3]:
             n_bad += 1
@@ -1032,7 +1032,7 @@ def test_composite_varlen(new, seed=21):
     # (f) At most 3 matches by default
     x = np.eye(4)[[0, 1, 2, 3]]
     target = np.concatenate([x] * 5)
-    out = new.run_modified_smith_waterman_composite(target, x[None], motif_trim=0, sim_threshold=0.99)
+    out = new.run_modified_smith_waterman_composite(target, x[None], subunit_motif_trim=0, sim_threshold=0.99)
     if len(out[3]) != 3:
         n_bad += 1
         print(f"  [FAIL] default limit: {len(out[3])} matches")
