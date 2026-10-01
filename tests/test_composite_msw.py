@@ -802,6 +802,54 @@ def test_match_count_max(new, n_cases=60, seed=19):
     return n_bad
 
 
+def test_signed(new, seed=20):
+    """i. label_unsigned=False compares signed motifs on 8 channels (each base's positive and
+    negative part apart), so that a negative region only matches a negative subunit; True keeps
+    4 channels on absolute values (bit for bit as before: see sections 0 and 2)."""
+    from unittest.mock import patch
+    import MotifCompendium.utils.motif as utils_motif
+    rng = np.random.default_rng(seed)
+    n_bad = 0
+    # The 8 channels reverse complement as [::-1, ::-1]
+    w = rng.normal(size=(20, 5, 4))
+    if not np.array_equal(utils_motif.motif_4_to_8(w[:, ::-1, ::-1]), utils_motif.motif_4_to_8(w)[:, ::-1, ::-1]):
+        n_bad += 1
+        print("  [FAIL] 8 channels do not reverse complement as [::-1, ::-1]")
+    # Channels of the similarity: 8 when signed, 4 when unsigned
+    motif, stack = make_mixed_case(rng, 2, 3, 20)
+    motif = motif * np.where(rng.random(motif.shape) < 0.3, -1, 1)
+    for unsigned, channels in ((False, 8), (True, 4)):
+        seen = []
+        core = new.compute_aligned_similarity
+        def record(x, y):
+            seen.append((x.shape[-1], y.shape[-1]))
+            return core(x, y)
+        with patch.object(new, "compute_aligned_similarity", side_effect=record):
+            new.run_modified_smith_waterman_composite(motif, stack, label_unsigned=unsigned)
+        if not seen or any(c != (channels, channels) for c in seen):
+            n_bad += 1
+            print(f"  [FAIL] label_unsigned={unsigned}: similarity on channels {seen}")
+    # A positive subunit a, and a negated subunit b: signed, only a and -b match
+    for M in (3, 4, 5):
+        a, b = np.eye(4)[[0] * (M - 1) + [1]], np.eye(4)[[2] + [3] * (M - 1)]
+        target = np.concatenate([a, np.full((3, 4), 0.01), -b])
+        stack = np.stack([a, b, -b])
+        kw = dict(sim_threshold=0.9, max_homo_subunits=1, allow_reverse_order=False, allow_reverse_comp=False,
+                  match_count_max=None)
+        signed = new.run_modified_smith_waterman_composite(target, stack, label_unsigned=False, **kw)
+        unsigned = new.run_modified_smith_waterman_composite(target, stack, label_unsigned=True, **kw)
+        starts = list(signed[5] - (M - 1))
+        if list(signed[3]) != [0, 2] or starts != [0, M + 3]:
+            n_bad += 1
+            print(f"  [FAIL] M={M} signed: subunits {list(signed[3])} at {starts}, expected [0, 2] at [0, {M + 3}]")
+        if list(unsigned[3])[:1] != [0] or len(unsigned[3]) != 2 or unsigned[3][1] not in (1, 2):
+            n_bad += 1
+            print(f"  [FAIL] M={M} unsigned: subunits {list(unsigned[3])}")
+    print(f"i. label_unsigned: 8-channel signed similarity, 4-channel unsigned, signs respected: "
+          f"{'ok' if n_bad == 0 else f'{n_bad} failures'}")
+    return n_bad
+
+
 def test_storage(new, seed=16):
     """g. What the DP stores: only the parts its choices need (H, or H_match and H_penalty with
     penalties and a general_penalty_root), by state for global_exact and, without it, with only the
@@ -1385,6 +1433,7 @@ if __name__ == "__main__":
     failures += test_match_count(new)
     failures += test_match_cost_and_root(new)
     failures += test_match_count_max(new)
+    failures += test_signed(new)
     failures += test_storage(new)
     failures += test_general_penalty(new)
     failures += test_padding(new)

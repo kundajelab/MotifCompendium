@@ -76,7 +76,11 @@ def run_modified_smith_waterman_composite(
             alignment is the best with at most this many matches (None: no limit) (default: 3)
             - int >= 1, or None
         return_match_profile: Also return msw_profile - bool
-        label_unsigned: Use absolute value of motifs (unsigned) - bool
+        label_unsigned: Compare the absolute values of the motifs (unsigned), so that a negative
+            region of the target can match a positive subunit. If False, compare the signed motifs
+            on 8 channels (each base's positive and negative part apart), so that a negative
+            region only matches a negative subunit, as assign_label_from_other_compendium()
+            (default: True) - bool
         allow_reverse_order: Also match the subunits in reverse order - bool
         allow_reverse_comp: Also match the subunits reverse complemented - bool
         max_homo_subunits: Copies of each block, i.e. matches of each subunit per subunit
@@ -226,7 +230,9 @@ def run_modified_smith_waterman_alignment(
             left after it (see _run_modified_smith_waterman()).
         return_matrices: Also return the full DP matrices. They are large and no known caller
             reads them, so they default to None - bool
-        label_unsigned: Use absolute value of motifs (unsigned) - bool
+        label_unsigned: Compare the absolute values of the motifs (unsigned); if False, compare the
+            signed motifs on 8 channels, so that a negative region only matches a negative finger
+            (see run_modified_smith_waterman_composite()) (default: True) - bool
         finger_length: Length of each finger motif - int (M)
 
     Returns:
@@ -352,7 +358,8 @@ def _run_modified_smith_waterman(
         skip_penalty_l2: Penalty for each additional motif position of a gap - float >= 0
         return_matrices: Also return the full DP matrices. They are large and no known caller
             reads them, so they default to None - bool
-        label_unsigned: Use absolute value of motifs (unsigned) - bool
+        label_unsigned: Compare absolute values (unsigned); if False, signed motifs on 8 channels
+            - bool
         general_penalty_root: p, to rescale the match score by (number of fingers matched)^(-1/p),
             so that every added finger renormalizes all match scores (2: 1/sqrt; 0: no rescaling)
             - float >= 0
@@ -422,9 +429,17 @@ def _run_modified_smith_waterman(
     # Subunit motifs
     subunit_motif_stack_norm_cp = cp.asarray(subunit_motif_stack_norm) # (F, M, D)
 
-    ## Calculate similarities
-    sims_ff = compute_aligned_similarity(subunit_motif_stack_norm_cp, target_motif_norm_unroll_cp) # (F, L-M+1)
-    sims_fr = compute_aligned_similarity(subunit_motif_stack_norm_cp, target_motif_norm_unroll_cp[:, ::-1, ::-1]) # (F, L-M+1)
+    ## Calculate similarities: On 8 channels (the positive and negative part of each base apart), as
+    # MotifCompendium's similarity, so that a signed window only matches a subunit of the same sign.
+    # Unsigned motifs have no negative part, so 4 channels give the same similarities. The 8
+    # channels are laid out so that [::-1, ::-1] still reverse complements
+    if label_unsigned:
+        sim_stack_cp, sim_windows_cp = subunit_motif_stack_norm_cp, target_motif_norm_unroll_cp
+    else:
+        sim_stack_cp = cp.asarray(utils_motif.motif_4_to_8(subunit_motif_stack_norm)) # (F, M, 8)
+        sim_windows_cp = cp.asarray(utils_motif.motif_4_to_8(target_motif_norm_unroll)) # (L-M+1, M, 8)
+    sims_ff = compute_aligned_similarity(sim_stack_cp, sim_windows_cp) # (F, L-M+1)
+    sims_fr = compute_aligned_similarity(sim_stack_cp, sim_windows_cp[:, ::-1, ::-1]) # (F, L-M+1)
 
     ## Run Modified Smith-Waterman: Local
     (msw_score, msw_orient, msw_actions, msw_state, H_final, state_final, msw_profile) = calculate_modified_smith_waterman(
@@ -582,7 +597,8 @@ def _unroll_motif(motif, M, xp):
 # SIMILARITY #
 ##############
 def compute_aligned_similarity(x, y):
-    """Computes the similarity of a (N, L, K) tensor with a (M, L, K) tensor (0 for an all-zero motif)."""
+    """Computes the cosine similarity of a (N, L, K) tensor with a (M, L, K) tensor, for any number of
+    channels K (4, or 8 for signed motifs) (0 for an all-zero motif)."""
     N, L, K = x.shape
     M = y.shape[0]
     x_norms = cp.linalg.norm(x, axis=(1, 2), keepdims=True)
