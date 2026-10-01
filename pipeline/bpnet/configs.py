@@ -172,12 +172,12 @@ class SmithWatermanArgs:
     msw_logo_col: str = "smith-waterman_logo"
 
     msw_sim_threshold: float = 0
-    overlap_penalty_f1: float = -0.02
-    overlap_penalty_f2: float = -0.1
-    skip_penalty_f1: float = -0.1
-    skip_penalty_f2: float = -0.1
-    skip_penalty_l1: float = -0.02
-    skip_penalty_l2: float = -0.1
+    overlap_penalty_f1: float = 0.02
+    overlap_penalty_f2: float = 0.1
+    skip_penalty_f1: float = 0.1
+    skip_penalty_f2: float = 0.1
+    skip_penalty_l1: float = 0.02
+    skip_penalty_l2: float = 0.1
     finger_length: int = 3
 
     min_msw_score: float = 0.6  # F1-optimized: 0.68

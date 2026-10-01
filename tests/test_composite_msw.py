@@ -2,15 +2,22 @@
 Regression + feature checks for MotifCompendium.utils.composite.
 
 Run:
-    python tests/test_composite_msw.py ORIGINAL_COMPOSITE [SNAPSHOT_COMPOSITE]
+    python tests/test_composite_msw.py ORIGINAL_COMPOSITE [SNAPSHOT_COMPOSITE [PREVIOUS_COMPOSITE]]
 
-ORIGINAL_COMPOSITE is the pre-generalization composite.py (old API). It gates that the
-frozen 3 bp core is still the original algorithm.
+ORIGINAL_COMPOSITE is the pre-generalization composite.py (old API; 4886214). It gates that the
+frozen 3 bp core is still the original algorithm, fed the penalties negated.
 
 SNAPSHOT_COMPOSITE is a composite.py from before the exact state DP and the target padding
-(one arrangement per cell, current API otherwise). Where the scoring did not change (zero
-penalties, no rescaling), results are checked bit for bit against it, feeding it the
-target padded as the current code pads it, with and without global_exact.
+(one arrangement per cell; 4af9021). Where the scoring did not change (zero penalties, no
+rescaling), results are checked bit for bit against it, feeding it the target padded as the
+current code pads it, with and without global_exact.
+
+PREVIOUS_COMPOSITE is a composite.py from before penalties were made positive and the gap
+penalty affine, and match_penalty_f was removed (5c9d388). It is fed the penalties negated:
+without a skip_penalty_l1 (where the two gap rules agree) results are checked bit for bit, and
+its match_penalty_f against match_count_penalty.
+
+Penalties are numbers >= 0, subtracted from the score.
 """
 
 import importlib.util
@@ -65,13 +72,15 @@ def pad(motif, M):
 
 NEUTRAL = dict(
     sim_threshold=0.0,
-    overlap_penalty_f1=-0.02,
-    overlap_penalty_f2=-0.1,
-    skip_penalty_f1=-0.1,
-    skip_penalty_f2=-0.1,
-    skip_penalty_l1=-0.02,
-    skip_penalty_l2=-0.1,
+    overlap_penalty_f1=0.02,
+    overlap_penalty_f2=0.1,
+    skip_penalty_f1=0.1,
+    skip_penalty_f2=0.1,
+    skip_penalty_l1=0.02,
+    skip_penalty_l2=0.1,
 )
+PENALTY_NAMES = ("overlap_penalty_f1", "overlap_penalty_f2", "skip_penalty_f1", "skip_penalty_f2",
+                 "skip_penalty_l1", "skip_penalty_l2")
 ZERO = dict(NEUTRAL, overlap_penalty_f1=0.0, overlap_penalty_f2=0.0, skip_penalty_f1=0.0,
             skip_penalty_f2=0.0, skip_penalty_l1=0.0, skip_penalty_l2=0.0)
 
@@ -161,20 +170,19 @@ def prepare(mod, motif, fingers, M):
 
 
 def chain_score(chain, sim, scale, M, p, general):
-    """Score of a chain of matches (finger, motif position), by the documented rules."""
+    """Score of a chain of matches (finger, motif position), by the documented rules: every
+    penalty affine (a first unit, then each further one), and subtracted."""
     raw = sum(scale[w] * sim[f, w] for f, w in chain)
-    penalty = p.get("match_penalty_f", 0.0) * len(chain)
+    penalty = 0.0
     for (fa, wa), (fb, wb) in zip(chain, chain[1:]):
         d, g = wb - wa, fb - fa - 1
         if d < M:  # Overlap of M - d bp
             penalty += p["overlap_penalty_f1"] + (M - d - 1) * p["overlap_penalty_f2"]
-        elif d == M + 1:  # Gap of 1 bp
-            penalty += p["skip_penalty_l1"]
-        elif d > M + 1:  # Gap of d - M bp
-            penalty += (d - M - 1) * p["skip_penalty_l2"]
+        elif d > M:  # Gap of d - M bp
+            penalty += p["skip_penalty_l1"] + (d - M - 1) * p["skip_penalty_l2"]
         if g >= 1:  # Run of g skipped fingers
             penalty += p["skip_penalty_f1"] + (g - 1) * p["skip_penalty_f2"]
-    return (raw * len(chain) ** (-1 / p.get("general_penalty_root", 2)) if general else raw) + penalty
+    return (raw * len(chain) ** (-1 / p.get("general_penalty_root", 2)) if general else raw) - penalty
 
 
 def match_chain(actions):
@@ -182,8 +190,14 @@ def match_chain(actions):
 
 
 # ------------------------------------------------------------------ sections
+def negated(p):
+    """p with every penalty negated: the convention of PREVIOUS_COMPOSITE."""
+    return {k: (-v if k in PENALTY_NAMES else v) for k, v in p.items()}
+
+
 def test_core_identical(new, orig, n_cases=300, seed=0):
-    """0. The frozen 3 bp core must match the original core exactly, given identical inputs."""
+    """0a. The frozen 3 bp core must match the original core exactly, given identical inputs
+    (its penalties negated: the original's convention)."""
     rng = np.random.default_rng(seed)
     n_diff = 0
     for i in range(n_cases):
@@ -193,21 +207,119 @@ def test_core_identical(new, orig, n_cases=300, seed=0):
         stack, motif_norm, sim_for, sim_rev, importance = prepare(new, motif, fingers, 3)
         shared = dict(matrix_f=stack, matrix_l=motif_norm, sim_for=sim_for, sim_rev=sim_rev,
                       scale_factor=importance, sim_threshold=0.0,
-                      overlap_penalty_f1=NEUTRAL["overlap_penalty_f1"],
-                      overlap_penalty_f2=NEUTRAL["overlap_penalty_f2"],
-                      skip_penalty_l1=NEUTRAL["skip_penalty_l1"],
-                      skip_penalty_l2=NEUTRAL["skip_penalty_l2"],
                       alignment_type="local", initial_score=0.0)
+        old = negated(NEUTRAL)  # The original adds its penalties (numbers <= 0)
         out_orig = orig.calculate_modified_smith_waterman(
-            skip_penalty_f=NEUTRAL["skip_penalty_f1"], **shared)
+            overlap_penalty_f1=old["overlap_penalty_f1"], overlap_penalty_f2=old["overlap_penalty_f2"],
+            skip_penalty_l1=old["skip_penalty_l1"], skip_penalty_l2=old["skip_penalty_l2"],
+            skip_penalty_f=old["skip_penalty_f1"], **shared)
         out_new = new.calculate_modified_smith_waterman_znf(
-            skip_penalty_f1=NEUTRAL["skip_penalty_f1"], skip_penalty_f2=NEUTRAL["skip_penalty_f2"], **shared)
+            **{k: NEUTRAL[k] for k in PENALTY_NAMES}, **shared)
         if tuple(out_orig[:3]) != tuple(out_new[:3]):
             n_diff += 1
             if n_diff <= 3:
                 print(f"  [diff] case {i} F={F} L={L}: {out_orig[0]!r} vs {out_new[0]!r}")
-    print(f"0. frozen core vs original core (identical inputs): {n_cases - n_diff}/{n_cases} identical")
+    print(f"0a. frozen core vs original core (identical inputs): {n_cases - n_diff}/{n_cases} identical")
     return n_diff
+
+
+def test_matches_previous(new, prev, n_cases=40, seed=17):
+    """0. Against the composite.py from before the sign change, fed the penalties negated:
+    without a skip_penalty_l1 (the two gap rules agree), every path matches bit for bit; and its
+    match_penalty_f keeps the alignment and score of match_count_penalty (global_exact). With a
+    skip_penalty_l1, a gap of G >= 2 bp now also costs it."""
+    rng = np.random.default_rng(seed)
+    configs = [ZERO, dict(NEUTRAL, skip_penalty_l1=0.0), dict(NEUTRAL, skip_penalty_l1=0.0, skip_penalty_f2=0.3),
+               dict(ZERO, overlap_penalty_f1=0.05, overlap_penalty_f2=0.2, skip_penalty_l2=0.15)]
+    n_diff = n_runs = n_cost = n_gap = 0
+    for i in range(n_cases):
+        M = (3, 4, 2)[i % 3]
+        F = int(rng.integers(2, 7))
+        motif, fingers = make_case(rng, F, M, int(rng.integers(max(M + 1, 12), 40)))
+        for cfg, root, exact in itertools.product(configs, (0, 2), (True, False)):
+            flags = dict(general_penalty_root=root, global_exact=exact)
+            runs = [("alignment", lambda mod, p: mod.run_modified_smith_waterman_alignment(
+                        target_motif=motif, reference_motif=fingers, finger_length=M, **flags, **p)),
+                    ("composite", lambda mod, p: mod.run_modified_smith_waterman_composite(
+                        motif, unroll(fingers, M)[:2], **flags, **p))]
+            for label, run in runs:
+                a, b = run(new, cfg), run(prev, negated(cfg))
+                n_runs += 1
+                same = all(np.array_equal(x, y) if isinstance(x, np.ndarray) else x == y for x, y in zip(a, b))
+                if not same:
+                    n_diff += 1
+                    if n_diff <= 3:
+                        print(f"  [diff] {label} M={M} root={root} global_exact={exact} {cfg}")
+        # The per-match cost: match_penalty_f (in the DP) vs match_count_penalty (by the number of matches)
+        sim = rng.random((int(rng.integers(1, 5)), int(rng.integers(2, 9)))) * 1.6 - 0.4
+        scale = rng.random(sim.shape[1]) * 0.5
+        for cfg, root, cost in itertools.product((ZERO, dict(NEUTRAL, skip_penalty_l1=0.0)), (0, 2, 2.5),
+                                                 (0.02, 0.1, 0.5)):
+            a = call_core(new, sim, scale, M, match_count_penalty=cost, general_penalty_root=root, **cfg)
+            b = call_core(prev, sim, scale, M, match_penalty_f=-cost, general_penalty_root=root, **negated(cfg))
+            n_cost += 1
+            if a[2] != b[2] or a[1] != b[1] or abs(a[0] - b[0]) > 1e-12:
+                n_diff += 1
+                if n_diff <= 3:
+                    print(f"  [diff] cost {cost} root={root} {cfg}: {a[0]!r} {a[2]} vs {b[0]!r} {b[2]}")
+        # With skip_penalty_l1, only alignments with a gap of 2 bp or more can change
+        cfg = dict(ZERO, skip_penalty_l1=0.05, skip_penalty_l2=0.1)
+        a = call_core(new, sim, scale, M, **cfg)
+        b = call_core(prev, sim, scale, M, **negated(cfg))
+        chain = match_chain(b[2])
+        long_gap = any(wb - wa > M + 1 for (_, wa), (_, wb) in zip(chain, chain[1:]))
+        n_gap += long_gap
+        if not long_gap and (a[2] != b[2] or a[0] != b[0]):
+            n_diff += 1
+            print(f"  [diff] skip_penalty_l1 changed an alignment without a 2 bp gap: {a[2]} vs {b[2]}")
+    print(f"0. vs previous (penalties negated): {n_runs + n_cost + n_cases - n_diff}/{n_runs + n_cost + n_cases} "
+          f"identical ({n_runs} wrapper runs without skip_penalty_l1, {n_cost} match_penalty_f vs "
+          f"match_count_penalty, {n_cases} with skip_penalty_l1, {n_gap} of them with a 2+ bp gap)")
+    return n_diff
+
+
+def test_penalty_signs(new):
+    """0b. Every penalty is a number >= 0: a negative one (the old convention) is rejected,
+    by the core and the wrappers, and match_penalty_f is gone."""
+    rng = np.random.default_rng(18)
+    motif, fingers = make_case(rng, 3, 3, 20)
+    n_bad = 0
+    frozen = dict(matrix_l=np.zeros((5, 4)), matrix_f=np.zeros((2, 3, 4)), sim_for=np.ones((2, 3)),
+                  sim_rev=np.ones((2, 3)), scale_factor=np.ones(3), sim_threshold=0.0)
+    for name in PENALTY_NAMES:
+        try:
+            new.calculate_modified_smith_waterman_znf(**frozen, **{**{k: 0.0 for k in PENALTY_NAMES}, name: -0.1})
+        except ValueError:
+            continue
+        n_bad += 1
+        print(f"  [FAIL] frozen core accepted {name}=-0.1")
+    for name in PENALTY_NAMES + ("match_count_penalty",):
+        for label, run in (
+                ("core", lambda: call_core(new, np.ones((2, 4)), np.ones(4), 2, **{name: -0.1})),
+                ("alignment", lambda: call_znf(new, motif, fingers, **{name: -0.1})),
+                ("composite", lambda: new.run_modified_smith_waterman_composite(
+                    motif, unroll(fingers, 3), **{name: -0.1}))):
+            try:
+                run()
+            except ValueError as exc:
+                if "subtracted" not in str(exc):
+                    n_bad += 1
+                    print(f"  [FAIL] {label} {name}: {exc}")
+                continue
+            n_bad += 1
+            print(f"  [FAIL] {label} accepted {name}=-0.1")
+    for label, run in (("alignment", lambda: call_znf(new, motif, fingers, match_penalty_f=0.1)),
+                       ("composite", lambda: new.run_modified_smith_waterman_composite(
+                           motif, unroll(fingers, 3), match_penalty_f=0.1))):
+        try:
+            run()
+        except TypeError:
+            continue
+        n_bad += 1
+        print(f"  [FAIL] {label} accepted match_penalty_f")
+    print(f"0b. penalty signs: negative penalties rejected, match_penalty_f removed: "
+          f"{'ok' if n_bad == 0 else f'{n_bad} failures'}")
+    return n_bad
 
 
 def test_degenerate(new):
@@ -287,17 +399,16 @@ def test_matches_snapshot(new, snap, n_cases=40, seed=4):
 EXACT_CONFIGS = {
     "zero": ZERO,
     "neutral": NEUTRAL,
-    "harsh f2": dict(NEUTRAL, skip_penalty_f2=-0.3),
-    "overlap": dict(ZERO, overlap_penalty_f1=-0.05, overlap_penalty_f2=-0.2),
-    "gap": dict(ZERO, skip_penalty_l1=-0.05, skip_penalty_l2=-0.15),
-    "l1 only": dict(ZERO, skip_penalty_l1=-0.1),
-    "f-skip": dict(ZERO, skip_penalty_f1=-0.05, skip_penalty_f2=-0.3),
+    "harsh f2": dict(NEUTRAL, skip_penalty_f2=0.3),
+    "overlap": dict(ZERO, overlap_penalty_f1=0.05, overlap_penalty_f2=0.2),
+    "gap": dict(ZERO, skip_penalty_l1=0.05, skip_penalty_l2=0.15),
+    "l1 only": dict(ZERO, skip_penalty_l1=0.1),
+    "l2 only": dict(ZERO, skip_penalty_l2=0.1),
+    "f-skip": dict(ZERO, skip_penalty_f1=0.05, skip_penalty_f2=0.3),
     "threshold": dict(NEUTRAL, sim_threshold=0.5),
-    "match cost": dict(ZERO, match_penalty_f=-0.05),
-    "match cost, neutral": dict(NEUTRAL, match_penalty_f=-0.02),
     "root 1": dict(ZERO, general_penalty_root=1),
     "root 1.5, neutral": dict(NEUTRAL, general_penalty_root=1.5),
-    "root 3, match cost": dict(ZERO, general_penalty_root=3, match_penalty_f=-0.02),
+    "root 3": dict(ZERO, general_penalty_root=3),
 }
 
 
@@ -334,9 +445,11 @@ def core_problems(new, out, sim, scale, M, p, general):
         problems.append("matches do not re-score to msw_score")
     if state["F_total"] != len(chain):
         problems.append(f"F_total {state['F_total']} for {len(chain)} matches")
-    if out[0] != (state["H_match"] * rescale + state["H_penalty_overlap_f"]
-                  + state["H_penalty_skip_f"] + state["H_penalty_skip_l"] + state["H_penalty_match_f"]):
-        problems.append("H != H_match*r + penalties")
+    if out[0] != (state["H_match"] * rescale - state["H_penalty_overlap_f"]
+                  - state["H_penalty_skip_f"] - state["H_penalty_skip_l"]):
+        problems.append("H != H_match*r - penalties")
+    if min(state["H_penalty_overlap_f"], state["H_penalty_skip_f"], state["H_penalty_skip_l"]) < 0:
+        problems.append("a negative penalty sum")
     if out[4].shape != (F + 1, N + 2 * M - 1) or abs(out[4].max() - out[0]) > 1e-12:
         problems.append(f"H_final {out[4].shape}, max {out[4].max()!r}")
     return problems
@@ -413,7 +526,7 @@ def test_match_count(new, n_cases=60, seed=14):
     chosen number of matches, its own score, and fewer matches as the penalty grows."""
     rng = np.random.default_rng(seed)
     n_bad = n_runs = 0
-    penalties = (-0.0, -0.01, -0.05, -0.2, -1.0)
+    penalties = (0.0, 0.01, 0.05, 0.2, 1.0)
     for i in range(n_cases):
         M = (2, 3, 4)[i % 3]
         F, N = int(rng.integers(1, 5)), int(rng.integers(2, 9))
@@ -446,16 +559,18 @@ def test_match_count(new, n_cases=60, seed=14):
                                 return_match_profile=True, **flags)
                 chosen = new._select_match_count(out[6], penalty, fraction)
                 chain = match_chain(out[2])
-                if len(chain) != chosen or abs(out[0] - out[6][chosen]) > 1e-12 or out[3]["F_total"] != chosen:
+                if (len(chain) != chosen or abs(out[0] - (out[6][chosen] - penalty * chosen)) > 1e-12
+                        or out[3]["F_total"] != chosen):
                     problems.append(f"penalty {penalty} fraction {fraction}: {len(chain)} matches, chose {chosen}")
-                elif chain and abs(chain_score(chain, sim, scale, M, p, general) - out[0]) > 1e-12:
+                elif chain and abs(chain_score(chain, sim, scale, M, p, general) - penalty * len(chain)
+                                   - out[0]) > 1e-12:
                     problems.append("chosen alignment does not re-score to msw_score")
                 if fraction == 1:
                     counts.append(chosen)
             if counts != sorted(counts, reverse=True):
                 problems.append(f"more matches with a larger penalty: {counts}")
-            if counts[-1] != 0 and profile[1:].max() < 1.0:  # -1 per match: Only the empty alignment
-                problems.append(f"penalty -1 kept {counts[-1]} matches")
+            if counts[-1] != 0 and profile[1:].max() < 1.0:  # 1 per match: Only the empty alignment
+                problems.append(f"penalty 1 kept {counts[-1]} matches")
             n_runs += 1
             if problems:
                 n_bad += 1
@@ -464,8 +579,8 @@ def test_match_count(new, n_cases=60, seed=14):
 
     # The rule, by hand
     profile = np.array([0.0, 0.5, 0.8, 0.9, 0.95, -np.inf])
-    for penalty, fraction, chosen in ((-0.0, 1.0, 4), (-0.08, 1.0, 3), (-0.12, 1.0, 2), (-0.35, 1.0, 1), (-0.6, 1.0, 0),
-                                      (-0.0, 0.9, 3), (-0.0, 0.8, 2), (-0.0, 0.5, 1), (-0.08, 0.5, 1)):
+    for penalty, fraction, chosen in ((0.0, 1.0, 4), (0.08, 1.0, 3), (0.12, 1.0, 2), (0.35, 1.0, 1), (0.6, 1.0, 0),
+                                      (0.0, 0.9, 3), (0.0, 0.8, 2), (0.0, 0.5, 1), (0.08, 0.5, 1)):
         if new._select_match_count(profile, penalty, fraction) != chosen:
             n_bad += 1
             print(f"  [FAIL] rule: penalty {penalty} fraction {fraction}")
@@ -475,9 +590,9 @@ def test_match_count(new, n_cases=60, seed=14):
         profile[0] = 0.0
         profile[rng.random(len(profile)) < 0.2] = -np.inf
         profile[0] = 0.0
-        for penalty in (-0.0, -0.1, -0.25):
+        for penalty in (0.0, 0.1, 0.25):
             if new._select_match_count(profile, penalty, 1.0) != int(
-                    (profile + penalty * np.arange(len(profile))).argmax()):
+                    (profile - penalty * np.arange(len(profile))).argmax()):
                 n_bad += 1
                 print(f"  [FAIL] fraction 1 on {profile}, penalty {penalty}")
     for fraction in (None, 0.0, 1.5, -0.5):
@@ -512,7 +627,7 @@ def test_match_count(new, n_cases=60, seed=14):
             n_bad += 1
             print(f"  [FAIL] alignment outputs {len(aligned)}")
     try:
-        call_core(new, np.ones((2, 4)), np.ones(4), 2, alignment_type="global", match_count_penalty=-0.1)
+        call_core(new, np.ones((2, 4)), np.ones(4), 2, alignment_type="global", match_count_penalty=0.1)
     except AssertionError:
         pass
     else:
@@ -525,10 +640,10 @@ def test_match_count(new, n_cases=60, seed=14):
 
 
 def test_match_cost_and_root(new, n_cases=60, seed=15):
-    """f. The per-match cost (match_penalty_f, in the score) and the root of the rescaling
-    (general_penalty_root): the cost keeps the alignment that choosing the number of matches
-    with the same penalty keeps (match_count_penalty), scored with it; fewer matches as the cost
-    grows or (without penalties) the root falls; and hand cases."""
+    """f. match_count_penalty as a per-match cost, and the root of the rescaling
+    (general_penalty_root): with global_exact, msw_score is the best over every chain of matches
+    (brute force, the empty one included) of its score minus the cost per match; fewer matches as
+    the cost grows or (without penalties) the root falls; and hand cases."""
     rng = np.random.default_rng(seed)
     n_bad = n_runs = 0
     for i in range(n_cases):
@@ -539,15 +654,16 @@ def test_match_cost_and_root(new, n_cases=60, seed=15):
         for config, general in itertools.product((ZERO, NEUTRAL), (False, True)):
             problems = []
             counts = []
-            for cost in (-0.0, -0.01, -0.05, -0.2, -1.0):
-                cost_run = call_core(new, sim, scale, M, match_penalty_f=cost, **rooted(config, general))
-                chosen = call_core(new, sim, scale, M, match_count_penalty=cost, return_match_profile=True,
-                                   **rooted(config, general))
-                chain = match_chain(cost_run[2])
+            profile = brute_force_profile(sim, scale, M, config, general)
+            for cost in (0.0, 0.01, 0.05, 0.2, 1.0):
+                out = call_core(new, sim, scale, M, match_count_penalty=cost, **rooted(config, general))
+                chain = match_chain(out[2])
                 counts.append(len(chain))
-                if (chain != match_chain(chosen[2]) or abs(cost_run[0] - (chosen[0] + cost * len(chain))) > 1e-12
-                        or abs(cost_run[3]["H_penalty_match_f"] - cost * len(chain)) > 1e-12):
-                    problems.append(f"cost {cost}: {chain} {cost_run[0]!r} vs {match_chain(chosen[2])} {chosen[0]!r}")
+                best = (profile - cost * np.arange(len(profile))).max()
+                if abs(out[0] - best) > 1e-12:
+                    problems.append(f"cost {cost}: score {out[0]!r}, best chain {best!r}")
+                elif chain and abs(chain_score(chain, sim, scale, M, config, general) - cost * len(chain) - out[0]) > 1e-12:
+                    problems.append(f"cost {cost}: matches do not re-score to msw_score")
             if counts != sorted(counts, reverse=True):
                 problems.append(f"more matches with a larger cost: {counts}")
             if general and config is ZERO:  # With penalties, a smaller root can trade them for matches
@@ -577,12 +693,12 @@ def test_match_cost_and_root(new, n_cases=60, seed=15):
     # Without the rescaling, a match is kept exactly if it adds more than the cost
     sim = np.full((2, 4), -1.0)
     sim[0, 0], sim[1, 2] = 0.3, 0.1
-    for cost, expected in ((-0.2, [(0, 0)]), (-0.05, [(0, 0), (1, 2)]), (-0.5, [])):
-        out = call_core(new, sim, np.ones(4), 2, match_penalty_f=cost, **ZERO)
-        if match_chain(out[2]) != expected:
+    for cost, expected, score in ((0.2, [(0, 0)], 0.1), (0.05, [(0, 0), (1, 2)], 0.3), (0.5, [], 0.0)):
+        out = call_core(new, sim, np.ones(4), 2, match_count_penalty=cost, **ZERO)
+        if match_chain(out[2]) != expected or abs(out[0] - score) > 1e-12:
             n_bad += 1
-            print(f"  [FAIL] cost {cost}: {out[2]}")
-    for bad in (dict(match_penalty_f=0.1), dict(general_penalty_root=-2), dict(general_penalty_root=-0.5)):
+            print(f"  [FAIL] cost {cost}: {out[0]!r} {out[2]}")
+    for bad in (dict(general_penalty_root=-2), dict(general_penalty_root=-0.5)):
         try:
             call_core(new, np.ones((2, 4)), np.ones(4), 2, **{**ZERO, "general_penalty_root": 2, **bad})
         except AssertionError:
@@ -593,14 +709,14 @@ def test_match_cost_and_root(new, n_cases=60, seed=15):
     # Wrappers: The composite keeps fewer subunits as the cost grows (exactly: global_exact)
     for j in range(4):
         motif, stack = make_mixed_case(rng, 2, 3, int(rng.integers(15, 25)))
-        sizes = [len(new.run_modified_smith_waterman_composite(motif, stack, match_penalty_f=cost, global_exact=True)[3])
-                 for cost in (-0.0, -0.02, -0.1)]
+        sizes = [len(new.run_modified_smith_waterman_composite(motif, stack, match_count_penalty=cost, global_exact=True)[3])
+                 for cost in (0.0, 0.02, 0.1)]
         sizes_root = [len(new.run_modified_smith_waterman_composite(motif, stack, general_penalty_root=root,
                                                                     global_exact=True)[3]) for root in (2, 1.5, 1)]
         if sizes != sorted(sizes, reverse=True) or sizes_root != sorted(sizes_root, reverse=True):
             n_bad += 1
             print(f"  [FAIL] composite: subunits by cost {sizes}, by root {sizes_root}")
-    print(f"f. match cost and root: {n_runs - n_bad}/{n_runs} agree with choosing the number of matches and "
+    print(f"f. match cost and root: {n_runs - n_bad}/{n_runs} optimal with the cost (brute force) and "
           f"shrink with the cost and the root; hand cases and wrappers {'ok' if n_bad == 0 else 'FAIL'}")
     return n_bad
 
@@ -617,7 +733,7 @@ def test_storage(new, seed=16):
         sim = rng.random((F, N)) * 1.6 - 0.4
         scale = rng.random(N) * 0.5
         for config, general in itertools.product(
-                (ZERO, NEUTRAL, dict(ZERO, skip_penalty_f2=-0.3), dict(ZERO, overlap_penalty_f1=-0.1)), (False, True)):
+                (ZERO, NEUTRAL, dict(ZERO, skip_penalty_f2=0.3), dict(ZERO, overlap_penalty_f1=0.1)), (False, True)):
             track_l = any(config[k] != 0 for k in ("overlap_penalty_f1", "overlap_penalty_f2",
                                                    "skip_penalty_l1", "skip_penalty_l2"))
             track_f = config["skip_penalty_f1"] != config["skip_penalty_f2"]
@@ -656,7 +772,7 @@ def test_storage(new, seed=16):
     return n_bad
 
 
-_EMPTY = ("H_match", "H_penalty_overlap_f", "H_penalty_skip_f", "H_penalty_skip_l", "H_penalty_match_f", "F_total")
+_EMPTY = ("H_match", "H_penalty_overlap_f", "H_penalty_skip_f", "H_penalty_skip_l", "F_total")
 
 
 def test_general_penalty(new, seed=12):
@@ -816,14 +932,14 @@ def test_new_params_noop(new, n_cases=100, seed=1):
         F = int(rng.integers(2, 9))
         motif, fingers = make_case(rng, F, 3, int(rng.integers(15, 50)))
         base = call_znf(new, motif, fingers)
-        same = call_znf(new, motif, fingers, skip_penalty_f1=-0.1, skip_penalty_f2=-0.1)
+        same = call_znf(new, motif, fingers, skip_penalty_f1=0.1, skip_penalty_f2=0.1)
         if differing(base, same):
             n_diff += 1
-        harsh = call_znf(new, motif, fingers, skip_penalty_f2=-0.3)
+        harsh = call_znf(new, motif, fingers, skip_penalty_f2=0.3)
         if harsh[0] != base[0]:
             n_changed += 1
     print(f"3. finger-skip params: {n_cases - n_diff}/{n_cases} neutral-identical; "
-          f"{n_changed}/{n_cases} changed under skip_f2=-0.3")
+          f"{n_changed}/{n_cases} changed under skip_f2=0.3")
     return n_diff
 
 
@@ -1173,6 +1289,10 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         orig = load_module(sys.argv[1], "composite_orig")
         failures += test_core_identical(new, orig)
+    if len(sys.argv) > 3:
+        prev = load_module(sys.argv[3], "composite_prev")
+        failures += test_matches_previous(new, prev)
+    failures += test_penalty_signs(new)
     if len(sys.argv) > 2:
         snap = load_module(sys.argv[2], "composite_snap")
         failures += test_matches_snapshot(new, snap)
