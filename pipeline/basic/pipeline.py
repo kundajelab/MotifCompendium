@@ -20,7 +20,7 @@ import MotifCompendium.utils.plotting as utils_plotting
 import MotifCompendium.utils.similarity as utils_similarity
 import MotifCompendium.utils.visualization as utils_visualization
 
-import pipeline.basic.configs as configs
+import configs
 
 
 def setup_parser():

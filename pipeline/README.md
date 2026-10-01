@@ -20,8 +20,9 @@ conda activate motifcompendium       # or motifcompendium-gpu
 pip install -e .
 ```
 
-Run the scripts from the repository root. This matters because they import
-modules through the top-level `pipeline` package.
+Each script imports the `configs.py` in its own directory, so it can be run from
+any working directory. The examples below use paths relative to the repository
+root.
 
 ```bash
 python pipeline/basic/pipeline.py --help

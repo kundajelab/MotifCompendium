@@ -17,7 +17,7 @@ import MotifCompendium
 import MotifCompendium.utils.analysis as utils_analysis
 import MotifCompendium.utils.motif as utils_motif
 
-import pipeline.jaspar.configs as configs
+import configs
 
 
 #### ARGUMENTS ------------------------------------------------------
