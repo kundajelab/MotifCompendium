@@ -20,6 +20,7 @@ its match_penalty_f against match_count_penalty.
 Penalties are numbers >= 0, subtracted from the score.
 """
 
+import functools
 import importlib.util
 import itertools
 import math
@@ -1607,11 +1608,70 @@ def test_general_m(new, seed=2):
     return n_fail
 
 
+def test_ic_scale(new):
+    """k. ic_scale: the composite wrappers IC-scale by default, the alignment wrappers do not; with
+    ic_scale, every wrapper is the same as fed the IC-scaled motifs without it (IC-scaled once, the
+    global IC-scale setting adding nothing), and the global setting is restored."""
+    rng = np.random.default_rng(11)
+    n_fail = 0
+    motif_ic, config = new.utils_motif.ic_scale, new.utils_config
+
+    def make(L):
+        return (rng.dirichlet(np.ones(4) * 0.3, size=L) * rng.choice([-1, 1], size=(L, 1))
+                * rng.uniform(0.2, 1, size=(L, 1)))
+
+    wrappers = {
+        "composite_fixlen": (new.run_modified_smith_waterman_composite_fixlen, True, 3),
+        "composite": (new.run_modified_smith_waterman_composite, True, 3),
+        "alignment": (lambda t, f, **k: new.run_modified_smith_waterman_alignment(
+            t, f.reshape(-1, 4), finger_length=f.shape[1], **k), False, 3),
+        "znf": (lambda t, f, **k: new.run_modified_smith_waterman_znf(
+            t, f.reshape(-1, 4), finger_length=f.shape[1], **k), False, 3),
+    }
+    setting = config.get_ic_scale()
+    for name, (fn, default, F) in wrappers.items():
+        for trial, unsigned in itertools.product(range(5), (True, False)):
+            target, stack = make(int(rng.integers(10, 20))), np.stack([make(4) for _ in range(F)])
+            if name in ("alignment", "znf"):
+                stack = np.abs(stack)
+            kw = dict(label_unsigned=unsigned)
+            results = {}
+            for global_ic in (False, True):
+                config.set_ic_scale(global_ic)
+                results[global_ic] = (fn(target, stack, **kw), fn(target, stack, ic_scale=default, **kw),
+                                      fn(target, stack, ic_scale=True, **kw),
+                                      fn(motif_ic(target), motif_ic(stack), ic_scale=False, **kw))
+                if config.get_ic_scale() != global_ic:
+                    print(f"  [FAIL] {name}: global IC-scale setting not restored")
+                    n_fail += 1
+            checks = [("default", results[False][0], results[False][1]),
+                      ("IC-scaled once", results[False][2], results[False][3]),
+                      ("global setting adds no IC-scaling (default)", results[False][0], results[True][0]),
+                      ("global setting adds no IC-scaling (ic_scale)", results[False][2], results[True][2]),
+                      ("global setting adds no IC-scaling (no ic_scale)", results[False][3], results[True][3])]
+            for label, a, b in checks:
+                diffs = differing(a, b)
+                if diffs:
+                    print(f"  [FAIL] {name} unsigned={unsigned} trial {trial}: {label}: {diffs}")
+                    n_fail += 1
+    config.set_ic_scale(setting)
+    print(f"k. ic_scale: {'ok' if n_fail == 0 else f'{n_fail} failures'}")
+    return n_fail
+
+
+def pin_ic_scale_off(new):
+    '''The tests below check the alignment against composite.py versions without IC-scaling: pin
+    the composite wrappers to ic_scale=False (test_ic_scale() checks ic_scale).'''
+    for name in ("run_modified_smith_waterman_composite_fixlen", "run_modified_smith_waterman_composite"):
+        setattr(new, name, functools.partial(getattr(new, name), ic_scale=False))
+
+
 if __name__ == "__main__":
     new = load_module(
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "MotifCompendium", "utils", "composite.py"),
         "composite_new")
-    failures = 0
+    failures = test_ic_scale(new)
+    pin_ic_scale_off(new)
     if len(sys.argv) > 1:
         orig = load_module(sys.argv[1], "composite_orig")
         failures += test_core_identical(new, orig)

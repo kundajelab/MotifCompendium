@@ -27,6 +27,7 @@ def run_modified_smith_waterman_composite(
     return_match_profile=False,
     label_unsigned=True,
     allow_reverse_comp=True,
+    ic_scale=True,
 ):
     '''
     Aligns a composite of subunit motifs of any lengths against a motif: each subunit is trimmed
@@ -72,12 +73,16 @@ def run_modified_smith_waterman_composite(
             the signed motifs on 8 channels, so that a negative region only matches a negative
             subunit (default: True) - bool
         allow_reverse_comp: Also match the subunits reverse complemented - bool
+        ic_scale: IC-scale the target and the subunits (once, before trimming and any
+            calculation), so that every similarity, match score and scaling uses the IC-scaled
+            motifs; pass motifs that are not IC-scaled already. The global IC-scale setting is
+            ignored (default: True) - bool
 
     Returns:
         msw_score: Score of the optimal alignment, minus match_count_penalty * N - float
         sim_score: MotifCompendium similarity score of the optimal alignment - float
-        aligned_subunit_stack: Each matched subunit (trimmed), scaled, in the orientation it
-            matched in, left to right. The target spans columns M-1 to L+M-2, leaving M-1
+        aligned_subunit_stack: Each matched subunit (IC-scaled, if ic_scale, and trimmed),
+            scaled, in the orientation it matched in, left to right. The target spans columns M-1 to L+M-2, leaving M-1
             columns past either end - np.array of shape (N, 2*M + L - 2, D)
         aligned_subunit_idx: Subunit of each match, as an index into subunit_motif_stack
             - np.array of shape (N,) of int
@@ -102,10 +107,15 @@ def run_modified_smith_waterman_composite(
     assert sim_threshold < 1
     _check_match_count_max(match_count_max)
 
-    # Setting: IC-scale off (store)
-    ic_scale = utils_config.get_ic_scale()
-    if ic_scale:
+    # Setting: IC-scale off (store), so that compute_similarities() does not IC-scale again
+    ic_scale_config = utils_config.get_ic_scale()
+    if ic_scale_config:
         utils_config.set_ic_scale(False)
+
+    # IC-scale: Only once, here
+    if ic_scale:
+        target_motif = utils_motif.ic_scale(target_motif)
+        subunit_motif_stack = utils_motif.ic_scale(subunit_motif_stack)
 
     # Unsigned: Absolute value
     if label_unsigned:
@@ -174,7 +184,7 @@ def run_modified_smith_waterman_composite(
             [aligned_subunit_stack.sum(axis=0)[np.newaxis], target_padded[np.newaxis]], [(0, 1)])[0]
 
     # Restore IC-scale setting
-    if ic_scale:
+    if ic_scale_config:
         utils_config.set_ic_scale(True)
 
     outputs = (msw_score, sim_score, aligned_subunit_stack, aligned_subunit_idx,
@@ -198,6 +208,7 @@ def run_modified_smith_waterman_composite_fixlen(
     allow_reverse_order=True,
     allow_reverse_comp=True,
     max_homo_subunits=2,
+    ic_scale=True,
 ):
     '''
     Aligns a composite of subunit motifs of one fixed length M > 1 against a motif (see
@@ -253,12 +264,16 @@ def run_modified_smith_waterman_composite_fixlen(
         allow_reverse_comp: Also match the subunits reverse complemented - bool
         max_homo_subunits: Copies of each block, i.e. matches of each subunit per subunit
             order and orientation; must be a positive integer (default: 2)
+        ic_scale: IC-scale the target and the subunits (once, before any calculation), so
+            that every similarity, match score and scaling uses the IC-scaled motifs; pass
+            motifs that are not IC-scaled already. The global IC-scale setting is ignored
+            (default: True) - bool
 
     Returns:
         msw_score: Modified Smith Waterman score of optimal alignment - float
         sim_score: MotifCompendium similarity score of optimal alignment - float
-        aligned_subunit_stack: Each matched subunit, scaled, in the orientation it matched in,
-            left to right. The target spans columns M-1 to L+M-2, leaving M-1 columns past
+        aligned_subunit_stack: Each matched subunit (IC-scaled, if ic_scale), scaled, in the
+            orientation it matched in, left to right. The target spans columns M-1 to L+M-2, leaving M-1 columns past
             either end - np.array of shape (N, 2*M + L - 2, D)
         aligned_subunit_idx: Subunit of each match, as an index into subunit_motif_stack
             - np.array of shape (N,) of int
@@ -275,6 +290,11 @@ def run_modified_smith_waterman_composite_fixlen(
             or not isinstance(max_homo_subunits, (int, np.integer))
             or max_homo_subunits < 1):
         raise ValueError("max_homo_subunits must be a positive integer")
+
+    # IC-scale: Only once, here, before the subunits are expanded
+    if ic_scale:
+        target_motif = utils_motif.ic_scale(target_motif)
+        subunit_motif_stack = utils_motif.ic_scale(subunit_motif_stack)
 
     # Repeat subunit stacks: Blocks of all F subunits
     # - Reverse motif order (F) x 2 (allow_reverse_order)
@@ -311,6 +331,7 @@ def run_modified_smith_waterman_composite_fixlen(
         place_as_matched=True,
         orientations=("for", "rev") if allow_reverse_comp else ("for",),
         align_remaining=False,
+        ic_scale=False,  # IC-scaled above
     )
     (msw_score, sim_score, aligned_motif_fs, msw_orient, _, _, msw_scale_f, msw_actions, _, _) = outputs[:10]
 
@@ -518,6 +539,7 @@ def run_modified_smith_waterman_alignment(
     return_matrices=False,
     label_unsigned=True,
     finger_length=3,
+    ic_scale=False,
 ):
     '''
     Aligns a chain of fixed-length finger motifs against a CWM, in the order and orientation
@@ -570,11 +592,16 @@ def run_modified_smith_waterman_alignment(
             signed motifs on 8 channels, so that a negative region only matches a negative finger
             (see run_modified_smith_waterman_composite()) (default: True) - bool
         finger_length: Length of each finger motif - int (M)
+        ic_scale: IC-scale the CWM and the fingers (once, before any calculation), so that
+            every similarity, match score and scaling uses the IC-scaled motifs; pass motifs
+            that are not IC-scaled already (the B1H PPM fingers usually are). The global
+            IC-scale setting is ignored (default: False) - bool
 
     Returns:
         msw_score: Modified Smith Waterman score of optimal alignment - float
         sim_score: MotifCompendium similarity score of optimal alignment - float
-        aligned_motif_fs: Aligned finger motifs - np.array of shape (F, L+2M-2, D)
+        aligned_motif_fs: Aligned finger motifs (IC-scaled, if ic_scale) - np.array of shape
+            (F, L+2M-2, D)
         msw_orient: Optimal orientation ("for" or "rev") - str
         msw_align_f: Finger alignment indices - list of int
         msw_align_l: CWM alignment indices (padded) - list of int
@@ -608,6 +635,7 @@ def run_modified_smith_waterman_alignment(
         match_count_fraction=match_count_fraction,
         match_count_max=match_count_max,
         return_match_profile=return_match_profile,
+        ic_scale=ic_scale,
     )
 
 
@@ -626,6 +654,7 @@ def run_modified_smith_waterman_znf(
     return_matrices=False,
     label_unsigned=True,
     finger_length=3,
+    ic_scale=False,
 ):
     '''
     Exactly run_modified_smith_waterman_alignment(), kept for backward compatibility.
@@ -654,6 +683,7 @@ def run_modified_smith_waterman_znf(
         return_matrices=return_matrices,
         label_unsigned=label_unsigned,
         finger_length=finger_length,
+        ic_scale=ic_scale,
     )
 
 
@@ -674,6 +704,7 @@ def _run_modified_smith_waterman(
     place_as_matched=False,
     orientations=("for", "rev"),
     align_remaining=True,
+    ic_scale=False,
 ):
     '''
     Aligns a chain of fixed-length finger motifs against a motif, for any finger length M > 1.
@@ -713,6 +744,8 @@ def _run_modified_smith_waterman(
             rest of the motif (globally), so that every finger is accounted for. Their matches are
             added to the alignment, but not to msw_score. The composite wrapper turns it off: its
             leftover stack entries are unused copies, not fingers to account for - bool
+        ic_scale: IC-scale the target and the fingers, once, before any calculation (the
+            global IC-scale setting is ignored) - bool
 
     Returns:
         msw_score: Modified Smith Waterman score of optimal alignment - float
@@ -730,15 +763,18 @@ def _run_modified_smith_waterman(
         msw_profile: Best score of a local alignment with exactly N matches, by N - np.array,
             only if return_match_profile
     '''
-    # Setting: IC-scale off (store)
-    if utils_config.get_ic_scale():
-        ic_scale = True
+    # Setting: IC-scale off (store), so that compute_similarities() does not IC-scale again
+    ic_scale_config = utils_config.get_ic_scale()
+    if ic_scale_config:
         utils_config.set_ic_scale(False)
-    else:
-        ic_scale = False
 
     ## Preprocess motifs
     F, M, D = subunit_motif_stack.shape # (F, M, D)
+
+    # IC-scale: Only once, here
+    if ic_scale:
+        target_motif = utils_motif.ic_scale(target_motif)
+        subunit_motif_stack = utils_motif.ic_scale(subunit_motif_stack)
 
     # Unsigned: Absolute value
     if label_unsigned:
@@ -873,7 +909,7 @@ def _run_modified_smith_waterman(
         )[0]
 
     # Restore IC-scale setting
-    if ic_scale:
+    if ic_scale_config:
         utils_config.set_ic_scale(True)
 
     outputs = (msw_score, sim_score, aligned_motif_fs, msw_orient, msw_align_f, msw_align_l, msw_scale_f, msw_actions, H_final, state_final)
