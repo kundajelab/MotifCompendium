@@ -2,7 +2,7 @@
 
 This document describes `MotifCompendium/utils/composite.py`: what problems it solves, the two
 scoring models, the two dynamic programs (DPs), and every function. It was written against the
-2610-line version of the file on `next_version` (2026-10-01). Line numbers refer to that version.
+2646-line version of the file on `next_version` (2026-10-02). Line numbers refer to that version.
 
 The file holds two aligners that share their preprocessing and helpers:
 
@@ -24,6 +24,8 @@ The previous version described the 2207-line file. Since then:
 | Signed similarity (`label_unsigned=False`) | 4-channel cosine of signed motifs | **8 channels** (each base's positive and negative part apart), as MotifCompendium's similarity (Section 3.2) |
 | Number of matches | chosen by `match_count_penalty` / `match_count_fraction` | also **limited** by `match_count_max` (Sections 12, 22) |
 | Exact DP speed | every diagonal, an argmax per source state, every row filled, one strided argmax per count | **exact shortcuts** for zero overlap/gap and finger-skip penalties (Section 8.6); 7–10× faster on the composite |
+| IC scaling | the global IC-scale setting, switched off inside | an **`ic_scale` argument**: the composite wrappers IC-scale the target and the subunits once, at entry (default True); the alignment wrappers don't (default False) (Section 3.1) |
+| Trimming argument | `motif_trim` | renamed **`subunit_motif_trim`** |
 | Frozen 3 bp recurrence | kept | still kept (the user's decision), penalties ≥ 0 |
 
 ---
@@ -96,19 +98,19 @@ is a chain of weighted intervals with an overlap cost (Section 21).
 
 | Lines | Section | Functions |
 |---|---|---|
-| 18–168 | Fixed-length composite wrapper | `run_modified_smith_waterman_composite_fixlen` |
-| 171–335 | Variable-length composite wrapper | `run_modified_smith_waterman_composite` |
-| 338–503 | Variable-length helpers and DP | `_trim_subunits`, `_check_match_count_max`, `_first_running_max`, `_chain_composite` |
-| 506–657 | Alignment wrappers | `run_modified_smith_waterman_alignment`, `run_modified_smith_waterman_znf` (deprecated alias) |
-| 660–910 | Fixed-length core runner | `_run_modified_smith_waterman`, `_next_unused_indices` |
-| 916–966 | Unrolling, similarity, shuffle | `_unroll_motif`, `compute_aligned_similarity`, `shuffle_motif_position` |
-| 972–1083 | Penalty check; helpers for the frozen recurrence and the action strings | `_previous_state`, `_check_penalty`, `_num_overlap`, `_calculate_overlap_penalties`, `_overlap_actions`, `_diagonal_actions`, `_calculate_finger_skip_penalty`, `_extract_best_alignment` |
-| 1086–1708 | Exact DP ("DP states") | `_EMPTY_STATE`, `_state_space`, `_state_value`, `_match_rescale`, `_initial_parts`, `_offer`, `_row_candidates`, `_cell_candidates`, `_fill_modified_smith_waterman`, `_best_cell`, `_traceback_step`, `_traceback`, `_path_state`, `_path_actions`, `_state_matrices`, `_trace_all_states`, `_best_by_count`, `_select_match_count`, `_max_matches`, `_align_all_states` |
-| 1711–1948 | Approximate DP ("one state per cell") | `_one_state_row_candidates`, `_one_state_cell_candidates`, `_fill_one_state`, `_one_state_matrices`, `_align_one_state` |
-| 1951–2134 | Fixed-length driver | `calculate_modified_smith_waterman` |
-| 2137–2391 | Frozen original | `calculate_modified_smith_waterman_znf` |
-| 2394–2499 | Reconstruction | `get_alignment_modified_smith_waterman`, `_alignment_tracks` |
-| 2504–2610 | Plotting | `visualize_motif`, `visualize_motifs_n` |
+| 18–192 | Variable-length composite wrapper | `run_modified_smith_waterman_composite` |
+| 195–356 | Fixed-length composite wrapper | `run_modified_smith_waterman_composite_fixlen` |
+| 359–524 | Variable-length helpers and DP | `_trim_subunits`, `_check_match_count_max`, `_first_running_max`, `_chain_composite` |
+| 527–687 | Alignment wrappers | `run_modified_smith_waterman_alignment`, `run_modified_smith_waterman_znf` (deprecated alias) |
+| 690–946 | Fixed-length core runner | `_run_modified_smith_waterman`, `_next_unused_indices` |
+| 952–1002 | Unrolling, similarity, shuffle | `_unroll_motif`, `compute_aligned_similarity`, `shuffle_motif_position` |
+| 1008–1119 | Penalty check; helpers for the frozen recurrence and the action strings | `_previous_state`, `_check_penalty`, `_num_overlap`, `_calculate_overlap_penalties`, `_overlap_actions`, `_diagonal_actions`, `_calculate_finger_skip_penalty`, `_extract_best_alignment` |
+| 1122–1744 | Exact DP ("DP states") | `_EMPTY_STATE`, `_state_space`, `_state_value`, `_match_rescale`, `_initial_parts`, `_offer`, `_row_candidates`, `_cell_candidates`, `_fill_modified_smith_waterman`, `_best_cell`, `_traceback_step`, `_traceback`, `_path_state`, `_path_actions`, `_state_matrices`, `_trace_all_states`, `_best_by_count`, `_select_match_count`, `_max_matches`, `_align_all_states` |
+| 1747–1984 | Approximate DP ("one state per cell") | `_one_state_row_candidates`, `_one_state_cell_candidates`, `_fill_one_state`, `_one_state_matrices`, `_align_one_state` |
+| 1987–2170 | Fixed-length driver | `calculate_modified_smith_waterman` |
+| 2173–2427 | Frozen original | `calculate_modified_smith_waterman_znf` |
+| 2430–2535 | Reconstruction | `get_alignment_modified_smith_waterman`, `_alignment_tracks` |
+| 2540–2646 | Plotting | `visualize_motif`, `visualize_motifs_n` |
 
 Call graph of a fixed-length run:
 
@@ -153,18 +155,25 @@ run_modified_smith_waterman_composite
 
 ## 3. Preprocessing and similarity
 
-### 3.1 Steps (fixed-length: `_run_modified_smith_waterman`, lines 737–778)
+### 3.1 Steps (fixed-length: `_run_modified_smith_waterman`, lines 767–814)
 
 | Step | Code | Effect |
 |---|---|---|
-| IC scaling off | `utils_config.set_ic_scale(False)`, restored at the end | Similarities are computed on the matrices as given |
-| Unsigned | `label_unsigned`: `np.abs` on target and fingers (line 744) | Negative CWM contributions count like positive ones |
-| Pad | `np.pad(target, ((M-1, M-1), (0, 0)))` (line 749) | A finger may hang off either end, overlapping the target by as little as 1 bp |
-| Normalize target | `target / ‖target‖_F` (line 756) | The whole padded target has unit Frobenius norm |
-| Normalize fingers | each finger `/ ‖finger‖_F`, all-zero fingers stay zero (line 758) | Each finger has unit norm |
-| Unroll | `_unroll_motif(target, M)` → (L−M+1, M, D) (line 761) | Every length-M window of the target |
-| Similarities | `compute_aligned_similarity`, on 8 channels when signed (lines 772–778) | Cosine similarity of each finger with each window, forward and reverse-complemented |
+| Global IC scaling off | `utils_config.set_ic_scale(False)`, restored at the end (line 767) | `compute_similarities` (for `sim_score`) never IC-scales again |
+| IC-scale | `ic_scale`: `utils_motif.ic_scale` on target and fingers, once (line 775) | Similarities, match scores and the rebuilt motif all use the IC-scaled motifs |
+| Unsigned | `label_unsigned`: `np.abs` on target and fingers (line 780) | Negative CWM contributions count like positive ones |
+| Pad | `np.pad(target, ((M-1, M-1), (0, 0)))` (line 785) | A finger may hang off either end, overlapping the target by as little as 1 bp |
+| Normalize target | `target / ‖target‖_F` (line 792) | The whole padded target has unit Frobenius norm |
+| Normalize fingers | each finger `/ ‖finger‖_F`, all-zero fingers stay zero (line 794) | Each finger has unit norm |
+| Unroll | `_unroll_motif(target, M)` → (L−M+1, M, D) (line 797) | Every length-M window of the target |
+| Similarities | `compute_aligned_similarity`, on 8 channels when signed (lines 808–814) | Cosine similarity of each finger with each window, forward and reverse-complemented |
 
+`ic_scale` is an argument of every wrapper: True by default for the two composite wrappers,
+False for the alignment and ZNF wrappers (their B1H finger PPMs usually come IC-scaled). The
+fixed-length composite IC-scales before it expands the stack and passes `ic_scale=False` to
+`_run_modified_smith_waterman`. `utils_motif.ic_scale` multiplies each position by its
+information content, so it is not idempotent: a motif scaled before and again here is scaled
+twice (intended, for example, for references that start as PPMs).
 The variable-length wrapper does the same per subunit length (Section 19). From here on in
 Part I, **L is the padded length**, L_orig + 2(M−1). The number of windows is L − M + 1, which
 the code calls `L_M_1`. Target position t is padded position t + M − 1.
@@ -207,7 +216,7 @@ The code then keeps 4 channels, so that unsigned results stay bit for bit as bef
 
 ### 3.3 Window importance and match scores (Part I)
 
-**Window importance** (`scale_factor`, called `target_motif_norm_unroll_importance`, line 763):
+**Window importance** (`scale_factor`, called `target_motif_norm_unroll_importance`, line 799):
 
 $$
 s_l = \lVert W_l \rVert_F^2
@@ -216,7 +225,7 @@ $$
 The windows of a tiling of the target (non-overlapping, covering it) have importances that sum to
 $\lVert T\rVert^2 = 1$.
 
-**Match score** of finger i at window l (in `calculate_modified_smith_waterman`, line 2099):
+**Match score** of finger i at window l (in `calculate_modified_smith_waterman`, line 2135):
 
 $$
 m_{i,l} = s_l \cdot \text{sim}_{i,l}
@@ -272,7 +281,7 @@ For two consecutive matches at windows $l_j$ and $l$, the distance is $d = l - l
 | `skip_penalty_f2` | $k_2$ | each further finger of the run |
 
 Every penalty is **affine** (one price for the first unit, another for each further unit), is
-given as a **number ≥ 0**, and is **subtracted**. `_check_penalty` (line 984) raises
+given as a **number ≥ 0**, and is **subtracted**. `_check_penalty` (line 1020) raises
 `ValueError` for a negative number (the old sign convention) and for the removed string value
 `'l2_norm'`.
 
@@ -302,7 +311,7 @@ $$
 
 ### 4.3 What the rescaling means
 
-`_match_rescale(n, p)` (line 1229) returns $n^{-1/p}$, with a fast path of `1/sqrt(n)` for p = 2,
+`_match_rescale(n, p)` (line 1265) returns $n^{-1/p}$, with a fast path of `1/sqrt(n)` for p = 2,
 and 1 for p = 0.
 
 - **p = 2** divides by √N, the norm of N unit vectors that don't overlap. It re-L2-normalizes
@@ -327,7 +336,7 @@ match.
 
 ## 5. The DP grid
 
-`_fill_modified_smith_waterman` (line 1371) allocates
+`_fill_modified_smith_waterman` (line 1407) allocates
 
 ```
 parts: (F + 1, num_cols, *state_shape, num_parts)      num_cols = L + M   (L padded)
@@ -341,10 +350,10 @@ parts: (F + 1, num_cols, *state_shape, num_parts)      num_cols = L + M   (L pad
 | columns L+1 … L+M−1 | unused (M−1 columns) |
 
 Every cell starts as the initial state, at (L_skip = −1, F_skip = 0, F_total = initial), with
-parts from `_initial_parts` (line 1242). The fill then **overwrites** every visited cell with
+parts from `_initial_parts` (line 1278). The fill then **overwrites** every visited cell with
 the best candidates it computes; only the unvisited cells keep the initial state.
 
-- For **local** alignment, the initial state is `_EMPTY_STATE` (line 1088): all sums 0, F_total = 0.
+- For **local** alignment, the initial state is `_EMPTY_STATE` (line 1124): all sums 0, F_total = 0.
 - For the **remaining global** alignment, it is the local alignment's `msw_state` (Section 14).
 
 `_initial_parts` converts a state dict to the parts the DP stores (Section 7.5):
@@ -401,13 +410,13 @@ move depends on how the cell was reached:
 - With rescaling, the value of H_match depends on how many matches there are.
 
 An alignment that looks worse at a cell can be the better one to continue. So the exact engine
-keeps **the best alignment for each state** in each cell. `_state_space` (line 1092) defines the
+keeps **the best alignment for each state** in each cell. `_state_space` (line 1128) defines the
 states and the tables both engines use:
 
 | Axis | Values | Index | Tracked when |
 |---|---|---|---|
-| L_skip | −1 (no match yet), 0, 1, …, M, M+1 (meaning "M+1 or more") | L_skip + 1, so 0 … M+2 | any of $o_1, o_2, g_1, g_2$ is nonzero (`track_l`, line 1149) |
-| F_skip | 0, 1 (meaning "1 or more") | 0, 1 | $k_1 \ne k_2$ (`track_f`, line 1151) |
+| L_skip | −1 (no match yet), 0, 1, …, M, M+1 (meaning "M+1 or more") | L_skip + 1, so 0 … M+2 | any of $o_1, o_2, g_1, g_2$ is nonzero (`track_l`, line 1185) |
+| F_skip | 0, 1 (meaning "1 or more") | 0, 1 | $k_1 \ne k_2$ (`track_f`, line 1187) |
 | F_total | 0 … num_n − 1 | same | set by the caller (Sections 9, 11, 12) |
 
 Shape: `(M+3 or 1, 2 or 1, num_n)`. An axis that no penalty depends on has a single value, so zero
@@ -439,7 +448,7 @@ further window as it is passed:
 
 | Where | Charge |
 |---|---|
-| Right move out of L_skip = M+1 (line 1358) | $g_2$ per window |
+| Right move out of L_skip = M+1 (line 1394) | $g_2$ per window |
 | Diagonal k from the capped state (`skip_l[k, M+2]`) | $g_1 + k\,g_2$ |
 | Total, for a true L_skip of s ≥ M+1 | $(s-M-1)\,g_2 + g_1 + k\,g_2$ ✓ |
 
@@ -490,7 +499,7 @@ $k_1 = k_2$ the F_skip axis collapses (`nF = 1`) and every skip costs $k_1$.
 
 ### 7.5 What a state stores: 1 or 2 parts
 
-| Case | Parts | Value (`_state_value`, line 1218) |
+| Case | Parts | Value (`_state_value`, line 1254) |
 |---|---|---|
 | no rescaling (root 0), or rescaling with all penalties 0 | `("H",)`: $H_\text{match}$ − penalties | $H \cdot w$ |
 | rescaling **and** some penalty (`split=True`) | `("H_match", "H_penalty")`, with $H_\text{penalty}$ = −(sum of penalties) ≤ 0 | $H_\text{match}\cdot w + H_\text{penalty}$ |
@@ -534,7 +543,7 @@ source[target] = where(better, candidate_source, source[target])
 `target` selects the destination states. All comparisons use `space.weight`, the match weight of
 the pass (Section 9).
 
-### 8.3 `_row_candidates` (line 1263): diagonals and Down
+### 8.3 `_row_candidates` (line 1299): diagonals and Down
 
 For each k = 1 … M (only if some cell in the row is matchable; only k = 1 without L_skip states):
 
@@ -545,13 +554,13 @@ For each k = 1 … M (only if some cell in the row is matchable; only k = 1 with
    (L_skip = 0, F_skip = 0), so per cell and per F_total take the argmax over the flattened
    sources (first maximum on ties). With a single source state, this is skipped.
 5. Offer it to the target (L_skip index `d0`, F_skip 0, F_total + 1), with move k − 1. The F_total
-   shift is `n_from = 0 … nN−2` → `n_to = 1 … nN−1` (line 1283): the top F_total has no
+   shift is `n_from = 0 … nN−2` → `n_to = 1 … nN−1` (line 1319): the top F_total has no
    successor, which is how a pass caps the number of matches (Sections 9.5, 12).
 
 Then Down: `below = parts[i-1, j0:j1]`, with $-k_1$ (from F_skip 0) or $-k_2$ (from F_skip 1)
 added to part `pen`, into F_skip 1, with move M.
 
-### 8.4 `_cell_candidates` (line 1317): Right and Start
+### 8.4 `_cell_candidates` (line 1353): Right and Start
 
 - **Right** (move M+1): `left = parts[i, j-1]`, shifted `right_from → right_to`; the capped index
   M+2 goes to itself with $-g_2$ on part `pen`. Without L_skip states it is a straight copy.
@@ -576,11 +585,11 @@ penalties make it exact, and each leaves every output bit for bit the same.
 
 | Shortcut | Applies when | Why it is exact | Where |
 |---|---|---|---|
-| Only diagonal 1 | no L_skip states (overlap and gap penalties 0) | each row never decreases along j, so diagonal 1 is never beaten and wins ties (Section 6) | `range(1, M + 1 if nD > 1 else 2)`, line 1286 |
-| No argmax over source states | one source state per F_total (`nD * nF == 1`) | there is nothing to choose | line 1293 |
-| Copy rows that can't match | no F_skip state and $k_1 = 0$ (`free_down`) | with no match, a cell takes the cell above (Down, first) or its left neighbour, which the row above already took; so the row equals the row above | lines 1394–1398 |
+| Only diagonal 1 | no L_skip states (overlap and gap penalties 0) | each row never decreases along j, so diagonal 1 is never beaten and wins ties (Section 6) | `range(1, M + 1 if nD > 1 else 2)`, line 1322 |
+| No argmax over source states | one source state per F_total (`nD * nF == 1`) | there is nothing to choose | line 1329 |
+| Copy rows that can't match | no F_skip state and $k_1 = 0$ (`free_down`) | with no match, a cell takes the cell above (Down, first) or its left neighbour, which the row above already took; so the row equals the row above | lines 1430–1434 |
 
-`_best_by_count` (line 1580) also scans the score matrix DP row by DP row instead of with one
+`_best_by_count` (line 1616) also scans the score matrix DP row by DP row instead of with one
 `argmax(axis=0)` over the flattened matrix, which is strided and was the largest single cost on
 long stacks. Updating only on a strictly greater value keeps the first maximum, as `np.argmax`.
 
@@ -613,7 +622,7 @@ Write a continuation as: c more matches, match sum h, penalty sum q (≥ 0). A p
 matches, match sum H and penalties P finishes at $\text{final} = w(f+c)\,(H+h) - P - q$, with
 $w(n) = n^{-1/p}$.
 
-### 9.3 The three regimes (`_align_all_states`, line 1623)
+### 9.3 The three regimes (`_align_all_states`, line 1659)
 
 `general = root != 0` and `split = general and any(penalties)`. Each pass is a tuple
 `(num_n, match_weight, final_weight, final_f_total)`:
@@ -626,7 +635,7 @@ $w(n) = n^{-1/p}$.
 
 $$
 \texttt{num\_f\_total} = F_{\text{total},0} + \min(F,\ L-M+1,\ \texttt{match\_count\_max}) + 1
-\qquad (\texttt{\_max\_matches}, \text{line 1615})
+\qquad (\texttt{\_max\_matches}, \text{line 1651})
 $$
 
 Every finger matches at most once (one per row) and every match uses at least one new window, so
@@ -683,9 +692,9 @@ P = 0.2; B has H = 1.6, P = 0:
    is now a fixed number, so the DP rule holds again.
 2. At most n matches: the F_total axis has n + 1 values, and the diagonal shift has no successor
    for F_total = n.
-3. Exactly n at the end: visited cells with F_total ≠ n are set to −∞ (line 1676).
+3. Exactly n at the end: visited cells with F_total ≠ n are set to −∞ (line 1712).
 
-The best over all passes (line 1694, strict `>`, passes in increasing n) is the global optimum,
+The best over all passes (line 1730, strict `>`, passes in increasing n) is the global optimum,
 and ties go to fewer fingers.
 
 | | Regime B | Regime C |
@@ -699,7 +708,7 @@ and ties go to fewer fingers.
 
 ## 10. Finding the best alignment, tracing it back, and scoring it
 
-### 10.1 `_best_cell` (line 1407)
+### 10.1 `_best_cell` (line 1443)
 
 | Alignment | Where it may end | Rule |
 |---|---|---|
@@ -709,7 +718,7 @@ and ties go to fewer fingers.
 If no alignment scores above 0, the argmax is cell (0, 0), the traceback loop never runs, and the
 result is the empty alignment.
 
-### 10.2 `_traceback` (line 1451), shared by both engines
+### 10.2 `_traceback` (line 1487), shared by both engines
 
 ```python
 while (i, j) is a visited cell:
@@ -720,7 +729,7 @@ while (i, j) is a visited cell:
 ```
 
 `row` is a flat state index for the exact engine and a row index for the approximate engine.
-`_traceback_step` (line 1431) turns a move into a step and a source cell:
+`_traceback_step` (line 1467) turns a move into a step and a source cell:
 
 | Move | Step | Source cell |
 |---|---|---|
@@ -729,7 +738,7 @@ while (i, j) is a visited cell:
 | M+1 | `("L-skip", f, l, 0)` | (i, j−1) |
 | M+2 | `("match", f, l, 0)`, and stop | – |
 
-### 10.3 `_path_actions` (line 1516): steps → action strings
+### 10.3 `_path_actions` (line 1552): steps → action strings
 
 The rest of the code works with action strings `F{finger}@{action}@L{window}`:
 
@@ -743,7 +752,7 @@ The rest of the code works with action strings `F{finger}@{action}@L{window}`:
 `_diagonal_actions` builds [overlaps…, match, skipped windows…], dropping windows before the start
 of the matrix (`guard_negative=True`; the frozen recurrence passes False).
 
-### 10.4 `_path_state` (line 1475): the score, by replaying the moves
+### 10.4 `_path_state` (line 1511): the score, by replaying the moves
 
 The DP keeps only one or two numbers per state, so the separate sums of the alignment found (its
 `msw_state`) are rebuilt by charging each move exactly as the DP did:
@@ -758,9 +767,9 @@ The DP keeps only one or two numbers per state, so the separate sums of the alig
 
 It returns the state dict and
 $\text{score} = H_\text{match}\cdot r(F_\text{total}) - P_\text{overlap} - P_\text{skip,f} - P_\text{skip,l}$.
-The driver uses `_state_space(M, *penalties, 1, 1.0)` ("rules", line 2126) for the tables.
+The driver uses `_state_space(M, *penalties, 1, 1.0)` ("rules", line 2162) for the tables.
 
-### 10.5 `_state_matrices` (line 1537; only with `return_matrices`)
+### 10.5 `_state_matrices` (line 1573; only with `return_matrices`)
 
 `H_final[i, j]` is the best score over all states at the cell; `state_final` holds the stored
 parts with only the state axes that have more than one value, plus `axes` giving the value of
@@ -770,7 +779,7 @@ each index.
 
 ## 11. The approximate DP (`global_exact=False`)
 
-`_align_one_state` (line 1893) keeps **one alignment per cell**, or, with a profile, one per cell
+`_align_one_state` (line 1929) keeps **one alignment per cell**, or, with a profile, one per cell
 and F_total ("rows"), on the same `_state_space` tables as the exact engine. Each row stores
 `parts` (1 or 2 numbers, or `None`), `states` (its flat state) and `score`.
 
@@ -791,7 +800,7 @@ drops P3). It is exact only when every penalty is 0 **and** the root is 0.
 
 **Profile mode delegates.** With a profile, if no penalty depends on L_skip or F_skip and the
 parts aren't split, the exact engine is both exact and cheaper, so `_align_one_state` calls
-`_align_all_states` (line 1915). Since `match_count_max` (default 3 in the composite wrappers)
+`_align_all_states` (line 1951). Since `match_count_max` (default 3 in the composite wrappers)
 turns the profile on, the fixed-length composite's defaults (all penalties 0, root 2) now always
 take this exact path, although `global_exact=False` (Section 25, item 1).
 
@@ -800,7 +809,7 @@ take this exact path, although `global_exact=False` (Section 25, item 1).
 ## 12. Choosing and limiting the number of matches
 
 Profile mode is on when `return_match_profile`, `match_count_penalty != 0`,
-`match_count_fraction < 1`, or `match_count_max` is not None (line 2090). It is only allowed for
+`match_count_fraction < 1`, or `match_count_max` is not None (line 2126). It is only allowed for
 local alignment.
 
 $$
@@ -810,14 +819,14 @@ $$
 
 (−∞ where no alignment has exactly N matches.)
 
-**Limit** (`match_count_max`, validated by `_check_match_count_max`, line 364: None or an
+**Limit** (`match_count_max`, validated by `_check_match_count_max`, line 385: None or an
 integer ≥ 1). The F_total axis stops at `match_count_max` (`_max_matches`, Section 9.3), so the
 DP never builds an alignment with more matches. `msw_profile` then stops at it, and the alignment
 found is the best (exactly, with `global_exact`) with at most that many matches. A limit of
 min(F, L−M+1) or more changes nothing (section h of the tests). It also shrinks the DP: at 3, the
 composite ran 2.5–3× faster on real motifs.
 
-**Selection** (`_select_match_count`, line 1604), with `match_count_penalty` c ≥ 0:
+**Selection** (`_select_match_count`, line 1640), with `match_count_penalty` c ≥ 0:
 
 $$
 \text{pen}(N) = \texttt{msw\_profile}[N] - c\cdot N,
@@ -826,17 +835,17 @@ N^* = \min\{\,N : \text{pen}(N) \ge \texttt{match\_count\_fraction}\cdot\max_{N'
 $$
 
 With fraction 1 this is the N that maximizes pen, taking the fewest matches on ties. N = 0 is
-always a candidate. **`msw_score` includes the count penalty** (line 2129):
+always a candidate. **`msw_score` includes the count penalty** (line 2165):
 $\texttt{msw\_score} = H(\text{chosen}) - c\cdot N^*$; `msw_profile` and `msw_state` are reported
 without it. With `global_exact`, this is exactly the best alignment under a per-match penalty c,
 found from one profile without a DP pass per final count. Across orientations, per N, the later
-orientation wins ties (`>=`, line 2114).
+orientation wins ties (`>=`, line 2150).
 
 ---
 
 ## 13. `calculate_modified_smith_waterman`: the driver
 
-Lines 1951–2134.
+Lines 1987–2170.
 
 1. **Validate.** Each of the six penalties and `match_count_penalty` go through `_check_penalty`
    (≥ 0); `match_count_max` through `_check_match_count_max`. Also checked: `sim_threshold < 1`,
@@ -859,21 +868,21 @@ reverse-complementing every finger; the chain still runs left to right in stack 
 
 ## 14. `_run_modified_smith_waterman`: local, then remaining global
 
-Line 660.
+Line 690.
 
 1. Preprocess (Section 3).
-2. **Local** alignment over all fingers and the whole padded target (line 781).
-3. **Remaining global** alignment (line 812). It runs only if `align_remaining`, the local
+2. **Local** alignment over all fingers and the whole padded target (line 817).
+3. **Remaining global** alignment (line 848). It runs only if `align_remaining`, the local
    alignment is non-empty, and fingers and windows are left over:
-   - `_next_unused_indices` (line 883): `remain_f` = the last action's finger + 1, `remain_l` = the
+   - `_next_unused_indices` (line 919): `remain_f` = the last action's finger + 1, `remain_l` = the
      end of the last match's footprint.
    - A **global** alignment of fingers `remain_f:` against windows `remain_l:`, in the local
      alignment's orientation, from `initial_state = msw_state`, without a profile or limit.
    - Its actions are appended. Its **score is discarded**, but **`msw_state` is replaced** by the
      combined state.
-4. **Rebuild** (Section 15), with `rescale_factor = _match_rescale(F_total, root)` (line 856).
+4. **Rebuild** (Section 15), with `rescale_factor = _match_rescale(F_total, root)` (line 892).
 5. `sim_score` = MotifCompendium similarity between the sum of the placed fingers and the padded
-   target (line 870).
+   target (line 906).
 6. Restore the IC-scale setting.
 
 Returns `(msw_score, sim_score, aligned_motif_fs, msw_orient, msw_align_f, msw_align_l,
@@ -888,7 +897,7 @@ msw_scale_f, msw_actions, H_final, state_final[, msw_profile])`.
 
 ## 15. Rebuilding the aligned motif
 
-### 15.1 `get_alignment_modified_smith_waterman` (line 2394)
+### 15.1 `get_alignment_modified_smith_waterman` (line 2430)
 
 For each `match` action (finger i, window l):
 
@@ -902,7 +911,7 @@ $$
 reconstructed target. (With fingers of one length, scaling by the window energy only rescales
 the reconstruction; Part II scales by the projection instead, Section 22.)
 
-### 15.2 `_alignment_tracks` (line 2436)
+### 15.2 `_alignment_tracks` (line 2472)
 
 Two equal-length tracks, one entry per column: `msw_align_f` (finger column f·M + k, or `'-'`)
 and `msw_align_l` (target position, or `'-'`). A matched finger's M columns sit over the positions
@@ -913,14 +922,15 @@ Every finger column and every target position appears exactly once, in order.
 
 ## 16. The fixed-length wrappers
 
-### 16.1 `run_modified_smith_waterman_composite_fixlen` (line 18)
+### 16.1 `run_modified_smith_waterman_composite_fixlen` (line 195)
 
 **Defaults:** all penalties 0, `general_penalty_root=2`, `global_exact=False`,
 `match_count_penalty=0`, `match_count_fraction=1`, `match_count_max=3`, `label_unsigned=True`,
-`allow_reverse_order=True`, `allow_reverse_comp=True`, `max_homo_subunits=2`.
+`allow_reverse_order=True`, `allow_reverse_comp=True`, `max_homo_subunits=2`, `ic_scale=True`
+(the target and subunits are IC-scaled once, before the stack is expanded, line 295).
 
 **The expanded stack.** Matches must follow stack order, so the stack decides which arrangements
-are possible. It is made of blocks of all F subunits (line 120):
+are possible. It is made of blocks of all F subunits (line 307):
 
 ```python
 orders  = [0..F-1] (+ [F-1..0] if allow_reverse_order)
@@ -948,15 +958,16 @@ entry once more, so one copy allows both forward-then-reverse and reverse-then-f
 | `aligned_subunit_scale` | `msw_scale_f[e]`, including $N^{-1/p}$ |
 | `aligned_subunit_stack` | (N, 2M + L_orig − 2, D): each match's placed subunit at its column |
 
-### 16.2 `run_modified_smith_waterman_alignment` (line 506)
+### 16.2 `run_modified_smith_waterman_alignment` (line 527)
 
 **Defaults:** $o_1 = 0.02$, $o_2 = 0.1$, $k_1 = k_2 = 0.1$, $g_1 = 0.02$, $g_2 = 0.1$,
-`general_penalty_root=0`, `global_exact=True`, `match_count_max=None`, `finger_length=3`. It
+`general_penalty_root=0`, `global_exact=True`, `match_count_max=None`, `finger_length=3`,
+`ic_scale=False`. It
 reshapes the (F·M, D) reference into (F, M, D) and calls the core with `align_remaining=True` and
 fingers placed as given. `match_count_max` limits the local alignment only; the remaining
 alignment can still add fingers.
 
-### 16.3 `run_modified_smith_waterman_znf` (line 614)
+### 16.3 `run_modified_smith_waterman_znf` (line 642)
 
 A deprecated alias for 16.2 with the same arguments. It does not use the frozen recurrence.
 
@@ -964,7 +975,7 @@ A deprecated alias for 16.2 with the same arguments. It does not use the frozen 
 
 ## 17. The frozen 3 bp recurrence
 
-`calculate_modified_smith_waterman_znf` (line 2137) is the original algorithm, kept only to
+`calculate_modified_smith_waterman_znf` (line 2173) is the original algorithm, kept only to
 reproduce old results; the tests use it as a gate against the original code. It requires M = 3.
 It takes penalties as numbers ≥ 0 (through `_check_penalty`) and negates them once, so the
 original arithmetic is unchanged, and it keeps the **old** gap rule: $g_1$ for a 1 bp gap, else
@@ -1010,7 +1021,7 @@ position, the problem becomes a chain of weighted intervals, which a much simple
 
 ## 19. Subunits, candidates and match scores
 
-### 19.1 Trimming (`_trim_subunits`, line 338)
+### 19.1 Trimming (`_trim_subunits`, line 359)
 
 `subunit_motif_trim` has the meaning of `logo_trimming` in `assign_label_from_other_compendium`:
 
@@ -1022,8 +1033,9 @@ position, the problem becomes a chain of weighted intervals, which a much simple
 
 `trim_motif` keeps the positions between the first and last position whose share of the
 subunit's total absolute weight exceeds the threshold. A subunit trimmed away entirely raises a
-`ValueError` naming it; other values of `subunit_motif_trim` raise a `ValueError` too. Trimming runs on
-the subunits as given (after `np.abs` when unsigned).
+`ValueError` naming it; other values of `subunit_motif_trim` raise a `ValueError` too. Trimming
+runs on the subunits after IC scaling (`ic_scale`) and `np.abs` (when unsigned), so flanks are
+trimmed by their IC-scaled weight.
 
 ### 19.2 Candidates
 
@@ -1031,7 +1043,7 @@ A **candidate** c is a subunit, as given or reverse complemented (`allow_reverse
 own length $M_c$, L2-normalized: $\hat c$. Candidates are listed subunit by subunit
 (`cand_subunit`, `cand_rc`), so there are F or 2F.
 
-### 19.3 Windows, similarity and match scores (lines 281–302)
+### 19.3 Windows, similarity and match scores (lines 138–158)
 
 The target is padded by M − 1 (the untrimmed width) on either side and L2-normalized as a whole
 ($\lVert T\rVert = 1$), as in Part I. A candidate of length $M_c$ at padded start l covers the
@@ -1129,7 +1141,7 @@ target's energy".
 
 ## 21. `_chain_composite`: the chain DP
 
-Line 383.
+Line 404.
 
 ### 21.1 Recurrence
 
@@ -1151,7 +1163,7 @@ $$
 
 Each case is a running maximum over e, so all candidates at one start are scored with a few
 vectorized passes over the end positions: a prefix maximum, a running maximum of
-$\texttt{best} - \lambda W$ from l+1, and a suffix maximum. `_first_running_max` (line 372)
+$\texttt{best} - \lambda W$ from l+1, and a suffix maximum. `_first_running_max` (line 393)
 returns each running maximum with the index of its first occurrence, so the traceback is
 deterministic. Ties go to less overlap (the cases in table order), then to the earliest end, then
 to the earliest pair.
@@ -1172,7 +1184,7 @@ With $r(N) \ne 1$ and λ > 0, the score $r(N) H_\text{match} - P$ is not a sum o
 terms. As in regime C (Section 9.5), one pass per final N maximizes
 $H_\text{match} - P / r(N)$, i.e. runs the DP with λ/r(N), and reports $r(N)$ times the best value
 with exactly N matches. Without a penalty (λ = 0) or without the rescaling (root 0), one pass
-suffices: the best $H_\text{match}$ by n is rescaled at the end, as in regime B (line 478). With
+suffices: the best $H_\text{match}$ by n is rescaled at the end, as in regime B (line 499). With
 `match_count_max` = 3 this is at most 3 passes.
 
 ### 21.3 Output
@@ -1194,23 +1206,24 @@ suffices: the best $H_\text{match}$ by n is rescaled at the end, as in regime B 
 
 ## 22. `run_modified_smith_waterman_composite`: the wrapper
 
-Line 171.
+Line 18.
 
 **Defaults:** `subunit_motif_trim=True`, `sim_threshold=0`, `overlap_penalty=1`,
 `general_penalty_root=2`, `match_count_penalty=0`, `match_count_fraction=1`, `match_count_max=3`,
-`label_unsigned=True`, `allow_reverse_comp=True`. There is no `global_exact`: the DP is always
-exact.
+`label_unsigned=True`, `allow_reverse_comp=True`, `ic_scale=True`. There is no `global_exact`:
+the DP is always exact.
 
 1. Validate: `overlap_penalty` and `match_count_penalty` through `_check_penalty`,
    `match_count_max` through `_check_match_count_max`, the root, the fraction and the threshold.
-2. IC scaling off (restored at the end); `np.abs` on target and subunits when unsigned.
+2. Global IC scaling off (restored at the end, line 111); with `ic_scale`, the target and the
+   subunits are IC-scaled once (line 116); `np.abs` on both when unsigned (line 121).
 3. Trim (Section 19.1) and build the candidates (19.2).
 4. Pad and normalize the target; similarities and match scores per length (19.3).
-5. `position_energy` = $\lVert T_x\rVert^2$ per padded position (sums to 1, line 304), the
+5. `position_energy` = $\lVert T_x\rVert^2$ per padded position (sums to 1, line 161), the
    overlap weight.
 6. `_chain_composite`, then `_select_match_count`; `msw_score` = `msw_profile[N]` − c·N.
 7. Place each matched candidate (trimmed, oriented, normalized) at its start, scaled by
-   $\langle \hat c, W\rangle\, r(N) = \lVert W\rVert\,\text{sim}\; r(N)$ (line 316).
+   $\langle \hat c, W\rangle\, r(N) = \lVert W\rVert\,\text{sim}\; r(N)$ (line 173).
 8. `sim_score` = MotifCompendium similarity between the sum of the placed subunits and the padded
    target.
 
@@ -1239,7 +1252,8 @@ So `h - (ref_len - 1)` still gives the start on the target, with `ref_len` the s
 ### 22.1 On real composites
 
 Ten ENCODE composites against the 1487 IC-scaled clustered references (`sim_threshold` 0.5,
-`match_count_max` 2), compared with `assign_label_from_other_compendium` (match, then subtract,
+`match_count_max` 2), measured before `ic_scale` was added (so the target was not IC-scaled),
+compared with `assign_label_from_other_compendium` (match, then subtract,
 `max_submotifs=2`):
 
 | Setting | Same subunit set as the labeler | Two subunits | Mean `sim_score` | Time per motif |
