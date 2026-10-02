@@ -4121,7 +4121,7 @@ if __name__ == "__main__":
 
         # Split: Monomer, Composite
         mask_composite = bool(row[MetadataCols.composite_col])
-        mask_has_composite = is_valid(row[LabelCols.label_flank_col])
+        mask_has_composite = is_valid(row[LabelCols.label_flank_col]) or is_valid(row[LabelCols.label_flank_constit_all_col])  # Centroid or constituent flank
 
         # Row annotations
         row_label_core = row[LabelCols.label_core_col]
@@ -4141,6 +4141,8 @@ if __name__ == "__main__":
                 label_flank = assign_label_flank(row)
                 if is_valid(label_flank):
                     label_combined = str(label_core) + "::" + str(label_flank)
+                else:
+                    label_combined = str(label_core)  # Flank unresolved: Core only
             elif is_valid(label_core):
                 label_combined = str(label_core)
 
@@ -4156,7 +4158,7 @@ if __name__ == "__main__":
 
         # Split: Monomer, Composite
         mask_composite = bool(row[MetadataCols.composite_col])
-        mask_has_composite = is_valid(row[LabelCols.label_flank_col])
+        mask_has_composite = is_valid(row[LabelCols.label_flank_col]) or is_valid(row[LabelCols.label_flank_constit_all_col])  # Centroid or constituent flank
         
         # Row annotations
         row_label_core = row[LabelCols.label_core_col]
@@ -4182,6 +4184,8 @@ if __name__ == "__main__":
                 label_flank = assign_label_flank(row)
                 if is_valid(label_flank):
                     label_combined = str(label_core) + "::" + str(label_flank)
+                else:
+                    label_combined = str(label_core)  # Flank unresolved: Core only
             elif is_valid(label_core):
                 label_combined = str(label_core)
         
@@ -4199,9 +4203,11 @@ if __name__ == "__main__":
                 and mask_composite
                 and mask_has_composite
             ):
-                label_flank = row_label_flank
+                label_flank = row_label_flank if is_valid(row_label_flank) else assign_label_flank(row)  # Centroid flank, else constituent flank
                 if is_valid(label_flank):
                     label_combined = str(label_core) + "::" + str(label_flank)
+                else:
+                    label_combined = str(label_core)  # Flank unresolved: Core only
             elif is_valid(label_core):
                 label_combined = str(label_core)
         
@@ -4220,6 +4226,8 @@ if __name__ == "__main__":
                 label_flank = assign_label_flank(row)
                 if is_valid(label_flank):
                     label_combined = str(label_core) + "::" + str(label_flank)
+                else:
+                    label_combined = str(label_core)  # Flank unresolved: Core only
             elif is_valid(label_core):
                 label_combined = str(label_core)
         
@@ -4235,10 +4243,14 @@ if __name__ == "__main__":
 
     ### Label: Metacluster - Filtered
     # Add human-readable label (Direct only)
-    mc_metacluster_filtered.metadata[[LabelCols.direct_label_core_col, LabelCols.direct_label_core_readable_col, LabelCols.label_flank_col, LabelCols.direct_label_col]] = pd.DataFrame(
+    # Flank: Not saved here (assign_label reads label_flank_col as input; same flank is assigned below)
+    direct_labels = pd.DataFrame(
         mc_metacluster_filtered.metadata.apply(assign_direct_label, axis=1).tolist(),
-        index=mc_metacluster_filtered.metadata.index
+        index=mc_metacluster_filtered.metadata.index,
+        columns=[LabelCols.direct_label_core_col, LabelCols.direct_label_core_readable_col, LabelCols.label_flank_col, LabelCols.direct_label_col],
     )
+    direct_label_cols = [LabelCols.direct_label_core_col, LabelCols.direct_label_core_readable_col, LabelCols.direct_label_col]
+    mc_metacluster_filtered.metadata[direct_label_cols] = direct_labels[direct_label_cols]
     # Add human-readable label
     mc_metacluster_filtered.metadata[[LabelCols.label_core_col, LabelCols.label_core_readable_col, LabelCols.label_flank_col, LabelCols.label_col]] = pd.DataFrame(
         mc_metacluster_filtered.metadata.apply(assign_label, axis=1).tolist(),

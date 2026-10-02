@@ -2168,7 +2168,7 @@ if __name__ == "__main__":
 
         # Split: Monomer, Composite
         mask_composite = bool(row[MetadataCols.composite_col])
-        mask_has_composite = is_valid(row[LabelCols.label_flank_col])
+        mask_has_composite = is_valid(row[LabelCols.label_flank_col]) or is_valid(row[LabelCols.label_flank_constit_all_col])  # Centroid or constituent flank
         
         # Row annotations
         row_label_core = row[LabelCols.label_core_col]
@@ -2191,9 +2191,11 @@ if __name__ == "__main__":
                 and mask_composite
                 and mask_has_composite
             ):
-                label_flank = row_label_flank
+                label_flank = row_label_flank if is_valid(row_label_flank) else assign_label_flank(row)  # Centroid flank, else constituent flank
                 if is_valid(label_flank):
                     label_combined = str(label_core) + "::" + str(label_flank)
+                else:
+                    label_combined = str(label_core)  # Flank unresolved: Core only
             elif is_valid(label_core):
                 label_combined = str(label_core)
         
@@ -2212,6 +2214,8 @@ if __name__ == "__main__":
                 label_flank = assign_label_flank(row)
                 if is_valid(label_flank):
                     label_combined = str(label_core) + "::" + str(label_flank)
+                else:
+                    label_combined = str(label_core)  # Flank unresolved: Core only
             elif is_valid(label_core):
                 label_combined = str(label_core)
         
