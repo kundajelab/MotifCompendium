@@ -2056,8 +2056,12 @@ class MotifCompendium:
                 mc_avg=mc_avg,
                 with_stats=True,
             )
-            # Add stats into metadata
-            mc_avg.metadata = pd.concat([mc_avg.metadata, stats_metadata], axis=1)
+            # Add stats into metadata: stats are indexed by cluster label, in the same sorted order
+            # as mc_avg, so align by position (an index join adds a row per unmatched label)
+            assert list(stats_metadata.index) == list(mc_avg.metadata["source_cluster"])
+            mc_avg.metadata = pd.concat(
+                [mc_avg.metadata, stats_metadata.set_axis(mc_avg.metadata.index)], axis=1
+            )
             # Add logos into images
             for stats_logo in stats_motifs.columns:
                 mc_avg.add_logos(
