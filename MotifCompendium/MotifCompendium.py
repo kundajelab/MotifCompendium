@@ -1755,13 +1755,18 @@ class MotifCompendium:
             alignment_rc: np.ndarray,
             ref_idxs: np.ndarray,
             motif_idxs: np.ndarray,
+            motifs: np.ndarray | None = None,
         ) -> list[np.ndarray]:
-            """Orient motifs relative to their cluster's reference motif."""
+            """Orient motifs relative to their cluster's reference motif.
+
+            motif_idxs index into motifs, which defaults to this MotifCompendium's motifs.
+            """
+            motifs = motif_motifs if motifs is None else motifs
             is_rc = alignment_rc[ref_idxs, motif_idxs]
             return [
-                utils_motif.reverse_complement(motif_motifs[motif_idx])
+                utils_motif.reverse_complement(motifs[motif_idx])
                 if rc
-                else motif_motifs[motif_idx]
+                else motifs[motif_idx]
                 for motif_idx, rc in zip(motif_idxs, is_rc)
             ]
 
@@ -1778,32 +1783,6 @@ class MotifCompendium:
         )
         stats_motifs["min_internal_motif-motif_similarity_motif2"] = aligned_logos(
             self.alignment_rc, cluster_ref_idxs[source_idx], internal_motif2_idxs
-        )
-
-        # No external comparison: Return None
-        if n_clusters < 2:
-            return quality_df, stats_metadata, stats_motifs
-
-        ## Max external motif-motif similarity
-        external_sim = quality.copy()
-        np.fill_diagonal(external_sim, -np.inf)
-
-        max_external_idx = external_sim.argmax(axis=0)
-        max_external_sim_score = quality[max_external_idx, source_idx]
-        motif1_idx = external_similarity_culprit_idxs[max_external_idx, source_idx]
-        motif2_idx = external_similarity_culprit_idxs[source_idx, max_external_idx]
-
-        # Populate: Metadata, Images
-        stats_metadata["max_external_motif-motif_similarity_score"] = max_external_sim_score
-        stats_metadata["max_external_motif-motif_similarity_motif1_cluster"] = clusters_arr[source_idx]
-        stats_metadata["max_external_motif-motif_similarity_motif2_cluster"] = clusters_arr[max_external_idx]
-        stats_metadata["max_external_motif-motif_similarity_motif1_name"] = motif_names_arr[motif1_idx]
-        stats_metadata["max_external_motif-motif_similarity_motif2_name"] = motif_names_arr[motif2_idx]
-        stats_motifs["max_external_motif-motif_similarity_motif1"] = aligned_logos(
-            self.alignment_rc, cluster_ref_idxs[source_idx], motif1_idx,
-        )
-        stats_motifs["max_external_motif-motif_similarity_motif2"] = aligned_logos(
-            self.alignment_rc, cluster_ref_idxs[max_external_idx], motif2_idx,
         )
 
         ## Cluster averages
@@ -1833,12 +1812,39 @@ class MotifCompendium:
             cluster_motif_rc, source_idx, min_centroid_motif_idxs
         )
 
+        # No external comparison: Return None
+        if n_clusters < 2:
+            return quality_df, stats_metadata, stats_motifs
+
+        ## Max external motif-motif similarity
+        external_sim = quality.copy()
+        np.fill_diagonal(external_sim, -np.inf)
+
+        max_external_idx = external_sim.argmax(axis=0)
+        max_external_sim_score = quality[max_external_idx, source_idx]
+        motif1_idx = external_similarity_culprit_idxs[max_external_idx, source_idx]
+        motif2_idx = external_similarity_culprit_idxs[source_idx, max_external_idx]
+
+        # Populate: Metadata, Images
+        stats_metadata["max_external_motif-motif_similarity_score"] = max_external_sim_score
+        stats_metadata["max_external_motif-motif_similarity_motif1_cluster"] = clusters_arr[source_idx]
+        stats_metadata["max_external_motif-motif_similarity_motif2_cluster"] = clusters_arr[max_external_idx]
+        stats_metadata["max_external_motif-motif_similarity_motif1_name"] = motif_names_arr[motif1_idx]
+        stats_metadata["max_external_motif-motif_similarity_motif2_name"] = motif_names_arr[motif2_idx]
+        stats_motifs["max_external_motif-motif_similarity_motif1"] = aligned_logos(
+            self.alignment_rc, cluster_ref_idxs[source_idx], motif1_idx,
+        )
+        stats_motifs["max_external_motif-motif_similarity_motif2"] = aligned_logos(
+            self.alignment_rc, cluster_ref_idxs[max_external_idx], motif2_idx,
+        )
+
         ## Max external cluster-motif similarity
         external_average_similarity = np.where(membership, -np.inf, cluster_motif_similarity)
         max_external_centroid_scores = external_average_similarity.max(axis=1)
         max_external_centroid_motif_idxs = external_average_similarity.argmax(axis=1)
 
         stats_metadata["max_external_centroid-motif_similarity_score"] = max_external_centroid_scores
+        stats_metadata["max_external_centroid-motif_similarity_motif_cluster"] = cluster_labels[max_external_centroid_motif_idxs]
         stats_metadata["max_external_centroid-motif_similarity_motif_name"] = motif_names_arr[max_external_centroid_motif_idxs]
         stats_motifs["max_external_centroid-motif_similarity_motif"] = aligned_logos(
             cluster_motif_rc, source_idx, max_external_centroid_motif_idxs
@@ -1854,7 +1860,7 @@ class MotifCompendium:
         stats_metadata["max_external_centroid-centroid_similarity_score"] = max_external_centroid_scores
         stats_metadata["max_external_centroid-centroid_similarity_cluster"] = mc_avg_names[max_external_centroid_cluster_idxs]
         stats_motifs["max_external_centroid-centroid_similarity_motif"] = aligned_logos(
-            cluster_cluster_rc, source_idx, max_external_centroid_cluster_idxs
+            cluster_cluster_rc, source_idx, max_external_centroid_cluster_idxs, mc_avg_motifs
         )
 
         return quality_df, stats_metadata, stats_motifs
@@ -2062,10 +2068,13 @@ class MotifCompendium:
             mc_avg.metadata = pd.concat(
                 [mc_avg.metadata, stats_metadata.set_axis(mc_avg.metadata.index)], axis=1
             )
-            # Add logos into images
+            # Add logos into images (with a single cluster, the external-comparison logos are empty)
             for stats_logo in stats_motifs.columns:
+                logos = stats_motifs[stats_logo].to_list()
+                if not all(isinstance(logo, np.ndarray) for logo in logos):
+                    continue
                 mc_avg.add_logos(
-                    motifs=np.stack(stats_motifs[stats_logo].to_list(), axis=0),
+                    motifs=np.stack(logos, axis=0),
                     image_name=stats_logo,
                 )
         return mc_avg
