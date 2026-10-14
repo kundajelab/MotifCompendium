@@ -650,7 +650,8 @@ def assign_label_from_pfms(
       MotifCompendium, find the closest match that appears in the PFM file. The match
       score and the label of the best match are saved in the provided MotifCompendium's
       metadata. Optionally, the logos of the matched motifs can be saved as images.
-      Composite matching can be enabled by setting max_submotifs > 1.
+      Composite matching can be enabled by setting max_submotifs > 1, or -1 to match
+      until no more matches are found.
 
     Args:
         mc: The MotifCompendium whose motifs you want to assign labels to.
@@ -666,7 +667,9 @@ def assign_label_from_pfms(
         max_submotifs: The maximum number of submotifs to consider in a match. If
           max_submotifs = 1, only a single match is given to each motif. If
           max_submotifs > 1, the best match for each motif can be from a combination of
-          multiple reference motifs.
+          multiple reference motifs. If max_submotifs = -1, matching is greedy: the
+          best match is subtracted and the residual matched again until no more
+          matches are found (see MotifCompendium.assign_label_from_motifs).
         label_unsigned: Whether or not to label indifferent of positive and negative
           signs. If True, negative motifs can be labeled by a positive reference motif.
           (i.e., indifferent to sign), by comparing the absolute value of both motifs. 
@@ -725,7 +728,7 @@ def assign_label_from_other_compendium(
       MotifCompendium. The match score and the label of the best match are saved in the
       unlabeled MotifCompendium's metadata. Optionally, the logos of the matched motifs
       can be saved as images. Composite matching can be enabled by setting max_submotifs
-      > 1.
+      > 1, or -1 to match until no more matches are found.
 
     Args:
         assign_to_mc: The target MotifCompendium to assign labels to.
@@ -742,7 +745,9 @@ def assign_label_from_other_compendium(
         max_submotifs: The maximum number of submotifs to consider in a match. If
           max_submotifs = 1, only a single match is given to each motif. If
           max_submotifs > 1, the best match for each motif can be from a combination of
-          multiple reference motifs.
+          multiple reference motifs. If max_submotifs = -1, matching is greedy: the
+          best match is subtracted and the residual matched again until no more
+          matches are found (see MotifCompendium.assign_label_from_motifs).
         label_unsigned: Whether or not to label indifferent of positive and negative
           signs. If True, negative motifs can be labeled by a positive reference motif.
           (i.e., indifferent to sign), by comparing the absolute value of both motifs. 

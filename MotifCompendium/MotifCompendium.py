@@ -20,6 +20,12 @@ import MotifCompendium.utils.similarity as utils_similarity
 import MotifCompendium.utils.visualization as utils_visualization
 
 
+#: safety cap on the rounds of greedy composite matching (max_submotifs=-1):
+#: every round subtracts a matched component, but the round-i score is scaled by
+#: sqrt(i + 1), so a shrinking residual alone does not guarantee termination
+GREEDY_MAX_SUBMOTIFS = 50
+
+
 ############
 # SETTINGS #
 ############
@@ -2454,7 +2460,8 @@ class MotifCompendium:
           match score and the label of the best match are saved in the metadata.
           Optionally, the logos of the matched motifs can be saved as images. These
           logos can be computed on the fly or passed in as utf8 images if they have been
-          precomputed. Composite matching can be enabled by setting max_submotifs > 1.
+          precomputed. Composite matching can be enabled by setting max_submotifs > 1,
+          or max_submotifs = -1 to keep matching until no more matches are found.
 
         Args:
             reference_motifs: A np.ndarray motif stack of shape (M, L, 4) to compare
@@ -2467,7 +2474,12 @@ class MotifCompendium:
             max_submotifs: The maximum number of submotifs to consider in a match. If
               max_submotifs = 1, only a single match is given to each motif. If
               max_submotifs > 1, the best match for each motif can be from a combination
-              of multiple reference motifs.
+              of multiple reference motifs. If max_submotifs = -1, matching is greedy:
+              the best match is subtracted and the residual matched again until a round
+              finds no match for any motif (at most GREEDY_MAX_SUBMOTIFS rounds). The
+              first round is always kept, so the columns are those of max_submotifs = 1
+              when nothing matches; later rounds compare only the motifs still matching.
+              One set of columns is saved per round that found a match.
             label_unsigned: Whether or not to label indifferent of positive and negative
               signs. If True, negative motifs can be labeled by a positive reference motif.
               (i.e., indifferent to sign), by comparing the absolute value of both motifs. 
@@ -2502,6 +2514,15 @@ class MotifCompendium:
               - f"{save_col_prefix}_logo (fwd){i}": Forward logo of the matched motif
         """
         # Check arguments
+        if not (
+            isinstance(max_submotifs, (int, np.integer))
+            and (max_submotifs >= 1 or max_submotifs == -1)
+        ):
+            raise ValueError(
+                f"max_submotifs must be a positive integer or -1 (greedy); got {max_submotifs!r}"
+            )
+        greedy = max_submotifs == -1
+        max_rounds = GREEDY_MAX_SUBMOTIFS if greedy else int(max_submotifs)
         if (utf8_images is not None) and not (
             (isinstance(utf8_images, dict))
             and all(key in utf8_images for key in ["logo (fwd)", "logo (rev)"])
@@ -2552,8 +2573,11 @@ class MotifCompendium:
         match_alignment_hs = []
         match_alignment_rcs = []
         match_mask = np.ones((my_motifs.shape[0],), dtype=bool)  # My motifs remaining for matching (N,)
-        
-        for i in range(max_submotifs):
+
+        for i in range(max_rounds):
+            # Greedy: stop once no motif is left to match
+            if greedy and i > 0 and not match_mask.any():
+                break
             # Initialize:
             if save_all_matches:
                 match_score = [np.array([]) for _ in range(my_motifs.shape[0])]  # list of length (N,) of arrays of shape (K_n,) scores
@@ -2571,9 +2595,21 @@ class MotifCompendium:
                 match_alignment_rc = np.zeros((my_motifs.shape[0],), dtype=bool)  # (N,)
 
             # Compute similarity (L2 norm included during similarity calculation)
-            sim, alignment_rc, alignment_h = utils_similarity.compute_similarities(
-                [my_motifs, reference_motifs], [(0, 1)]
-            )[0]
+            if greedy and i > 0:
+                # Greedy rounds after the first compare only the motifs still
+                # matching; the others keep all-zero similarities
+                active = np.flatnonzero(match_mask)
+                sim_a, rc_a, h_a = utils_similarity.compute_similarities(
+                    [my_motifs[active], reference_motifs], [(0, 1)]
+                )[0]
+                sim = np.zeros((my_motifs.shape[0], sim_a.shape[1]), dtype=sim_a.dtype)
+                alignment_rc = np.zeros(sim.shape, dtype=rc_a.dtype)
+                alignment_h = np.zeros(sim.shape, dtype=h_a.dtype)
+                sim[active], alignment_rc[active], alignment_h[active] = sim_a, rc_a, h_a
+            else:
+                sim, alignment_rc, alignment_h = utils_similarity.compute_similarities(
+                    [my_motifs, reference_motifs], [(0, 1)]
+                )[0]
             # Unscale L2 norm
             my_motifs_norm = np.linalg.norm(my_motifs, axis=(1, 2))[:, np.newaxis]
             reference_motifs_norm = np.linalg.norm(reference_motifs, axis=(1, 2))[np.newaxis, :]
@@ -2584,6 +2620,8 @@ class MotifCompendium:
             sim *= np.sqrt(i + 1)  # (N, M)
             # Remove matches below threshold
             sim_threshold = np.where(sim >= min_score, sim, 0)  # (N, M)
+            if greedy and i > 0 and not (sim_threshold > 0).any():
+                break  # Greedy: this round found nothing; do not keep it
             match_mask = match_mask & (sim_threshold > 0).any(axis=1)  # (N,)
             my_motifs[~match_mask] = 0
             
@@ -2648,13 +2686,20 @@ class MotifCompendium:
             match_labels.append(match_label)
             match_alignment_hs.append(match_alignment_h)
             match_alignment_rcs.append(match_alignment_rc)
+        else:
+            if greedy:
+                warnings.warn(
+                    f"greedy matching stopped after GREEDY_MAX_SUBMOTIFS = "
+                    f"{GREEDY_MAX_SUBMOTIFS} rounds with matches still being found.",
+                    RuntimeWarning,
+                )
 
         # Restore IC-scale setting
         if ic_scale:
             utils_config.set_ic_scale(True)
 
-        # Save match information to metadata and images
-        for i in range(max_submotifs):
+        # Save match information to metadata and images (one set per round kept)
+        for i in range(len(match_scores)):
             self.metadata[f"{save_col_prefix}_score{i}"] = match_scores[i]  # Save score
             self.metadata[f"{save_col_prefix}_name{i}"] = match_labels[i]  # Save label
             self.metadata[f"{save_col_prefix}_alignment_h{i}"] = match_alignment_hs[i]  # Save alignment
