@@ -205,16 +205,20 @@ HTML is opt-in. Common choices are:
 
 `--logo-trimming` accepts `true`, `false`, or a number from 0 to 1.
 
-The output root contains the principal `.mc` objects directly, for example:
+The `.mc` objects are saved in `mc/`, for example:
 
-- `motifcompendium.mc`: loaded/built input after preprocessing.
-- `motifcompendium_labeled.mc`: motif-level reference matches, when requested.
-- `motifcompendium_filtered.mc` and `motifcompendium_removed.mc`: retained and
-  rejected motifs, when filtering is enabled.
-- `motifcompendium_clustered.mc`: motifs with final cluster assignments.
-- `motifcompendium_cluster_filtered.mc`: retained cluster averages.
-- `motifcompendium_metacluster_filtered.mc` and
-  `motifcompendium_subcluster_filtered.mc`: optional hierarchy levels.
+- `mc/motifcompendium.mc`: loaded/built input after preprocessing.
+- `mc/motifcompendium_filtered.mc` and `mc/motifcompendium_removed.mc`: retained
+  and rejected motifs, when filtering is enabled.
+- `mc/motifcompendium_cluster_filtered.mc`: retained cluster averages.
+- `mc/motifcompendium_metacluster_filtered.mc` and
+  `mc/motifcompendium_subcluster_filtered.mc`: optional hierarchy levels.
+- `mc/motifcompendium_clustered.mc` (`--save-clustered`): motifs with final
+  cluster assignments. Not saved by default; the assignments are also in
+  `export/motifcompendium_metadata.tsv`.
+- `mc/motifcompendium_labeled.mc`, `mc/motifcompendium_{cluster,metacluster,subcluster}_labeled.mc`
+  (`--save-labeled`): reference matches before filtering, when a reference is
+  given. Not saved by default.
 - `html/`: requested interactive tables and motif collections.
 - `quality/`: requested clustering diagnostics.
 - `export/args.json`: command-line and configuration provenance.
@@ -339,8 +343,19 @@ OUTPUT/
 The combine stages load their upstream products from these exact locations.
 Consequently, selecting `tf-combine`, `chrom-combine`, or `encode-combine`
 without its prerequisite stages is a resume operation: the expected outputs
-must already exist under the same output root. Combine stages also write
-`*-indexed.mc` products back into their upstream stage directories.
+must already exist under the same output root. Combine stages also write back
+into their upstream stage directories, over the files there: an atlas combine
+stage adds its atlas-cluster names to the per-head `motifcompendium_*_all.mc`,
+and the ENCODE combine its ENCODE-cluster names and final filter flags to every
+atlas level (`motifcompendium_{level}_{filtered,removed,all}.mc`, with their
+MEME, HTML and metadata TSV). After that, the atlas's own selection is gone, so
+the combine stages refuse to rerun on it: rerun the atlas first.
+
+Each level saves only `mc/motifcompendium_{level}_{filtered,removed,all}.mc`
+(`{level}`: `motif`, `cluster`, `metacluster`, `atlascluster`, `encode`), plus
+`motifcompendium_metacluster_combined.mc` (atlas combine),
+`motifcompendium_atlascluster_combined.mc` (ENCODE combine) and
+`motifcompendium_motif_init.mc` (head stages).
 
 Each stage writes some combination of `mc/`, `html/`, `export/`, `metadata/`,
 and `logs/`. Every stage records arguments/configuration in

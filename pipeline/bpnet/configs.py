@@ -40,6 +40,11 @@ class MetadataCols:
 
     num_seqlets_col: str = 'num_seqlets'
     num_hits_col: str = 'num_hits'
+    # Input paths, per model (from the CLI)
+    modisco_path_col: str = 'modisco_path'
+    pfm_path_col: str = 'pfm_path'
+    finemo_path_col: str = 'finemo_path'
+    peaks_path_col: str = 'peaks_path'
     num_constituents_col: str = 'num_constituents'
     posneg_col: str = 'posneg'
     avgcontrib_score_col: str = "avg_contrib_score"
@@ -826,57 +831,21 @@ class MotifFilterArgs:
 
 
 ## ATLAS-CLUSTER (COMBINE) FILTERS -------------------------------------------------------------------------------
-# Filters used by the atlas-cluster / combine stage (pipeline_tfatlas_combine.py).
+# Filters used by the atlas-cluster / combine stage of pipeline_bpnet.py.
 #
-# These come from combine_counts-profile.ipynb, which uses different GC/AT-bias thresholds
-# than MotifFilterArgs (used by the per-head pipeline, pipeline_tfatlas.py). They are kept in a
-# separate class so the two stages cannot silently drift into each other.
-#
-# Deltas vs MotifFilterArgs -- metric "copair_composition", operation ">":
-#   soft_filters      "7_gcbias_2": 0.45  (MotifFilterArgs: 0.4)
-#   moderate_filters  "7_gcbias_2": 0.5   (MotifFilterArgs: 0.45)
-#   hard_filters      "7_gcbias_2": 0.6   (same as MotifFilterArgs)
-# Everything else (metrics, operations, invert / override / apply_motif / apply_cluster flags,
-# and every other threshold) is identical to MotifFilterArgs, so the groups below are derived
-# from it and only the thresholds listed above are overridden.
-#
-# DELIBERATE DEVIATION from combine_counts-profile.ipynb: flag_type stays "high-GC-AT" rather
-# than the notebook's "high-GC/AT". A "/" in flag_type reaches the cluster name / label columns
-# and raises "Motif names cannot have slashes (/) in them!" during the MoDISco HDF5 export
-# (h5py treats "/" as a path separator). See CHANGELOG 2026-08-31.
-_ATLAS_FILTER_THRESHOLD_OVERRIDES = {
-    "soft_filters": {"7_gcbias_2": 0.45},      # MotifFilterArgs: 0.4
-    "moderate_filters": {"7_gcbias_2": 0.5},   # MotifFilterArgs: 0.45
-}
-
-
-def _atlas_filter_group(group_name: str) -> tuple:
-    """Copy a MotifFilterArgs filter group, applying the atlas-stage threshold overrides.
-
-    Uses dataclasses.replace so the _FilterArgs instances are copies: the tuple defaults on
-    MotifFilterArgs are shared class-level objects, so mutating them in place would also change
-    MotifFilterArgs for the per-head pipeline.
-    """
-    overrides = _ATLAS_FILTER_THRESHOLD_OVERRIDES.get(group_name, {})
-    filters = []
-    for filter_args in getattr(MotifFilterArgs(), group_name):
-        filter_copy = replace(filter_args)
-        if filter_copy.name in overrides:
-            filter_copy = replace(filter_copy, threshold=overrides[filter_copy.name])
-        filters.append(filter_copy)
-    return tuple(filters)
-
-
+# The same filters as MotifFilterArgs (used by its counts and profile stages), copied with
+# dataclasses.replace. They are kept in a separate class so the combine stage can be tuned
+# without changing the per-head stages.
 @dataclass
 class AtlasFilterArgs:
     # Motif metrics to be calculated (same as MotifFilterArgs)
     motif_metrics: tuple = field(default_factory=lambda: tuple(MotifFilterArgs().motif_metrics))
 
-    soft_filters: tuple = field(default_factory=lambda: _atlas_filter_group("soft_filters"))
-    soft_override_filters: tuple = field(default_factory=lambda: _atlas_filter_group("soft_override_filters"))
-    moderate_filters: tuple = field(default_factory=lambda: _atlas_filter_group("moderate_filters"))
-    moderate_override_filters: tuple = field(default_factory=lambda: _atlas_filter_group("moderate_override_filters"))
-    hard_filters: tuple = field(default_factory=lambda: _atlas_filter_group("hard_filters"))
+    soft_filters: tuple = field(default_factory=lambda: tuple(map(replace, MotifFilterArgs().soft_filters)))
+    soft_override_filters: tuple = field(default_factory=lambda: tuple(map(replace, MotifFilterArgs().soft_override_filters)))
+    moderate_filters: tuple = field(default_factory=lambda: tuple(map(replace, MotifFilterArgs().moderate_filters)))
+    moderate_override_filters: tuple = field(default_factory=lambda: tuple(map(replace, MotifFilterArgs().moderate_override_filters)))
+    hard_filters: tuple = field(default_factory=lambda: tuple(map(replace, MotifFilterArgs().hard_filters)))
 
     def to_dict(self):
         # Return filters as a dictionary
@@ -979,7 +948,7 @@ class ClusterArgs:
         (LabelCols.label_core_constit_1_col, "merge", LabelCols.label_core_constit_all_col),
         (LabelCols.label_core_readable_constit_1_col, "merge", LabelCols.label_core_readable_constit_all_col),
         (LabelCols.label_flank_constit_1_col, "merge", LabelCols.label_flank_constit_all_col),
-        (LabelCols.direct_label_constit_1_col, "merge", LabelCols.label_constit_all_col),
+        (LabelCols.direct_label_constit_1_col, "merge", LabelCols.direct_label_constit_all_col),
         (LabelCols.direct_label_core_constit_1_col, "merge", LabelCols.direct_label_core_constit_all_col),
         (LabelCols.direct_label_core_readable_constit_1_col, "merge", LabelCols.direct_label_core_readable_constit_all_col),
     ])
@@ -996,6 +965,7 @@ class VisualizeArgs:
     cluster_name_col: str = 'cluster_name'
     metacluster_name_col: str = 'metacluster_name'
     atlascluster_name_col: str = 'atlascluster_name'
+    encodecluster_name_col: str = 'ENCODE_name'  # Set by the ENCODE combine when it writes its final flags back
     sort_col: str = 'sort'
 
     max_major_family_frac: float = 0.3

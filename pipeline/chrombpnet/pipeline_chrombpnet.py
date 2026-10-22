@@ -1,10 +1,26 @@
 #!/usr/bin/env python
 # coding: utf-8
 """
-Sequential hierarchical clustering of the Chromatin Atlas ENCODE motif compendium:
-per-cell-type clustering of motifs, followed by a second clustering pass over
-cell-type clusters into meta-clusters, with reference-based labeling and
-MotifCompendium/HTML/MEME export at each level.
+ChromBPNet (DNase/ATAC-seq): end-to-end MotifCompendium pipeline.
+
+Runs the full ChromBPNet hierarchy from a single CLI, in order:
+
+  1. counts   - counts head  : motif -> cell-type cluster -> meta-cluster
+  2. profile  - profile head : motif -> cell-type cluster -> meta-cluster
+  3. combine  - counts + profile meta-clusters -> atlasclusters
+
+The per-head stages (1-2) are this script's former stand-alone sequential pipeline, run once
+per head; the combine stage (3) is the Chromatin Atlas combine step
+(chromatlas/src/runs/pipeline_chromatlas_combine.py), run with this directory's configs.py.
+Use `--stages counts` (or `profile`) to run a single head as before.
+
+Every stage directory is derived from a single --output-dir root, and the combine stage
+reads the counts and profile stage directories directly:
+
+  <root>/counts       <root>/profile       <root>/combined
+
+Use --stages to run a subset (e.g. `--stages combine` to re-run only the combine stage on
+existing counts/profile outputs under the same root).
 """
 import os
 import re
@@ -13,9 +29,11 @@ import time
 
 import argparse
 import logging
+import concurrent.futures
 import json
 import dataclasses
 import h5py
+from argparse import Namespace
 
 import numpy as np
 import pandas as pd
@@ -26,33 +44,59 @@ import MotifCompendium.utils.motif as utils_motif
 import MotifCompendium.utils.similarity as utils_similarity
 import MotifCompendium.utils.config as utils_config
 
-import configs
+import importlib.util
+# Configs: this script's own configs.py, imported under a name of its own (not "configs"), so that the
+# atlas pipelines can be imported side by side (see pipeline/encode/pipeline_encode_full.py)
+_configs_spec = importlib.util.spec_from_file_location(
+    "configs_chrombpnet", os.path.join(os.path.dirname(os.path.abspath(__file__)), "configs.py")
+)
+configs = importlib.util.module_from_spec(_configs_spec)
+sys.modules[_configs_spec.name] = configs
+_configs_spec.loader.exec_module(configs)
+
+
+#### STAGES ---------------------------------------------------------
+# Stage key -> label
+STAGES = {
+    "counts":  "ChromBPNet: counts head",
+    "profile": "ChromBPNet: profile head",
+    "combine": "ChromBPNet: combine counts + profile",
+}
+STAGE_ORDER = list(STAGES)
 
 
 #### ARGUMENTS ------------------------------------------------------
 def setup_parser():
-    parser = argparse.ArgumentParser(description="Pipeline for a collection of DNase/ATAC-seq ChromBPNet models.")
+    parser = argparse.ArgumentParser(
+        description="ChromBPNet: end-to-end MotifCompendium pipeline for a collection of DNase/ATAC-seq ChromBPNet models (counts head -> profile head -> combine).",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+
+    # Pipeline control
+    parser.add_argument("--stages", nargs="+", choices=STAGE_ORDER, default=STAGE_ORDER, help="Subset of stages to run, in pipeline order.")
 
     # Run type
-    parser.add_argument("-vr", "--mcid-version", type=str, default=None, required=True, help="The version to use in the unique identifier (e.g., V1).")
-    parser.add_argument("-hd", "--head-type", type=str, default=None, required=True, help="The head type to use (options: counts, profile).")
+    parser.add_argument("-vr", "--mcid-version", type=str, default="V0", help="The version to use in the unique identifier (e.g., V1).")
 
     # Output
-    parser.add_argument("-o", "--output-dir", type=str, required=True, help="Path to the output directory.")
+    parser.add_argument("-o", "--output-dir", type=str, required=True, help="Root output directory; the counts/profile/combined stage directories are derived from it.")
 
-    # Input
-    parser.add_argument("-im", "--input-mc", type=str, default=None, help="Path to the input MotifCompendium object.")
-    parser.add_argument("-ih", "--input-modisco-h5s", nargs="+", type=str, default=None, help="Path(s) to the input TF-MoDISco (lite) H5 file(s).")
+    # Input: per head (counts, profile)
+    for head in ("counts", "profile"):
+        parser.add_argument(f"--{head}-input-mc", type=str, default=None, help=f"{head} head: path to the input MotifCompendium object.")
+        parser.add_argument(f"--{head}-modisco-h5s", nargs="+", type=str, default=None, help=f"{head} head: path(s) to the input TF-MoDISco (lite) H5 file(s).")
+        parser.add_argument(f"--{head}-input-names", nargs="+", type=str, default=None, help=f"{head} head: nickname(s) of the input TF-MoDISco (lite) H5 file(s).")
+        parser.add_argument(f"--{head}-metadata", type=str, default=None, help=f"{head} head: path to the metadata file, per input file or motif: CSV, TSV format.")
+        parser.add_argument(f"--{head}-finemo-paths", type=str, default=None, help=f"{head} head: path to the FiNeMo paths file (TSV, no header: input name, FiNeMo hits file), for the number of hits per motif (counted in the hits file) and its filter (1_minhits). If not provided, the filter is skipped.")
+        parser.add_argument(f"--{head}-peaks-paths", type=str, default=None, help=f"{head} head: path to the peaks paths file (TSV, no header: input name, peaks BED), recorded per motif (peaks_path) for the ENCODE hits annotation.")
     parser.add_argument("-sh", "--input-subpatterns", action="store_true", help="Use subpatterns (instead of main patterns) when loading input TF-MoDISco (lite) H5 file(s).")
-    parser.add_argument("-ip", "--input-pfms", nargs="+", type=str, default=None, help="Path(s) to the input motif PFM files, in PFM or MEME format.")
-    parser.add_argument("-in", "--input-names", nargs="+", type=str, default=None, help="Nickname(s) of the input file(s): TF-MoDISco (lite) H5, PFMs, MEME.")
 
     # Reference databases
     parser.add_argument("--ref-qc", type=str, required=True, help="Path to the ENCODE QC reference PFM MotifCompendium object (.mc).")
-    parser.add_argument("--ref-clustered-hr-metadata", type=str, required=True, help="Path to the metadata TSV for --mc-ref-clustered-hr.")
+    parser.add_argument("--ref-direct", type=str, default=None, help="Path to the direct reference MotifCompendium object (.mc). Required for the combine stage.")
+    parser.add_argument("--ref-clustered-hr-metadata", type=str, required=True, help="Path to the metadata TSV for the human-readable clustered reference.")
 
     # Metadata
-    parser.add_argument("-m", "--metadata", type=str, default=None, help="Path to the metadata file, per input file or motif: CSV, TSV format.")
     parser.add_argument("--column-desc-tsv", type=str, required=True, help="Path to the TSV describing HTML summary table column names.")
 
     # Compute
@@ -63,6 +107,7 @@ def setup_parser():
     parser.add_argument("--unsafe", action="store_false", dest="safe", help="Do not check the validity of the MotifCompendium objects.")
     parser.add_argument("--no-ic", action="store_false", dest="ic", help="Do not scale motifs by information content.")
     parser.add_argument("--fast-plot", action="store_true", help="Reduce the resolution of logo images for faster plotting.")
+    parser.add_argument("--export-modisco", action="store_true", help="Also export TF-MoDISco HDF5 files (default: off).")
     parser.add_argument("-t", "--time", action="store_true", help="Print time taken for each step.")
     parser.add_argument("-v", "--verbose", action="store_true", help="Print verbose output.")
 
@@ -72,7 +117,7 @@ def setup_parser():
 #### DEFAULT OPTIONS ------------------------------------------------------------
 def set_default_configs():
     global MotifCompendiumArgs, TFMoDIScoCols, MetadataCols, CellTypeCols, ReferenceMatchCols, LabelCols, MotifMatchArgs
-    global DirectTypeArgs, FilterArgs, MotifFilterArgs, ClusterArgs, VisualizeArgs
+    global DirectTypeArgs, FilterArgs, MotifFilterArgs, AtlasFilterArgs, ClusterArgs, VisualizeArgs
 
     MotifCompendiumArgs = configs.MotifCompendiumArgs()
     TFMoDIScoCols = configs.TFMoDIScoCols()
@@ -83,9 +128,30 @@ def set_default_configs():
     MotifMatchArgs = configs.MotifMatchArgs()
     DirectTypeArgs = configs.DirectTypeArgs()
     FilterArgs = configs.FilterArgs()
+    # The per-head stages use MotifFilterArgs (per-head pipeline thresholds); the combine
+    # (atlascluster) stage uses AtlasFilterArgs (combine_counts-profile.ipynb thresholds).
+    # See configs.AtlasFilterArgs.
     MotifFilterArgs = configs.MotifFilterArgs()
+    AtlasFilterArgs = configs.AtlasFilterArgs()
     ClusterArgs = configs.ClusterArgs()
     VisualizeArgs = configs.VisualizeArgs()
+
+
+#### PATHS ----------------------------------------------------------
+def stage_dirs(root):
+    """Fixed per-stage directory layout, derived from the --output-dir root."""
+    return {
+        "counts":  os.path.join(root, "counts"),
+        "profile": os.path.join(root, "profile"),
+        "combine": os.path.join(root, "combined"),
+    }
+
+
+def stage_args(args, **overrides):
+    """A per-stage args namespace: the shared CLI args plus stage-specific wiring."""
+    d = vars(args).copy()
+    d.update(overrides)
+    return Namespace(**d)
 
 
 def collect_configs_snapshot():
@@ -383,6 +449,11 @@ def apply_filter_threshold(
     Returns:
         None
     """
+    # Filters on the number of FiNeMo hits: Skipped if no FiNeMo paths are provided (see add_num_hits)
+    if metric == MetadataCols.num_hits_col and metric not in mc.columns():
+        logging.info(f"Skipping filter on {metric}: no FiNeMo paths provided")
+        return
+
     # Apply filter
     if operation == "<":
         filter_result = (mc[metric] < threshold)
@@ -433,7 +504,7 @@ def apply_filter_threshold(
 
 def apply_filter_initial(
     mc: MotifCompendium,
-    motif_filter_args: configs.MotifFilterArgs,
+    motif_filter_args: configs.MotifFilterArgs | configs.AtlasFilterArgs,
     filter_flag_col: str,
     filter_flag_type_col: str,
 ) -> None:
@@ -442,7 +513,7 @@ def apply_filter_initial(
 
     Args:
         mc (MotifCompendium): The MotifCompendium object.
-        motif_filter_args (configs.MotifFilterArgs): The filter arguments.
+        motif_filter_args (configs.MotifFilterArgs | configs.AtlasFilterArgs): The filter arguments.
         filter_flag_col (str): The column name to use for the filter flag.
 
     Returns:
@@ -466,7 +537,7 @@ def apply_filter_initial(
 
 def apply_filter_motifs(
     mc: MotifCompendium,
-    motif_filter_args: configs.MotifFilterArgs,
+    motif_filter_args: configs.MotifFilterArgs | configs.AtlasFilterArgs,
     filter_flag_col: str,
     filter_flag_type_col: str,
 ) -> None:
@@ -475,7 +546,7 @@ def apply_filter_motifs(
 
     Args:
         mc (MotifCompendium): The MotifCompendium object.
-        motif_filter_args (configs.MotifFilterArgs): The filter arguments.
+        motif_filter_args (configs.MotifFilterArgs | configs.AtlasFilterArgs): The filter arguments.
         filter_flag_col (str): The column name to use for the filter flag.
 
     Returns:
@@ -530,7 +601,7 @@ def apply_filter_motifs(
 
 def apply_filter_clusters(
     mc: MotifCompendium,
-    motif_filter_args: configs.MotifFilterArgs,
+    motif_filter_args: configs.MotifFilterArgs | configs.AtlasFilterArgs,
     filter_flag_col: str,
     filter_flag_type_col: str,
 ) -> None:
@@ -539,7 +610,7 @@ def apply_filter_clusters(
 
     Args:
         mc (MotifCompendium): The MotifCompendium object.
-        motif_filter_args (configs.MotifFilterArgs): The filter arguments.
+        motif_filter_args (configs.MotifFilterArgs | configs.AtlasFilterArgs): The filter arguments.
         filter_flag_col (str): The column name to use for the filter flag.
         filter_flag_type_col (str): The column name to use for the filter flag type.
     Returns:
@@ -593,11 +664,140 @@ def apply_filter_clusters(
             )
 
 
-#### MAIN -----------------------------------------------------------------------
-if __name__ == "__main__":
-    args = setup_parser()
+def add_num_hits(
+    mc: MotifCompendium,
+    finemo_paths: str | None,
+    num_hits_col: str,
+    finemo_path_col: str = "finemo_path",
+    name_col: str = "name",
+    posneg_col: str = "posneg",
+    model_col: str = "model",
+    max_workers: int = 1,
+) -> bool:
+    """
+    Add the number of FiNeMo hits per motif, counted in its model's hits file, if a FiNeMo paths file is provided.
 
-    set_default_configs()
+    finemo_paths is a TSV without header: per model (input name), its FiNeMo hits file, as BED (the motif name in
+    the 4th column, e.g. hits.bed.gz) or FiNeMo hits TSV (a motif_name column). Hits are matched to motifs by
+    pos/neg and pattern number, because the TF-MoDISco pattern names can be renamed after FiNeMo ran (e.g.
+    pos_patterns.pattern_0 vs. pos_patterns.ENCSR000AHD_ChIP_CTCF_MCF-7_ENCSR867WPY_counts_pattern_0). A motif
+    without hits has 0.
+
+    Args:
+        mc (MotifCompendium): The MotifCompendium object.
+        finemo_paths (str | None): Path to the FiNeMo paths file (TSV, no header: model, FiNeMo hits file).
+        num_hits_col (str): The column name to save the number of hits to.
+        finemo_path_col (str): The column name to save each motif's FiNeMo hits file to.
+        name_col (str): The column name of the motif names.
+        posneg_col (str): The column name of pos/neg.
+        model_col (str): The column name of the models.
+        max_workers (int): Number of hits files to read at a time.
+
+    Returns:
+        bool: True if num_hits_col was added. False if no FiNeMo paths file is provided, in which
+            case the filters on num_hits_col are skipped (see apply_filter_threshold).
+    """
+    if not finemo_paths:
+        logging.info(f"No FiNeMo paths provided: {num_hits_col} is not calculated, and its filters are skipped.")
+        return False
+
+    # FiNeMo hits file per model
+    finemo_df = pd.read_csv(finemo_paths, sep="\t", header=None, usecols=[0, 1], names=["model", "finemo"], dtype=str)
+    if finemo_df["model"].duplicated().any():
+        raise ValueError(f"Models are listed more than once in the FiNeMo paths file: {finemo_paths}")
+    model_finemo = mc[model_col].astype(str).map(finemo_df.set_index("model")["finemo"])
+    if model_finemo.isna().any():
+        missing_models = mc.metadata.loc[model_finemo.isna().to_numpy(), model_col].unique()
+        raise ValueError(f"No FiNeMo path in {finemo_paths} for {len(missing_models)} model(s): {', '.join(map(str, missing_models[:10]))}")
+
+    def pattern_key(posneg: pd.Series, names: pd.Series) -> pd.Series:
+        # "pos" / "neg" + "." + pattern number (from the trailing "pattern_{#}"; subpatterns do not match)
+        return posneg.str[:3] + "." + names.str.extract(r"(?:^|[^A-Za-z])pattern_(\d+)$", expand=False)
+
+    motif_keys = pattern_key(mc[posneg_col], mc[name_col])
+    if motif_keys.isna().any():
+        unkeyed = mc.metadata.loc[motif_keys.isna().to_numpy(), name_col]
+        raise ValueError(f"{len(unkeyed)} motif name(s) without a pattern number (subpatterns?), e.g.: {', '.join(unkeyed[:5])}")
+
+    def count_hits(hits_path: str) -> pd.Series:
+        # Hits per pos/neg pattern, in one hits file (an empty file: no hits)
+        try:
+            if hits_path.endswith((".bed", ".bed.gz")):
+                motif_names = pd.read_csv(hits_path, sep="\t", header=None, usecols=[3])[3]
+            else:
+                motif_names = pd.read_csv(hits_path, sep="\t", usecols=["motif_name"])["motif_name"]
+        except pd.errors.EmptyDataError:
+            return pd.Series(dtype=int)
+        # Count per motif name, then key the names (far fewer than the hits)
+        name_counts = motif_names.astype(str).value_counts()
+        names = name_counts.index.to_series()
+        keys = pattern_key(names.str.split(".").str[0], names)
+        if keys.isna().any():
+            raise ValueError(f"FiNeMo hits with motif names that are not pos/neg patterns ({', '.join(names[keys.isna()][:5])}): {hits_path}")
+        return name_counts.groupby(keys.to_numpy()).sum()
+
+    # Count: the hits of each model's hits file
+    hits_paths = model_finemo.unique()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, max_workers)) as executor:
+        hits_counts = dict(zip(hits_paths, executor.map(count_hits, hits_paths)))
+
+    # Match: (hits file, pos/neg pattern number); a motif without hits has 0
+    hits_lookup = pd.concat(hits_counts)
+    motif_index = pd.MultiIndex.from_arrays([model_finemo, motif_keys])
+    mc[num_hits_col] = hits_lookup.reindex(motif_index).fillna(0).astype(int).to_numpy()
+    mc[finemo_path_col] = model_finemo.to_numpy()
+
+    # Check: the hits are of their model's motifs (a hits file none of whose hits match is a mismatch)
+    matched = hits_lookup.index.isin(motif_index)
+    if (~matched).any():
+        paths_matched = set(hits_lookup.index[matched].get_level_values(0))
+        paths_unmatched = sorted(set(hits_lookup.index[~matched].get_level_values(0)) - paths_matched)
+        if paths_unmatched:
+            raise ValueError(f"No FiNeMo hit matches a motif of its model in {len(paths_unmatched)} hits file(s), e.g.: {paths_unmatched[0]}")
+        logging.warning(f"{int(hits_lookup[~matched].sum())} FiNeMo hits of {int((~matched).sum())} pattern(s) are not of their model's motifs (ignored).")
+
+    logging.info(f"Added {num_hits_col}, counted in {len(hits_counts)} FiNeMo hits files: {(mc[num_hits_col] == 0).sum()} of {len(mc)} motifs have no hits.")
+    return True
+
+
+def add_input_paths(
+    mc: MotifCompendium,
+    paths_tsv: str | None,
+    path_col: str,
+    model_col: str = "model",
+) -> None:
+    """
+    Add a per-model input path to every motif (e.g. the peaks of its model), if a paths file is provided.
+
+    Args:
+        mc (MotifCompendium): The MotifCompendium object.
+        paths_tsv (str | None): Path to the paths file (TSV, no header: model, path).
+        path_col (str): The column name to save the paths to.
+        model_col (str): The column name of the models.
+    """
+    if not paths_tsv:
+        return
+    paths_df = pd.read_csv(paths_tsv, sep="\t", header=None, usecols=[0, 1], names=["model", "path"], dtype=str)
+    if paths_df["model"].duplicated().any():
+        raise ValueError(f"Models are listed more than once in: {paths_tsv}")
+    mc[path_col] = mc[model_col].astype(str).map(paths_df.set_index("model")["path"]).to_numpy()
+    missing_models = mc.metadata.loc[mc[path_col].isna(), model_col].unique()
+    if len(missing_models):
+        logging.warning(f"No {path_col} in {paths_tsv} for {len(missing_models)} model(s): {', '.join(map(str, missing_models[:10]))}")
+
+
+def save_replace(mc, path):
+    """Save mc over path, an input of later stages: to a temporary file first, then replace path with it."""
+    temp_path = f"{path}.tmp.mc"  # MotifCompendium.save appends .mc when absent
+    if os.path.exists(temp_path):
+        os.remove(temp_path)
+    mc.save(temp_path)
+    os.replace(temp_path, path)
+
+
+def run_chrom_sequential(args):
+    """Chromatin atlas, one head: motif -> cell-type cluster -> meta-cluster"""
+
 
     ### OPTIONS -----------------------------------------------------------------
     # Set up logging: High-level actions always logged; details gated on --verbose
@@ -612,7 +812,9 @@ if __name__ == "__main__":
         f"log_pipeline_{os.path.basename(os.path.normpath(args.output_dir))}"
         f"_{time.strftime('%Y-%m-%d_%H-%M-%S', time.localtime())}.out",
     )
+    # force=True: each stage replaces the previous stage's handlers (incl. its log file)
     logging.basicConfig(
+        force=True,
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=[logging.StreamHandler(sys.stdout), logging.FileHandler(log_path)]
@@ -672,7 +874,6 @@ if __name__ == "__main__":
     mc_motif_removed_path = os.path.join(mc_dir, "motifcompendium_motif_removed.mc")
 
     # Clusters
-    mc_cluster_init_path = os.path.join(mc_dir, "motifcompendium_cluster_init.mc")
     mc_cluster_path = os.path.join(mc_dir, "motifcompendium_cluster_all.mc")
     mc_cluster_filtered_path = os.path.join(mc_dir, "motifcompendium_cluster_filtered.mc")
     mc_cluster_removed_path = os.path.join(mc_dir, "motifcompendium_cluster_removed.mc")
@@ -824,6 +1025,9 @@ if __name__ == "__main__":
                     logging.critical("Error building MotifCompendium object. max_chunk has reached 0.")
                     raise ValueError("Error building MotifCompendium object.")
 
+        # Input paths, per model: TF-MoDISco H5
+        mc[MetadataCols.modisco_path_col] = mc[MetadataCols.model_col].map(modisco_dict)
+
     # Load the input PFM files
     elif args.input_pfms:
         # Check input
@@ -863,6 +1067,10 @@ if __name__ == "__main__":
         if args.time:
             logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
+        # Input paths, per model: PFM file
+        pfm_dict = {os.path.splitext(os.path.basename(pfm))[0]: pfm for pfm in args.input_pfms}
+        mc[MetadataCols.pfm_path_col] = mc["source"].map(pfm_dict)
+
     else:
         logging.error("Input MotifCompendium object or H5 files must be provided.")
         raise ValueError("Input MotifCompendium object or H5 files must be provided.")
@@ -884,6 +1092,16 @@ if __name__ == "__main__":
             if col in metadata_df.columns:
                 logging.error(f"Metadata file cannot contain column name: {col}")
                 raise ValueError(f"Metadata file cannot contain column name: {col}")
+
+        # Single-valued annotations (one per model) are concatenated into ","-separated lists when motifs are
+        # aggregated, so a "," inside a value would split it (e.g. celltype "Jurkat,-Clone-E6-1" -> "Jurkat",
+        # "-Clone-E6-1"): its parts are joined with "-" instead (biosample "Jurkat-Clone-E6-1")
+        for col in [CellTypeCols.celltype_col, CellTypeCols.organ_col, MetadataCols.biosample_col]:
+            if col in metadata_df.columns and metadata_df[col].dtype == object:
+                mask_comma = metadata_df[col].str.contains(",", na=False)
+                if mask_comma.any():
+                    logging.warning(f"{col}: ',' inside {mask_comma.sum()} value(s) replaced by '-', e.g. {metadata_df.loc[mask_comma, col].iloc[0]}")
+                    metadata_df[col] = metadata_df[col].str.replace(r"\s*,[\s-]*", "-", regex=True)
 
         # Merge metadata
         n_motifs_premerge = len(mc)
@@ -955,6 +1173,21 @@ if __name__ == "__main__":
 
         if args.verbose:
             logging.info(f"Metadata columns: {mc.columns()}")
+
+    # FiNeMo hits: Number of hits per motif, if a FiNeMo paths file is provided
+    add_num_hits(
+        mc=mc,
+        finemo_paths=args.finemo_paths,
+        num_hits_col=MetadataCols.num_hits_col,
+        finemo_path_col=MetadataCols.finemo_path_col,
+        name_col=MetadataCols.name_col,
+        posneg_col=MetadataCols.posneg_col,
+        model_col=MetadataCols.model_col,
+        max_workers=args.max_cpus,
+    )
+
+    # Peaks, per model (for the ENCODE hits annotation), if a peaks paths file is provided
+    add_input_paths(mc, args.peaks_paths, MetadataCols.peaks_path_col, model_col=MetadataCols.model_col)
 
     ## Rename motifs: Original TF-Modisco motif name
     # From scratch
@@ -1176,7 +1409,7 @@ if __name__ == "__main__":
     )
 
     membership_cluster = mc_filtered[cluster_cluster_col]
-    logging.info(f"Unique clusters (Indirect): {len(set(membership_cluster))}")
+    logging.info(f"Unique clusters: {len(set(membership_cluster))}")
 
 
     # Recursively cluster:
@@ -1207,9 +1440,9 @@ if __name__ == "__main__":
 
         # Check convergence
         new_membership_cluster = mc_filtered[cluster_cluster_col]
-        logging.info(f"  Unique clusters (Indirect): {len(set(new_membership_cluster))}")
+        logging.info(f"  Unique clusters: {len(set(new_membership_cluster))}")
         if np.array_equal(membership_cluster, new_membership_cluster):
-            logging.info(f"Final unique clusters (Indirect): {len(set(new_membership_cluster))}")
+            logging.info(f"Final Unique clusters: {len(set(new_membership_cluster))}")
             break
         else:
             membership_cluster = new_membership_cluster
@@ -1243,9 +1476,9 @@ if __name__ == "__main__":
 
         # Check convergence
         new_membership_cluster = mc_filtered[cluster_cluster_col]
-        logging.info(f"  Unique clusters (Indirect): {len(set(new_membership_cluster))}")
+        logging.info(f"  Unique clusters: {len(set(new_membership_cluster))}")
         if np.array_equal(membership_cluster, new_membership_cluster):
-            logging.info(f"Final unique clusters (Indirect): {len(set(new_membership_cluster))}")
+            logging.info(f"Final Unique clusters: {len(set(new_membership_cluster))}")
             break
         else:
             membership_cluster = new_membership_cluster
@@ -1600,11 +1833,6 @@ if __name__ == "__main__":
         )
     del mc_cluster_filtered_images_updated, mc_cluster_filtered_images_existing
 
-
-    # Save MotifCompendium: Cluster
-    mc_cluster_filtered.save(mc_cluster_init_path)
-
-
     # ## META-CLUSTERS
     # ### Clustering: Clusters
     logging.info("Clustering clusters into meta-clusters...")
@@ -1638,7 +1866,7 @@ if __name__ == "__main__":
     )
 
     membership_cluster = mc_cluster_filtered[metacluster_cluster_col]
-    logging.info(f"Unique clusters (Indirect): {len(set(membership_cluster))}")
+    logging.info(f"Unique clusters: {len(set(membership_cluster))}")
 
 
     # Recursively cluster
@@ -1669,9 +1897,9 @@ if __name__ == "__main__":
 
         # Check convergence
         new_membership_cluster = mc_cluster_filtered[metacluster_cluster_col]
-        logging.info(f"  Unique clusters (Indirect): {len(set(new_membership_cluster))}")
+        logging.info(f"  Unique clusters: {len(set(new_membership_cluster))}")
         if np.array_equal(membership_cluster, new_membership_cluster):
-            logging.info(f"Final unique clusters (Indirect): {len(set(new_membership_cluster))}")
+            logging.info(f"Final Unique clusters: {len(set(new_membership_cluster))}")
             break
         else:
             membership_cluster = new_membership_cluster
@@ -1705,9 +1933,9 @@ if __name__ == "__main__":
 
         # Check convergence
         new_membership_cluster = mc_cluster_filtered[metacluster_cluster_col]
-        logging.info(f"  Unique clusters (Indirect): {len(set(new_membership_cluster))}")
+        logging.info(f"  Unique clusters: {len(set(new_membership_cluster))}")
         if np.array_equal(membership_cluster, new_membership_cluster):
-            logging.info(f"Final unique clusters (Indirect): {len(set(new_membership_cluster))}")
+            logging.info(f"Final Unique clusters: {len(set(new_membership_cluster))}")
             break
         else:
             membership_cluster = new_membership_cluster
@@ -2159,80 +2387,73 @@ if __name__ == "__main__":
 
         return label_flank
 
+    def compose_label(row, label_core, flank_fn):
+        """Flank and combined label of a core: {core}::{flank} for a composite whose flank resolves, else {core}."""
+        if not is_valid(label_core):
+            return None, None
+        mask_composite = bool(row[MetadataCols.composite_col])
+        mask_has_composite = is_valid(row[LabelCols.label_flank_col]) or is_valid(row[LabelCols.label_flank_constit_all_col])  # Centroid or constituent flank
+        if mask_composite and mask_has_composite:
+            label_flank = flank_fn(row)
+            if is_valid(label_flank):
+                return label_flank, str(label_core) + "::" + str(label_flank)
+            return label_flank, str(label_core)  # Flank unresolved: Core only
+        return None, str(label_core)
+
+
+    def centroid_flank(row):
+        """Flank of an annotated centroid: its own, else its constituents'."""
+        return row[LabelCols.label_flank_col] if is_valid(row[LabelCols.label_flank_col]) else assign_label_flank(row)
+
+
     def assign_label(row):
-        # Initialize
+        """Label (Rules 2-4; the chromatin atlas has no direct types) of a row, by column."""
         label_core = None
         label_core_readable = None
         label_flank = None
         label_combined = None
 
-        # Split: Monomer, Composite
-        mask_composite = bool(row[MetadataCols.composite_col])
-        mask_has_composite = is_valid(row[LabelCols.label_flank_col]) or is_valid(row[LabelCols.label_flank_constit_all_col])  # Centroid or constituent flank
-        
-        # Row annotations
-        row_label_core = row[LabelCols.label_core_col]
-        row_label_core_readable = row[LabelCols.label_core_readable_col]
-        row_label_flank = row[LabelCols.label_flank_col]
-        row_label_core_constituents = row[LabelCols.label_core_constit_all_col]
-
-        
-        ## Rule 2: Indirect, with annotated centroid: Use centroid's core
+        ## Rule 2: Indirect, with annotated centroid: Use centroid's core (and flank, else constituent flank)
         if (
             pd.isna(label_core)
             and pd.isna(label_combined)
-            and is_valid(row_label_core)
-            and is_valid(row_label_core_readable)
+            and is_valid(row[LabelCols.label_core_col])
+            and is_valid(row[LabelCols.label_core_readable_col])
         ):
-            label_core = str(row_label_core)
-            label_core_readable = str(row_label_core_readable)
-            if (
-                is_valid(label_core)
-                and mask_composite
-                and mask_has_composite
-            ):
-                label_flank = row_label_flank if is_valid(row_label_flank) else assign_label_flank(row)  # Centroid flank, else constituent flank
-                if is_valid(label_flank):
-                    label_combined = str(label_core) + "::" + str(label_flank)
-                else:
-                    label_combined = str(label_core)  # Flank unresolved: Core only
-            elif is_valid(label_core):
-                label_combined = str(label_core)
-        
+            label_core = str(row[LabelCols.label_core_col])
+            label_core_readable = str(row[LabelCols.label_core_readable_col])
+            label_flank, label_combined = compose_label(row, label_core, centroid_flank)
+
         ## Rule 3: Indirect, with annotated constituents: Use constituent's annotations
         if (
             pd.isna(label_core)
             and pd.isna(label_combined)
-            and is_valid(row_label_core_constituents)
+            and is_valid(row[LabelCols.label_core_constit_all_col])
         ):
             label_core, label_core_readable = assign_label_core(row)
-            if (
-                is_valid(label_core)
-                and mask_composite
-                and mask_has_composite
-            ):
-                label_flank = assign_label_flank(row)
-                if is_valid(label_flank):
-                    label_combined = str(label_core) + "::" + str(label_flank)
-                else:
-                    label_combined = str(label_core)  # Flank unresolved: Core only
-            elif is_valid(label_core):
-                label_combined = str(label_core)
-        
+            label_flank, label_combined = compose_label(row, label_core, assign_label_flank)
+
         ## Rule 4: Unknown
         if pd.isna(label_combined):
             label_core = None
             label_core_readable = None
             label_flank = None
             label_combined = MetadataCols.name_unknown
-        
-        return label_core, label_core_readable, label_flank, label_combined
+
+        return {
+            LabelCols.label_core_col: label_core,
+            LabelCols.label_core_readable_col: label_core_readable,
+            LabelCols.label_flank_col: label_flank,
+            LabelCols.label_col: label_combined,
+        }
 
 
     # Add human-readable label
-    mc_metacluster_filtered.metadata[[LabelCols.label_core_col, LabelCols.label_core_readable_col, LabelCols.label_flank_col, LabelCols.label_col]] = pd.DataFrame(
+    label_cols = [LabelCols.label_core_col, LabelCols.label_core_readable_col, LabelCols.label_flank_col, LabelCols.label_col]
+    mc_metacluster_filtered.metadata[label_cols] = pd.DataFrame(
         mc_metacluster_filtered.metadata.apply(assign_label, axis=1).tolist(),
-        index=mc_metacluster_filtered.metadata.index
+        index=mc_metacluster_filtered.metadata.index,
+        columns=label_cols,
     )
 
     ### Name: Metacluster - Removed
@@ -2463,10 +2684,12 @@ if __name__ == "__main__":
     mc_removed = mc[mc[FilterArgs.filter_flag_col]]
 
     # Removed motifs: Sample a subset, for the HTML summary table only
+    # (capped at the number of removed motifs: sample(n) raises if n exceeds the population)
+    n_removed_sample = min(VisualizeArgs.html_removed_sample_size, len(mc_removed))
     mc_removed_sample = mc_removed[list(
-        mc_removed.metadata.sample(n=VisualizeArgs.html_removed_sample_size,
+        mc_removed.metadata.sample(n=n_removed_sample,
                                    random_state=ClusterArgs.seeds[0]).index
-    )]
+    )] if n_removed_sample > 0 else None
 
     ## HTML summary table columns, per level
     html_columns_metacluster = [html_col for html_col in VisualizeArgs.html_columns if html_col in (mc_metacluster.columns() + mc_metacluster.images())]
@@ -2510,13 +2733,14 @@ if __name__ == "__main__":
     os.makedirs(html_dir, exist_ok=True)
 
     # (1) Motifs: Removed only (sampled subset)
-    mc_removed_sample.summary_table_html(
-        html_out=html_motif_removed_path,
-        columns=(mc_removed_sample.columns() + mc_removed_sample.images()),
-        logo_trimming=VisualizeArgs.html_logo_trim,
-        editable=True,
-        column_desc_dict=html_column_desc_dict_metacluster,
-    )
+    if mc_removed_sample is not None:
+        mc_removed_sample.summary_table_html(
+            html_out=html_motif_removed_path,
+            columns=(mc_removed_sample.columns() + mc_removed_sample.images()),
+            logo_trimming=VisualizeArgs.html_logo_trim,
+            editable=True,
+            column_desc_dict=html_column_desc_dict_metacluster,
+        )
 
     # (2) Clusters
     mc_cluster.summary_table_html(
@@ -2566,79 +2790,84 @@ if __name__ == "__main__":
 
 
     ## EXPORT: MoDISco HDF5
-    logging.info(f"Saving MoDISco HDF5 files to: {export_dir}...")
-    os.makedirs(export_dir, exist_ok=True)
+    if args.export_modisco:
+        logging.info(f"Saving MoDISco HDF5 files to: {export_dir}...")
+        os.makedirs(export_dir, exist_ok=True)
 
-    # (1) Motifs
-    utils_analysis.export_compendium_modisco(
-        mc=mc,
-        name_col=MetadataCols.name_col,
-        save_loc=modisco_motif_path,
-    )
-    utils_analysis.export_compendium_modisco(
-        mc=mc_filtered,
-        name_col=MetadataCols.name_col,
-        save_loc=modisco_motif_filtered_path,
-    )
-    utils_analysis.export_compendium_modisco(
-        mc=mc_removed,
-        name_col=MetadataCols.name_col,
-        save_loc=modisco_motif_removed_path,
-    )
+        # (1) Motifs
+        utils_analysis.export_compendium_modisco(
+            mc=mc,
+            name_col=MetadataCols.name_col,
+            save_loc=modisco_motif_path,
+        )
+        utils_analysis.export_compendium_modisco(
+            mc=mc_filtered,
+            name_col=MetadataCols.name_col,
+            save_loc=modisco_motif_filtered_path,
+        )
+        utils_analysis.export_compendium_modisco(
+            mc=mc_removed,
+            name_col=MetadataCols.name_col,
+            save_loc=modisco_motif_removed_path,
+        )
 
-    # (2) Clusters
-    utils_analysis.export_compendium_modisco(
-        mc=mc_cluster,
-        name_col=MetadataCols.name_col,
-        save_loc=modisco_cluster_path,
-    )
-    utils_analysis.export_compendium_modisco(
-        mc=mc_cluster_filtered,
-        name_col=MetadataCols.name_col,
-        save_loc=modisco_cluster_filtered_path,
-    )
-    utils_analysis.export_compendium_modisco(
-        mc=mc_cluster_removed,
-        name_col=MetadataCols.name_col,
-        save_loc=modisco_cluster_removed_path,
-    )
+        # (2) Clusters
+        utils_analysis.export_compendium_modisco(
+            mc=mc_cluster,
+            name_col=MetadataCols.name_col,
+            save_loc=modisco_cluster_path,
+        )
+        utils_analysis.export_compendium_modisco(
+            mc=mc_cluster_filtered,
+            name_col=MetadataCols.name_col,
+            save_loc=modisco_cluster_filtered_path,
+        )
+        utils_analysis.export_compendium_modisco(
+            mc=mc_cluster_removed,
+            name_col=MetadataCols.name_col,
+            save_loc=modisco_cluster_removed_path,
+        )
 
-    # (3) Metaclusters
-    utils_analysis.export_compendium_modisco(
-        mc=mc_metacluster,
-        name_col=MetadataCols.name_col,
-        save_loc=modisco_metacluster_path,
-    )
-    utils_analysis.export_compendium_modisco(
-        mc=mc_metacluster_filtered,
-        name_col=MetadataCols.name_col,
-        save_loc=modisco_metacluster_filtered_path,
-    )
-    utils_analysis.export_compendium_modisco(
-        mc=mc_metacluster_removed,
-        name_col=MetadataCols.name_col,
-        save_loc=modisco_metacluster_removed_path,
-    )
+        # (3) Metaclusters
+        utils_analysis.export_compendium_modisco(
+            mc=mc_metacluster,
+            name_col=MetadataCols.name_col,
+            save_loc=modisco_metacluster_path,
+        )
+        utils_analysis.export_compendium_modisco(
+            mc=mc_metacluster_filtered,
+            name_col=MetadataCols.name_col,
+            save_loc=modisco_metacluster_filtered_path,
+        )
+        utils_analysis.export_compendium_modisco(
+            mc=mc_metacluster_removed,
+            name_col=MetadataCols.name_col,
+            save_loc=modisco_metacluster_removed_path,
+        )
 
 
     ## EXPORT: MEME txt
     logging.info(f"Saving MEME txt files to: {export_dir}...")
+    os.makedirs(export_dir, exist_ok=True)
 
     # (1) Motifs
     utils_analysis.export_compendium_meme(
         mc=mc,
         name_col=MetadataCols.name_col,
         save_loc=meme_motif_path,
+        trim_importance=(1/(2*mc.motifs.shape[1])),
     )
     utils_analysis.export_compendium_meme(
         mc=mc_filtered,
         name_col=MetadataCols.name_col,
         save_loc=meme_motif_filtered_path,
+        trim_importance=(1/(2*mc_filtered.motifs.shape[1])),
     )
     utils_analysis.export_compendium_meme(
         mc=mc_removed,
         name_col=MetadataCols.name_col,
         save_loc=meme_motif_removed_path,
+        trim_importance=(1/(2*mc_removed.motifs.shape[1])),
     )
 
     # (2) Clusters
@@ -2646,16 +2875,19 @@ if __name__ == "__main__":
         mc=mc_cluster,
         name_col=MetadataCols.name_col,
         save_loc=meme_cluster_path,
+        trim_importance=(1/(2*mc_cluster.motifs.shape[1])),
     )
     utils_analysis.export_compendium_meme(
         mc=mc_cluster_filtered,
         name_col=MetadataCols.name_col,
         save_loc=meme_cluster_filtered_path,
+        trim_importance=(1/(2*mc_cluster_filtered.motifs.shape[1])),
     )
     utils_analysis.export_compendium_meme(
         mc=mc_cluster_removed,
         name_col=MetadataCols.name_col,
         save_loc=meme_cluster_removed_path,
+        trim_importance=(1/(2*mc_cluster_removed.motifs.shape[1])),
     )
 
     # (3) Metaclusters
@@ -2663,16 +2895,19 @@ if __name__ == "__main__":
         mc=mc_metacluster,
         name_col=MetadataCols.name_col,
         save_loc=meme_metacluster_path,
+        trim_importance=(1/(2*mc_metacluster.motifs.shape[1])),
     )
     utils_analysis.export_compendium_meme(
         mc=mc_metacluster_filtered,
         name_col=MetadataCols.name_col,
         save_loc=meme_metacluster_filtered_path,
+        trim_importance=(1/(2*mc_metacluster_filtered.motifs.shape[1])),
     )
     utils_analysis.export_compendium_meme(
         mc=mc_metacluster_removed,
         name_col=MetadataCols.name_col,
         save_loc=meme_metacluster_removed_path,
+        trim_importance=(1/(2*mc_metacluster_removed.motifs.shape[1])),
     )
 
 
@@ -2893,3 +3128,1393 @@ if __name__ == "__main__":
 
 
     logging.info(f'Run completed: {time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())}')
+
+
+def run_chrom_combine(args):
+    """Chromatin atlas: combine the counts and profile meta-clusters into atlasclusters"""
+
+
+    ### OPTIONS -----------------------------------------------------------------
+    # Set up logging: High-level actions always logged; details gated on --verbose
+    # A run log is ALWAYS written into <output-dir>/logs/, as in the per-head pipeline.
+    log_dir = os.path.join(args.output_dir, "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    log_path = os.path.join(
+        log_dir,
+        f"log_pipeline_{os.path.basename(os.path.normpath(args.output_dir))}"
+        f"_{time.strftime('%Y-%m-%d_%H-%M-%S', time.localtime())}.out",
+    )
+    # force=True: each stage replaces the previous stage's handlers (incl. its log file)
+    logging.basicConfig(
+        force=True,
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[logging.StreamHandler(sys.stdout), logging.FileHandler(log_path)]
+    )
+    logging.info(f'Run started: {time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())}')
+    logging.info(f"Writing run log to: {log_path}")
+
+    # Set compute options
+    if args.verbose:
+        logging.info(
+            f"Setting compute options:\n"
+            f"  max_chunk={args.max_chunk},\n"
+            f"  max_cpus={args.max_cpus},\n"
+            f"  use_gpu={args.use_gpu},\n"
+            f"  ic_scale={args.ic},\n"
+            f"  fast_plot={args.fast_plot},\n"
+        )
+
+    MotifCompendium.set_compute_options(
+        max_chunk=args.max_chunk,
+        max_cpus=args.max_cpus,
+        use_gpu=args.use_gpu,
+        ic_scale=args.ic,
+        fast_plotting=args.fast_plot,
+    )
+
+    # Check output
+    if args.verbose:
+        logging.info(f"Output directory: {args.output_dir}")
+    os.makedirs(args.output_dir, exist_ok=True)
+
+    ### PATHS --------------------------------------------------------------------
+    ## Derived identifiers
+    unique_id_initial = f'{MetadataCols.unique_id_col}.{args.mcid_version}'
+    label_initial = MetadataCols.atlas_type
+
+    ## Derived clustering column name
+    atlascluster_cluster_col = f"rec_{ClusterArgs.cluster_algorithm_force}-{ClusterArgs.cluster_sim_threshold_force}_{ClusterArgs.cluster_algorithm_kmeans}-{ClusterArgs.cluster_sim_assignment_threshold_kmeans}"
+
+    ## HTML column descriptions
+    html_column_desc_df = pd.read_csv(args.column_desc_tsv, sep="\t", header=0)
+    html_column_desc_dict = html_column_desc_df.set_index('column_name')['column_desc'].to_dict()
+
+    ## Input: counts head
+    mc_counts_path = os.path.join(args.counts_dir, "mc", "motifcompendium_motif_all.mc")
+    mc_cluster_counts_path = os.path.join(args.counts_dir, "mc", "motifcompendium_cluster_all.mc")
+    mc_metacluster_filtered_counts_path = os.path.join(args.counts_dir, "mc", "motifcompendium_metacluster_filtered.mc")
+    mc_metacluster_counts_path = os.path.join(args.counts_dir, "mc", "motifcompendium_metacluster_all.mc")
+
+    ## Input: profile head
+    mc_profile_path = os.path.join(args.profile_dir, "mc", "motifcompendium_motif_all.mc")
+    mc_cluster_profile_path = os.path.join(args.profile_dir, "mc", "motifcompendium_cluster_all.mc")
+    mc_metacluster_filtered_profile_path = os.path.join(args.profile_dir, "mc", "motifcompendium_metacluster_filtered.mc")
+    mc_metacluster_profile_path = os.path.join(args.profile_dir, "mc", "motifcompendium_metacluster_all.mc")
+
+    ## Output: MotifCompendium object
+    mc_dir = os.path.join(args.output_dir, "mc")
+
+    mc_metacluster_combined_path = os.path.join(mc_dir, "motifcompendium_metacluster_combined.mc")
+    mc_atlascluster_path = os.path.join(mc_dir, "motifcompendium_atlascluster_all.mc")
+    mc_atlascluster_filtered_path = os.path.join(mc_dir, "motifcompendium_atlascluster_filtered.mc")
+    mc_atlascluster_removed_path = os.path.join(mc_dir, "motifcompendium_atlascluster_removed.mc")
+
+    ## Output: HTML summary table
+    html_dir = os.path.join(args.output_dir, "html")
+
+    html_atlascluster_path = os.path.join(html_dir, "motifcompendium_atlascluster_all.html")
+    html_atlascluster_filtered_path = os.path.join(html_dir, "motifcompendium_atlascluster_filtered.html")
+    html_atlascluster_removed_path = os.path.join(html_dir, "motifcompendium_atlascluster_removed.html")
+
+    ## Output: Export - MoDISco HDF5, MEME
+    export_dir = os.path.join(args.output_dir, "export")
+
+    modisco_atlascluster_path = os.path.join(export_dir, "motifcompendium_atlascluster_all.h5")
+    modisco_atlascluster_filtered_path = os.path.join(export_dir, "motifcompendium_atlascluster_filtered.h5")
+    modisco_atlascluster_removed_path = os.path.join(export_dir, "motifcompendium_atlascluster_removed.h5")
+
+    meme_atlascluster_path = os.path.join(export_dir, "motifcompendium_atlascluster_all.meme.txt")
+    meme_atlascluster_filtered_path = os.path.join(export_dir, "motifcompendium_atlascluster_filtered.meme.txt")
+    meme_atlascluster_removed_path = os.path.join(export_dir, "motifcompendium_atlascluster_removed.meme.txt")
+
+    ## Output: Metadata
+    metadata_dir = os.path.join(args.output_dir, "metadata")
+
+    metadata_atlascluster_path = os.path.join(metadata_dir, "motifcompendium_atlascluster_all_metadata.tsv")
+    metadata_motif_index_path = os.path.join(metadata_dir, "motifcompendium_atlascluster_motif_index.tsv")
+    args_json_path = os.path.join(metadata_dir, "args.json")
+
+
+    # ## Initial Meta-clusters
+
+    # #### Load MotifCompendium
+    logging.info("Loading per-head (counts, profile) MotifCompendium objects...")
+    # Load MotifCompendium
+    mc_metacluster_filtered_counts = MotifCompendium.load(mc_metacluster_filtered_counts_path, safe=args.safe)
+    mc_metacluster_filtered_profile = MotifCompendium.load(mc_metacluster_filtered_profile_path, safe=args.safe)
+
+    # The per-head selection: once the ENCODE combine has written its final flags back, motifcompendium_*_filtered.mc
+    # holds those instead, and this stage would combine an already-filtered selection
+    for mc_input, mc_input_path in (
+        (mc_metacluster_filtered_counts, mc_metacluster_filtered_counts_path),
+        (mc_metacluster_filtered_profile, mc_metacluster_filtered_profile_path),
+    ):
+        if VisualizeArgs.encodecluster_name_col in mc_input.columns():
+            raise ValueError(
+                f"{mc_input_path} holds the final flags of an ENCODE combine ({VisualizeArgs.encodecluster_name_col}), "
+                "not the per-head selection: rerun the per-head stages (counts, profile) before this stage."
+            )
+
+
+    # ### Import reference
+    logging.info("Loading reference motif databases...")
+
+    # Load Ref MotifCompendium
+    if args.ref_qc.endswith(".mc"):
+        mc_ref_qc = MotifCompendium.load(args.ref_qc, safe=args.safe)
+    else:
+        mc_ref_qc = MotifCompendium.build_from_pfm(
+            pfm_dict={os.path.splitext(os.path.basename(args.ref_qc))[0]: args.ref_qc},
+            safe=args.safe,
+        )
+
+    # Remove multimers
+    mc_ref_qc = mc_ref_qc[~mc_ref_qc[MetadataCols.name_col].str.contains('::')]
+
+    # IC scale
+    mc_ref_qc.motifs = utils_motif.ic_scale(mc_ref_qc.motifs)
+
+    # Annotate motifs: Human-readable
+    mc_ref_clustered_hr_metadata = pd.read_csv(args.ref_clustered_hr_metadata, sep="\t")
+
+    mc_ref_clustered_hr_metadata[MetadataCols.name_col] = mc_ref_clustered_hr_metadata[MetadataCols.name_col].str.split("_").str[0]  # Remove "_{#}"
+    mc_ref_clustered_hr_metadata['motifs_name'] = mc_ref_clustered_hr_metadata['motifs'].str.split(",")
+    mc_ref_clustered_hr_metadata_expand = mc_ref_clustered_hr_metadata.explode("motifs_name")
+
+    mc_ref_qc_hr_dict = dict(zip(mc_ref_clustered_hr_metadata_expand['motifs_name'], mc_ref_clustered_hr_metadata_expand[MetadataCols.name_col]))
+    mc_ref_qc_tf_dict = dict(zip(mc_ref_qc[MetadataCols.name_col], mc_ref_qc[ReferenceMatchCols.ref_tf_col]))
+
+    mc_ref_qc[LabelCols.label_col] = mc_ref_qc[MetadataCols.name_col].map(mc_ref_qc_hr_dict)
+
+
+    # ### Combine: Meta-clusters
+    logging.info("Combining counts + profile meta-clusters...")
+
+    # #### Pairwise similarity
+    # Combine MotifCompendium
+    mc_metacluster_combined = MotifCompendium.combine(
+        [mc_metacluster_filtered_counts, mc_metacluster_filtered_profile],
+        safe=args.safe,
+    )
+
+
+    # #### Combine
+    # Force-cluster
+    mc_metacluster_combined.cluster(
+        algorithm=ClusterArgs.cluster_algorithm_force,
+        similarity_threshold=ClusterArgs.cluster_sim_threshold_force,
+        cluster_within=ClusterArgs.atlascluster_within,
+        save_name=atlascluster_cluster_col,
+        largest_clusters_first=True,
+        seed=ClusterArgs.seeds[0],
+    )
+    # Reassign: K-mean distance
+    mc_metacluster_combined.cluster(
+        algorithm=ClusterArgs.cluster_algorithm_kmeans,
+        cluster_within=ClusterArgs.atlascluster_within,
+        save_name=atlascluster_cluster_col,
+        largest_clusters_first=True,
+        init_clustering_col=atlascluster_cluster_col,
+        weight_col=ClusterArgs.average_weight_col,
+        assignment_threshold=ClusterArgs.cluster_sim_assignment_threshold_kmeans,
+    )
+    membership_atlas = mc_metacluster_combined[atlascluster_cluster_col]
+    logging.info(f"Unique clusters: {len(set(membership_atlas))}")
+
+    # Cluster: Recursively
+    for i in range(ClusterArgs.cluster_max_iter_force):
+        if args.verbose:
+            logging.info(f"Recursively clustering: {i}")
+        # Force-cluster
+        mc_metacluster_combined.cluster(
+            algorithm=ClusterArgs.cluster_algorithm_force,
+            similarity_threshold=ClusterArgs.cluster_sim_threshold_force,
+            cluster_within_on=(ClusterArgs.atlascluster_within, atlascluster_cluster_col),
+            cluster_on_weight=ClusterArgs.average_weight_col,
+            save_name=atlascluster_cluster_col,
+            largest_clusters_first=True,
+            density=ClusterArgs.cluster_force_density,
+            seed=ClusterArgs.seeds[0],
+        )
+        # Reassign: K-mean distance
+        mc_metacluster_combined.cluster(
+            algorithm=ClusterArgs.cluster_algorithm_kmeans,
+            cluster_within=ClusterArgs.atlascluster_within,
+            save_name=atlascluster_cluster_col,
+            largest_clusters_first=True,
+            init_clustering_col=atlascluster_cluster_col,
+            weight_col=ClusterArgs.average_weight_col,
+            assignment_threshold=ClusterArgs.cluster_sim_assignment_threshold_kmeans,
+        )
+
+        # Check convergence
+        new_membership_atlas = mc_metacluster_combined[atlascluster_cluster_col]
+        if args.verbose:
+            logging.info(f"  Unique clusters: {len(set(new_membership_atlas))}")
+        if np.array_equal(membership_atlas, new_membership_atlas):
+            logging.info(f"Final Unique clusters: {len(set(new_membership_atlas))}")
+            break
+        else:
+            membership_atlas = new_membership_atlas
+    # ## Cluster: Manual
+    logging.info("Merging meta-clusters 1:1 by pairwise similarity...")
+    # # Apply threshold
+    # sim_threshold = np.where(mc_metacluster_combined.similarity < cluster_sim_threshold_force, 0, mc_metacluster_combined.similarity)
+    # np.fill_diagonal(sim_threshold, 0) # Set diagonal to 0
+    # sim_threshold_sparse = scipy.sparse.coo_matrix(sim_threshold) # Sparse matrix
+    # # Sort by similarity score (descending), then by row index, then by column index
+    # cluster_candidates = sorted([(sim_threshold_sparse.data[i], sim_threshold_sparse.row[i], sim_threshold_sparse.col[i]) for i in range(len(sim_threshold_sparse.data))], reverse=True)
+
+    # # Create clusters
+    # clustered = [0] * len(mc_metacluster_combined)
+    # cluster_num = 0
+    # for cluster_candidate in cluster_candidates:
+    #     sim, i, j = cluster_candidate
+    #     if clustered[i] == 0 and clustered[j] == 0:
+    #         # Create new cluster
+    #         mc_metacluster_combined.metadata.loc[i, atlascluster_cluster_col] = cluster_num
+    #         mc_metacluster_combined.metadata.loc[j, atlascluster_cluster_col] = cluster_num
+    #         cluster_num += 1
+        
+    #         # Record clustered
+    #         clustered[i] += 1 
+    #         clustered[j] += 1
+
+    # # Assign singleton clusters to unclustered motifs
+    # mc_metacluster_combined.metadata.loc[mc_metacluster_combined.metadata[atlascluster_cluster_col].isna(), atlascluster_cluster_col] = range(cluster_num, cluster_num + mc_metacluster_combined.metadata[atlascluster_cluster_col].isna().sum())
+
+    # # Average MotifCompendium
+    # mc_chromatlas = mc_metacluster_combined.cluster_averages(
+    #     clustering=atlascluster_cluster_col,
+    #     aggregations=aggregations,
+    #     weight_col=average_weight_col,
+    #     compute_quality_stats=False,
+    # )
+
+    # min_len = mc_chromatlas[atlascluster_cluster_col].nunique()
+    # print(f"Unique clusters (Filtered): {min_len}")
+    # ## Cluster: Manual (recursively)
+    # for i in range(cluster_max_iter_force):
+    #     # Apply threshold
+    #     sim_threshold = np.where(mc_metacluster_combined.similarity < cluster_sim_threshold_force, 0, mc_metacluster_combined.similarity)
+    #     np.fill_diagonal(sim_threshold, 0) # Set diagonal to 0
+    #     sim_threshold_sparse = scipy.sparse.coo_matrix(sim_threshold) # Sparse matrix
+    
+    #     # Sort by similarity score (descending), then by row index, then by column index
+    #     cluster_candidates = sorted([(sim_threshold_sparse.data[i], sim_threshold_sparse.row[i], sim_threshold_sparse.col[i]) for i in range(len(sim_threshold_sparse.data))], reverse=True)
+
+    #     # Create clusters
+    #     clustered = [0] * len(mc_metacluster_combined)
+    #     cluster_num = 0
+    #     for cluster_candidate in cluster_candidates:
+    #         sim, i, j = cluster_candidate
+    #         if clustered[i] == 0 and clustered[j] == 0:
+    #             # Create new cluster
+    #             mc_metacluster_combined.metadata.loc[i, atlascluster_cluster_col] = cluster_num
+    #             mc_metacluster_combined.metadata.loc[j, atlascluster_cluster_col] = cluster_num
+    #             cluster_num += 1
+            
+    #             # Record clustered
+    #             clustered[i] += 1 
+    #             clustered[j] += 1
+
+    #     # Assign singleton clusters to unclustered motifs
+    #     mc_metacluster_combined.metadata.loc[mc_metacluster_combined.metadata[atlascluster_cluster_col].isna(), atlascluster_cluster_col] = range(cluster_num, cluster_num + mc_metacluster_combined.metadata[atlascluster_cluster_col].isna().sum())
+
+    #     ## Average MotifCompendium
+    #     mc_chromatlas = mc_metacluster_combined.cluster_averages(
+    #         clustering=atlascluster_cluster_col,
+    #         aggregations=aggregations,
+    #         weight_col=average_weight_col,
+    #         compute_quality_stats=False,
+    #     )
+
+    #     new_min_len = mc_chromatlas[atlascluster_cluster_col].nunique()
+    #     print(f"Unique clusters (Filtered): {new_min_len}")
+    #     if min_len == new_min_len:
+    #         break
+    #     else:
+    #         min_len = new_min_len
+
+
+    # ## Final: Chromatin Atlas
+
+    # #### Average
+    logging.info("Creating atlasclusters, by averaging...")
+    # Average MotifCompendium
+    aggregations_atlascluster = []
+    for (agg_col_in, agg, agg_col_out) in ClusterArgs.aggregations:
+        if agg_col_in in mc_metacluster_combined.columns():
+            aggregations_atlascluster.append((agg_col_in, agg, agg_col_out))
+
+    mc_chromatlas = mc_metacluster_combined.cluster_averages(
+        clustering=atlascluster_cluster_col,
+        aggregations=aggregations_atlascluster,
+        weight_col=ClusterArgs.average_weight_col,
+        compute_quality_stats=False,
+    )
+    # Weighted aggregations
+    weighted_aggregations_atlascluster = []
+    for (agg_col_in, agg, agg_col_out) in ClusterArgs.weighted_aggregations:
+        if agg_col_in in mc_metacluster_combined.columns():
+            weighted_aggregations_atlascluster.append((agg_col_in, agg, agg_col_out))
+
+    for (agg_col_old, _, agg_col_new) in weighted_aggregations_atlascluster:
+        aggregate_weighted_avg(
+            mc=mc_metacluster_combined,
+            mc_cluster=mc_chromatlas,
+            cluster_col=atlascluster_cluster_col,
+            agg_col=agg_col_old,
+            new_col=agg_col_new,
+            weight_col=ClusterArgs.average_weight_col,
+        )
+    # Merge aggregations
+    merge_aggregations_atlascluster = []
+    for i, aggregate in enumerate(ClusterArgs.merge_aggregations):
+        (agg_col_old, action, agg_col_new) = aggregate
+        if agg_col_old in mc_chromatlas.columns():
+            merge_aggregations_atlascluster.append(aggregate)
+        if agg_col_new not in mc_chromatlas.columns():
+            mc_chromatlas.metadata[agg_col_new] = None
+
+    for (agg_col_old, _, agg_col_new) in merge_aggregations_atlascluster:
+        mc_chromatlas.metadata[agg_col_new] = mc_chromatlas.metadata[[agg_col_old, agg_col_new]].apply(
+            lambda row: ",".join(dict.fromkeys(
+                part
+                for agg in row
+                if pd.notna(agg) and agg != ""
+                for part in agg.split(",")
+                if part not in ("", "None")
+            )),
+            axis=1
+        )
+
+
+    # #### Calculations
+    # Calculations
+    mc_chromatlas[MetadataCols.total_contrib_score_ratio_col] = mc_chromatlas[MetadataCols.total_contrib_score_col] / mc_chromatlas[MetadataCols.group_total_contrib_score_col]  # Contribution score
+    mc_chromatlas[MetadataCols.posneg_col] = utils_motif.motif_posneg_sum(mc_chromatlas.get_standard_motif_stack())  # Positive / negative
+    mc_chromatlas[MetadataCols.composite_col] = mc_chromatlas[MetadataCols.composite_col].astype(bool)
+    mc_chromatlas.sort(by=[MetadataCols.posneg_col, MetadataCols.num_seqlets_col], ascending=False, inplace=True)  # Sort by pos/neg, num_seqlets
+
+    # mc_chromatlas.sort(by=[composite_col], ascending=True, inplace=True)  # Sort by composite
+    mc_chromatlas.add_motif_strings(
+        name=VisualizeArgs.motif_string_col,
+        importance=VisualizeArgs.motif_string_importance,
+        specificity=VisualizeArgs.motif_string_specificity
+    )  # Add strings
+
+    ## Add: Unique ID
+    mc_chromatlas[MetadataCols.unique_id_col] = unique_id_initial + f".C3.{MetadataCols.atlas_type}.counts_profile." + mc_chromatlas.metadata.index.map('{:08d}'.format)
+    ### Aggregate: Annotations
+    mc_chromatlas_metadata_updates = []
+    mc_chromatlas_images_updated = pd.DataFrame(index=mc_chromatlas[MetadataCols.unique_id_col])
+    mc_chromatlas_images_existing = set(mc_chromatlas.images())
+
+    for i, row in mc_chromatlas.metadata.iterrows():
+        # MotifCompendium: Subset
+        mc_chromatlas_i = mc_chromatlas[[i]]
+        ref_name_constituents_i = row[ReferenceMatchCols.ref_name_constit_all_col].split(",") if pd.notna(row[ReferenceMatchCols.ref_name_constit_all_col]) else []
+        composite_i = row[MetadataCols.composite_col]
+        max_submotifs_i = 2 if composite_i else 1
+        direct_type_i = row[DirectTypeArgs.direct_type_col]
+
+        ## [General] Reference annotations
+        if ref_name_constituents_i:
+            mc_ref_qc_i = mc_ref_qc[mc_ref_qc[MetadataCols.name_col].isin(ref_name_constituents_i)]
+
+            # Annotate with best reference constituents
+            utils_analysis.assign_label_from_other_compendium(
+                assign_to_mc=mc_chromatlas_i,
+                assign_from_mc=mc_ref_qc_i,
+                save_col_prefix=ReferenceMatchCols.best_ref_constit_col,
+                min_score=0,
+                max_submotifs=max_submotifs_i,
+                label_unsigned=True,
+                save_images=True,
+                logo_trimming=0,
+            )
+    
+        ## Update: Metadata, Images
+        mc_chromatlas_metadata_updates.append(mc_chromatlas_i.metadata.set_index(MetadataCols.unique_id_col))
+
+        new_image_cols = [image_col for image_col in mc_chromatlas_i.images() if image_col not in mc_chromatlas_images_existing]
+        mc_chromatlas_i_new_images = pd.DataFrame({
+            image_col: pd.Series(
+                mc_chromatlas_i.get_images(image_col),
+                index=mc_chromatlas_i[MetadataCols.unique_id_col],
+            )
+            for image_col in new_image_cols
+        })
+        mc_chromatlas_images_updated = mc_chromatlas_images_updated.combine_first(mc_chromatlas_i_new_images)
+        mc_chromatlas_images_updated.update(mc_chromatlas_i_new_images)
+    # Apply updates: Metadata, Images
+    mc_chromatlas_metadata_updates_df = pd.concat(mc_chromatlas_metadata_updates)
+    mc_chromatlas.metadata.set_index(MetadataCols.unique_id_col, inplace=True)
+    mc_chromatlas.metadata = mc_chromatlas.metadata.combine_first(mc_chromatlas_metadata_updates_df)
+    mc_chromatlas.metadata.update(mc_chromatlas_metadata_updates_df)
+    mc_chromatlas.metadata.reset_index(inplace=True)
+    del mc_chromatlas_metadata_updates, mc_chromatlas_metadata_updates_df
+
+    for image_col in mc_chromatlas_images_updated.columns:
+        mc_chromatlas.set_images(
+            image_name=image_col,
+            images=mc_chromatlas_images_updated[image_col].where(
+                pd.notna(mc_chromatlas_images_updated[image_col]), None).to_list()
+        )
+    del mc_chromatlas_images_updated, mc_chromatlas_images_existing
+
+
+    # #### Annotate
+    # ### Annotate: Meta-clusters
+    logging.info("Annotating atlasclusters against the reference...")
+    # Initialize
+    mc_chromatlas[LabelCols.label_col] = MetadataCols.name_unknown  # Initial readable name: Unknown
+    mc_chromatlas[LabelCols.label_core_col] = None
+    mc_chromatlas[LabelCols.label_core_readable_col] = None
+    mc_chromatlas[LabelCols.label_flank_col] = None
+    # mc_chromatlas[ref_readable_name_col] = None
+    ## [General] Label meta-clusters
+    utils_analysis.assign_label_from_other_compendium(
+        assign_to_mc=mc_chromatlas,
+        assign_from_mc=mc_ref_qc,
+        from_label_col=MetadataCols.name_col,
+        save_col_prefix=ReferenceMatchCols.ref_col,
+        min_score=MotifMatchArgs.min_composite_score,
+        max_submotifs=MotifMatchArgs.max_submotifs,
+        label_unsigned=True,
+        save_images=True,
+        logo_trimming=0,
+    )
+    ## Annotate: Centroids
+    # Map human-readable name
+    ref_readable_name_cols = [f'{ReferenceMatchCols.ref_readable_col}_name{i}' for i in range(MotifMatchArgs.max_submotifs)]
+    ref_score_cols = [f'{ReferenceMatchCols.ref_col}_score{i}' for i in range(MotifMatchArgs.max_submotifs)]
+    for i, (ref_readable_name_col, ref_score_col) in enumerate(zip(ref_readable_name_cols, ref_score_cols)):    
+        mc_chromatlas[ref_readable_name_col] = mc_chromatlas[f'{ReferenceMatchCols.ref_col}_name{i}'].map(mc_ref_qc_hr_dict)
+
+    # Classification: Mask
+    mask_monomer_metacluster = (
+        (mc_chromatlas[f'{ReferenceMatchCols.ref_col}_score0'] > MotifMatchArgs.min_single_score)
+        & ~(mc_chromatlas[f'{ReferenceMatchCols.ref_col}_score1'] > MotifMatchArgs.min_composite_score)
+        & ~(mc_chromatlas[f'{ReferenceMatchCols.ref_col}_score2'] > MotifMatchArgs.min_composite_score)
+    )
+    mask_dimer_metacluster = (
+        (mc_chromatlas[f'{ReferenceMatchCols.ref_col}_score0'] > MotifMatchArgs.min_composite_score)
+        & (mc_chromatlas[f'{ReferenceMatchCols.ref_col}_score1'] > MotifMatchArgs.min_composite_score)
+        & ~(mc_chromatlas[f'{ReferenceMatchCols.ref_col}_score2'] > MotifMatchArgs.min_composite_score)
+    )
+    mask_trimer_metacluster = (
+        (mc_chromatlas[f'{ReferenceMatchCols.ref_col}_score0'] > MotifMatchArgs.min_composite_score)
+        & (mc_chromatlas[f'{ReferenceMatchCols.ref_col}_score1'] > MotifMatchArgs.min_composite_score)
+        & (mc_chromatlas[f'{ReferenceMatchCols.ref_col}_score2'] > MotifMatchArgs.min_composite_score)
+    )
+    mask_multimer_metacluster = (
+        mask_dimer_metacluster | mask_trimer_metacluster
+    )
+    mask_matched_metacluster = (
+        mask_monomer_metacluster | mask_dimer_metacluster | mask_trimer_metacluster
+    )
+
+    # Dimer-style notation
+    mc_chromatlas.metadata.loc[mask_matched_metacluster, LabelCols.label_core_col] = mc_chromatlas.metadata.loc[mask_matched_metacluster, ref_readable_name_cols[0]]
+    mc_chromatlas.metadata.loc[mask_matched_metacluster, LabelCols.label_core_readable_col] = mc_chromatlas.metadata.loc[mask_matched_metacluster, ref_readable_name_cols[0]]
+    mc_chromatlas.metadata.loc[mask_dimer_metacluster, LabelCols.label_flank_col] = mc_chromatlas.metadata.loc[mask_dimer_metacluster, ref_readable_name_cols[1]]
+    mc_chromatlas.metadata.loc[mask_trimer_metacluster, LabelCols.label_flank_col] = mc_chromatlas.metadata.loc[mask_trimer_metacluster, ref_readable_name_cols[1]] + "::" + mc_chromatlas.metadata.loc[mask_trimer_metacluster, ref_readable_name_cols[2]]
+    # mc_chromatlas.metadata.loc[mask_dimer_metacluster, num_subunit_col] = 2  # Composite: Determined with clusters
+    # mc_chromatlas.metadata.loc[mask_trimer_metacluster, num_subunit_col] = 3
+    # mc_chromatlas.metadata[composite_col] = mc_chromatlas.metadata[num_subunit_col] > min_composite_subunit
+
+    # # Trimer-style notation
+    # mc_chromatlas[ref_readable_name_col] = mc_chromatlas.metadata[
+    #     [
+    #         f'{ref_readable_col}_name{submotif_i}' 
+    #         for submotif_i in range(max_submotifs)
+    #     ]
+    # ].agg(
+    #     lambda x: "::".join(filter(pd.notna, x)), axis=1
+    # )
+
+    # Concatenate all unique annotations
+    mc_chromatlas[ReferenceMatchCols.ref_name_col] = mc_chromatlas.metadata[
+        [f'{ReferenceMatchCols.ref_col}_name{submotif_i}' for submotif_i in range(MotifMatchArgs.max_submotifs)]
+    ].agg(
+        lambda x: ",".join(pd.unique(x.dropna().astype(str))),
+        axis=1
+    )
+
+
+    # #### Filter
+    logging.info("Filtering atlasclusters...")
+    # Calculate filters
+    mc_chromatlas[FilterArgs.filter_flag_col] = False
+
+    utils_analysis.calculate_filters(
+        mc=mc_chromatlas,
+        metric_list=AtlasFilterArgs.motif_metrics,
+        trim_importance=FilterArgs.filter_trim_importance,
+        trim_length=FilterArgs.filter_trim_length,
+    )
+    # Apply filters
+    apply_filter_clusters(
+        mc=mc_chromatlas,
+        motif_filter_args=AtlasFilterArgs,
+        filter_flag_col=FilterArgs.filter_flag_col,
+        filter_flag_type_col=FilterArgs.filter_flag_type_col,
+    )
+    # Remove flagged clusters
+    mc_chromatlas_removed = mc_chromatlas[mc_chromatlas[FilterArgs.filter_flag_col]]
+    mc_chromatlas_filtered = mc_chromatlas[~(mc_chromatlas[FilterArgs.filter_flag_col])]
+
+
+    # #### Clustering (for sorting only)
+    ## Cluster: For sorting only
+    logging.info("Clustering atlasclusters (for sorting only)...")
+    # Cluster: Leiden CPM
+    mc_chromatlas_filtered.cluster(
+        algorithm=ClusterArgs.cluster_algorithm_main,
+        similarity_threshold=ClusterArgs.cluster_sim_threshold,
+        save_name=VisualizeArgs.sort_col,
+        largest_clusters_first=True,
+        n_iterations=ClusterArgs.n_iterations,
+        seeds=ClusterArgs.seeds,
+    )
+
+    # Reassign: K-means
+    mc_chromatlas_filtered.cluster(
+        algorithm=ClusterArgs.cluster_algorithm_kmeans,
+        save_name=VisualizeArgs.sort_col,
+        largest_clusters_first=True,
+        init_clustering_col=VisualizeArgs.sort_col,
+        weight_col=ClusterArgs.average_weight_col,
+        assignment_threshold=ClusterArgs.cluster_sim_assignment_threshold_kmeans,
+        n_iterations=ClusterArgs.n_iterations,
+    )
+    membership_cluster = mc_chromatlas_filtered[VisualizeArgs.sort_col]
+    if args.verbose:
+        logging.info(f"Unique clusters (for sorting only): {len(set(membership_cluster))}")
+
+
+    # Recursively cluster
+    for i in range(ClusterArgs.cluster_max_iter_main):
+        if args.verbose:
+            logging.info(f"Recursively clustering: {i}")
+        # Cluster: Leiden CPM
+        mc_chromatlas_filtered.cluster(
+            algorithm=ClusterArgs.cluster_algorithm_main,
+            similarity_threshold=ClusterArgs.cluster_sim_threshold,
+            cluster_on=VisualizeArgs.sort_col,
+            cluster_on_weight=ClusterArgs.average_weight_col,
+            save_name=VisualizeArgs.sort_col,
+            largest_clusters_first=True,
+            n_iterations=ClusterArgs.n_iterations,
+            seeds=ClusterArgs.seeds,
+        )
+        # Reassign: K-means
+        mc_chromatlas_filtered.cluster(
+            algorithm=ClusterArgs.cluster_algorithm_kmeans,
+            save_name=VisualizeArgs.sort_col,
+            largest_clusters_first=True,
+            init_clustering_col=VisualizeArgs.sort_col,
+            weight_col=ClusterArgs.average_weight_col,
+            assignment_threshold=ClusterArgs.cluster_sim_assignment_threshold_kmeans,
+            n_iterations=ClusterArgs.n_iterations,
+        )
+
+        # Check convergence
+        new_membership_cluster = mc_chromatlas_filtered[VisualizeArgs.sort_col]
+        if args.verbose:
+            logging.info(f"Unique clusters (for sorting only): {len(set(new_membership_cluster))}")
+        if np.array_equal(membership_cluster, new_membership_cluster):
+            break
+        else:
+            membership_cluster = new_membership_cluster
+
+
+    # Force-cluster
+    for i in range(ClusterArgs.cluster_max_iter_force):
+        if args.verbose:
+            logging.info(f"Recursively clustering: {i}")
+        # Cluster: DCC
+        mc_chromatlas_filtered.cluster(
+            algorithm=ClusterArgs.cluster_algorithm_force,
+            similarity_threshold=ClusterArgs.cluster_sim_threshold_force,
+            cluster_on=VisualizeArgs.sort_col,
+            cluster_on_weight=ClusterArgs.average_weight_col,
+            save_name=VisualizeArgs.sort_col,
+            largest_clusters_first=True,
+            density=ClusterArgs.cluster_force_density,
+            seed=ClusterArgs.seeds[0],
+        )
+        # Reassign: K-means
+        mc_chromatlas_filtered.cluster(
+            algorithm=ClusterArgs.cluster_algorithm_kmeans,
+            save_name=VisualizeArgs.sort_col,
+            largest_clusters_first=True,
+            init_clustering_col=VisualizeArgs.sort_col,
+            weight_col=ClusterArgs.average_weight_col,
+            assignment_threshold=ClusterArgs.cluster_sim_assignment_threshold_kmeans,
+            n_iterations=ClusterArgs.n_iterations,
+        )
+    
+        # Check convergence
+        new_membership_cluster = mc_chromatlas_filtered[VisualizeArgs.sort_col]
+        if args.verbose:
+            logging.info(f"Unique clusters (for sorting only): {len(set(new_membership_cluster))}")
+        if np.array_equal(membership_cluster, new_membership_cluster):
+            break
+        else:
+            membership_cluster = new_membership_cluster
+
+
+    # #### Final name: Chromatin Atlas
+    # Count occurrence: Core TF family
+    mc_metacluster_combined[LabelCols.label_core_readable_col_set] = mc_metacluster_combined[LabelCols.label_core_readable_col].apply(lambda x: set(re.split(r",|-", x)) if pd.notna(x) else x)
+    mc_metacluster_explode_readable_core = mc_metacluster_combined.metadata.explode(LabelCols.label_core_readable_col_set)
+
+    # Count occurrence: Composite TF family
+    mc_metacluster_combined[LabelCols.label_flank_col_set] = mc_metacluster_combined[LabelCols.label_flank_col].apply(lambda x: set(re.split(r",|-", x)) if pd.notna(x) else x)
+    mc_metacluster_explode_readable_composite = mc_metacluster_combined.metadata.explode(LabelCols.label_flank_col_set)
+    ## Count occurrences: Create pivot table
+    # Core: All
+    mc_metacluster_core_readable_pivot = pd.pivot_table(
+        mc_metacluster_explode_readable_core,
+        index=atlascluster_cluster_col,
+        columns=LabelCols.label_core_readable_col_set,
+        values=MetadataCols.total_contrib_score_col,
+        aggfunc='sum',
+        fill_value=0
+    )
+    mc_metacluster_core_readable_pivot = mc_metacluster_core_readable_pivot.div(
+        mc_metacluster_core_readable_pivot.sum(axis=1), axis=0)
+
+    # Composite
+    mc_metacluster_flank_pivot = pd.pivot_table(
+        mc_metacluster_explode_readable_composite,
+        index=atlascluster_cluster_col,
+        columns=LabelCols.label_flank_col_set,
+        values=MetadataCols.total_contrib_score_col,
+        aggfunc='sum',
+        fill_value=0
+    )
+    mc_metacluster_flank_pivot = mc_metacluster_flank_pivot.div(
+        mc_metacluster_flank_pivot.sum(axis=1), axis=0)
+
+    # Match order of metaclusters
+    mc_metacluster_core_readable_pivot = mc_metacluster_core_readable_pivot.reindex(
+        mc_chromatlas_filtered[ClusterArgs.source_cluster_col]).fillna(0).drop([''], axis=1, errors='ignore')
+    mc_metacluster_flank_pivot = mc_metacluster_flank_pivot.reindex(
+        mc_chromatlas_filtered[ClusterArgs.source_cluster_col]).fillna(0).drop([''], axis=1, errors='ignore')
+    def is_valid(x):
+        """Pandas-safe validity check"""
+        return pd.notna(x) and x != ""
+
+    def assign_label_core(row):
+        # Initialize
+        label_core = None
+        label_core_readable = None
+        source_cluster = row[ClusterArgs.source_cluster_col]
+
+        # 1: Assign core TF (if only one TF)
+        label_core_constituents = row[LabelCols.label_core_constit_all_col]
+        if (
+            is_valid(label_core_constituents)
+            and ("," not in str(label_core_constituents))
+        ):
+            label_core = str(label_core_constituents).strip()
+            label_core_readable = label_core
+    
+        # 2: Combine core TFs
+        if (
+            pd.isna(label_core_readable)
+            and pd.isna(label_core)
+            and (source_cluster in mc_metacluster_core_readable_pivot.index)
+        ):
+            label_core_readable_frac = mc_metacluster_core_readable_pivot.loc[source_cluster]
+
+            if label_core_readable_frac.sum() > 0:
+                for major_family_frac in np.arange(VisualizeArgs.max_major_family_frac, VisualizeArgs.major_family_increment, VisualizeArgs.major_family_increment):
+                    major_family_mask = label_core_readable_frac >= major_family_frac
+
+                    if major_family_mask.any():
+                        label_core = "-".join(
+                            label_core_readable_frac[major_family_mask]
+                            .sort_values(ascending=False)
+                            .index[:VisualizeArgs.max_major_family_count]
+                        )
+                        label_core_readable = label_core
+                        break
+
+        return label_core, label_core_readable
+
+
+    def assign_label_flank(row):
+        # Initialize
+        label_flank = None
+        source_cluster = row[ClusterArgs.source_cluster_col]
+
+        # 1: Assign Flank TF (if only one Flank TF)
+        label_flank_constituents = row[LabelCols.label_flank_constit_all_col]
+        if (
+            is_valid(label_flank_constituents)
+            and ("," not in str(label_flank_constituents))
+        ):
+            label_flank = str(label_flank_constituents).strip()
+
+        # 2: Combine composite TF families
+        if (
+            pd.isna(label_flank)
+            and (source_cluster in mc_metacluster_flank_pivot.index)
+        ):
+            composite_family_frac = mc_metacluster_flank_pivot.loc[source_cluster]
+            if composite_family_frac.sum() > 0:
+                for major_family_frac in np.arange(VisualizeArgs.max_major_family_frac, VisualizeArgs.major_family_increment, VisualizeArgs.major_family_increment):
+                    major_family_mask = composite_family_frac >= major_family_frac
+                    if major_family_mask.any():
+                        label_flank = "-".join(
+                            composite_family_frac[major_family_mask]
+                            .sort_values(ascending=False)
+                            .index[:VisualizeArgs.max_major_family_count]
+                        )
+                        break
+
+        return label_flank
+
+    def compose_label(row, label_core, flank_fn):
+        """Flank and combined label of a core: {core}::{flank} for a composite whose flank resolves, else {core}."""
+        if not is_valid(label_core):
+            return None, None
+        mask_composite = bool(row[MetadataCols.composite_col])
+        mask_has_composite = is_valid(row[LabelCols.label_flank_col]) or is_valid(row[LabelCols.label_flank_constit_all_col])  # Centroid or constituent flank
+        if mask_composite and mask_has_composite:
+            label_flank = flank_fn(row)
+            if is_valid(label_flank):
+                return label_flank, str(label_core) + "::" + str(label_flank)
+            return label_flank, str(label_core)  # Flank unresolved: Core only
+        return None, str(label_core)
+
+
+    def centroid_flank(row):
+        """Flank of an annotated centroid: its own, else its constituents'."""
+        return row[LabelCols.label_flank_col] if is_valid(row[LabelCols.label_flank_col]) else assign_label_flank(row)
+
+
+    def assign_label(row):
+        """Label (Rules 2-4; the chromatin atlas has no direct types) of a row, by column."""
+        label_core = None
+        label_core_readable = None
+        label_flank = None
+        label_combined = None
+
+        ## Rule 2: Indirect, with annotated centroid: Use centroid's core (and flank, else constituent flank)
+        if (
+            pd.isna(label_core)
+            and pd.isna(label_combined)
+            and is_valid(row[LabelCols.label_core_col])
+            and is_valid(row[LabelCols.label_core_readable_col])
+        ):
+            label_core = str(row[LabelCols.label_core_col])
+            label_core_readable = str(row[LabelCols.label_core_readable_col])
+            label_flank, label_combined = compose_label(row, label_core, centroid_flank)
+
+        ## Rule 3: Indirect, with annotated constituents: Use constituent's annotations
+        if (
+            pd.isna(label_core)
+            and pd.isna(label_combined)
+            and is_valid(row[LabelCols.label_core_constit_all_col])
+        ):
+            label_core, label_core_readable = assign_label_core(row)
+            label_flank, label_combined = compose_label(row, label_core, assign_label_flank)
+
+        ## Rule 4: Unknown
+        if pd.isna(label_combined):
+            label_core = None
+            label_core_readable = None
+            label_flank = None
+            label_combined = MetadataCols.name_unknown
+
+        return {
+            LabelCols.label_core_col: label_core,
+            LabelCols.label_core_readable_col: label_core_readable,
+            LabelCols.label_flank_col: label_flank,
+            LabelCols.label_col: label_combined,
+        }
+    # Label: Chromatlas - Filtered
+    # Add human-readable label
+    label_cols = [LabelCols.label_core_col, LabelCols.label_core_readable_col, LabelCols.label_flank_col, LabelCols.label_col]
+    mc_chromatlas_filtered.metadata[label_cols] = pd.DataFrame(
+        mc_chromatlas_filtered.metadata.apply(assign_label, axis=1).tolist(),
+        index=mc_chromatlas_filtered.metadata.index,
+        columns=label_cols,
+    )
+    # Label: Chromatlas - Removed
+    mc_chromatlas_removed[LabelCols.label_col] = mc_chromatlas_removed[FilterArgs.filter_flag_type_col]
+    ## Prename
+    mc_chromatlas_filtered[MetadataCols.prename_col] = label_initial + "_" + mc_chromatlas_filtered[LabelCols.label_col]
+    mc_chromatlas_removed[MetadataCols.prename_col] = label_initial + "_" + mc_chromatlas_removed[LabelCols.label_col]
+
+    ## Simple name
+    mc_chromatlas_filtered[MetadataCols.simple_name_col] = mc_chromatlas_filtered[LabelCols.label_col]
+    mc_chromatlas_removed[MetadataCols.simple_name_col] = mc_chromatlas_removed[LabelCols.label_col]
+    ### Annotate: Best label
+    mc_chromatlas_filtered_metadata_updates = []
+    mc_chromatlas_filtered_images_updated = pd.DataFrame(index=mc_chromatlas_filtered[MetadataCols.unique_id_col])
+    mc_chromatlas_filtered_images_existing = set(mc_chromatlas_filtered.images())
+
+    for i, row in mc_chromatlas_filtered.metadata.iterrows():
+        # MotifCompendium: Subset
+        mc_chromatlas_filtered_i = mc_chromatlas_filtered[[i]]
+        label_core_i = row[LabelCols.label_core_col].split("-") if pd.notna(row[LabelCols.label_core_col]) else []
+        label_flank_i = row[LabelCols.label_flank_col].split("-") if pd.notna(row[LabelCols.label_flank_col]) else []
+        composite_i = row[MetadataCols.composite_col]
+        max_submotifs_i = 2 if composite_i else 1
+        direct_type_i = row[DirectTypeArgs.direct_type_col]
+
+        ## [General] Reference annotations
+        # Reference: Subset
+        mc_ref_core_i = mc_ref_qc[
+            (mc_ref_qc[ReferenceMatchCols.ref_tf_col].isin(label_core_i)) |
+            (mc_ref_qc[ReferenceMatchCols.ref_family_col].isin(label_core_i))
+        ]
+        mc_ref_composite_i = mc_ref_qc[
+            (mc_ref_qc[ReferenceMatchCols.ref_tf_col].isin(label_flank_i)) |
+            (mc_ref_qc[ReferenceMatchCols.ref_family_col].isin(label_flank_i))
+        ]
+
+        # Annotate with name references
+        if len(mc_ref_core_i) > 0:
+            assign_direct_composite(
+                target_mc=mc_chromatlas_filtered_i,
+                direct_reference_mc=mc_ref_core_i,
+                indirect_reference_mc=mc_ref_composite_i,
+                save_col_prefix=LabelCols.best_label_ref_col,
+                min_score=0,
+                max_submotifs=max_submotifs_i if len(mc_ref_composite_i) > 0 else 1,
+                label_unsigned=True,
+                save_images=True,
+                logo_trimming=0,
+            )
+    
+        ## Update: Metadata, Images
+        mc_chromatlas_filtered_metadata_updates.append(mc_chromatlas_filtered_i.metadata.set_index(MetadataCols.unique_id_col))
+    
+        new_image_cols = [image_col for image_col in mc_chromatlas_filtered_i.images() if image_col not in mc_chromatlas_filtered_images_existing]
+        mc_chromatlas_filtered_i_new_images = pd.DataFrame({
+            image_col: pd.Series(
+                mc_chromatlas_filtered_i.get_images(image_col),
+                index=mc_chromatlas_filtered_i[MetadataCols.unique_id_col],
+            )
+            for image_col in new_image_cols
+        })
+        mc_chromatlas_filtered_images_updated = mc_chromatlas_filtered_images_updated.combine_first(mc_chromatlas_filtered_i_new_images)
+        mc_chromatlas_filtered_images_updated.update(mc_chromatlas_filtered_i_new_images)
+    # Apply updates: Metadata, Images
+    mc_chromatlas_filtered_metadata_updates_df = pd.concat(mc_chromatlas_filtered_metadata_updates)
+    mc_chromatlas_filtered.metadata.set_index(MetadataCols.unique_id_col, inplace=True)
+    mc_chromatlas_filtered.metadata = mc_chromatlas_filtered.metadata.combine_first(mc_chromatlas_filtered_metadata_updates_df)
+    mc_chromatlas_filtered.metadata.update(mc_chromatlas_filtered_metadata_updates_df)
+    mc_chromatlas_filtered.metadata.reset_index(inplace=True)
+    del mc_chromatlas_filtered_metadata_updates, mc_chromatlas_filtered_metadata_updates_df
+
+    for image_col in mc_chromatlas_filtered_images_updated.columns:
+        mc_chromatlas_filtered.set_images(
+            image_name=image_col,
+            images=[x if pd.notna(x) else None 
+                for x in mc_chromatlas_filtered_images_updated[image_col]],
+        )
+    del mc_chromatlas_filtered_images_updated, mc_chromatlas_filtered_images_existing
+
+
+    # #### Update MotifCompendium
+    #### Update original MotifCompendium
+    ### (4) Atlas-cluster:
+    # Combine: Update columns
+    mc_chromatlases = [mc_chromatlas_filtered, mc_chromatlas_removed]
+
+    mc_chromatlas.metadata.set_index(MetadataCols.unique_id_col, inplace=True)
+    mc_chromatlas_images_updated = pd.DataFrame(index=mc_chromatlas.metadata.index)
+    mc_chromatlas_images_existing = set(mc_chromatlas.images())
+
+    # Build updates: Metadata, Images
+    for mc_chromatlas_i in mc_chromatlases:
+        # Metadata
+        mc_chromatlas.metadata = mc_chromatlas.metadata.combine_first(mc_chromatlas_i.metadata.set_index(MetadataCols.unique_id_col))
+        mc_chromatlas.metadata.update(mc_chromatlas_i.metadata.set_index(MetadataCols.unique_id_col))
+        # Images
+        new_image_cols = [image_col for image_col in mc_chromatlas_i.images() if image_col not in mc_chromatlas_images_existing]
+        mc_chromatlas_i_new_images = pd.DataFrame({
+            image_col: pd.Series(
+                mc_chromatlas_i.get_images(image_col),
+                index=mc_chromatlas_i[MetadataCols.unique_id_col],
+            )
+            for image_col in new_image_cols
+        })
+        mc_chromatlas_images_updated = mc_chromatlas_images_updated.combine_first(mc_chromatlas_i_new_images)
+        mc_chromatlas_images_updated.update(mc_chromatlas_i_new_images)
+    # Apply updates: Metadata, Images
+    mc_chromatlas.metadata.reset_index(inplace=True)
+    for image_col in mc_chromatlas_images_updated.columns:
+        mc_chromatlas.set_images(
+            image_name=image_col,
+            images=[x if pd.notna(x) else None 
+                for x in mc_chromatlas_images_updated[image_col]],
+        )
+    del mc_chromatlas_images_updated, mc_chromatlas_images_existing
+    # # Share columns
+    # metadata_cols = []
+    # image_cols = []
+    # for mc_chromatlas_i in mc_chromatlases:
+    #     metadata_cols = list(set(metadata_cols + mc_chromatlas_i.columns()))
+    #     image_cols = list(set(image_cols + mc_chromatlas_i.images()))
+    # for mc_chromatlas_i in mc_chromatlases:
+    #     for metadata_col in metadata_cols:
+    #         if metadata_col not in mc_chromatlas_i.columns():
+    #             mc_chromatlas_i.metadata[metadata_col] = None
+    #     for logo_i in ['logo (fwd)', 'logo (rev)']:
+    #         mc_chromatlas_i.add_logos(
+    #             motifs=mc_chromatlas_i.motifs,
+    #             image_name=logo_i,
+    #             trim=0,
+    #         )
+    #     for image_col in image_cols:
+    #         if image_col not in mc_chromatlas_i.images():
+    #             mc_chromatlas_i.add_logos(
+    #                 motifs=np.zeros_like(mc_chromatlas_i.get_standard_motif_stack()),
+    #                 image_name=image_col,
+    #                 trim=False,
+    #             )
+
+    # # Update original MotifCompendium: Metacluster
+    # mc_chromatlas = MotifCompendium.combine(mc_chromatlases, safe=safe)
+    # Readable label: Type
+    mask_indirect = ~mc_chromatlas[LabelCols.label_col].isin(FilterArgs.filter_flag_types)
+    mc_chromatlas.metadata.loc[mask_indirect, LabelCols.label_conf_col] = LabelCols.label_confs[2]
+    mc_chromatlas.metadata.loc[~mask_indirect, LabelCols.label_conf_col] = LabelCols.label_confs[-1]
+    ## Rename: {readable_name}_{counter}
+    mc_chromatlas.metadata[MetadataCols.counter_col] = mc_chromatlas.metadata.dropna(subset=[MetadataCols.prename_col]).groupby(MetadataCols.prename_col).cumcount().fillna(0).astype(int)
+    mc_chromatlas.metadata[MetadataCols.name_new_col] = mc_chromatlas.metadata[MetadataCols.prename_col] + "_" + mc_chromatlas.metadata[MetadataCols.counter_col].astype(str)
+    mc_chromatlas.metadata[MetadataCols.name_col] = mc_chromatlas.metadata[MetadataCols.name_new_col]
+    mc_chromatlas.metadata.drop(columns=[MetadataCols.name_new_col, MetadataCols.counter_col], axis=1, inplace=True)
+    ## Map: Metacluster to Atlas-cluster: Name, Simple name
+    metacluster2atlas_name_map = dict(zip(mc_chromatlas[ClusterArgs.source_cluster_col], mc_chromatlas[MetadataCols.name_col]))
+    metacluster2atlas_simple_map = dict(zip(mc_chromatlas[ClusterArgs.source_cluster_col], mc_chromatlas[MetadataCols.simple_name_col]))
+
+    mc_metacluster_combined[VisualizeArgs.atlascluster_name_col] = mc_metacluster_combined[atlascluster_cluster_col].map(metacluster2atlas_name_map)
+    mc_metacluster_combined[MetadataCols.simple_name_col] = mc_metacluster_combined[atlascluster_cluster_col].map(metacluster2atlas_simple_map)
+
+
+    # #### Visualize HTML
+    ## Create HTML
+    # HTML columns
+    html_columns_atlascluster = [html_col for html_col in VisualizeArgs.html_columns if html_col in (mc_chromatlas.columns() + mc_chromatlas.images())]
+    html_column_desc_dict_atlascluster = {col: html_column_desc_dict.get(col, col) for col in html_columns_atlascluster}
+
+    os.makedirs(os.path.dirname(html_atlascluster_path), exist_ok=True)
+    mc_chromatlas.summary_table_html(
+        html_out=html_atlascluster_path,
+        columns=[FilterArgs.filter_flag_col]+html_columns_atlascluster,
+        logo_trimming=VisualizeArgs.html_logo_trim,
+        editable=True,
+        column_desc_dict=html_column_desc_dict_atlascluster,
+    )
+
+    os.makedirs(os.path.dirname(html_atlascluster_filtered_path), exist_ok=True)
+    mc_chromatlas_filtered = mc_chromatlas[~(mc_chromatlas[FilterArgs.filter_flag_col])]
+    mc_chromatlas_filtered.summary_table_html(
+        html_out=html_atlascluster_filtered_path,
+        columns=html_columns_atlascluster,
+        logo_trimming=VisualizeArgs.html_logo_trim,
+        editable=True,
+        column_desc_dict=html_column_desc_dict_atlascluster,
+    )
+
+    os.makedirs(os.path.dirname(html_atlascluster_path), exist_ok=True)
+    mc_chromatlas_removed = mc_chromatlas[mc_chromatlas[FilterArgs.filter_flag_col]]
+    mc_chromatlas_removed.summary_table_html(
+        html_out=html_atlascluster_removed_path,
+        columns=[col for col in html_columns_atlascluster if col in mc_chromatlas_removed.columns()],
+        logo_trimming=VisualizeArgs.html_logo_trim,
+        editable=True,
+        column_desc_dict=html_column_desc_dict_atlascluster,
+    )
+
+    # os.makedirs(os.path.dirname(html_chromatlas_monomer_path), exist_ok=True)
+    # mc_chromatlas_monomer = mc_chromatlas_filtered[~mc_chromatlas_filtered[composite_col]]
+    # mc_chromatlas_monomer.summary_table_html(
+    #     html_out=html_chromatlas_monomer_path,
+    #     columns=html_columns,
+    #     logo_trimming=html_logo_trim,
+    #     editable=True,
+    #     column_desc_dict=html_column_desc_dict,
+    # )
+
+    # os.makedirs(os.path.dirname(html_chromatlas_multimer_path), exist_ok=True)
+    # mc_chromatlas_multimer = mc_chromatlas_filtered[mc_chromatlas_filtered[composite_col]]
+    # mc_chromatlas_multimer.summary_table_html(
+    #     html_out=html_chromatlas_multimer_path,
+    #     columns=html_columns,
+    #     logo_trimming=html_logo_trim,
+    #     editable=True,
+    #     column_desc_dict=html_column_desc_dict,
+    # )
+
+
+    # #### Save MotifCompendium
+    # Save MotifCompendium: Chromatlas Atlas
+    os.makedirs(os.path.dirname(mc_atlascluster_path), exist_ok=True)
+    mc_chromatlas.save(mc_atlascluster_path)
+
+    os.makedirs(os.path.dirname(mc_atlascluster_filtered_path), exist_ok=True)
+    mc_chromatlas_filtered.save(mc_atlascluster_filtered_path)
+
+    os.makedirs(os.path.dirname(mc_atlascluster_removed_path), exist_ok=True)
+    mc_chromatlas_removed.save(mc_atlascluster_removed_path)
+
+    # os.makedirs(os.path.dirname(mc_chromatlas_monomer_path), exist_ok=True)
+    # mc_chromatlas_monomer.save(mc_chromatlas_monomer_path)
+
+    # os.makedirs(os.path.dirname(mc_chromatlas_multimer_path), exist_ok=True)
+    # mc_chromatlas_multimer.save(mc_chromatlas_multimer_path)
+
+    os.makedirs(os.path.dirname(mc_metacluster_combined_path), exist_ok=True)
+    mc_metacluster_combined.save(mc_metacluster_combined_path)
+
+
+    # ### Export
+    # Export as MEME txt
+    os.makedirs(os.path.dirname(meme_atlascluster_path), exist_ok=True)
+    utils_analysis.export_compendium_meme(
+        mc=mc_chromatlas,
+        name_col=MetadataCols.name_col,
+        save_loc=meme_atlascluster_path,
+        trim_importance=(1/(2*mc_chromatlas.motifs.shape[1])),
+    )
+
+    os.makedirs(os.path.dirname(meme_atlascluster_filtered_path), exist_ok=True)
+    utils_analysis.export_compendium_meme(
+        mc=mc_chromatlas_filtered,
+        name_col=MetadataCols.name_col,
+        save_loc=meme_atlascluster_filtered_path,
+        trim_importance=(1/(2*mc_chromatlas_filtered.motifs.shape[1])),
+    )
+
+    os.makedirs(os.path.dirname(meme_atlascluster_removed_path), exist_ok=True)
+    utils_analysis.export_compendium_meme(
+        mc=mc_chromatlas_removed,
+        name_col=MetadataCols.name_col,
+        save_loc=meme_atlascluster_removed_path,
+        trim_importance=(1/(2*mc_chromatlas_removed.motifs.shape[1])),
+    )
+
+    ## EXPORT: MoDISco HDF5
+    if args.export_modisco:
+        logging.info("Saving MoDISco HDF5 files...")
+        os.makedirs(os.path.dirname(modisco_atlascluster_path), exist_ok=True)
+        utils_analysis.export_compendium_modisco(
+            mc=mc_chromatlas,
+            name_col=MetadataCols.name_col,
+            save_loc=modisco_atlascluster_path,
+        )
+        utils_analysis.export_compendium_modisco(
+            mc=mc_chromatlas_filtered,
+            name_col=MetadataCols.name_col,
+            save_loc=modisco_atlascluster_filtered_path,
+        )
+        utils_analysis.export_compendium_modisco(
+            mc=mc_chromatlas_removed,
+            name_col=MetadataCols.name_col,
+            save_loc=modisco_atlascluster_removed_path,
+        )
+    # Metadata TSV
+    os.makedirs(metadata_dir, exist_ok=True)
+    mc_chromatlas.metadata.to_csv(metadata_atlascluster_path, sep="\t", index=False)
+
+
+    # #### Motif index
+    # Load MotifCompendium
+    mc_metacluster_counts = MotifCompendium.load(mc_metacluster_counts_path, safe=args.safe)
+    mc_metacluster_profile = MotifCompendium.load(mc_metacluster_profile_path, safe=args.safe)
+
+    mc_cluster_counts = MotifCompendium.load(mc_cluster_counts_path, safe=args.safe)
+    mc_cluster_profile = MotifCompendium.load(mc_cluster_profile_path, safe=args.safe)
+
+    mc_counts = MotifCompendium.load(mc_counts_path, safe=args.safe)
+    mc_profile = MotifCompendium.load(mc_profile_path, safe=args.safe)
+    # Update Metaclusters
+    for mc_metacluster_i in [mc_metacluster_counts, mc_metacluster_profile]:
+        for metadata_col in mc_metacluster_combined.columns():
+            if metadata_col not in mc_metacluster_i.columns():
+                mc_metacluster_i.metadata[metadata_col] = None
+        mc_metacluster_i.metadata.set_index(MetadataCols.unique_id_col, inplace=True)
+        mc_metacluster_i.metadata.update(mc_metacluster_combined.metadata.set_index(MetadataCols.unique_id_col))
+        mc_metacluster_i.metadata.reset_index(inplace=True)
+    # Map: Metacluster to Atlas-cluster: Name, Simple name
+    mc_metacluster_counts[VisualizeArgs.atlascluster_name_col] = mc_metacluster_counts[atlascluster_cluster_col].map(metacluster2atlas_name_map)
+    mc_metacluster_counts[MetadataCols.simple_name_col] = mc_metacluster_counts[atlascluster_cluster_col].map(metacluster2atlas_simple_map).fillna(mc_metacluster_counts[MetadataCols.simple_name_col])
+
+    mc_metacluster_profile[VisualizeArgs.atlascluster_name_col] = mc_metacluster_profile[atlascluster_cluster_col].map(metacluster2atlas_name_map)
+    mc_metacluster_profile[MetadataCols.simple_name_col] = mc_metacluster_profile[atlascluster_cluster_col].map(metacluster2atlas_simple_map).fillna(mc_metacluster_profile[MetadataCols.simple_name_col])
+    ## Map: Motif, Cluster to Atlas-cluster
+    cluster2metacluster_atlascluster_map = dict(zip(mc_metacluster_combined[MetadataCols.name_col], mc_metacluster_combined[VisualizeArgs.atlascluster_name_col]))
+    cluster2metacluster_simple_map = dict(zip(mc_metacluster_combined[MetadataCols.name_col], mc_metacluster_combined[MetadataCols.simple_name_col]))
+
+    mc_cluster_counts[VisualizeArgs.atlascluster_name_col] = mc_cluster_counts[VisualizeArgs.metacluster_name_col].map(cluster2metacluster_atlascluster_map)
+    mc_cluster_counts[MetadataCols.simple_name_col] = mc_cluster_counts[VisualizeArgs.metacluster_name_col].map(cluster2metacluster_simple_map).fillna(mc_cluster_counts[MetadataCols.simple_name_col])
+    mc_cluster_profile[VisualizeArgs.atlascluster_name_col] = mc_cluster_profile[VisualizeArgs.metacluster_name_col].map(cluster2metacluster_atlascluster_map)
+    mc_cluster_profile[MetadataCols.simple_name_col] = mc_cluster_profile[VisualizeArgs.metacluster_name_col].map(cluster2metacluster_simple_map).fillna(mc_cluster_profile[MetadataCols.simple_name_col])
+
+    mc_counts[VisualizeArgs.atlascluster_name_col] = mc_counts[VisualizeArgs.metacluster_name_col].map(cluster2metacluster_atlascluster_map)
+    mc_counts[MetadataCols.simple_name_col] = mc_counts[VisualizeArgs.metacluster_name_col].map(cluster2metacluster_simple_map).fillna(mc_counts[MetadataCols.simple_name_col])
+    mc_profile[VisualizeArgs.atlascluster_name_col] = mc_profile[VisualizeArgs.metacluster_name_col].map(cluster2metacluster_atlascluster_map)
+    mc_profile[MetadataCols.simple_name_col] = mc_profile[VisualizeArgs.metacluster_name_col].map(cluster2metacluster_simple_map).fillna(mc_profile[MetadataCols.simple_name_col])
+    # Save MotifCompendium: with the motif index, over the per-head inputs (motifcompendium_*_all.mc)
+    save_replace(mc_metacluster_counts, mc_metacluster_counts_path)
+    save_replace(mc_metacluster_profile, mc_metacluster_profile_path)
+
+    save_replace(mc_cluster_counts, mc_cluster_counts_path)
+    save_replace(mc_cluster_profile, mc_cluster_profile_path)
+
+    save_replace(mc_counts, mc_counts_path)
+    save_replace(mc_profile, mc_profile_path)
+    # Motif index
+    mc_motif_index = pd.concat([
+        mc_counts.metadata,
+        mc_profile.metadata,
+    ], axis=0)
+    # Export: Motif index
+    mc_motif_index[VisualizeArgs.motif_index_cols_atlascluster].to_csv(metadata_motif_index_path, sep="\t", index=False)
+    # Arguments JSON
+    args_record = {
+        # --- Full provenance (added 2026-09-10) ---------------------------------
+        # Every parser argument, verbatim
+        "parser_args": vars(args),
+        # Upstream provenance: the per-head runs this combine consumes
+        "previous_args": collect_previous_args([
+            ("counts", args.counts_dir),
+            ("profile", args.profile_dir),
+            ("previous_run_this_output_dir", args.output_dir),
+        ]),
+        # Every dataclass in configs.py as used by this run
+        "configs": collect_configs_snapshot(),
+        # --- Curated summary (pre-existing keys) --------------------------------
+        # Compute options
+        "max_chunk": args.max_chunk,
+        "max_cpus": args.max_cpus,
+        "use_gpu": args.use_gpu,
+        "safe": args.safe,
+        "ic_scale": args.ic,
+        "fast_plot": args.fast_plot,
+
+        # Parameters: Column names
+        "name_col": MetadataCols.name_col,
+        "prename_col": MetadataCols.prename_col,
+        "simple_name_col": MetadataCols.simple_name_col,
+        "name_new_col": MetadataCols.name_new_col,
+        "name_constituents_col": MetadataCols.name_constituents_col,
+        "counter_col": MetadataCols.counter_col,
+        "name_unknown": MetadataCols.name_unknown,
+        "unique_id_col": MetadataCols.unique_id_col,
+        "unique_id_initial": unique_id_initial,
+
+        # Experiment
+        "atlas_type": MetadataCols.atlas_type,
+        "id_col": MetadataCols.id_col,
+        "assay_col": MetadataCols.assay_col,
+        "model_col": MetadataCols.model_col,
+        "head_col": MetadataCols.head_col,
+        "file_col": MetadataCols.file_col,
+        "accession_col": MetadataCols.accession_col,
+        "biosample_col": MetadataCols.biosample_col,
+
+        # Composites
+        "composite_col": MetadataCols.composite_col,
+        "num_subunit_col": MetadataCols.num_subunit_col,
+
+        # TF-MoDISco
+        "num_seqlets_col": MetadataCols.num_seqlets_col,
+        "num_constituents_col": MetadataCols.num_constituents_col,
+        "posneg_col": MetadataCols.posneg_col,
+        "avgcontrib_score_col": MetadataCols.avgcontrib_score_col,
+        "total_contrib_score_col": MetadataCols.total_contrib_score_col,
+        "group_total_contrib_score_col": MetadataCols.group_total_contrib_score_col,
+        "total_contrib_score_ratio_col": MetadataCols.total_contrib_score_ratio_col,
+        "avgdist_summit_col": MetadataCols.avgdist_summit_col,
+
+        # Parameters: Cell type annotations
+        "celltype_col": CellTypeCols.celltype_col,
+        "organ_col": CellTypeCols.organ_col,
+        "slim_cell_col": CellTypeCols.slim_cell_col,
+        "slim_organ_col": CellTypeCols.slim_organ_col,
+        "slim_dev_col": CellTypeCols.slim_dev_col,
+        "slim_system_col": CellTypeCols.slim_system_col,
+
+        # Annotation
+        "label_initial": label_initial,
+        "label_col": LabelCols.label_col,
+        "label_constit_1_col": LabelCols.label_constit_1_col,
+        "label_constit_all_col": LabelCols.label_constit_all_col,
+        "label_core_col": LabelCols.label_core_col,
+        "label_core_col_set": LabelCols.label_core_col_set,
+        "label_core_constit_1_col": LabelCols.label_core_constit_1_col,
+        "label_core_constit_all_col": LabelCols.label_core_constit_all_col,
+        "label_flank_col": LabelCols.label_flank_col,
+        "label_flank_col_set": LabelCols.label_flank_col_set,
+        "label_flank_constit_1_col": LabelCols.label_flank_constit_1_col,
+        "label_flank_constit_all_col": LabelCols.label_flank_constit_all_col,
+        "label_conf_col": LabelCols.label_conf_col,
+        "label_confs": LabelCols.label_confs,
+        "best_label_ref_col": LabelCols.best_label_ref_col,
+
+        # Parameters: Annotation / Reference
+        "ref_tf_col": ReferenceMatchCols.ref_tf_col,
+        "ref_family_col": ReferenceMatchCols.ref_family_col,
+        "ref_col": ReferenceMatchCols.ref_col,
+        "ref_name_col": ReferenceMatchCols.ref_name_col,
+        "ref_name_constit_1_col": ReferenceMatchCols.ref_name_constit_1_col,
+        "ref_name_constit_all_col": ReferenceMatchCols.ref_name_constit_all_col,
+        "best_ref_constit_col": ReferenceMatchCols.best_ref_constit_col,
+        "ref_readable_col": ReferenceMatchCols.ref_readable_col,
+        # "ref_readable_name_col": ref_readable_name_col,
+        # "ref_readable_name_constit_1_col": ref_readable_name_constit_1_col,
+        # "ref_readable_name_constit_all_col": ref_readable_name_constit_all_col,
+        "ref_znf_col": ReferenceMatchCols.ref_znf_col,
+        "ref_znf_name_col": ReferenceMatchCols.ref_znf_name_col,
+        "ref_znf_name_constit_1_col": ReferenceMatchCols.ref_znf_name_constit_1_col,
+        "ref_znf_name_constit_all_col": ReferenceMatchCols.ref_znf_name_constit_all_col,
+        "ref_nonznf_readable_col": ReferenceMatchCols.ref_nonznf_readable_col,
+        "ref_nonznf_col": ReferenceMatchCols.ref_nonznf_col,
+        "min_single_score": MotifMatchArgs.min_single_score,
+        "min_composite_score": MotifMatchArgs.min_composite_score,
+        "max_submotifs": MotifMatchArgs.max_submotifs,
+        "min_composite_subunit": MotifMatchArgs.min_composite_subunit,
+        "direct_type_col": DirectTypeArgs.direct_type_col,
+        "direct_types": DirectTypeArgs.direct_types,
+
+        # Parameters: Clustering
+        "cluster_algorithm_main": ClusterArgs.cluster_algorithm_main,
+        "cluster_algorithm_force": ClusterArgs.cluster_algorithm_force,
+        "cluster_algorithm_kmeans": ClusterArgs.cluster_algorithm_kmeans,
+        "cluster_sim_threshold": ClusterArgs.cluster_sim_threshold,
+        "cluster_sim_threshold_force": ClusterArgs.cluster_sim_threshold_force,
+        "cluster_force_density": ClusterArgs.cluster_force_density,
+        "cluster_sim_assignment_threshold_kmeans": ClusterArgs.cluster_sim_assignment_threshold_kmeans,
+        "atlascluster_within": ClusterArgs.atlascluster_within,
+        "atlascluster_cluster_col": atlascluster_cluster_col,
+        "cluster_max_iter_main": ClusterArgs.cluster_max_iter_main,
+        "cluster_max_iter_force": ClusterArgs.cluster_max_iter_force,
+        "average_weight_col": ClusterArgs.average_weight_col,
+        "source_cluster_col": ClusterArgs.source_cluster_col,
+        "n_iterations": ClusterArgs.n_iterations,
+        "seeds": ClusterArgs.seeds,
+
+        # Parameters: Filtering
+        "filter_flag_col": FilterArgs.filter_flag_col,
+        "filter_flag_type_col": FilterArgs.filter_flag_type_col,
+        "filter_trim_importance": FilterArgs.filter_trim_importance,
+        "filter_trim_length": FilterArgs.filter_trim_length,
+        "filter_ic_scale": FilterArgs.filter_ic_scale,
+        "filter_flag_types": FilterArgs.filter_flag_types,
+        "motif_string_col": VisualizeArgs.motif_string_col,
+        "motif_string_importance": VisualizeArgs.motif_string_importance,
+        "motif_string_specificity": VisualizeArgs.motif_string_specificity,
+
+        # Parameters: Hierarchy
+        "cluster_name_col": VisualizeArgs.cluster_name_col,
+        "metacluster_name_col": VisualizeArgs.metacluster_name_col,
+        "atlascluster_name_col": VisualizeArgs.atlascluster_name_col,
+        "sort_col": VisualizeArgs.sort_col,
+        "max_major_family_frac": VisualizeArgs.max_major_family_frac,
+        "major_family_increment": VisualizeArgs.major_family_increment,
+        "max_major_family_count": VisualizeArgs.max_major_family_count,
+
+        # Parameters: HTML
+        "html_logo_trim": VisualizeArgs.html_logo_trim,
+
+        # Aggregation
+        "aggregations": ClusterArgs.aggregations,
+        "weighted_aggregations": ClusterArgs.weighted_aggregations,
+
+        # Motif index
+        "motif_index_cols": VisualizeArgs.motif_index_cols_atlascluster,
+
+        # Run log
+        "log_path": log_path,
+    }
+
+    os.makedirs(os.path.dirname(args_json_path), exist_ok=True)
+    with open(args_json_path, "w") as f:
+        json.dump(args_record, f, indent=2, default=str)
+
+    logging.info(f"Completed run: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
+
+
+if __name__ == "__main__":
+    args = setup_parser()
+
+    set_default_configs()
+
+    ### OPTIONS -----------------------------------------------------------------
+    # Pipeline-level logging (stdout only); each stage re-configures logging for itself
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[logging.StreamHandler(sys.stdout)]
+    )
+
+    # Stages requested, kept in pipeline order
+    selected = [s for s in STAGE_ORDER if s in set(args.stages)]
+
+    if "combine" in selected and args.ref_direct is None:
+        raise ValueError("Stage 'combine' requires --ref-direct.")
+
+    os.makedirs(args.output_dir, exist_ok=True)
+    DIRS = stage_dirs(args.output_dir)
+
+    logging.info("ChromBPNet pipeline: run started.")
+    logging.info(f"Output root: {args.output_dir}")
+    logging.info(f"Stages to run ({len(selected)}/{len(STAGE_ORDER)}): {', '.join(selected)}")
+
+    ### RUN ---------------------------------------------------------------------
+    for stage in selected:
+        stage_dir = DIRS[stage]
+        logging.info("=" * 78)
+        logging.info(f"STAGE {STAGE_ORDER.index(stage) + 1}/{len(STAGE_ORDER)}: {STAGES[stage]}")
+        logging.info(f"  output: {stage_dir}")
+        logging.info("=" * 78)
+        if args.time:
+            stage_start = time.time()
+
+        os.makedirs(stage_dir, exist_ok=True)
+
+        # --- 1 & 2: per-head sequential clustering ----------------------------
+        if stage in ("counts", "profile"):
+            sa = stage_args(
+                args,
+                output_dir=stage_dir,
+                head_type=stage,
+                input_mc=getattr(args, f"{stage}_input_mc"),
+                input_modisco_h5s=getattr(args, f"{stage}_modisco_h5s"),
+                input_names=getattr(args, f"{stage}_input_names"),
+                input_pfms=None,
+                metadata=getattr(args, f"{stage}_metadata"),
+                finemo_paths=getattr(args, f"{stage}_finemo_paths"),
+                peaks_paths=getattr(args, f"{stage}_peaks_paths"),
+            )
+            run_chrom_sequential(sa)
+
+        # --- 3: combine the two heads into atlasclusters ----------------------
+        else:
+            sa = stage_args(
+                args,
+                output_dir=stage_dir,
+                counts_dir=DIRS["counts"],
+                profile_dir=DIRS["profile"],
+            )
+            run_chrom_combine(sa)
+
+        if args.time:
+            logging.info(f"Stage '{stage}' time taken: {time.time() - stage_start:.2f}s")
+
+    logging.info("=" * 78)
+    logging.info(f'ChromBPNet pipeline: run completed: {time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())}')

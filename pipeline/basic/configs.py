@@ -28,6 +28,11 @@ class MetadataCols:
     filter_flag_col: str = "flag_remove"
     motif_string_col: str = "motif_string"
     sort_cluster_col: str = "sort_cluster"
+    num_hits_col: str = "num_hits"
+    # Input paths, per model (from the CLI)
+    modisco_path_col: str = "modisco_path"
+    pfm_path_col: str = "pfm_path"
+    finemo_path_col: str = "finemo_path"
 
 @dataclass
 class OutputPaths:
@@ -148,7 +153,7 @@ class VisualizeArgs:
 
     # HTML table columns
     html_table_cols_base: List[str] = field(default_factory=lambda: ["name", "motif_string", "sort_cluster",
-        "posneg", "num_motifs", "num_seqlets", "avg_dist_from_summit", "avg_contrib", "motif_scale", "ic-scaled",
+        "posneg", "num_motifs", "num_seqlets", "num_hits", "avg_dist_from_summit", "avg_contrib", "motif_scale", "ic-scaled",
         "invitro_cluster", "assay", "target", "TF", "tissue", "organ", "system", "source", "motifs", "biosample",
         "model", "ID",
     ])
@@ -295,6 +300,15 @@ class MotifFilterArgs:
             apply_cluster=False,
         ),
         _FilterArgs(
+            name="7_minhits",
+            metric=MetadataCols.num_hits_col,
+            operation="<",
+            threshold=100,
+            override=False,
+            apply_motif=True,
+            apply_cluster=False,
+        ),
+        _FilterArgs(
             name="8_posneg_inverted",
             metric="posneg_inverted",
             operation="==",
@@ -422,6 +436,15 @@ class MotifFilterArgs:
         _FilterArgs(
             name="7_minseqlets",
             metric="num_seqlets",
+            operation="<",
+            threshold=20,
+            override=False,
+            apply_motif=True,
+            apply_cluster=False,
+        ),
+        _FilterArgs(
+            name="7_minhits",
+            metric=MetadataCols.num_hits_col,
             operation="<",
             threshold=20,
             override=False,

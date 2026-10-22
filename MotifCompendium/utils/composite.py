@@ -262,62 +262,62 @@ def _chain_composite(match_scores, matchable, cand_len, overlap_penalty_fraction
             N - function
     '''
     C, S = match_scores.shape
-    pairs_c, pairs_l = np.nonzero(matchable.T)[::-1]  # Matchable (candidate, start), by start
-    starts = np.unique(pairs_l)
+    pairs_c, pairs_l = np.nonzero(matchable.T)[::-1]  # (K,), (K,): Matchable (candidate, start), by start
+    starts = np.unique(pairs_l)  # (<= S,): Distinct starts with a pair
     num_n = len(starts) if max_count is None else min(len(starts), max_count)  # Starts strictly increase
-    ends = pairs_l + cand_len[pairs_c]
+    ends = pairs_l + cand_len[pairs_c]  # (K,)
     penalty = overlap_penalty_fraction
 
     ## Fill: The best value of each pair by n, and the pair before it
     K = len(pairs_c)
-    value = np.full((K, num_n + 1), -np.inf)
-    previous = np.full((K, num_n + 1), -1)  # Pair before, in the best alignment with n matches
-    best = np.full((S + 1 + int(cand_len.max()), num_n + 1), -np.inf)  # By end and n
-    best_pair = np.full(best.shape, -1)
-    weight = np.zeros(best.shape[0])
+    value = np.full((K, num_n + 1), -np.inf)  # (K, num_n+1)
+    previous = np.full((K, num_n + 1), -1)  # (K, num_n+1): Pair before, in the best alignment with n matches
+    best = np.full((S + 1 + int(cand_len.max()), num_n + 1), -np.inf)  # (P, num_n+1), P = S+1+max(cand_len): By end and n
+    best_pair = np.full(best.shape, -1)  # (P, num_n+1)
+    weight = np.zeros(best.shape[0])  # (P,)
     weight[:min(S, len(overlap_weight))] = overlap_weight[:S]
-    W = np.concatenate([[0.0], np.cumsum(weight)])  # W[x]: Summed weight of positions before x
-    order = np.argsort(pairs_l, kind="stable")
-    bounds = np.searchsorted(pairs_l[order], starts)
+    W = np.concatenate([[0.0], np.cumsum(weight)])  # (P+1,): W[x]: Summed weight of positions before x
+    order = np.argsort(pairs_l, kind="stable")  # (K,)
+    bounds = np.searchsorted(pairs_l[order], starts)  # (<= S,)
     for s_i, l in enumerate(starts):
-        ks = order[bounds[s_i]:bounds[s_i + 1] if s_i + 1 < len(starts) else len(order)]
-        t = ends[ks]
-        scores = match_scores[pairs_c[ks], l]
+        ks = order[bounds[s_i]:bounds[s_i + 1] if s_i + 1 < len(starts) else len(order)]  # (K_l,): The pairs at l
+        t = ends[ks]  # (K_l,)
+        scores = match_scores[pairs_c[ks], l]  # (K_l,)
         value[ks, 1] = scores
         for n in range(2, num_n + 1):
-            prior = best[:, n - 1]
+            prior = best[:, n - 1]  # (P,)
             # e <= l: No overlap
-            pre_max, pre_arg = _first_running_max(prior)
-            options = [np.full(len(ks), pre_max[l]), np.full(len(ks), pre_arg[l])]
+            pre_max, pre_arg = _first_running_max(prior)  # (P,), (P,)
+            options = [np.full(len(ks), pre_max[l]), np.full(len(ks), pre_arg[l])]  # [(K_l,), (K_l,)]
             # l < e <= t: Overlap of e - l bp
-            inner = prior[l + 1:] - penalty * W[l + 1:len(prior)]
-            in_max, in_arg = _first_running_max(inner)
-            in_val, in_e = in_max[t - l - 1] + penalty * W[l], in_arg[t - l - 1] + l + 1
+            inner = prior[l + 1:] - penalty * W[l + 1:len(prior)]  # (P-l-1,)
+            in_max, in_arg = _first_running_max(inner)  # (P-l-1,), (P-l-1,)
+            in_val, in_e = in_max[t - l - 1] + penalty * W[l], in_arg[t - l - 1] + l + 1  # (K_l,), (K_l,)
             # e > t: The candidate is covered (overlap of M_c bp)
-            rev_max, rev_arg = _first_running_max(prior[::-1])  # rev index j: e = len-1-j
-            j = len(prior) - 1 - (t + 1)
-            out_val = np.where(j >= 0, rev_max[np.maximum(j, 0)] - penalty * (W[t] - W[l]), -np.inf)
-            out_e = len(prior) - 1 - rev_arg[np.maximum(j, 0)]
+            rev_max, rev_arg = _first_running_max(prior[::-1])  # (P,), (P,): rev index j: e = len-1-j
+            j = len(prior) - 1 - (t + 1)  # (K_l,)
+            out_val = np.where(j >= 0, rev_max[np.maximum(j, 0)] - penalty * (W[t] - W[l]), -np.inf)  # (K_l,)
+            out_e = len(prior) - 1 - rev_arg[np.maximum(j, 0)]  # (K_l,)
             # Ties: Less overlap first
-            vals = np.stack([options[0], in_val, out_val])
-            es = np.stack([options[1], in_e, out_e])
-            pick = vals.argmax(axis=0)
-            prev_val = vals[pick, np.arange(len(ks))]
-            prev_e = es[pick, np.arange(len(ks))]
-            ok = np.isfinite(prev_val)
+            vals = np.stack([options[0], in_val, out_val])  # (3, K_l)
+            es = np.stack([options[1], in_e, out_e])  # (3, K_l)
+            pick = vals.argmax(axis=0)  # (K_l,)
+            prev_val = vals[pick, np.arange(len(ks))]  # (K_l,)
+            prev_e = es[pick, np.arange(len(ks))]  # (K_l,)
+            ok = np.isfinite(prev_val)  # (K_l,)
             value[ks, n] = np.where(ok, prev_val + scores, -np.inf)
             previous[ks, n] = np.where(ok, best_pair[prev_e, n - 1], -1)
         # Add the candidates at l, by end (ties: the first pair)
         for n in range(1, num_n + 1):
-            v = value[ks, n]
+            v = value[ks, n]  # (K_l,)
             for k, e, vk in zip(ks, t, v):
                 if vk > best[e, n]:
                     best[e, n], best_pair[e, n] = vk, k
 
     ## The best chain with n matches, for every n
-    msw_profile = np.full(num_n + 1, -np.inf)
+    msw_profile = np.full(num_n + 1, -np.inf)  # (num_n+1,)
     msw_profile[0] = 0.0
-    found = [None] * (num_n + 1)
+    found = [None] * (num_n + 1)  # [num_n+1]
     for n in range(1, num_n + 1):
         if K == 0 or not np.isfinite(value[:, n]).any():
             continue

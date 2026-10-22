@@ -36,6 +36,11 @@ class MetadataCols:
 
     num_seqlets_col: str = 'num_seqlets'
     num_hits_col: str = 'num_hits'
+    # Input paths, per model (from the CLI)
+    modisco_path_col: str = 'modisco_path'
+    pfm_path_col: str = 'pfm_path'
+    finemo_path_col: str = 'finemo_path'
+    peaks_path_col: str = 'peaks_path'
     num_constituents_col: str = 'num_constituents'
     posneg_col: str = 'posneg'
     avgcontrib_score_col: str = "avg_contrib_score"
@@ -692,6 +697,7 @@ class VisualizeArgs:
     cluster_name_col: str = 'cluster_name'
     metacluster_name_col: str = 'metacluster_name'
     atlascluster_name_col: str = 'atlascluster_name'
+    encodecluster_name_col: str = 'ENCODE_name'  # Set by the ENCODE combine when it writes its final flags back
     metacluster_name: str = 'Chromatin'
     sort_col: str = 'sort'
 

@@ -50,6 +50,7 @@ def setup_parser():
     parser.add_argument("--no-ic", action="store_false", dest="ic", help="Do not scale motifs by information content.")
     parser.add_argument("--fast-plot", action="store_true", help="Reduce the resolution of logo images for faster plotting.")
     parser.add_argument("--save-all", action="store_true", help="Save all intermediate MotifCompendium objects.")
+    parser.add_argument("--export-modisco", action="store_true", help="Also export TF-MoDISco HDF5 files (default: off).")
     parser.add_argument("-t", "--time", action="store_true", help="Print time taken for each step.")
     parser.add_argument("-v", "--verbose", action="store_true", help="Print verbose output.")
 
@@ -1886,127 +1887,128 @@ if __name__ == "__main__":
 
 
     ## EXPORT: MODISCO HDF5
-    logging.info(f"Saving as MoDISco HDF5 files to: {args.output_dir}...")
-    # Motifs: All
-    os.makedirs(os.path.dirname(modisco_motif_path), exist_ok=True)
-    utils_analysis.export_compendium_modisco(
-        mc=mc,
-        name_col=MetadataCols.name_col,
-        save_loc=modisco_motif_path,
-    )
-    os.makedirs(os.path.dirname(modisco_motif_ppm_path), exist_ok=True)
-    utils_analysis.export_compendium_modisco(
-        mc=mc_ppm,
-        name_col=MetadataCols.name_col,
-        save_loc=modisco_motif_ppm_path,
-    )
-    os.makedirs(os.path.dirname(modisco_motif_pfm_path), exist_ok=True)
-    utils_analysis.export_compendium_modisco(
-        mc=mc_pfm,
-        name_col=MetadataCols.name_col,
-        save_loc=modisco_motif_pfm_path,
-    )
-
-    # Motifs: Invitro
-    os.makedirs(os.path.dirname(modisco_motif_invitro_path), exist_ok=True)
-    utils_analysis.export_compendium_modisco(
-        mc=mc_invitro,
-        name_col=MetadataCols.name_col,
-        save_loc=modisco_motif_invitro_path,
-    )
-    os.makedirs(os.path.dirname(modisco_motif_invitro_ppm_path), exist_ok=True)
-    utils_analysis.export_compendium_modisco(
-        mc=mc_invitro_ppm,
-        name_col=MetadataCols.name_col,
-        save_loc=modisco_motif_invitro_ppm_path,
-    )
-    os.makedirs(os.path.dirname(modisco_motif_invitro_pfm_path), exist_ok=True)
-    utils_analysis.export_compendium_modisco(
-        mc=mc_invitro_pfm,
-        name_col=MetadataCols.name_col,
-        save_loc=modisco_motif_invitro_pfm_path,
-    )
-
-    # Cluster: Invitro
-    os.makedirs(os.path.dirname(modisco_cluster_invitro_path), exist_ok=True)
-    utils_analysis.export_compendium_modisco(
-        mc=mc_cluster_invitro,
-        name_col=MetadataCols.name_col,
-        save_loc=modisco_cluster_invitro_path,
-    )
-    os.makedirs(os.path.dirname(modisco_cluster_invitro_ppm_path), exist_ok=True)
-    utils_analysis.export_compendium_modisco(
-        mc=mc_cluster_invitro_ppm,
-        name_col=MetadataCols.name_col,
-        save_loc=modisco_cluster_invitro_ppm_path,
-    )
-    os.makedirs(os.path.dirname(modisco_cluster_invitro_pfm_path), exist_ok=True)
-    utils_analysis.export_compendium_modisco(
-        mc=mc_cluster_invitro_pfm,
-        name_col=MetadataCols.name_col,
-        save_loc=modisco_cluster_invitro_pfm_path,
-    )
-
-    if args.save_all:
-        # Motifs: Noninvitro
-        os.makedirs(os.path.dirname(modisco_motif_noninvitro_path), exist_ok=True)
+    if args.export_modisco:
+        logging.info(f"Saving as MoDISco HDF5 files to: {args.output_dir}...")
+        # Motifs: All
+        os.makedirs(os.path.dirname(modisco_motif_path), exist_ok=True)
         utils_analysis.export_compendium_modisco(
-            mc=mc_noninvitro,
+            mc=mc,
             name_col=MetadataCols.name_col,
-            save_loc=modisco_motif_noninvitro_path,
+            save_loc=modisco_motif_path,
         )
-        os.makedirs(os.path.dirname(modisco_motif_noninvitro_ppm_path), exist_ok=True)
+        os.makedirs(os.path.dirname(modisco_motif_ppm_path), exist_ok=True)
         utils_analysis.export_compendium_modisco(
-            mc=mc_noninvitro_ppm,
+            mc=mc_ppm,
             name_col=MetadataCols.name_col,
-            save_loc=modisco_motif_noninvitro_ppm_path,
+            save_loc=modisco_motif_ppm_path,
         )
-        os.makedirs(os.path.dirname(modisco_motif_noninvitro_pfm_path), exist_ok=True)
+        os.makedirs(os.path.dirname(modisco_motif_pfm_path), exist_ok=True)
         utils_analysis.export_compendium_modisco(
-            mc=mc_noninvitro_pfm,
+            mc=mc_pfm,
             name_col=MetadataCols.name_col,
-            save_loc=modisco_motif_noninvitro_pfm_path,
+            save_loc=modisco_motif_pfm_path,
         )
 
-        # Cluster: Noninvitro
-        os.makedirs(os.path.dirname(modisco_cluster_noninvitro_path), exist_ok=True)
+        # Motifs: Invitro
+        os.makedirs(os.path.dirname(modisco_motif_invitro_path), exist_ok=True)
         utils_analysis.export_compendium_modisco(
-            mc=mc_cluster_noninvitro,
+            mc=mc_invitro,
             name_col=MetadataCols.name_col,
-            save_loc=modisco_cluster_noninvitro_path,
+            save_loc=modisco_motif_invitro_path,
         )
-        os.makedirs(os.path.dirname(modisco_cluster_noninvitro_ppm_path), exist_ok=True)
+        os.makedirs(os.path.dirname(modisco_motif_invitro_ppm_path), exist_ok=True)
         utils_analysis.export_compendium_modisco(
-            mc=mc_cluster_noninvitro_ppm,
+            mc=mc_invitro_ppm,
             name_col=MetadataCols.name_col,
-            save_loc=modisco_cluster_noninvitro_ppm_path,
+            save_loc=modisco_motif_invitro_ppm_path,
         )
-        os.makedirs(os.path.dirname(modisco_cluster_noninvitro_pfm_path), exist_ok=True)
+        os.makedirs(os.path.dirname(modisco_motif_invitro_pfm_path), exist_ok=True)
         utils_analysis.export_compendium_modisco(
-            mc=mc_cluster_noninvitro_pfm,
+            mc=mc_invitro_pfm,
             name_col=MetadataCols.name_col,
-            save_loc=modisco_cluster_noninvitro_pfm_path,
+            save_loc=modisco_motif_invitro_pfm_path,
         )
 
-        # Metacluster: Invitro
-        os.makedirs(os.path.dirname(modisco_metacluster_invitro_path), exist_ok=True)
+        # Cluster: Invitro
+        os.makedirs(os.path.dirname(modisco_cluster_invitro_path), exist_ok=True)
         utils_analysis.export_compendium_modisco(
-            mc=mc_metacluster_invitro,
+            mc=mc_cluster_invitro,
             name_col=MetadataCols.name_col,
-            save_loc=modisco_metacluster_invitro_path,
+            save_loc=modisco_cluster_invitro_path,
         )
-        os.makedirs(os.path.dirname(modisco_metacluster_invitro_ppm_path), exist_ok=True)
+        os.makedirs(os.path.dirname(modisco_cluster_invitro_ppm_path), exist_ok=True)
         utils_analysis.export_compendium_modisco(
-            mc=mc_metacluster_invitro_ppm,
+            mc=mc_cluster_invitro_ppm,
             name_col=MetadataCols.name_col,
-            save_loc=modisco_metacluster_invitro_ppm_path,
+            save_loc=modisco_cluster_invitro_ppm_path,
         )
-        os.makedirs(os.path.dirname(modisco_metacluster_invitro_pfm_path), exist_ok=True)
+        os.makedirs(os.path.dirname(modisco_cluster_invitro_pfm_path), exist_ok=True)
         utils_analysis.export_compendium_modisco(
-            mc=mc_metacluster_invitro_pfm,
+            mc=mc_cluster_invitro_pfm,
             name_col=MetadataCols.name_col,
-            save_loc=modisco_metacluster_invitro_pfm_path,
+            save_loc=modisco_cluster_invitro_pfm_path,
         )
+
+        if args.save_all:
+            # Motifs: Noninvitro
+            os.makedirs(os.path.dirname(modisco_motif_noninvitro_path), exist_ok=True)
+            utils_analysis.export_compendium_modisco(
+                mc=mc_noninvitro,
+                name_col=MetadataCols.name_col,
+                save_loc=modisco_motif_noninvitro_path,
+            )
+            os.makedirs(os.path.dirname(modisco_motif_noninvitro_ppm_path), exist_ok=True)
+            utils_analysis.export_compendium_modisco(
+                mc=mc_noninvitro_ppm,
+                name_col=MetadataCols.name_col,
+                save_loc=modisco_motif_noninvitro_ppm_path,
+            )
+            os.makedirs(os.path.dirname(modisco_motif_noninvitro_pfm_path), exist_ok=True)
+            utils_analysis.export_compendium_modisco(
+                mc=mc_noninvitro_pfm,
+                name_col=MetadataCols.name_col,
+                save_loc=modisco_motif_noninvitro_pfm_path,
+            )
+
+            # Cluster: Noninvitro
+            os.makedirs(os.path.dirname(modisco_cluster_noninvitro_path), exist_ok=True)
+            utils_analysis.export_compendium_modisco(
+                mc=mc_cluster_noninvitro,
+                name_col=MetadataCols.name_col,
+                save_loc=modisco_cluster_noninvitro_path,
+            )
+            os.makedirs(os.path.dirname(modisco_cluster_noninvitro_ppm_path), exist_ok=True)
+            utils_analysis.export_compendium_modisco(
+                mc=mc_cluster_noninvitro_ppm,
+                name_col=MetadataCols.name_col,
+                save_loc=modisco_cluster_noninvitro_ppm_path,
+            )
+            os.makedirs(os.path.dirname(modisco_cluster_noninvitro_pfm_path), exist_ok=True)
+            utils_analysis.export_compendium_modisco(
+                mc=mc_cluster_noninvitro_pfm,
+                name_col=MetadataCols.name_col,
+                save_loc=modisco_cluster_noninvitro_pfm_path,
+            )
+
+            # Metacluster: Invitro
+            os.makedirs(os.path.dirname(modisco_metacluster_invitro_path), exist_ok=True)
+            utils_analysis.export_compendium_modisco(
+                mc=mc_metacluster_invitro,
+                name_col=MetadataCols.name_col,
+                save_loc=modisco_metacluster_invitro_path,
+            )
+            os.makedirs(os.path.dirname(modisco_metacluster_invitro_ppm_path), exist_ok=True)
+            utils_analysis.export_compendium_modisco(
+                mc=mc_metacluster_invitro_ppm,
+                name_col=MetadataCols.name_col,
+                save_loc=modisco_metacluster_invitro_ppm_path,
+            )
+            os.makedirs(os.path.dirname(modisco_metacluster_invitro_pfm_path), exist_ok=True)
+            utils_analysis.export_compendium_modisco(
+                mc=mc_metacluster_invitro_pfm,
+                name_col=MetadataCols.name_col,
+                save_loc=modisco_metacluster_invitro_pfm_path,
+            )
 
     
     ## EXPORT: MEME TXT
