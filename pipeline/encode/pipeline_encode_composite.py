@@ -175,15 +175,26 @@ def final_encode_compendium(mc_encode, mc_encode_c4_filtered, mc_encode_c4_remov
     c4_id_by_name = dict(zip(mc_encode_c4_filtered[name_col].astype(str), c4_filtered_ids))
     c5_members_values = mc_encode[members_col] if members_col in mc_encode.columns() else pd.Series([None] * len(mc_encode))
     c4_to_c5_row = {}
+    in_two = []  # (C4 ENCODE cluster, its first C5 row, its second)
     for row, (name, members) in enumerate(zip(mc_encode[name_col].astype(str), c5_members_values)):
         if pd.notna(members) and str(members).strip():
             c4_ids = [c4_id.strip() for c4_id in str(members).split(",") if c4_id.strip()]
-        else:
+        elif name in c4_id_by_name:
             c4_ids = [c4_id_by_name[name]]
+        else:
+            raise ValueError(f"C5 single {name} (row {row}) is not a filtered ENCODE cluster of the combine")
         for c4_id in c4_ids:
             if c4_id in c4_to_c5_row:
-                raise ValueError(f"ENCODE cluster {c4_id} of the combine is in two C5 ENCODE clusters")
+                in_two.append((c4_id, c4_to_c5_row[c4_id], row))
             c4_to_c5_row[c4_id] = row
+    if in_two:
+        c4_id, row_a, row_b = in_two[0]
+        c5_names = mc_encode[name_col].astype(str).to_numpy()
+        raise ValueError(
+            f"{len(in_two)} ENCODE clusters of the combine are in two C5 ENCODE clusters, e.g. {c4_id}: rows {row_a} "
+            f"({c5_names[row_a]}) and {row_b} ({c5_names[row_b]}). The C5 singles and composites must come from the "
+            "same composites (the singles: the filtered ENCODE clusters outside the composites of the ISM analysis)."
+        )
     not_filtered = set(c4_to_c5_row) - set(c4_filtered_ids)
     if not_filtered:
         raise ValueError(f"C5 members that are not filtered ENCODE clusters of the combine: {sorted(not_filtered)[:5]}")
@@ -1635,8 +1646,17 @@ def run_encode_composite(args):
 
     # ### Re-combine all: ENCODE MotifCompendium (C5)
 
-    # ENCODE: Single
-    mc_encode_single = mc_encode[(mc_encode[MetadataCols.composite_col] == False)]
+    # ENCODE: Single: the filtered ENCODE clusters outside the composites of the ISM analysis (cpaths.mc_composite_path, as
+    # loaded under "ISM Cooperativity"), whatever mc_encode's composite flags say: resumed after the ISM runs, mc_encode may
+    # hold other flags than the MSW that selected the composites (e.g. an earlier ENCODE combine's, without the MSW). The
+    # composites dropped as errors ("Drop: Errors": core or flank label "_...") stay out of C5.
+    mc_encode_composite_ids = set(MotifCompendium.load(cpaths.mc_composite_path, safe=args.safe)[MetadataCols.unique_id_col].astype(str))
+    mc_encode_error = (mc_encode[MetadataCols.composite_col] == True) & (
+        mc_encode[LabelCols.label_core_col].astype(str).str.startswith("_") | mc_encode[LabelCols.label_flank_col].astype(str).str.startswith("_")
+    )
+    mc_encode_single = mc_encode[~mc_encode[MetadataCols.unique_id_col].astype(str).isin(mc_encode_composite_ids) & ~mc_encode_error]
+    logging.info(f"C5 singles: {len(mc_encode_single)} of {len(mc_encode)} filtered ENCODE clusters "
+                 f"({len(mc_encode_composite_ids)} composites, {int(mc_encode_error.sum())} dropped as errors)")
 
     # Re-Combine: Full ENCODE MotifCompendium
     mc_encode_columns = list(set(mc_encode_single.columns() + mc_encode_composite.columns()))
