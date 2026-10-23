@@ -1297,8 +1297,9 @@ def export_encode_levels(args, mc_encode, mc_atlascluster_combined, atlascluster
     mc_atlascluster_combined (encodecluster_cluster_col) to its name and simple name in mc_encode.
 
     In <output-dir>: the ENCODE compendia (all, filtered, removed: .mc, HTML, MEME, metadata TSV), the combined
-    atlasclusters and the motif index. In the atlas pipelines' directories: every level's compendia, with their ENCODE
-    cluster, final filter flags and confidence, over the atlas pipelines' own files. The FiNeMo hits are annotated by
+    atlasclusters and the motif index. In the atlas pipelines' directories: every level's compendia (all, filtered,
+    removed: .mc, metadata TSV, MEME, HTML but at the motif level) and the motif indexes, with their ENCODE cluster,
+    final filter flags and confidence, over the atlas pipelines' own files. The FiNeMo hits are annotated by
     pipeline_encode_hits.py, from these outputs.
     """
     paths = encode_paths(args)
@@ -1749,15 +1750,16 @@ def export_encode_levels(args, mc_encode, mc_atlascluster_combined, atlascluster
 
     mc_atlascluster_procap.metadata[LabelCols.label_conf_col] = mc_atlascluster_procap.metadata[VisualizeArgs.encodecluster_name_col].map(mc_encode_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
 
-    # Motif index
-    mc_motif_index = pd.concat([
-        mc_counts_tf.metadata,
-        mc_profile_tf.metadata,
-        mc_counts_chrom.metadata,
-        mc_profile_chrom.metadata,
-        mc_counts_procap.metadata,
-        mc_profile_procap.metadata,
-    ], axis=0).reset_index(drop=True)
+    # Motif index: every atlas's motifs, per head
+    motif_index_parts = [
+        (EncodeCombineArgs.tfatlas_id, 'counts', mc_counts_tf),
+        (EncodeCombineArgs.tfatlas_id, 'profile', mc_profile_tf),
+        (EncodeCombineArgs.chromatlas_id, 'counts', mc_counts_chrom),
+        (EncodeCombineArgs.chromatlas_id, 'profile', mc_profile_chrom),
+        (EncodeCombineArgs.procapatlas_id, 'counts', mc_counts_procap),
+        (EncodeCombineArgs.procapatlas_id, 'profile', mc_profile_procap),
+    ]
+    mc_motif_index = pd.concat([mc.metadata for _, _, mc in motif_index_parts], axis=0).reset_index(drop=True)
 
     # Add motif category type: "direct-tf", "indirect-tf", "tf", "non-canonical"
     mc_motif_index[DirectTypeArgs.category_type_col] = np.select(
@@ -1827,6 +1829,33 @@ def export_encode_levels(args, mc_encode, mc_atlascluster_combined, atlascluster
     # Export: Motif index
     mc_motif_index[VisualizeArgs.motif_index_cols].to_csv(paths.metadata_motif_index_path, sep="\t", index=False)
     # mc_motif_index[motif_cateogory_cols].to_csv(mc_motif_cateogory_tsv, sep="\t", index=False)
+
+    # Export: the atlas pipelines' motif indexes (each head's motifs: <head>/metadata/motifcompendium_motif_index.tsv;
+    # both heads': <combined>/metadata/motifcompendium_atlascluster_motif_index.tsv), over their files: their own
+    # columns, then the ENCODE motif index's they lack (category, confidence, filter flag, ENCODE cluster)
+    def export_atlas_motif_index(motif_index_df, path):
+        own_cols = list(pd.read_csv(path, sep="\t", nrows=0).columns) if os.path.exists(path) else []
+        missing_cols = [col for col in own_cols if col not in motif_index_df.columns]
+        if missing_cols:
+            logging.warning(f"Motif index {path}: columns no longer in the metadata, not written: {missing_cols}")
+        cols = [col for col in own_cols if col in motif_index_df.columns]
+        cols += [col for col in VisualizeArgs.motif_index_cols if col not in cols]
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        motif_index_df[cols].to_csv(path, sep="\t", index=False)
+        if args.verbose:
+            logging.info(f'Saved at: {path}')
+
+    motif_index_atlas = {}
+    motif_index_ends = np.cumsum([len(mc) for _, _, mc in motif_index_parts])
+    for (atlas, head, _), end, start in zip(motif_index_parts, motif_index_ends, np.r_[0, motif_index_ends[:-1]]):
+        motif_index_head = mc_motif_index.iloc[start:end]
+        motif_index_atlas.setdefault(atlas, []).append(motif_index_head)
+        export_atlas_motif_index(motif_index_head, os.path.join(paths.mc_dirs[atlas][head], "metadata", "motifcompendium_motif_index.tsv"))
+    for atlas, motif_index_heads in motif_index_atlas.items():
+        export_atlas_motif_index(
+            pd.concat(motif_index_heads, axis=0).reset_index(drop=True),
+            os.path.join(paths.mc_dirs[atlas]['combined'], "metadata", "motifcompendium_atlascluster_motif_index.tsv"),
+        )
 
     # MotifCompendium objects
     mc_alls = {
@@ -1900,6 +1929,7 @@ def export_encode_levels(args, mc_encode, mc_atlascluster_combined, atlascluster
     # Export per-atlas compendia, back into the upstream atlas pipeline directories.
     # One pass over every (atlas, head, level, flag) combination writes all four
     # artefacts, so each flag slice is taken once instead of once per artefact.
+    # Flags: _filtered, _removed and _all (every row: the level's motifcompendium_*_all.*).
     #   File name: {file_general}{level_suffix}{flag_suffix}{suffix}{filetype}: the atlas pipelines' own files, overwritten
     logging.info("Exporting per-atlas compendia, back into the atlas pipeline directories...")
 
@@ -1970,7 +2000,7 @@ def export_encode_levels(args, mc_encode, mc_atlascluster_combined, atlascluster
         mc_level = atlas_dict[level]
         for suffix_flag, flag_bool in EncodeCombineArgs.flags:
             export_level_flag(
-                mc_level_flag=mc_level[mc_level[FilterArgs.filter_flag_col] == flag_bool],
+                mc_level_flag=mc_level if flag_bool is None else mc_level[mc_level[FilterArgs.filter_flag_col] == flag_bool],
                 mc_level_dir=paths.mc_dirs[atlas][level],
                 mc_level_suffix=mc_suffixs[atlas][level],
                 suffix_flag=suffix_flag,
@@ -1982,38 +2012,12 @@ def export_encode_levels(args, mc_encode, mc_atlascluster_combined, atlascluster
             for level, mc_level in atlas_dict[head].items():
                 for suffix_flag, flag_bool in EncodeCombineArgs.flags:
                     export_level_flag(
-                        mc_level_flag=mc_level[mc_level[FilterArgs.filter_flag_col] == flag_bool],
+                        mc_level_flag=mc_level if flag_bool is None else mc_level[mc_level[FilterArgs.filter_flag_col] == flag_bool],
                         mc_level_dir=paths.mc_dirs[atlas][head],
                         mc_level_suffix=mc_suffixs[atlas][head][level],
                         suffix_flag=suffix_flag,
                         level=level,
                     )
-
-    # Save MotifCompendium: with the ENCODE clusters, over the atlases' motifcompendium_*_all.mc
-    for mc, save_path in (
-        (mc_counts_tf, paths.mc_counts_tf_path),
-        (mc_cluster_counts_tf, paths.mc_cluster_counts_tf_path),
-        (mc_metacluster_counts_tf, paths.mc_metacluster_counts_tf_path),
-        (mc_profile_tf, paths.mc_profile_tf_path),
-        (mc_cluster_profile_tf, paths.mc_cluster_profile_tf_path),
-        (mc_metacluster_profile_tf, paths.mc_metacluster_profile_tf_path),
-        (mc_atlascluster_tf, paths.mc_atlascluster_tf_path),
-        (mc_counts_chrom, paths.mc_counts_chrom_path),
-        (mc_cluster_counts_chrom, paths.mc_cluster_counts_chrom_path),
-        (mc_metacluster_counts_chrom, paths.mc_metacluster_counts_chrom_path),
-        (mc_profile_chrom, paths.mc_profile_chrom_path),
-        (mc_cluster_profile_chrom, paths.mc_cluster_profile_chrom_path),
-        (mc_metacluster_profile_chrom, paths.mc_metacluster_profile_chrom_path),
-        (mc_atlascluster_chrom, paths.mc_atlascluster_chrom_path),
-        (mc_counts_procap, paths.mc_counts_procap_path),
-        (mc_cluster_counts_procap, paths.mc_cluster_counts_procap_path),
-        (mc_metacluster_counts_procap, paths.mc_metacluster_counts_procap_path),
-        (mc_profile_procap, paths.mc_profile_procap_path),
-        (mc_cluster_profile_procap, paths.mc_cluster_profile_procap_path),
-        (mc_metacluster_profile_procap, paths.mc_metacluster_profile_procap_path),
-        (mc_atlascluster_procap, paths.mc_atlascluster_procap_path),
-    ):
-        save_replace(mc, save_path)
 
 
 def run_encode_combine(args):

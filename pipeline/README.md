@@ -469,7 +469,10 @@ directory as `--output-dir` and the composites' as `--composite-dir` (default:
     them to every level below. The composites and their subunits are written to
     `composite/` (`export/ENCODE-motifcompendium_composite_metadata{,_model}.tsv`,
     `mc/ENCODE-motifcompendium_composite_vf.mc`). `--all-paths-tsv` (optional)
-    adds each model's model, assay and atlas to the per-model table.
+    adds each model's model, assay and atlas to the per-model table. The
+    export to every level below writes, over the atlas pipelines' files, each
+    level's compendia (all, filtered, removed: `.mc`, metadata TSV, MEME, HTML)
+    and the atlas pipelines' motif indexes, with their ENCODE clusters.
 11. `encode-composite-ism` (`pipeline_encode_composite_ism.py`): ISM
     cooperativity of every composite in every model it was found in. It needs
     torch, bpnetlite and tangermeme, so `pipeline_encode_full.py` runs it as a

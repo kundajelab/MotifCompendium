@@ -1629,7 +1629,7 @@ def run_encode_composite(args):
     mc_encode_composite_nosynergy = mc_encode_composite[mc_encode_composite[CompositeArgs.ism_class_col] == "no synergy"]
     mc_encode_composite = mc_encode_composite[mc_encode_composite[CompositeArgs.ism_class_col] != "no synergy"]
 
-    # #### Plot
+    # ### Plot
 
     # HTML summary table: ISM cooperativity
     os.makedirs(os.path.dirname(cpaths.html_composite_ism_dedup_path), exist_ok=True)

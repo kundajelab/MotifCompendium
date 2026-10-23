@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field, asdict
-from typing import List, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 
 ## SHARED ---------------------------------------------------------------------------------------------------
@@ -1017,10 +1017,11 @@ class EncodeCombineArgs:
     file_general: str = 'motifcompendium'
     suffix_metadata: str = '_metadata'
 
-    # Filter-flag value per output flavour: '_filtered' keeps flag_remove == False
-    flags: List[Tuple[str, bool]] = field(default_factory=lambda: [
+    # Filter-flag value per output flavour: '_filtered' keeps flag_remove == False, '_removed' True, '_all' (None) every row
+    flags: List[Tuple[str, Optional[bool]]] = field(default_factory=lambda: [
         ('_filtered', False),
         ('_removed', True),
+        ('_all', None),
     ])
 
     # Level suffixes: combined (atlasclusters), and per head
