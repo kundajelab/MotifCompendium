@@ -706,6 +706,7 @@ def encode_paths(args):
     metadata_encode_removed_path = os.path.join(metadata_dir, "motifcompendium_encode_removed_metadata.tsv")
     metadata_motif_index_path = os.path.join(metadata_dir, "motifcompendium_encode_motif_index.tsv")
     metadata_motif_category_path = os.path.join(metadata_dir, "motifcompendium_encode_motif_category.tsv")
+    metadata_c5_membership_path = os.path.join(metadata_dir, "motifcompendium_encode_c5_membership.tsv")  # pipeline_encode_composite.py
 
     args_json_path = os.path.join(metadata_dir, "args.json")
 
@@ -971,7 +972,7 @@ def assign_msw_composites(mc_encode, mc_ref_composite, ic_scale, verbose=False):
 
             # Update metadata: Composite
             if label_conf_i not in LabelCols.label_confs[0:2]:  # Don't update high, medium
-                if (bellman_composite and ~composite_i) or (~bellman_composite and composite_i):  # Composites: Must be confirmed by Bellman
+                if (bellman_composite and ~composite_i) or (~bellman_composite and composite_i):  # Prior composites + flip only
                     mc_encode.metadata.loc[org_idx, MetadataCols.composite_col] = bellman_composite
                     mc_encode.metadata.loc[org_idx, MetadataCols.num_subunit_col] = ref_num
                     mc_encode.metadata.loc[org_idx, LabelCols.label_core_col] = ref_cluster_labels[0] if ref_num > 0 else None  # If using mc_ref

@@ -481,7 +481,11 @@ directory as `--output-dir` and the composites' as `--composite-dir` (default:
     composites by cooperativity (hard, soft, no synergy), merges the duplicate
     ones and the soft and no-synergy ones of the same reference clusters,
     removes the no-synergy ones, and combines the rest with the singles: the
-    final ENCODE MotifCompendium, exported again to every level below.
+    final ENCODE MotifCompendium, exported again to every level below. Its
+    ENCODE clusters are numbered (`encode_c5_cluster`), each ENCODE cluster of
+    `encode-combine` gets the number of the final one it is in
+    (`encode/metadata/motifcompendium_encode_c5_membership.tsv`), and the final
+    ones are named as `encode-combine` names its own (`{prename}_{counter}`).
     Rerunning it needs `encode-combine` first, whose outputs it overwrites.
 13. `encode-hits` (`pipeline_encode_hits.py`): indexes each experiment's FiNeMo
     hits with the final ENCODE clusters and annotates them (needs an indexed

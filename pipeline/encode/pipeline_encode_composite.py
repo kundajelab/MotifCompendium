@@ -13,7 +13,10 @@ composite/identify_composite_motifs.ipynb after the ISM runs:
   2. Merge: duplicate composites (centroids, until no pair is similar enough), then the soft and no-synergy composites
      of the same reference clusters; the merged ones reannotated; the no-synergy composites removed.
   3. The final ENCODE MotifCompendium: the singles and the merged composites (<composite-dir>/mc/ENCODE-motifcompendium_vf.mc).
-     The ENCODE clusters left out of it (no-synergy and unannotated composites) are added to the removed ones.
+     The ENCODE clusters left out of it (no-synergy and unannotated composites) are added to the removed ones. Each
+     final ENCODE cluster is numbered (encode_c5_cluster), each ENCODE cluster of pipeline_encode.py (C4) gets the
+     number of the final one it is in (<output-dir>/metadata/motifcompendium_encode_c5_membership.tsv; also each
+     atlascluster), and the final ones are named as pipeline_encode.py names its ENCODE clusters ({prename}_{counter}).
   4. Exported as by pipeline_encode.py: the ENCODE compendia (all, filtered, removed), the motif index and every level
      below, over the ENCODE stage's and the atlas pipelines' files. Then pipeline_encode_hits.py.
 
@@ -144,35 +147,57 @@ def align_columns(mcs):
 def final_encode_compendium(mc_encode, mc_encode_c4_filtered, mc_encode_c4_removed, mc_encode_composite_nosynergy,
                             mc_atlascluster_combined, encodecluster_cluster_col, safe=False):
     """
-    The final ENCODE MotifCompendium (filtered and removed, by filter_flag_col), and its map from each ENCODE cluster of
-    the ENCODE stage (encodecluster_cluster_col of mc_atlascluster_combined, which is updated) to its final name and
-    simple name.
+    The final ENCODE MotifCompendium: filtered and removed (by filter_flag_col), numbered and named, with each ENCODE
+    cluster of the combine (C4) and each atlascluster mapped to its final ENCODE cluster.
 
-    Filtered: the C5 ENCODE clusters (mc_encode). Removed: the ENCODE stage's removed ones (mc_encode_c4_removed), and
-    its filtered ENCODE clusters left out of C5: the no-synergy composites and the composites without subunits (dropped,
-    with an error label). Each C5 ENCODE cluster is named as in the ENCODE stage, or, a merged composite, by its
-    members' names, comma-joined: so every name of the ENCODE stage maps to its final ENCODE cluster.
+    Filtered: the C5 ENCODE clusters (mc_encode). Removed: the combine's removed ones (mc_encode_c4_removed), and its
+    filtered ones left out of C5: the no-synergy composites and the composites without subunits (dropped, with an error
+    label).
+
+    Membership, as in a clustering: each final ENCODE cluster has a number (CompositeArgs.c5_cluster_col: the C5 ones
+    first, in mc_encode's order, then the removed ones), and each C4 ENCODE cluster the number of the final one it is
+    in. A C5 composite holds the C4 composites merged into it (their MCIDs: CompositeArgs.duplicate_members_col); a C5
+    single, and a removed ENCODE cluster, is its own C4 one. The final ENCODE clusters are then named as the combine
+    names its ENCODE clusters, {prename}_{counter} (simple name: prename); mc_encode gets the same names and numbers.
 
     Returns:
-        (mc_encode_final, mc_atlascluster_combined, atlascluster2encode_name_map, atlascluster2encode_simple_map,
+        (mc_encode_final, mc_atlascluster_combined (with the number, name and simple name of its final ENCODE cluster),
+         atlascluster2encode_name_map, atlascluster2encode_simple_map, membership (one row per C4 ENCODE cluster),
          ENCODE clusters left out of C5, by flag type)
     """
-    assert not pd.concat([mc_encode_c4_filtered[MetadataCols.name_col], mc_encode_c4_removed[MetadataCols.name_col]]).astype(str).str.contains(",").any(), \
-        "ENCODE cluster names with a comma: the members of merged composites could not be told apart"
-    c4_to_c5_name = {
-        c4_name: c5_name
-        for c5_name in mc_encode[MetadataCols.name_col].astype(str)
-        for c4_name in c5_name.split(",")
-    }
-    nosynergy_c4_names = {
-        c4_name
-        for nosynergy_name in mc_encode_composite_nosynergy[MetadataCols.name_col].astype(str)
-        for c4_name in nosynergy_name.split(",")
-    }
-    dropped_mask = ~mc_encode_c4_filtered[MetadataCols.name_col].astype(str).isin(c4_to_c5_name)
+    id_col, name_col = MetadataCols.unique_id_col, MetadataCols.name_col
+    members_col = CompositeArgs.duplicate_members_col
+    c5_cluster_col = CompositeArgs.c5_cluster_col
+
+    # C4 ENCODE clusters of each C5 one: a composite's are its members' MCIDs; a single is its own C4 ENCODE cluster,
+    # found by its name (its MCID is the C5 one by now)
+    c4_filtered_ids = mc_encode_c4_filtered[id_col].astype(str)
+    c4_id_by_name = dict(zip(mc_encode_c4_filtered[name_col].astype(str), c4_filtered_ids))
+    c5_members_values = mc_encode[members_col] if members_col in mc_encode.columns() else pd.Series([None] * len(mc_encode))
+    c4_to_c5_row = {}
+    for row, (name, members) in enumerate(zip(mc_encode[name_col].astype(str), c5_members_values)):
+        if pd.notna(members) and str(members).strip():
+            c4_ids = [c4_id.strip() for c4_id in str(members).split(",") if c4_id.strip()]
+        else:
+            c4_ids = [c4_id_by_name[name]]
+        for c4_id in c4_ids:
+            if c4_id in c4_to_c5_row:
+                raise ValueError(f"ENCODE cluster {c4_id} of the combine is in two C5 ENCODE clusters")
+            c4_to_c5_row[c4_id] = row
+    not_filtered = set(c4_to_c5_row) - set(c4_filtered_ids)
+    if not_filtered:
+        raise ValueError(f"C5 members that are not filtered ENCODE clusters of the combine: {sorted(not_filtered)[:5]}")
+
+    # Left out of C5: the no-synergy composites, else the composites without subunits
+    nosynergy_c4_ids = {
+        c4_id.strip()
+        for members in mc_encode_composite_nosynergy[members_col].dropna().astype(str)
+        for c4_id in members.split(",") if c4_id.strip()
+    } if members_col in mc_encode_composite_nosynergy.columns() else set()
+    dropped_mask = ~c4_filtered_ids.isin(c4_to_c5_row)
     mc_encode_dropped = mc_encode_c4_filtered[dropped_mask]
     flag_type_dropped = np.where(
-        mc_encode_dropped[MetadataCols.name_col].astype(str).isin(nosynergy_c4_names),
+        mc_encode_dropped[id_col].astype(str).isin(nosynergy_c4_ids),
         CompositeArgs.flag_type_no_synergy,
         CompositeArgs.flag_type_unannotated,
     )
@@ -193,24 +218,63 @@ def final_encode_compendium(mc_encode, mc_encode_c4_filtered, mc_encode_c4_remov
     mc_encode_final[FilterArgs.filter_flag_col] = mc_encode_final[FilterArgs.filter_flag_col].astype(bool)
     logging.info(f"Final ENCODE MotifCompendium: {len(mc_encode)} filtered, {len(mc_encode_removed)} removed ENCODE clusters")
 
-    # Map: Atlascluster to final ENCODE cluster (via its ENCODE cluster in the ENCODE stage)
-    c4_to_final_name = {
-        **{name: name for name in mc_encode_removed[MetadataCols.name_col].astype(str)},
-        **c4_to_c5_name,
+    # Membership: the final ENCODE clusters' numbers, and each C4 ENCODE cluster's final one
+    num_c5 = len(mc_encode)
+    numbers = np.arange(len(mc_encode_final))
+    mc_encode_final[c5_cluster_col] = numbers
+    c4_to_number = {
+        **c4_to_c5_row,
+        **{c4_id: num_c5 + i for i, c4_id in enumerate(mc_encode_removed[id_col].astype(str))},
     }
-    final_simple_map = dict(zip(mc_encode_final[MetadataCols.name_col].astype(str), mc_encode_final[MetadataCols.simple_name_col]))
-    atlascluster2encode_c4_map = dict(zip(
-        pd.concat([mc_encode_c4_filtered[ClusterArgs.source_cluster_col], mc_encode_c4_removed[ClusterArgs.source_cluster_col]]),
-        pd.concat([mc_encode_c4_filtered[MetadataCols.name_col], mc_encode_c4_removed[MetadataCols.name_col]]).astype(str),
-    ))
-    atlascluster2encode_name_map = {source: c4_to_final_name[name] for source, name in atlascluster2encode_c4_map.items()}
-    atlascluster2encode_simple_map = {source: final_simple_map[name] for source, name in atlascluster2encode_name_map.items()}
+    c4_all = pd.concat([
+        mc_encode_c4_filtered.metadata[[id_col, name_col, ClusterArgs.source_cluster_col]],
+        mc_encode_c4_removed.metadata[[id_col, name_col, ClusterArgs.source_cluster_col]],
+    ], ignore_index=True)
+    c4_numbers = c4_all[id_col].astype(str).map(c4_to_number)
+    if c4_numbers.isna().any():
+        raise ValueError(f"ENCODE clusters of the combine in no final one: {c4_all.loc[c4_numbers.isna(), id_col].tolist()[:5]}")
+    c4_numbers = c4_numbers.astype(int)
 
+    # Names: as the combine names its ENCODE clusters (pipeline_encode.py, "Rename: {prename_col}_{counter}")
+    mc_encode_final.metadata[MetadataCols.counter_col] = mc_encode_final.metadata.dropna(subset=[MetadataCols.prename_col]).groupby(MetadataCols.prename_col).cumcount().fillna(0).astype(int)
+    mc_encode_final.metadata[MetadataCols.name_new_col] = mc_encode_final.metadata[MetadataCols.prename_col] + "_" + mc_encode_final.metadata[MetadataCols.counter_col].astype(str)
+    mc_encode_final.metadata[name_col] = mc_encode_final.metadata[MetadataCols.name_new_col]
+    mc_encode_final.metadata.drop(columns=[MetadataCols.name_new_col, MetadataCols.counter_col], axis=1, inplace=True)
+    mc_encode_final[MetadataCols.simple_name_col] = mc_encode_final[MetadataCols.prename_col]
+    if mc_encode_final[name_col].isna().any() or not mc_encode_final[name_col].is_unique:
+        raise ValueError("Final ENCODE cluster names are missing or not unique (prename)")
+
+    # The C5 ENCODE clusters (mc_encode): the same numbers and names
+    for col in (c5_cluster_col, name_col, MetadataCols.simple_name_col):
+        mc_encode[col] = mc_encode_final[col].iloc[:num_c5].to_numpy()
+
+    # Membership table: each C4 ENCODE cluster, with its final ENCODE cluster
+    final_md = mc_encode_final.metadata
+    membership = pd.DataFrame({
+        f"{id_col}_C4": c4_all[id_col].astype(str).to_numpy(),
+        f"{name_col}_C4": c4_all[name_col].to_numpy(),
+        f"{ClusterArgs.source_cluster_col}_C4": c4_all[ClusterArgs.source_cluster_col].to_numpy(),
+        c5_cluster_col: c4_numbers.to_numpy(),
+        id_col: final_md[id_col].to_numpy()[c4_numbers],
+        name_col: final_md[name_col].to_numpy()[c4_numbers],
+        MetadataCols.simple_name_col: final_md[MetadataCols.simple_name_col].to_numpy()[c4_numbers],
+        FilterArgs.filter_flag_col: final_md[FilterArgs.filter_flag_col].to_numpy()[c4_numbers],
+    })
+
+    # Map: Atlascluster to final ENCODE cluster (via its ENCODE cluster in the combine)
+    source_to_number = dict(zip(c4_all[ClusterArgs.source_cluster_col], c4_numbers))
+    final_names = final_md[name_col].to_numpy()
+    final_simple_names = final_md[MetadataCols.simple_name_col].to_numpy()
+    atlascluster2encode_name_map = {source: final_names[number] for source, number in source_to_number.items()}
+    atlascluster2encode_simple_map = {source: final_simple_names[number] for source, number in source_to_number.items()}
+
+    mc_atlascluster_combined[c5_cluster_col] = mc_atlascluster_combined[encodecluster_cluster_col].map(source_to_number)
     mc_atlascluster_combined[VisualizeArgs.encodecluster_name_col] = mc_atlascluster_combined[encodecluster_cluster_col].map(atlascluster2encode_name_map)
     mc_atlascluster_combined[MetadataCols.simple_name_col] = mc_atlascluster_combined[encodecluster_cluster_col].map(atlascluster2encode_simple_map).fillna(mc_atlascluster_combined[MetadataCols.simple_name_col]).fillna(MetadataCols.name_unknown)
 
     num_left_out = dict(pd.Series(flag_type_dropped, dtype=object).value_counts())
-    return mc_encode_final, mc_atlascluster_combined, atlascluster2encode_name_map, atlascluster2encode_simple_map, num_left_out
+    return (mc_encode_final, mc_atlascluster_combined, atlascluster2encode_name_map, atlascluster2encode_simple_map,
+            membership, num_left_out)
 
 
 def run_encode_composite(args):
@@ -1595,7 +1659,20 @@ def run_encode_composite(args):
     # MCID
     mc_encode[MetadataCols.unique_id_col] = unique_id_initial + f".{CompositeArgs.mcid_level}." + mc_encode.metadata.index.map('{:08d}'.format)
 
-    # HTML report
+    ### FINAL ENCODE MOTIFCOMPENDIUM -----------------------------------------------------------------------------
+    # Numbered and named, with each ENCODE cluster of the combine (membership) and each atlascluster mapped to its
+    # final ENCODE cluster
+    logging.info("Final ENCODE MotifCompendium: the C5 ENCODE clusters and the removed ones...")
+    (mc_encode_final, mc_atlascluster_combined, atlascluster2encode_name_map, atlascluster2encode_simple_map,
+     c5_membership_df, num_left_out) = final_encode_compendium(
+        mc_encode, mc_encode_c4_filtered, mc_encode_c4_removed, mc_encode_composite_nosynergy,
+        mc_atlascluster_combined, encodecluster_cluster_col, safe=args.safe,
+    )
+    os.makedirs(os.path.dirname(paths.metadata_c5_membership_path), exist_ok=True)
+    c5_membership_df.to_csv(paths.metadata_c5_membership_path, sep="\t", index=False)
+
+    # HTML report: the C5 ENCODE clusters, with their final names
+    os.makedirs(os.path.dirname(cpaths.html_encode_vf_path), exist_ok=True)
     mc_encode.summary_table_html(
         html_out=cpaths.html_encode_vf_path,
         columns=[col for col in VisualizeArgs.html_columns if col in (mc_encode.columns() + mc_encode.images())],
@@ -1604,16 +1681,8 @@ def run_encode_composite(args):
         column_desc_dict=html_column_desc_dict,
     )
 
-    # Save: Full ENCODE MotifCompendium
+    # Save: Full ENCODE MotifCompendium (C5)
     save_replace(mc_encode, cpaths.mc_encode_vf_path)
-
-    ### FINAL ENCODE MOTIFCOMPENDIUM -----------------------------------------------------------------------------
-    logging.info("Final ENCODE MotifCompendium: the C5 ENCODE clusters and the removed ones...")
-    (mc_encode_final, mc_atlascluster_combined, atlascluster2encode_name_map, atlascluster2encode_simple_map,
-     num_left_out) = final_encode_compendium(
-        mc_encode, mc_encode_c4_filtered, mc_encode_c4_removed, mc_encode_composite_nosynergy,
-        mc_atlascluster_combined, encodecluster_cluster_col, safe=args.safe,
-    )
 
     # #### Export: ENCODE compendia, motif index and every level below (as the ENCODE stage)
     pipeline_encode.export_encode_levels(

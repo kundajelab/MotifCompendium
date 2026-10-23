@@ -1178,6 +1178,9 @@ class Encode_CompositeArgs:
     # Final ENCODE MotifCompendium (C5): the singles and the merged composites. ENCODE clusters left out of it
     # are removed, with these flag types: the no-synergy composites, and the composites without subunits.
     mcid_level: str = "C5.single_multi.TF_Chrom_ProCap.counts_profile"
+    # Membership, as in a clustering: the number of each final ENCODE cluster (0, 1, ...: the C5 ones, then the
+    # removed ones), and, for each ENCODE cluster of the combine (C4) and atlascluster, the number of its final one
+    c5_cluster_col: str = "encode_c5_cluster"
     flag_type_no_synergy: str = 'no-synergy'
     flag_type_unannotated: str = 'composite-unannotated'
 
