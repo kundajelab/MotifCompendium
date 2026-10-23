@@ -172,6 +172,8 @@ class Encode_LabelCols:
     label_flank_constit_1_col: str = 'label_flank_constit_prev'
     label_flank_constit_all_col: str = 'label_flank_constit_all'
 
+    label_flank_readable_col: str = 'label_flank_readable'  # Composite: Subunit TF family
+
     label_conf_col: str = 'label_confidence'
     label_confs: Tuple[str, ...] = ('high', 'medium', 'low', 'flag')
     label_confs_simple: Tuple[str, ...] = ('high', 'med', 'low', '')
@@ -1038,6 +1040,188 @@ class EncodeCombineArgs:
         Encode_MetadataCols.checked_col,
     ])
 
+## COMPOSITE MOTIFS ------------------------------------------------------------------------------------------
+# Composite motifs of the ENCODE clusters (composite/identify_composite_motifs.ipynb): the modified Smith-Waterman
+# decomposition into reference monomers (pipeline_encode.py), ISM cooperativity (pipeline_encode_composite_ism.py),
+# and the merge of duplicate and soft / no-synergy composites into the final ENCODE MotifCompendium
+# (pipeline_encode_composite.py).
+@dataclass
+class Encode_CompositeArgs:
+    # Modified Smith-Waterman (Bellman DP): decomposition into direct reference monomers
+    bellman_score_col: str = "bellman_composite_score"
+    bellman_name_col: str = "bellman_composite_name"
+    bellman_label_col: str = "bellman_composite_label"
+    bellman_sim_col: str = "bellman_composite_similarity"
+    bellman_orient_col: str = "bellman_composite_orientation"
+    bellman_align_col: str = "bellman_composite_alignment"
+    bellman_logo_col: str = "bellman_composite_logo"
+
+    bellman_sim_min_threshold: float = 0.5
+    bellman_subunit_motif_trim: bool = True  # Trim each reference subunit (as logo_trimming: True = 1/M)
+    bellman_overlap_penalty_fraction: float = 1.0  # Of the target energy two consecutive subunits both cover (1: take it back once)
+    bellman_match_count_max: int = 2
+    bellman_match_count_penalty: float = 0.1  # Per match, subtracted from the score
+    bellman_match_count_fraction: float = 1
+
+    # Reference monomers: the direct reference without its composites, long non-ZNF motifs and IRFs
+    reference_cluster_col: str = "reference_cluster"
+    ref_composites: List[str] = field(default_factory=lambda: [
+        'HOCO.IRF3.H14CORE.0.PS.A', 'HOCO.SOX8.H14CORE.0.PSM.A', 'JASP.MA0050.2.IRF1', 'CISBP.M05748_3.00.IRF8',
+        'CISBP.M05005_3.00.ETV3L', 'CISBP.M03194_3.00.ETV6', 'CISBP.M05074_3.00.GATA2', 'CISBP.M03668_3.00.RUNX1',
+        'CISBP.M05082_3.00.GATA2', 'CISBP.M03670_3.00.RUNX1', 'HOCO.ETV4.H14CORE.0.P.B', 'CISBP.M04921_3.00.ETV3L',
+        'CISBP.M05737_3.00.IRF3', 'CISBP.M03078_3.00.PRDM1', 'CISBP.M03188_3.00.ETV3L', 'CISBP.M03137_3.00.HIC2',
+        'CISBP.M04534_3.00.JUN', 'CISBP.M05751_3.00.IRF7', 'CISBP.M04200_3.00.TEAD4', 'CISBP.M03961_3.00.GATA2',
+        'HOCO.ETV2.H14INVITRO.1.PM.A', 'HOCO.IRF4.H14CORE.0.P.B', 'CISBP.M04943_3.00.ETV3L', 'JASP.MA0101.1.REL',
+        'CISBP.M05069_3.00.GATA2', 'HOCO.IRF3.H14INVITRO.0.PS.A', 'HOCO.IRF8.H14CORE.1.SM.B', 'CISBP.M05002_3.00.ETV3L',
+        'CISBP.M05078_3.00.GATA2', 'CISBP.M05937_3.00.RUNX1', 'CISBP.M05745_3.00.IRF8', 'JASP.MA0107.1.RELA',
+        'HOCO.IRF8.H14CORE.0.P.B', 'JASP.MA0050.1.IRF1', 'CISBP.M05753_3.00.IRF9', 'CISBP.M05752_3.00.IRF7',
+        'HOCO.IRF2.H14INVITRO.0.PSM.A', 'HOCO.IRF5.H14INVITRO.0.SM.B', 'HOCO.IRF8.H14CORE.2.SM.B', 'HOCO.IRF8.H14INVITRO.0.P.B',
+        'CISBP.M05738_3.00.IRF3', 'JASP.MA0772.1.IRF7', 'JASP.MA0653.1.IRF9', 'HOCO.IRF1.H14CORE.0.P.B',
+        'HOCO.IRF3.H14CORE.1.SM.B', 'HOCO.IRF4.H14INVITRO.2.SM.B', 'HOCO.IRF9.H14CORE.0.PSM.A', 'JASP.MA0051.1.IRF2',
+        'HOCO.IRF8.H14INVITRO.1.SM.B', 'CISBP.M03543_3.00.IRF9', 'CISBP.M05747_3.00.IRF8', 'HOCO.IRF1.H14INVITRO.0.P.D',
+        'CISBP.M05754_3.00.IRF9', 'HOCO.IRF5.H14CORE.0.SM.B', 'JASP.MA0652.1.IRF8', 'HOCO.IRF4.H14INVITRO.0.P.B',
+        'CISBP.M03541_3.00.IRF7', 'HOCO.IRF9.H14INVITRO.0.PSM.A', 'JASP.MA1418.1.IRF3', 'CISBP.M05746_3.00.IRF8',
+        'HOCO.IRF4.H14INVITRO.1.S.B', 'HOCO.IRF3.H14INVITRO.1.SM.B', 'HOCO.IRF8.H14INVITRO.2.SM.B', 'CISBP.M00876_3.00.IRF2',
+        'JASP.MA0051.2.IRF2', 'HOCO.IRF2.H14CORE.0.PSM.A', 'JASP.MA0772.2.IRF7', 'CISBP.M03539_3.00.IRF8',
+        'CISBP.M05750_3.00.IRF2', 'CISBP.M02336_3.00.IRF5', 'CISBP.M03540_3.00.IRF8', 'HOCO.IRF4.H14CORE.1.S.B',
+        'CISBP.M05744_3.00.IRF8', 'JASP.MA1419.1.IRF4', 'CISBP.M03535_3.00.IRF3', 'CISBP.M05736_3.00.IRF3',
+        'HOCO.IRF5.H14CORE.1.S.B', 'CISBP.M05743_3.00.IRF8', 'HOCO.IRF5.H14INVITRO.1.S.B', 'CISBP.M03538_3.00.IRF8',
+        'JASP.MA1418.2.IRF3', 'CISBP.M02337_3.00.IRF7', 'JASP.MA0652.2.IRF8', 'CISBP.M05739_3.00.IRF5',
+        'CISBP.M05749_3.00.IRF2', 'JASP.MA1419.2.IRF4', 'HOCO.IRF7.H14INVITRO.1.SM.B', 'CISBP.M05741_3.00.IRF5',
+        'HOCO.IRF7.H14CORE.1.SM.B', 'CISBP.M05742_3.00.IRF5', 'CISBP.M05740_3.00.IRF5', 'CISBP.M00230_3.00.IRF8',
+        'JASP.MA1420.1.IRF5', 'HOCO.IRF7.H14CORE.0.S.B', 'HOCO.IRF6.H14INVITRO.1.S.C', 'HOCO.IRF7.H14INVITRO.0.S.B',
+        'CISBP.M03542_3.00.IRF7', 'CISBP.M03536_3.00.IRF5', 'CISBP.M02340_3.00.IRF9', 'HOCO.IRF6.H14CORE.1.S.C',
+        'CISBP.M02335_3.00.IRF5', 'CISBP.M05735_3.00.IRF3', 'CISBP.M02339_3.00.IRF9', 'CISBP.M00228_3.00.IRF9',
+        'CISBP.M02341_3.00.IRF5', 'CISBP.M03537_3.00.IRF5', 'CISBP.M00232_3.00.IRF5', 'CISBP.M02338_3.00.IRF5',
+        'CISBP.M02342_3.00.IRF5', 'CISBP.M00229_3.00.IRF3', 'HOCO.IRF6.H14INVITRO.0.SM.B', 'CISBP.M00231_3.00.IRF5',
+        'CISBP.M05733_3.00.IRF5', 'HOCO.IRF6.H14CORE.0.SM.B', 'CISBP.M05734_3.00.IRF5', 'CISBP.M05731_3.00.IRF5',
+        'CISBP.M05732_3.00.IRF5', 'CISBP.M05068_3.00.GATA2', 'CISBP.M05070_3.00.GATA2', 'CISBP.M05072_3.00.GATA2',
+        'CISBP.M05067_3.00.GATA2', 'CISBP.M03270_3.00.GATA2', 'CISBP.M03269_3.00.GATA2', 'CISBP.M05081_3.00.GATA2',
+        'CISBP.M05080_3.00.GATA2', 'CISBP.M05076_3.00.GATA2', 'CISBP.M05084_3.00.GATA2', 'HOCO.GATA3.H14CORE.1.SM.B',
+        'HOCO.GATA3.H14INVITRO.1.SM.B', 'JASP.MA0766.1.GATA5', 'JASP.MA1104.1.GATA6', 'HOCO.KLF15.H14CORE.1.P.C',
+        'CISBP.M05965_3.00.SOX18', 'CISBP.M05955_3.00.SOX18', 'CISBP.M04998_3.00.ETV3L', 'CISBP.M02935_3.00.PRDM1',
+        'CISBP.M03212_3.00.SPIB', 'JASP.MA1643.1.NFIB', 'JASP.MA1643.2.NFIB', 'CISBP.M05951_3.00.NFIA',
+        'JASP.MA2510.1.ZBTB41', 'JASP.UN0145.1.ZBTB37', 'HOCO.KLF8.H14INVITRO.1.P.D', 'HOCO.NR1D1.H14CORE.1.SM.B',
+        'CISBP.M03672_3.00.RUNX1', 'CISBP.M05938_3.00.RUNX1', 'HOCO.KLF8.H14CORE.1.P.C', 'CISBP.M04941_3.00.ETV3L',
+        'CISBP.M05966_3.00.SOX18', 'HOCO.SOX6.H14INVITRO.0.P.D', 'HOCO.SPIB.H14CORE.1.S.C', 'HOCO.SOX6.H14CORE.0.P.B',
+        'JASP.MA0867.2.SOX4', 'CISBP.M05969_3.00.SOX18', 'HOCO.SPIB.H14INVITRO.1.S.C', 'HOCO.KLF15.H14INVITRO.1.P.C',
+        'HOCO.NR1D2.H14INVITRO.1.SM.B', 'HOCO.KLF12.H14INVITRO.0.P.C', 'JASP.MA0867.3.SOX4', 'CISBP.M05956_3.00.SOX18',
+        'JASP.MA0080.4.SPI1', 'CISBP.M05970_3.00.SOX18', 'CISBP.M03169_3.00.SPIB', 'CISBP.M00210_3.00.SPIB',
+        'HOCO.NR1D2.H14CORE.1.SM.B', 'CISBP.M04169_3.00.RUNX1', 'HOCO.COT1.H14INVITRO.1.PSM.A', 'CISBP.M04025_3.00.DPRX',
+        'HOCO.TEAD1.H14INVITRO.2.S.C', 'CISBP.M03185_3.00.ETV3L', 'CISBP.M03190_3.00.ETV3L',
+    ])
+    monomer_long_tf_names: str = "SOX|SPI|KLF|RUNX|NR1|ETV|ETS|TEAD|NFKB|REL|HOX|PAX|STAT|POU|ELF|NFAT|HES|USF|FOX"
+    monomer_long_families: List[str] = field(default_factory=lambda: ["SP", "MAX"])
+    monomer_max_length: int = 10  # Longer (motif string) non-ZNF monomers are removed
+    monomer_irf_keep: str = "JASP.MA1509.1.IRF6"  # The only IRF kept
+
+    # Subunits: reference matches per composite
+    composite_ref_col: str = "composite_reference"
+    max_submotifs_composite: int = 3
+    composite_error_prefix: str = "_"  # Composites with a core or flank label starting with it are dropped
+    families: List[str] = field(default_factory=lambda: [
+        'ARID', 'ARNT', 'BCL', 'BHLH', 'CEBP', 'CREB', 'CDX', 'DMRT', 'ESRR', 'ELS',
+        'ETS', 'ETL', 'ETV', 'E2F', 'FOS', 'FOX', 'GABP', 'GATA', 'GFI', 'HMG',
+        'HNF', 'HOX', 'JUN', 'KIAA', 'MAF', 'MAX', 'MEF', 'NFAT', 'NFE', 'NFI',
+        'NFY', 'NANOG', 'NR', 'NRF', 'NEURO', 'PAX', 'PHO', 'POU', 'PPAR', 'PRDM',
+        'REL', 'ROR', 'RXR', 'SP', 'SPI', 'STAT', 'TCF', 'CTCF', 'TFAP', 'TFCP',
+        'TSC22', 'TBX', 'YY', 'ZBTB', 'ZFP', 'ZNF', 'ZSCAN',
+    ])
+
+    # ISM cooperativity: per (motif, model) results, then one classification per motif
+    name_id_col: str = 'name_id'
+    num_ids_col: str = 'num_ids'
+    ism_contrib_path_col: str = 'ism_contrib_path'
+    ism_results_path_col: str = 'ism_results_path'
+    ism_logo_fwd_col: str = 'ism_logo_fwd'
+    ism_logo_rev_col: str = 'ism_logo_rev'
+    ism_similarity_col: str = 'ism_similarity'
+    ism_id_best_col: str = 'ism_id_best'
+    ism_name_id_best_col: str = 'ism_name_id_best'
+    ism_spacing_col: str = 'ism_spacing'
+    ism_spacing_diff_col: str = 'ism_spacing_diff'
+    ism_z_score_col: str = 'ism_z_score'
+    ism_p_value_col: str = 'ism_p_value'
+    ism_p_value_adj_col: str = 'ism_p_value_adj'
+    ism_effect_max_col: str = 'ism_effect_max'
+    ism_effect_medium_col: str = 'ism_effect_medium'
+    ism_identity_col: str = 'ism_identity'
+    ism_class_col: str = 'ism_class'  # "hard & soft", "hard", "soft", "no synergy"
+    ism_class_rank_col: str = 'ism_class_rank'
+
+    ism_similarity_threshold: float = 0.95
+    ism_spacing_threshold: int = 1
+
+    # Classification thresholds, matching HDMA's 04c-plot_cooperativity_results.Rmd:
+    # "hard" = synergy is sharply spacing-dependent (peaked at one spacing/orientation);
+    # "soft" = synergy persists broadly across a medium-distance (20-150bp) spacing window;
+    # a pair can be both, or neither ("no synergy").
+    p_val_thresh: float = 0.001
+    z_thresh: float = 4
+    delta_thresh: float = 0.15
+    result_priority: Tuple[str, ...] = ("hard & soft", "hard", "soft", "no synergy")
+    result_col_suffix: dict = field(default_factory=lambda: {
+        "hard & soft": "hard_and_soft", "hard": "hard", "soft": "soft", "no synergy": "no_synergy",
+    })
+
+    # Merge: duplicate motifs, then soft + no-synergy composites of the same reference clusters
+    duplicate_sim_threshold: float = 0.92
+    duplicate_score_col: str = 'duplicate_score'
+    duplicate_logo_col: str = 'duplicate_logo'
+    duplicate_cluster_col: str = 'duplicate_cluster'
+    duplicate_members_col: str = f'duplicate_{Encode_MetadataCols.unique_id_col}'
+    duplicate_num_members_col: str = 'num_duplicate_members'
+    soft_nosynergy_membership_col: str = 'soft_nosynergy_membership'
+    soft_nosynergy_merge_cluster_col: str = 'soft_nosynergy_merge_cluster'
+    soft_nosynergy_num_members_col: str = 'num_soft_nosynergy_members'
+
+    # Final ENCODE MotifCompendium (C5): the singles and the merged composites. ENCODE clusters left out of it
+    # are removed, with these flag types: the no-synergy composites, and the composites without subunits.
+    mcid_level: str = "C5.single_multi.TF_Chrom_ProCap.counts_profile"
+    flag_type_no_synergy: str = 'no-synergy'
+    flag_type_unannotated: str = 'composite-unannotated'
+
+    # Composite HTML summary tables (ISM cooperativity, merged composites)
+    html_columns_composite: List[str] = field(default_factory=lambda: [
+        Encode_MetadataCols.simple_name_col,
+        Encode_MetadataCols.id_col,
+        Encode_CompositeArgs.duplicate_score_col,
+        Encode_CompositeArgs.duplicate_num_members_col,
+        Encode_CompositeArgs.duplicate_members_col,
+        Encode_CompositeArgs.soft_nosynergy_membership_col,
+        Encode_CompositeArgs.soft_nosynergy_num_members_col,
+        Encode_CompositeArgs.duplicate_logo_col,
+    ] + [
+        Encode_CompositeArgs.ism_logo_fwd_col,
+        Encode_CompositeArgs.ism_logo_rev_col,
+        Encode_CompositeArgs.ism_similarity_col,
+        Encode_CompositeArgs.ism_z_score_col,
+        Encode_CompositeArgs.ism_p_value_col,
+        Encode_CompositeArgs.ism_effect_max_col,
+        Encode_CompositeArgs.ism_effect_medium_col,
+        Encode_CompositeArgs.ism_identity_col,
+        Encode_CompositeArgs.ism_class_col,
+        Encode_CompositeArgs.ism_spacing_col,
+        f'{Encode_CompositeArgs.composite_ref_col}_spacing',
+        Encode_CompositeArgs.ism_spacing_diff_col,
+    ] + [
+        Encode_CompositeArgs.bellman_score_col,
+        Encode_CompositeArgs.bellman_sim_col,
+        Encode_CompositeArgs.bellman_align_col,
+        Encode_CompositeArgs.bellman_name_col,
+        Encode_CompositeArgs.bellman_label_col,
+        Encode_CompositeArgs.bellman_logo_col,
+    ] + [
+        col
+        for i in range(Encode_CompositeArgs.max_submotifs_composite)
+        for col in [
+            f"{Encode_CompositeArgs.composite_ref_col}_name{i}",
+            f"{Encode_CompositeArgs.composite_ref_col}_score{i}",
+            f"{Encode_CompositeArgs.composite_ref_col}_logo{i}",
+            f"{Encode_CompositeArgs.composite_ref_col}_{Encode_VisualizeArgs.motif_string_col}{i}",
+        ]
+    ])
+
 ## PROFILES -------------------------------------------------------------------------------------------------
 # Config selection: pipeline_encode.set_default_configs() binds these to module globals.
 # The TF, Chromatin and ProCap atlas configs live in their pipelines' configs.py (pipeline/bpnet,
@@ -1055,6 +1239,7 @@ PROFILES = {
         "VisualizeArgs": Encode_VisualizeArgs,
         "HitsCols": HitsCols,
         "EncodeCombineArgs": EncodeCombineArgs,
+        "CompositeArgs": Encode_CompositeArgs,
         "MotifMatchArgs": MotifMatchArgs,
         "MotifCompendiumArgs": MotifCompendiumArgs,
         "CellTypeCols": CellTypeCols,

@@ -297,20 +297,23 @@ all-cluster, and meta-cluster intermediate objects and exports.
 
 ## 3. ENCODE pipeline
 
-The ENCODE entry point constructs two atlases, each from counts and profile
-TF-MoDISco heads, then combines the atlases:
+The ENCODE entry point (`encode/pipeline_encode_full.py`) constructs three
+atlases, each from counts and profile TF-MoDISco heads, then combines them and
+finalizes the composite motifs:
 
 ```text
 TF counts ─┐
            ├─ TF atlas ─────────┐
 TF profile ┘                    │
-                               ├─ ENCODE collection
-Chromatin counts ─┐             │
-                  ├─ Chromatin ─┘
-Chromatin profile ┘   atlas
+Chromatin counts ─┐             ├─ ENCODE combine ─ composite ISM ─ composite ─ hits
+                  ├─ Chromatin ─┤   (+ composites)    (per model)    (final)
+Chromatin profile ┘   atlas     │
+ProCap counts ─┐                │
+               ├─ ProCap atlas ─┘
+ProCap profile ┘
 ```
 
-The seven stage names, in execution order, are:
+The thirteen stage names, in execution order, are:
 
 1. `tf-counts`
 2. `tf-profile`
@@ -318,9 +321,15 @@ The seven stage names, in execution order, are:
 4. `chrom-counts`
 5. `chrom-profile`
 6. `chrom-combine`
-7. `encode-combine`
+7. `procap-counts`
+8. `procap-profile`
+9. `procap-combine`
+10. `encode-combine`: `encode/pipeline_encode.py`
+11. `encode-composite-ism`: `encode/pipeline_encode_composite_ism.py`
+12. `encode-composite`: `encode/pipeline_encode_composite.py`
+13. `encode-hits`: `encode/pipeline_encode_hits.py`
 
-With no `--stages`, all seven are selected. A supplied subset is always run in
+With no `--stages`, all thirteen are selected. A supplied subset is always run in
 the order above, regardless of the order on the command line.
 
 ### Fixed output layout and dependencies
@@ -329,15 +338,20 @@ All paths are derived from one `--output-dir`:
 
 ```text
 OUTPUT/
-├── tfatlas/
+├── bpnet/        (TF atlas)
 │   ├── counts/
 │   ├── profile/
 │   └── combined/
-├── chromatlas/
+├── chrombpnet/   (Chromatin atlas)
 │   ├── counts/
 │   ├── profile/
 │   └── combined/
-└── encode/
+├── procapnet/    (ProCap atlas)
+│   ├── counts/
+│   ├── profile/
+│   └── combined/
+├── encode/       (ENCODE compendium, motif index, hits)
+└── composite/    (composites, their ISM runs in ism/, the merged composites)
 ```
 
 The combine stages load their upstream products from these exact locations.
@@ -442,30 +456,36 @@ ENCODE. Override them with `--mcid-version-tf`, `--mcid-version-chrom`, and
 `--mcid-version-encode` only when deliberately creating a different identifier
 namespace.
 
-### Current status of `encode-combine`
+### ENCODE stages
 
-In the current source, the final `encode-combine` stage is not runnable end to
-end solely through the documented CLI:
+Each is also a script of its own, with the atlases' output roots as
+`--tfatlas-dir`, `--chromatlas-dir`, `--procapatlas-dir`, the ENCODE stage's
+directory as `--output-dir` and the composites' as `--composite-dir` (default:
+`composite/`, next to `--output-dir`):
 
-- It validates eight options as present: `--tf-init-metadata`,
-  `--chrom-init-metadata`, `--mc-qc-remove-removed`,
-  `--mc-qc-pass-filtered`, `--mc-qc-pass-lowq`, `--metadata-edited`,
-  `--hg38-fasta`, and `--gencode-gtf`.
-- The stage body later reads `args.metadata`, but the parser does not define
-  `--metadata` and the wrapper does not map either initial-metadata option to
-  it. This raises an `AttributeError` before final export.
-- Hit annotation also expects pre-existing
-  `encode/metadata/motifcompendium_encode_metadata_hits.tsv` and
-  `encode/raw/encid_metadata.tsv`; no CLI options populate those paths.
-- `--mc-name`, `--modisco-region-width`, and `--mc-ref-clustered-hr` are
-  currently accepted (the last is required) but not read; only
-  `--mc-ref-clustered-hr-metadata` is used for the readable-name mapping.
-
-Stages 1–6 can be run as shown above. Before using stage 7, fix or supply the
-missing metadata/hit-index wiring for the intended dataset. The stage also
-needs an indexed hg38 FASTA (the `.fai` must be available) and a GENCODE GTF for
-genomic hit annotation. Do not treat a run that stops after stage 6 as a
-completed ENCODE collection.
+10. `encode-combine` (`pipeline_encode.py`): force-clusters the atlasclusters
+    into ENCODE clusters, annotates and filters them, and decomposes the filtered
+    ones into reference monomers (modified Smith-Waterman), before exporting
+    them to every level below. The composites and their subunits are written to
+    `composite/` (`export/ENCODE-motifcompendium_composite_metadata{,_model}.tsv`,
+    `mc/ENCODE-motifcompendium_composite_vf.mc`). `--all-paths-tsv` (optional)
+    adds each model's model, assay and atlas to the per-model table.
+11. `encode-composite-ism` (`pipeline_encode_composite_ism.py`): ISM
+    cooperativity of every composite in every model it was found in. It needs
+    torch, bpnetlite and tangermeme, so `pipeline_encode_full.py` runs it as a
+    subprocess of `--ism-python`, model after model; for the full collection,
+    run it as a SLURM array instead (`--model-idx`, one model per task), then
+    the remaining stages. Its helpers, `utils_composite_ism.py`, are HDMA's
+    `tangermeme_utils` (https://github.com/GreenleafLab/HDMA/), copied.
+12. `encode-composite` (`pipeline_encode_composite.py`): classifies the
+    composites by cooperativity (hard, soft, no synergy), merges the duplicate
+    ones and the soft and no-synergy ones of the same reference clusters,
+    removes the no-synergy ones, and combines the rest with the singles: the
+    final ENCODE MotifCompendium, exported again to every level below.
+    Rerunning it needs `encode-combine` first, whose outputs it overwrites.
+13. `encode-hits` (`pipeline_encode_hits.py`): indexes each experiment's FiNeMo
+    hits with the final ENCODE clusters and annotates them (needs an indexed
+    hg38 FASTA, `--hg38-fasta`, and a GENCODE GTF, `--gencode-gtf`).
 
 ## Reproducibility and troubleshooting
 

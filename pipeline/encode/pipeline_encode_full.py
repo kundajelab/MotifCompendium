@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 """
-ENCODE MotifCompendium: end-to-end pipeline, all atlases and the ENCODE combine in one process.
+ENCODE MotifCompendium: end-to-end pipeline, all atlases and the ENCODE stages in one process.
 
 Runs the full atlas hierarchy from a single CLI, in order:
 
@@ -14,13 +14,20 @@ Runs the full atlas hierarchy from a single CLI, in order:
   7. ProCap atlas   - counts head    : motif -> cell-type cluster -> meta-cluster
   8. ProCap atlas   - profile head   : motif -> cell-type cluster -> meta-cluster
   9. ProCap atlas   - combine        : counts + profile meta-clusters -> atlascluster
- 10. ENCODE         - combine        : TF + Chromatin + ProCap atlasclusters -> ENCODE cluster
+ 10. ENCODE         - combine        : TF + Chromatin + ProCap atlasclusters -> ENCODE cluster, and its composites
+ 11. ENCODE         - composite ISM  : ISM cooperativity of each composite, per model
+ 12. ENCODE         - composite      : composites merged by cooperativity -> final ENCODE MotifCompendium
+ 13. ENCODE         - hits           : FiNeMo hits indexed and annotated with the final ENCODE clusters
 
 The stages are imported from the atlas pipelines, not copied: pipeline/bpnet/pipeline_bpnet.py (TF),
 pipeline/chrombpnet/pipeline_chrombpnet.py (Chromatin), pipeline/procapnet/pipeline_procapnet.py
-(ProCap) and pipeline/encode/pipeline_encode.py (ENCODE combine). Each binds its own configs.py
-(set_default_configs()) before its stages run. Running the atlas pipelines separately (e.g. as a
-SLURM array) and then pipeline_encode.py gives the same result.
+(ProCap) and pipeline/encode/pipeline_encode{,_composite,_hits}.py (ENCODE). Each binds its own
+configs.py (set_default_configs()) before its stages run. The composite ISM stage
+(pipeline/encode/pipeline_encode_composite_ism.py) needs torch, bpnetlite and tangermeme, so it runs
+as a subprocess of --ism-python, one model after the other; a long run is better split into a SLURM
+array (one model per task, --model-idx), then the remaining stages (--stages encode-composite encode-hits).
+Running the atlas pipelines separately (e.g. as a SLURM array) and then the ENCODE stages gives the
+same result.
 
 Every stage directory is derived from a single --output-dir root, and each stage's
 outputs are wired directly into the next stage's inputs:
@@ -28,13 +35,14 @@ outputs are wired directly into the next stage's inputs:
   <root>/bpnet/counts         <root>/bpnet/profile        <root>/bpnet/combined
   <root>/chrombpnet/counts    <root>/chrombpnet/profile   <root>/chrombpnet/combined
   <root>/procapnet/counts     <root>/procapnet/profile    <root>/procapnet/combined
-  <root>/encode
+  <root>/encode               <root>/composite            <root>/composite/ism
 """
 import os
 import sys
 import time
 import argparse
 import logging
+import subprocess
 import importlib.util
 from argparse import Namespace
 
@@ -58,6 +66,10 @@ pipeline_bpnet = load_pipeline("pipeline_bpnet", os.path.join(PIPELINE_DIR, "bpn
 pipeline_chrombpnet = load_pipeline("pipeline_chrombpnet", os.path.join(PIPELINE_DIR, "chrombpnet", "pipeline_chrombpnet.py"))
 pipeline_procapnet = load_pipeline("pipeline_procapnet", os.path.join(PIPELINE_DIR, "procapnet", "pipeline_procapnet.py"))
 pipeline_encode = load_pipeline("pipeline_encode", os.path.join(PIPELINE_DIR, "encode", "pipeline_encode.py"))
+pipeline_encode_composite = load_pipeline("pipeline_encode_composite", os.path.join(PIPELINE_DIR, "encode", "pipeline_encode_composite.py"))
+pipeline_encode_hits = load_pipeline("pipeline_encode_hits", os.path.join(PIPELINE_DIR, "encode", "pipeline_encode_hits.py"))
+# Run by --ism-python (torch, bpnetlite, tangermeme), not imported
+COMPOSITE_ISM_SCRIPT = os.path.join(PIPELINE_DIR, "encode", "pipeline_encode_composite_ism.py")
 
 # Atlas key -> (pipeline module, its per-head stage, its combine stage)
 ATLAS_PIPELINES = {
@@ -80,6 +92,9 @@ STAGES = {
     "procap-profile": ("ProCap atlas: profile head",         "pipeline_procapnet"),
     "procap-combine": ("ProCap atlas: combine counts + profile", "pipeline_procapnet"),
     "encode-combine": ("ENCODE: combine TF + Chromatin + ProCap atlasclusters", "pipeline_encode"),
+    "encode-composite-ism": ("ENCODE: ISM cooperativity of the composites, per model", None),
+    "encode-composite": ("ENCODE: composites merged by cooperativity -> final ENCODE MotifCompendium", "pipeline_encode_composite"),
+    "encode-hits":    ("ENCODE: FiNeMo hits indexed and annotated", "pipeline_encode_hits"),
 }
 STAGE_ORDER = list(STAGES)
 
@@ -227,9 +242,28 @@ def setup_parser():
     parser.add_argument("--metadata-edited", type=str, default=None,
                         help="ENCODE stage: manually edited filtered-metadata CSV.")
     parser.add_argument("--hg38-fasta", type=str, default=None,
-                        help="ENCODE stage: hg38 genome FASTA, for hits annotation.")
+                        help="ENCODE hits stage: hg38 genome FASTA, for hits annotation (and the composite ISM stage's "
+                             "background sequences, without --ism-genome-fa).")
     parser.add_argument("--gencode-gtf", type=str, default=None,
-                        help="ENCODE stage: GENCODE annotation GTF (.gz), for hits annotation.")
+                        help="ENCODE hits stage: GENCODE annotation GTF (.gz), for hits annotation.")
+
+    # Input: composite stages
+    parser.add_argument("--all-paths-tsv", type=str, default=None,
+                        help="ENCODE composite stages: model metadata TSV, model and background paths per fold "
+                             "(raw/all_paths.tsv of composite/build_all_paths.py); required by encode-composite-ism.")
+    parser.add_argument("--ism-python", type=str, default=sys.executable,
+                        help="ENCODE composite ISM stage: Python with torch, bpnetlite and tangermeme "
+                             "(e.g. the tangermeme environment's bin/python).")
+    parser.add_argument("--ism-genome-fa", type=str, default=None,
+                        help="ENCODE composite ISM stage: genome FASTA of the background sequences (default: --hg38-fasta).")
+    parser.add_argument("--ism-model-idx", type=int, nargs="*", default=None,
+                        help="ENCODE composite ISM stage: models to run (rows of the per-model composite metadata; default: all).")
+    parser.add_argument("--ism-n-spaces", type=int, default=201,
+                        help="ENCODE composite ISM stage: number of spacings tested per orientation.")
+    parser.add_argument("--ism-n-background-seqs", type=int, default=100,
+                        help="ENCODE composite ISM stage: background sequences per fold.")
+    parser.add_argument("--ism-overwrite-all", action="store_true",
+                        help="ENCODE composite ISM stage: recompute (motif, model) runs already done.")
 
     # Compute
     parser.add_argument("-g", "--use-gpu", action="store_true", help="Use GPU for processing.")
@@ -281,6 +315,9 @@ def stage_dirs(root):
         "procap-profile": os.path.join(root, "procapnet", "profile"),
         "procap-combine": os.path.join(root, "procapnet", "combined"),
         "encode-combine": os.path.join(root, "encode"),
+        "encode-composite-ism": os.path.join(root, "composite", "ism"),
+        "encode-composite": os.path.join(root, "encode"),
+        "encode-hits":    os.path.join(root, "encode"),
     }
 
 
@@ -335,17 +372,23 @@ if __name__ == "__main__":
     logging.info(f"Output root: {args.output_dir}")
     logging.info(f"Stages to run ({len(selected)}/{len(STAGE_ORDER)}): {', '.join(selected)}")
 
-    # Stage 'encode-combine': Required inputs are checked here, before the stages that precede it.
+    # Stages 'encode-*': Required inputs are checked here, before the stages that precede them.
     # The QC inputs (--mc-qc-remove-removed, --mc-qc-pass-filtered, --mc-qc-pass-lowq) are optional:
     # each QC step is skipped without its input.
-    if "encode-combine" in selected:
-        missing = [n for n in ("tf_init_metadata", "chrom_init_metadata", "procap_init_metadata", "metadata_edited",
-                               "hg38_fasta", "gencode_gtf")
-                   if getattr(args, n) is None]
+    required = {
+        "encode-combine": ("tf_init_metadata", "chrom_init_metadata", "procap_init_metadata", "metadata_edited"),
+        "encode-composite-ism": ("all_paths_tsv",),
+        "encode-composite": ("tf_init_metadata", "chrom_init_metadata", "procap_init_metadata"),
+        "encode-hits": ("hg38_fasta", "gencode_gtf"),
+    }
+    for stage, stage_required in required.items():
+        missing = [n for n in stage_required if stage in selected and getattr(args, n) is None]
+        if stage == "encode-composite-ism" and stage in selected and args.ism_genome_fa is None and args.hg38_fasta is None:
+            missing.append("ism_genome_fa")
         if missing:
-            logging.error("Stage 'encode-combine' requires: "
-                          + ", ".join("--" + m.replace("_", "-") for m in missing))
-            raise ValueError(f"Missing required arguments for encode-combine: {missing}")
+            logging.error(f"Stage '{stage}' requires: " + ", ".join("--" + m.replace("_", "-") for m in missing))
+            raise ValueError(f"Missing required arguments for {stage}: {missing}")
+    COMPOSITE_DIR = os.path.join(args.output_dir, "composite")
 
 
     ### RUN --------------------------------------------------------------------
@@ -359,9 +402,29 @@ if __name__ == "__main__":
         if args.time:
             stage_start = time.time()
 
-        # Bind this stage's pipeline configs before its body runs
-        sys.modules[module_name].set_default_configs()
+        # Bind this stage's pipeline configs before its body runs (the composite ISM stage: its own process)
+        if module_name is not None:
+            sys.modules[module_name].set_default_configs()
         os.makedirs(stage_dir, exist_ok=True)
+
+        # ENCODE stages: the ENCODE stage's directory, the atlases' stage directories and the composites
+        encode_args = dict(
+            output_dir=DIRS["encode-combine"],
+            composite_dir=COMPOSITE_DIR,
+            mcid_version=args.mcid_version,
+            tf_dir=DIRS["tf-combine"],
+            tf_counts_dir=DIRS["tf-counts"],
+            tf_profile_dir=DIRS["tf-profile"],
+            chrom_dir=DIRS["chrom-combine"],
+            chrom_counts_dir=DIRS["chrom-counts"],
+            chrom_profile_dir=DIRS["chrom-profile"],
+            tf_combined_dir=DIRS["tf-combine"],
+            chrom_combined_dir=DIRS["chrom-combine"],
+            procap_dir=DIRS["procap-combine"],
+            procap_counts_dir=DIRS["procap-counts"],
+            procap_profile_dir=DIRS["procap-profile"],
+            procap_combined_dir=DIRS["procap-combine"],
+        )
 
         # --- 1/2, 4/5 & 7/8: per-head sequential clustering -----------------------
         if stage in ("tf-counts", "tf-profile", "chrom-counts", "chrom-profile", "procap-counts", "procap-profile"):
@@ -394,26 +457,37 @@ if __name__ == "__main__":
             )
             ATLAS_PIPELINES[atlas_key][2](sa)
 
-        # --- 10: combine the TF, Chromatin and ProCap atlases --------------------------
+        # --- 10: combine the TF, Chromatin and ProCap atlases, and identify the composites --
+        elif stage == "encode-combine":
+            pipeline_encode.run_encode_combine(stage_args(args, **encode_args))
+
+        # --- 11: ISM cooperativity of each composite, per model (--ism-python) ---------
+        elif stage == "encode-composite-ism":
+            composite_paths = pipeline_encode.composite_paths(COMPOSITE_DIR)
+            command = [
+                args.ism_python, COMPOSITE_ISM_SCRIPT,
+                "--motif-metadata", composite_paths.metadata_composite_path,
+                "--run-metadata", composite_paths.metadata_composite_model_path,
+                "--model-metadata", args.all_paths_tsv,
+                "--output-dir", composite_paths.ism_dir,
+                "--genome-fa", args.ism_genome_fa or args.hg38_fasta,
+                "--n-spaces", str(args.ism_n_spaces),
+                "--n-background-seqs", str(args.ism_n_background_seqs),
+            ]
+            if args.ism_model_idx:
+                command += ["--model-idx", *map(str, args.ism_model_idx)]
+            if args.ism_overwrite_all:
+                command += ["--overwrite-all"]
+            logging.info("Running: " + " ".join(command))
+            subprocess.run(command, check=True)
+
+        # --- 12: merge the composites by cooperativity: the final ENCODE MotifCompendium ---
+        elif stage == "encode-composite":
+            pipeline_encode_composite.run_encode_composite(stage_args(args, **encode_args))
+
+        # --- 13: index and annotate the FiNeMo hits with the final ENCODE clusters -----
         else:
-            sa = stage_args(
-                args,
-                output_dir=stage_dir,
-                mcid_version=args.mcid_version,
-                tf_dir=DIRS["tf-combine"],
-                tf_counts_dir=DIRS["tf-counts"],
-                tf_profile_dir=DIRS["tf-profile"],
-                chrom_dir=DIRS["chrom-combine"],
-                chrom_counts_dir=DIRS["chrom-counts"],
-                chrom_profile_dir=DIRS["chrom-profile"],
-                tf_combined_dir=DIRS["tf-combine"],
-                chrom_combined_dir=DIRS["chrom-combine"],
-                procap_dir=DIRS["procap-combine"],
-                procap_counts_dir=DIRS["procap-counts"],
-                procap_profile_dir=DIRS["procap-profile"],
-                procap_combined_dir=DIRS["procap-combine"],
-            )
-            pipeline_encode.run_encode_combine(sa)
+            pipeline_encode_hits.run_encode_hits(stage_args(args, **encode_args))
 
         if args.time:
             logging.info(f"Stage '{stage}' time taken: {time.time() - stage_start:.2f}s")
