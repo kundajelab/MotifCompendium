@@ -1646,6 +1646,11 @@ def run_encode_composite(args):
 
     # ### Re-combine all: ENCODE MotifCompendium (C5)
 
+    # mc_encode must be the ENCODE combine's filtered compendium (C4): once the final export has run, mc_encode_filtered_path
+    # holds the final one, which a new kernel loads as mc_encode (and C5 would be built from C5)
+    if CompositeArgs.ism_class_col in mc_encode.columns():
+        raise ValueError(f"mc_encode is already a final compendium (it has {CompositeArgs.ism_class_col}): rerun the ENCODE combine first.")
+
     # ENCODE: Single: the filtered ENCODE clusters outside the composites of the ISM analysis (cpaths.mc_composite_path, as
     # loaded under "ISM Cooperativity"), whatever mc_encode's composite flags say: resumed after the ISM runs, mc_encode may
     # hold other flags than the MSW that selected the composites (e.g. an earlier ENCODE combine's, without the MSW). The
