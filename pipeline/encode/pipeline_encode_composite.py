@@ -1662,8 +1662,8 @@ def run_encode_composite(args):
                  f"({len(mc_encode_composite_ids)} composites, {int(mc_encode_error.sum())} dropped as errors)")
 
     # Re-Combine: Full ENCODE MotifCompendium
-    mc_encode_columns = list(set(mc_encode_single.columns() + mc_encode_composite.columns()))
-    mc_encode_images = list(set(mc_encode_single.images() + mc_encode_composite.images()))
+    mc_encode_columns = list(dict.fromkeys(mc_encode_single.columns() + mc_encode_composite.columns()))  # in order: reproducible
+    mc_encode_images = list(dict.fromkeys(mc_encode_single.images() + mc_encode_composite.images()))
 
     for mc_encode_i in [mc_encode_single, mc_encode_composite]:
         for col in mc_encode_columns:
