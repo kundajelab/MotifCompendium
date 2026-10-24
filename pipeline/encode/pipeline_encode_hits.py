@@ -63,6 +63,13 @@ def setup_parser():
                         help="Output root of the Chromatin atlas pipeline (pipeline/chrombpnet/pipeline_chrombpnet.py).")
     parser.add_argument("--procapatlas-dir", type=str, required=True,
                         help="Output root of the ProCap atlas pipeline (pipeline/procapnet/pipeline_procapnet.py).")
+    parser.add_argument("--level", type=str, default="singlemulticluster", choices=["singlemulticluster", "encode"],
+                        help="The clusters the hits are indexed and summarized by: the singlemulticluster level (C5, "
+                             "pipeline_encode_composite.py; outputs in --composite-dir) or the ENCODE clusters (C4; in "
+                             "--output-dir).")
+    parser.add_argument("--composite-dir", type=str, default=None,
+                        help="Directory of the singlemulticluster level (pipeline_encode_composite.py --composite-dir; "
+                             "default: single_multi, next to --output-dir).")
 
     # Input: annotation
     parser.add_argument("--hg38-fasta", type=str, required=True,
@@ -254,12 +261,22 @@ def run_encode_hits(args):
     """ENCODE: index and annotate the FiNeMo hits with the final ENCODE clusters"""
 
     ### OPTIONS -----------------------------------------------------------------
-    # Run log, in <output-dir>/logs/, as in the ENCODE stage
-    log_dir = os.path.join(args.output_dir, "logs")
+    # The level the hits are indexed and summarized by: the singlemulticluster level (C5; its compendia, motif index and
+    # these outputs in <composite-dir>) or the ENCODE clusters (C4, <output-dir>)
+    level = getattr(args, "level", None) or "singlemulticluster"
+    if level == "singlemulticluster":
+        cpaths = pipeline_encode.composite_paths(
+            getattr(args, "composite_dir", None) or pipeline_encode.default_composite_dir(args.output_dir))
+        level_dir = cpaths.composite_dir
+    else:
+        level_dir = args.output_dir
+
+    # Run log, in the level's logs/, as in the ENCODE stage
+    log_dir = os.path.join(level_dir, "logs")
     os.makedirs(log_dir, exist_ok=True)
     log_path = os.path.join(
         log_dir,
-        f"log_pipeline_hits_{os.path.basename(os.path.normpath(args.output_dir))}"
+        f"log_pipeline_hits_{os.path.basename(os.path.normpath(level_dir))}"
         f"_{time.strftime('%Y-%m-%d_%H-%M-%S', time.localtime())}.out",
     )
     # force=True: each stage replaces the previous stage's handlers (incl. its log file)
@@ -273,7 +290,10 @@ def run_encode_hits(args):
     logging.info(f"Writing run log to: {log_path}")
 
     ### PATHS --------------------------------------------------------------------
-    paths = pipeline_encode.encode_paths(args)
+    # The atlas pipelines' (FiNeMo and peaks paths); the level's compendia, motif index and outputs
+    paths = (pipeline_encode.singlemulticluster_level_paths(args, cpaths) if level == "singlemulticluster"
+             else pipeline_encode.encode_paths(args))
+    logging.info(f"Hits by the {level} level: {level_dir}")
 
     ## HTML column descriptions
     html_column_desc_df = pd.read_csv(args.column_desc_tsv, sep="\t", header=0)

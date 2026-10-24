@@ -16,8 +16,8 @@ Runs the full atlas hierarchy from a single CLI, in order:
   9. ProCap atlas   - combine        : counts + profile meta-clusters -> atlascluster
  10. ENCODE         - combine        : TF + Chromatin + ProCap atlasclusters -> ENCODE cluster, and its composites
  11. ENCODE         - composite ISM  : ISM cooperativity of each composite, per model
- 12. ENCODE         - composite      : composites merged by cooperativity -> final ENCODE MotifCompendium
- 13. ENCODE         - hits           : FiNeMo hits indexed and annotated with the final ENCODE clusters
+ 12. ENCODE         - composite      : composites merged by cooperativity -> singlemulticluster level (C5)
+ 13. ENCODE         - hits           : FiNeMo hits indexed and annotated with the singlemulticlusters
 
 The stages are imported from the atlas pipelines, not copied: pipeline/bpnet/pipeline_bpnet.py (TF),
 pipeline/chrombpnet/pipeline_chrombpnet.py (Chromatin), pipeline/procapnet/pipeline_procapnet.py
@@ -35,7 +35,7 @@ outputs are wired directly into the next stage's inputs:
   <root>/bpnet/counts         <root>/bpnet/profile        <root>/bpnet/combined
   <root>/chrombpnet/counts    <root>/chrombpnet/profile   <root>/chrombpnet/combined
   <root>/procapnet/counts     <root>/procapnet/profile    <root>/procapnet/combined
-  <root>/encode               <root>/composite            <root>/composite/ism
+  <root>/encode               <root>/single_multi         <root>/single_multi/ism
 """
 import os
 import sys
@@ -93,7 +93,7 @@ STAGES = {
     "procap-combine": ("ProCap atlas: combine counts + profile", "pipeline_procapnet"),
     "encode-combine": ("ENCODE: combine TF + Chromatin + ProCap atlasclusters", "pipeline_encode"),
     "encode-composite-ism": ("ENCODE: ISM cooperativity of the composites, per model", None),
-    "encode-composite": ("ENCODE: composites merged by cooperativity -> final ENCODE MotifCompendium", "pipeline_encode_composite"),
+    "encode-composite": ("ENCODE: composites merged by cooperativity -> singlemulticluster level (C5)", "pipeline_encode_composite"),
     "encode-hits":    ("ENCODE: FiNeMo hits indexed and annotated", "pipeline_encode_hits"),
 }
 STAGE_ORDER = list(STAGES)
@@ -315,9 +315,9 @@ def stage_dirs(root):
         "procap-profile": os.path.join(root, "procapnet", "profile"),
         "procap-combine": os.path.join(root, "procapnet", "combined"),
         "encode-combine": os.path.join(root, "encode"),
-        "encode-composite-ism": os.path.join(root, "composite", "ism"),
-        "encode-composite": os.path.join(root, "encode"),
-        "encode-hits":    os.path.join(root, "encode"),
+        "encode-composite-ism": os.path.join(root, "single_multi", "ism"),
+        "encode-composite": os.path.join(root, "single_multi"),
+        "encode-hits":    os.path.join(root, "single_multi"),
     }
 
 
@@ -388,7 +388,7 @@ if __name__ == "__main__":
         if missing:
             logging.error(f"Stage '{stage}' requires: " + ", ".join("--" + m.replace("_", "-") for m in missing))
             raise ValueError(f"Missing required arguments for {stage}: {missing}")
-    COMPOSITE_DIR = os.path.join(args.output_dir, "composite")
+    COMPOSITE_DIR = os.path.join(args.output_dir, "single_multi")  # CompositeArgs.composite_dir_name: the singlemulticluster level
 
 
     ### RUN --------------------------------------------------------------------
@@ -481,13 +481,13 @@ if __name__ == "__main__":
             logging.info("Running: " + " ".join(command))
             subprocess.run(command, check=True)
 
-        # --- 12: merge the composites by cooperativity: the final ENCODE MotifCompendium ---
+        # --- 12: merge the composites by cooperativity: the singlemulticluster level (C5) ---
         elif stage == "encode-composite":
             pipeline_encode_composite.run_encode_composite(stage_args(args, **encode_args))
 
-        # --- 13: index and annotate the FiNeMo hits with the final ENCODE clusters -----
+        # --- 13: index and annotate the FiNeMo hits with the singlemulticlusters -------
         else:
-            pipeline_encode_hits.run_encode_hits(stage_args(args, **encode_args))
+            pipeline_encode_hits.run_encode_hits(stage_args(args, **encode_args, level="singlemulticluster"))
 
         if args.time:
             logging.info(f"Stage '{stage}' time taken: {time.time() - stage_start:.2f}s")

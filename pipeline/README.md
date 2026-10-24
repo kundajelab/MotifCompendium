@@ -305,9 +305,9 @@ finalizes the composite motifs:
 TF counts ─┐
            ├─ TF atlas ─────────┐
 TF profile ┘                    │
-Chromatin counts ─┐             ├─ ENCODE combine ─ composite ISM ─ composite ─ hits
-                  ├─ Chromatin ─┤   (+ composites)    (per model)    (final)
-Chromatin profile ┘   atlas     │
+Chromatin counts ─┐             ├─ ENCODE combine ─ composite ISM ─ composite ──────── hits
+                  ├─ Chromatin ─┤   (+ composites)    (per model)    (singlemulti-  (by single-
+Chromatin profile ┘   atlas     │                                    cluster, C5)   multicluster)
 ProCap counts ─┐                │
                ├─ ProCap atlas ─┘
 ProCap profile ┘
@@ -350,8 +350,9 @@ OUTPUT/
 │   ├── counts/
 │   ├── profile/
 │   └── combined/
-├── encode/       (ENCODE compendium, motif index, hits)
-└── composite/    (composites, their ISM runs in ism/, the merged composites)
+├── encode/       (ENCODE clusters, C4: compendium, motif index)
+└── single_multi/ (composites, their ISM runs in ism/, the merged composites; the
+                   singlemulticluster level, C5, its motif index and the hits)
 ```
 
 The combine stages load their upstream products from these exact locations.
@@ -460,14 +461,14 @@ namespace.
 
 Each is also a script of its own, with the atlases' output roots as
 `--tfatlas-dir`, `--chromatlas-dir`, `--procapatlas-dir`, the ENCODE stage's
-directory as `--output-dir` and the composites' as `--composite-dir` (default:
-`composite/`, next to `--output-dir`):
+directory as `--output-dir` and the composites' and singlemulticluster
+level's as `--composite-dir` (default: `single_multi/`, next to `--output-dir`):
 
 10. `encode-combine` (`pipeline_encode.py`): force-clusters the atlasclusters
     into ENCODE clusters, annotates and filters them, and decomposes the filtered
     ones into reference monomers (modified Smith-Waterman), before exporting
     them to every level below. The composites and their subunits are written to
-    `composite/` (`export/ENCODE-motifcompendium_composite_metadata{,_model}.tsv`,
+    `single_multi/` (`export/ENCODE-motifcompendium_composite_metadata{,_model}.tsv`,
     `mc/ENCODE-motifcompendium_composite_vf.mc`). `--all-paths-tsv` (optional)
     adds each model's model, assay and atlas to the per-model table. The
     export to every level below writes, over the atlas pipelines' files, each
@@ -484,15 +485,23 @@ directory as `--output-dir` and the composites' as `--composite-dir` (default:
     composites by cooperativity (hard, soft, no synergy), merges the duplicate
     ones and the soft and no-synergy ones of the same reference clusters,
     removes the no-synergy ones, and combines the rest with the singles: the
-    final ENCODE MotifCompendium, exported again to every level below. Its
-    ENCODE clusters are numbered (`encode_c5_cluster`), each ENCODE cluster of
-    `encode-combine` gets the number of the final one it is in
-    (`encode/metadata/motifcompendium_encode_c5_membership.tsv`), and the final
-    ones are named as `encode-combine` names its own (`{prename}_{counter}`).
-    Rerunning it needs `encode-combine` first, whose outputs it overwrites.
+    singlemulticluster level (C5), written like an ENCODE level to
+    `single_multi/` (`motifcompendium_singlemulticluster_{all,filtered,removed}`:
+    `.mc`, HTML, metadata TSV, MEME; its motif index). As a clustering, each
+    singlemulticluster has a number (`source_cluster`) and a C5 MCID, and each
+    ENCODE cluster of `encode-combine` the number of its singlemulticluster
+    (`single_multi/metadata/motifcompendium_singlemulticluster_membership.tsv`);
+    they are named as `encode-combine` names its own (`{prename}_{counter}`).
+    The levels below keep their names, MCIDs and flags and get new columns: the
+    ENCODE clusters `singlemulticluster_cluster`, `singlemulticluster_name` and
+    `singlemulticluster_flag_remove`; every atlas level and the motif indexes
+    `singlemulticluster_name` and `singlemulticluster_flag_remove`. It can be
+    rerun on the same `encode-combine` outputs.
 13. `encode-hits` (`pipeline_encode_hits.py`): indexes each experiment's FiNeMo
-    hits with the final ENCODE clusters and annotates them (needs an indexed
-    hg38 FASTA, `--hg38-fasta`, and a GENCODE GTF, `--gencode-gtf`).
+    hits with the singlemulticlusters (`--level singlemulticluster`, the
+    default; `--level encode`: the ENCODE clusters) and annotates them, in
+    `single_multi/export/` (needs an indexed hg38 FASTA, `--hg38-fasta`, and a
+    GENCODE GTF, `--gencode-gtf`).
 
 ## Reproducibility and troubleshooting
 

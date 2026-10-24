@@ -818,6 +818,7 @@ class Encode_VisualizeArgs:
     metacluster_name_col: str = 'metacluster_name'
     atlascluster_name_col: str = 'atlascluster_name'
     encodecluster_name_col: str = 'ENCODE_name'
+    singlemulticluster_name_col: str = 'singlemulticluster_name'  # Its singlemulticluster (C5; pipeline_encode_composite.py)
     atlas_col: str = 'atlas'
     sort_col: str = 'sort'
 
@@ -1026,6 +1027,7 @@ class EncodeCombineArgs:
 
     # Level suffixes: combined (atlasclusters), and per head
     suffix_atlascluster: str = '_atlascluster'
+    suffix_singlemulticluster: str = '_singlemulticluster'  # The singlemulticluster level (C5), in <run>/single_multi
     suffix_metacluster: str = '_metacluster'
     suffix_cluster: str = '_cluster'
     suffix_motif: str = '_motif'
@@ -1179,9 +1181,13 @@ class Encode_CompositeArgs:
     # Final ENCODE MotifCompendium (C5): the singles and the merged composites. ENCODE clusters left out of it
     # are removed, with these flag types: the no-synergy composites, and the composites without subunits.
     mcid_level: str = "C5.single_multi.TF_Chrom_ProCap.counts_profile"
-    # Membership, as in a clustering: the number of each final ENCODE cluster (0, 1, ...: the C5 ones, then the
-    # removed ones), and, for each ENCODE cluster of the combine (C4) and atlascluster, the number of its final one
-    c5_cluster_col: str = "encode_c5_cluster"
+    # The singlemulticluster level (C5), in <run>/<composite_dir_name>: as a clustering, each singlemulticluster has a
+    # number (its source_cluster: the C5 ones 0, 1, ..., then the removed ones), each ENCODE cluster (C4) the number
+    # of its singlemulticluster; every level below its singlemulticluster's name
+    # (VisualizeArgs.singlemulticluster_name_col) and filter flag
+    composite_dir_name: str = "single_multi"
+    c5_cluster_col: str = "singlemulticluster_cluster"
+    c5_flag_col: str = "singlemulticluster_flag_remove"
     flag_type_no_synergy: str = 'no-synergy'
     flag_type_unannotated: str = 'composite-unannotated'
 
