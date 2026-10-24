@@ -303,6 +303,10 @@ def run_encode_hits(args):
     # The final ENCODE compendium: filtered and removed ENCODE clusters, and the motif index (every motif with its
     # ENCODE cluster, final filter flag, confidence and category)
     logging.info("Loading the final ENCODE compendia and the motif index...")
+    if not os.path.exists(paths.metadata_motif_index_path):
+        raise FileNotFoundError(
+            f"{paths.metadata_motif_index_path}: no motif index of the {level} level yet: the levels below it are "
+            "updated first (run_pipeline_encode_propagate.sh: each stage's --update-constituents only)")
     mc_encode_filtered = MotifCompendium.load(paths.mc_encode_filtered_path, safe=args.safe)
     mc_encode_removed = MotifCompendium.load(paths.mc_encode_removed_path, safe=args.safe)
     mc_motif_index = pd.read_csv(paths.metadata_motif_index_path, sep="\t", keep_default_na=False, na_values=[""])

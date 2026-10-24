@@ -76,6 +76,12 @@ def setup_parser():
 
     # Pipeline control
     parser.add_argument("--stages", nargs="+", choices=STAGE_ORDER, default=STAGE_ORDER, help="Subset of stages to run, in pipeline order.")
+    parser.add_argument("--update-constituents", choices=["now", "defer", "only"], default="now",
+                        help="The combine stage's update of the levels below the atlasclusters (each head's metacluster, cluster "
+                             "and motif compendia: their atlascluster; the atlascluster motif index). now: by the combine "
+                             "stage; defer: not (the levels below stay as the per-head stages wrote them, e.g. until the ENCODE "
+                             "pipeline's last level is made); only: that update alone, from the combine's saved outputs (no "
+                             "stage is run).")
 
     # Run type
     parser.add_argument("-vr", "--mcid-version", type=str, default="V0", help="The version to use in the unique identifier (e.g., V1).")
@@ -3156,6 +3162,115 @@ def run_procap_sequential(args):
     logging.info(f'Run completed: {time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())}')
 
 
+def update_constituents(args, mc_metacluster_combined, metacluster2atlas_name_map, metacluster2atlas_simple_map):
+    """
+    The levels below the atlasclusters: each head's metacluster, cluster and motif compendia (motifcompendium_*_all.mc)
+    get their atlascluster (name, simple name), by their metacluster; then the atlascluster motif index. Run by the
+    combine stage (--update-constituents now), or on its own from the combine's saved outputs (--update-constituents only:
+    run_procap_constituents()).
+    """
+    atlascluster_cluster_col = f"rec_{ClusterArgs.cluster_algorithm_force}-{ClusterArgs.cluster_sim_threshold_force}_{ClusterArgs.cluster_algorithm_kmeans}-{ClusterArgs.cluster_sim_assignment_threshold_kmeans}"
+    mc_counts_path = os.path.join(args.counts_dir, "mc", "motifcompendium_motif_all.mc")
+    mc_cluster_counts_path = os.path.join(args.counts_dir, "mc", "motifcompendium_cluster_all.mc")
+    mc_metacluster_counts_path = os.path.join(args.counts_dir, "mc", "motifcompendium_metacluster_all.mc")
+    mc_profile_path = os.path.join(args.profile_dir, "mc", "motifcompendium_motif_all.mc")
+    mc_cluster_profile_path = os.path.join(args.profile_dir, "mc", "motifcompendium_cluster_all.mc")
+    mc_metacluster_profile_path = os.path.join(args.profile_dir, "mc", "motifcompendium_metacluster_all.mc")
+    metadata_motif_index_path = os.path.join(args.output_dir, "metadata", "motifcompendium_atlascluster_motif_index.tsv")
+    os.makedirs(os.path.dirname(metadata_motif_index_path), exist_ok=True)
+
+    # #### Motif index
+    # Load MotifCompendium
+    mc_metacluster_counts = MotifCompendium.load(mc_metacluster_counts_path, safe=args.safe)
+    mc_metacluster_profile = MotifCompendium.load(mc_metacluster_profile_path, safe=args.safe)
+
+    mc_cluster_counts = MotifCompendium.load(mc_cluster_counts_path, safe=args.safe)
+    mc_cluster_profile = MotifCompendium.load(mc_cluster_profile_path, safe=args.safe)
+
+    mc_counts = MotifCompendium.load(mc_counts_path, safe=args.safe)
+    mc_profile = MotifCompendium.load(mc_profile_path, safe=args.safe)
+    # Update Metaclusters
+    for mc_metacluster_i in [mc_metacluster_counts, mc_metacluster_profile]:
+        for metadata_col in mc_metacluster_combined.columns():
+            if metadata_col not in mc_metacluster_i.columns():
+                mc_metacluster_i.metadata[metadata_col] = None
+        mc_metacluster_i.metadata.set_index(MetadataCols.unique_id_col, inplace=True)
+        mc_metacluster_i.metadata.update(mc_metacluster_combined.metadata.set_index(MetadataCols.unique_id_col))
+        mc_metacluster_i.metadata.reset_index(inplace=True)
+    # Map: Metacluster to Atlas-cluster: Name, Simple name
+    mc_metacluster_counts[VisualizeArgs.atlascluster_name_col] = mc_metacluster_counts[atlascluster_cluster_col].map(metacluster2atlas_name_map)
+    mc_metacluster_counts[MetadataCols.simple_name_col] = mc_metacluster_counts[atlascluster_cluster_col].map(metacluster2atlas_simple_map).fillna(mc_metacluster_counts[MetadataCols.simple_name_col])
+
+    mc_metacluster_profile[VisualizeArgs.atlascluster_name_col] = mc_metacluster_profile[atlascluster_cluster_col].map(metacluster2atlas_name_map)
+    mc_metacluster_profile[MetadataCols.simple_name_col] = mc_metacluster_profile[atlascluster_cluster_col].map(metacluster2atlas_simple_map).fillna(mc_metacluster_profile[MetadataCols.simple_name_col])
+    ## Map: Motif, Cluster to Atlas-cluster
+    cluster2metacluster_atlascluster_map = dict(zip(mc_metacluster_combined[MetadataCols.name_col], mc_metacluster_combined[VisualizeArgs.atlascluster_name_col]))
+    cluster2metacluster_simple_map = dict(zip(mc_metacluster_combined[MetadataCols.name_col], mc_metacluster_combined[MetadataCols.simple_name_col]))
+
+    mc_cluster_counts[VisualizeArgs.atlascluster_name_col] = mc_cluster_counts[VisualizeArgs.metacluster_name_col].map(cluster2metacluster_atlascluster_map)
+    mc_cluster_counts[MetadataCols.simple_name_col] = mc_cluster_counts[VisualizeArgs.metacluster_name_col].map(cluster2metacluster_simple_map).fillna(mc_cluster_counts[MetadataCols.simple_name_col])
+    mc_cluster_profile[VisualizeArgs.atlascluster_name_col] = mc_cluster_profile[VisualizeArgs.metacluster_name_col].map(cluster2metacluster_atlascluster_map)
+    mc_cluster_profile[MetadataCols.simple_name_col] = mc_cluster_profile[VisualizeArgs.metacluster_name_col].map(cluster2metacluster_simple_map).fillna(mc_cluster_profile[MetadataCols.simple_name_col])
+
+    mc_counts[VisualizeArgs.atlascluster_name_col] = mc_counts[VisualizeArgs.metacluster_name_col].map(cluster2metacluster_atlascluster_map)
+    mc_counts[MetadataCols.simple_name_col] = mc_counts[VisualizeArgs.metacluster_name_col].map(cluster2metacluster_simple_map).fillna(mc_counts[MetadataCols.simple_name_col])
+    mc_profile[VisualizeArgs.atlascluster_name_col] = mc_profile[VisualizeArgs.metacluster_name_col].map(cluster2metacluster_atlascluster_map)
+    mc_profile[MetadataCols.simple_name_col] = mc_profile[VisualizeArgs.metacluster_name_col].map(cluster2metacluster_simple_map).fillna(mc_profile[MetadataCols.simple_name_col])
+    # Save MotifCompendium: with the motif index, over the per-head inputs (motifcompendium_*_all.mc)
+    save_replace(mc_metacluster_counts, mc_metacluster_counts_path)
+    save_replace(mc_metacluster_profile, mc_metacluster_profile_path)
+
+    save_replace(mc_cluster_counts, mc_cluster_counts_path)
+    save_replace(mc_cluster_profile, mc_cluster_profile_path)
+
+    save_replace(mc_counts, mc_counts_path)
+    save_replace(mc_profile, mc_profile_path)
+    # Motif index
+    mc_motif_index = pd.concat([
+        mc_counts.metadata,
+        mc_profile.metadata,
+    ], axis=0)
+    # Export: Motif index
+    mc_motif_index[VisualizeArgs.motif_index_cols_atlascluster].to_csv(metadata_motif_index_path, sep="\t", index=False)
+
+
+def run_procap_constituents(args):
+    """--update-constituents only: the combine stage's update of the levels below the atlasclusters (update_constituents()), from its
+    saved outputs (<output-dir>/mc: motifcompendium_atlascluster_all.mc, motifcompendium_metacluster_combined.mc)."""
+    log_dir = os.path.join(args.output_dir, "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    log_path = os.path.join(
+        log_dir,
+        f"log_pipeline_{os.path.basename(os.path.normpath(args.output_dir))}_constituents"
+        f"_{time.strftime('%Y-%m-%d_%H-%M-%S', time.localtime())}.out",
+    )
+    logging.basicConfig(
+        force=True,
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[logging.StreamHandler(sys.stdout), logging.FileHandler(log_path)]
+    )
+    logging.info(f"Run started (the levels below the atlasclusters only): {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
+    logging.info(f"Writing run log to: {log_path}")
+    MotifCompendium.set_compute_options(
+        max_chunk=args.max_chunk,
+        max_cpus=args.max_cpus,
+        use_gpu=args.use_gpu,
+        ic_scale=args.ic,
+        fast_plotting=args.fast_plot,
+    )
+    mc_dir = os.path.join(args.output_dir, "mc")
+    mc_atlascluster = MotifCompendium.load(os.path.join(mc_dir, "motifcompendium_atlascluster_all.mc"), safe=args.safe)
+    mc_metacluster_combined = MotifCompendium.load(os.path.join(mc_dir, "motifcompendium_metacluster_combined.mc"), safe=args.safe)
+    update_constituents(
+        args,
+        mc_metacluster_combined,
+        dict(zip(mc_atlascluster[ClusterArgs.source_cluster_col], mc_atlascluster[MetadataCols.name_col])),
+        dict(zip(mc_atlascluster[ClusterArgs.source_cluster_col], mc_atlascluster[MetadataCols.simple_name_col])),
+    )
+    logging.info(f"Completed run: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
+
+
 def run_procap_combine(args):
     """ProCap atlas: combine the counts and profile meta-clusters into atlasclusters"""
 
@@ -4257,59 +4372,11 @@ def run_procap_combine(args):
     mc_procapatlas.metadata.to_csv(metadata_atlascluster_path, sep="\t", index=False)
 
 
-    # #### Motif index
-    # Load MotifCompendium
-    mc_metacluster_counts = MotifCompendium.load(mc_metacluster_counts_path, safe=args.safe)
-    mc_metacluster_profile = MotifCompendium.load(mc_metacluster_profile_path, safe=args.safe)
-
-    mc_cluster_counts = MotifCompendium.load(mc_cluster_counts_path, safe=args.safe)
-    mc_cluster_profile = MotifCompendium.load(mc_cluster_profile_path, safe=args.safe)
-
-    mc_counts = MotifCompendium.load(mc_counts_path, safe=args.safe)
-    mc_profile = MotifCompendium.load(mc_profile_path, safe=args.safe)
-    # Update Metaclusters
-    for mc_metacluster_i in [mc_metacluster_counts, mc_metacluster_profile]:
-        for metadata_col in mc_metacluster_combined.columns():
-            if metadata_col not in mc_metacluster_i.columns():
-                mc_metacluster_i.metadata[metadata_col] = None
-        mc_metacluster_i.metadata.set_index(MetadataCols.unique_id_col, inplace=True)
-        mc_metacluster_i.metadata.update(mc_metacluster_combined.metadata.set_index(MetadataCols.unique_id_col))
-        mc_metacluster_i.metadata.reset_index(inplace=True)
-    # Map: Metacluster to Atlas-cluster: Name, Simple name
-    mc_metacluster_counts[VisualizeArgs.atlascluster_name_col] = mc_metacluster_counts[atlascluster_cluster_col].map(metacluster2atlas_name_map)
-    mc_metacluster_counts[MetadataCols.simple_name_col] = mc_metacluster_counts[atlascluster_cluster_col].map(metacluster2atlas_simple_map).fillna(mc_metacluster_counts[MetadataCols.simple_name_col])
-
-    mc_metacluster_profile[VisualizeArgs.atlascluster_name_col] = mc_metacluster_profile[atlascluster_cluster_col].map(metacluster2atlas_name_map)
-    mc_metacluster_profile[MetadataCols.simple_name_col] = mc_metacluster_profile[atlascluster_cluster_col].map(metacluster2atlas_simple_map).fillna(mc_metacluster_profile[MetadataCols.simple_name_col])
-    ## Map: Motif, Cluster to Atlas-cluster
-    cluster2metacluster_atlascluster_map = dict(zip(mc_metacluster_combined[MetadataCols.name_col], mc_metacluster_combined[VisualizeArgs.atlascluster_name_col]))
-    cluster2metacluster_simple_map = dict(zip(mc_metacluster_combined[MetadataCols.name_col], mc_metacluster_combined[MetadataCols.simple_name_col]))
-
-    mc_cluster_counts[VisualizeArgs.atlascluster_name_col] = mc_cluster_counts[VisualizeArgs.metacluster_name_col].map(cluster2metacluster_atlascluster_map)
-    mc_cluster_counts[MetadataCols.simple_name_col] = mc_cluster_counts[VisualizeArgs.metacluster_name_col].map(cluster2metacluster_simple_map).fillna(mc_cluster_counts[MetadataCols.simple_name_col])
-    mc_cluster_profile[VisualizeArgs.atlascluster_name_col] = mc_cluster_profile[VisualizeArgs.metacluster_name_col].map(cluster2metacluster_atlascluster_map)
-    mc_cluster_profile[MetadataCols.simple_name_col] = mc_cluster_profile[VisualizeArgs.metacluster_name_col].map(cluster2metacluster_simple_map).fillna(mc_cluster_profile[MetadataCols.simple_name_col])
-
-    mc_counts[VisualizeArgs.atlascluster_name_col] = mc_counts[VisualizeArgs.metacluster_name_col].map(cluster2metacluster_atlascluster_map)
-    mc_counts[MetadataCols.simple_name_col] = mc_counts[VisualizeArgs.metacluster_name_col].map(cluster2metacluster_simple_map).fillna(mc_counts[MetadataCols.simple_name_col])
-    mc_profile[VisualizeArgs.atlascluster_name_col] = mc_profile[VisualizeArgs.metacluster_name_col].map(cluster2metacluster_atlascluster_map)
-    mc_profile[MetadataCols.simple_name_col] = mc_profile[VisualizeArgs.metacluster_name_col].map(cluster2metacluster_simple_map).fillna(mc_profile[MetadataCols.simple_name_col])
-    # Save MotifCompendium: with the motif index, over the per-head inputs (motifcompendium_*_all.mc)
-    save_replace(mc_metacluster_counts, mc_metacluster_counts_path)
-    save_replace(mc_metacluster_profile, mc_metacluster_profile_path)
-
-    save_replace(mc_cluster_counts, mc_cluster_counts_path)
-    save_replace(mc_cluster_profile, mc_cluster_profile_path)
-
-    save_replace(mc_counts, mc_counts_path)
-    save_replace(mc_profile, mc_profile_path)
-    # Motif index
-    mc_motif_index = pd.concat([
-        mc_counts.metadata,
-        mc_profile.metadata,
-    ], axis=0)
-    # Export: Motif index
-    mc_motif_index[VisualizeArgs.motif_index_cols_atlascluster].to_csv(metadata_motif_index_path, sep="\t", index=False)
+    # #### The levels below: each head's metaclusters, clusters and motifs (their atlascluster), the motif index
+    if args.update_constituents == "now":
+        update_constituents(args, mc_metacluster_combined, metacluster2atlas_name_map, metacluster2atlas_simple_map)
+    else:
+        logging.info("The levels below the atlasclusters: not updated (--update-constituents defer; later: --update-constituents only)")
     # Arguments JSON
     args_record = {
         # --- Full provenance (added 2026-09-10) ---------------------------------
@@ -4490,11 +4557,16 @@ if __name__ == "__main__":
     # Stages requested, kept in pipeline order
     selected = [s for s in STAGE_ORDER if s in set(args.stages)]
 
-    if "combine" in selected and args.ref_direct is None:
+    if "combine" in selected and args.ref_direct is None and args.update_constituents != "only":
         raise ValueError("Stage 'combine' requires --ref-direct.")
 
     os.makedirs(args.output_dir, exist_ok=True)
     DIRS = stage_dirs(args.output_dir)
+
+    if args.update_constituents == "only":
+        logging.info("ProCap atlas pipeline: the update of the levels below the atlasclusters only (--update-constituents only).")
+        run_procap_constituents(stage_args(args, output_dir=DIRS["combine"], counts_dir=DIRS["counts"], profile_dir=DIRS["profile"]))
+        sys.exit(0)
 
     logging.info("ProCap atlas pipeline: run started.")
     logging.info(f"Output root: {args.output_dir}")

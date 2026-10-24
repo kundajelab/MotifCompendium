@@ -18,9 +18,10 @@ composite/validate_composite_motifs.ipynb (after the ISM runs):
      the number of its singlemulticluster (<composite-dir>/metadata/motifcompendium_singlemulticluster_membership.tsv);
      the singlemulticlusters are named as pipeline_encode.py names its ENCODE clusters ({prename}_{counter}).
   4. Exported as an ENCODE level, in <composite-dir> (motifcompendium_singlemulticluster_{all,filtered,removed}: .mc,
-     HTML, metadata TSV, MEME; its motif index), and added to the levels below, which keep their own names and flags:
-     the ENCODE clusters (C4) get their singlemulticluster's number, name and filter flag; every atlas level and the
-     motif indexes its name and filter flag. Then pipeline_encode_hits.py --level singlemulticluster.
+     HTML, metadata TSV, MEME; the membership), and (--update-constituents now; defer: later, --update-constituents only) added to the
+     levels below, which keep their own names and flags: the ENCODE clusters (C4) get their singlemulticluster's
+     number, name and filter flag; every atlas level and the motif indexes its name and filter flag; then the motif
+     index of the level. Then pipeline_encode_hits.py --level singlemulticluster.
 
 This stage does not change the ENCODE stage's (pipeline_encode.py) names, MCIDs or flags: it can be rerun on its outputs
 (the singlemulticluster columns it added are replaced).
@@ -74,6 +75,8 @@ def setup_parser():
     parser.add_argument("--composite-dir", type=str, default=None,
                         help="Directory of the composites and their ISM runs (default: 'composite', next to --output-dir).")
     parser.add_argument("--mcid-version", type=str, default="V0", help="ENCODE MCID version.")
+    parser.add_argument("--update-constituents", choices=["now", "defer", "only"], default="now",
+                        help="This stage's update of the levels below its own (the ENCODE clusters, every atlas level and the motif indexes: their singlemulticluster; the level's motif index). now: by this stage; defer: not (they stay as they were, e.g. until the last level is made: run_pipeline_encode_propagate.sh); only: that update alone, from this stage's saved outputs (nothing else is run).")
     parser.add_argument("--tfatlas-dir", type=str, required=True,
                         help="Output root of the TF atlas pipeline (pipeline/bpnet/pipeline_bpnet.py).")
     parser.add_argument("--chromatlas-dir", type=str, required=True,
@@ -1701,8 +1704,13 @@ def run_encode_composite(args):
     # Save: the C5 clusters
     save_replace(mc_encode, cpaths.mc_encode_vf_path)
 
-    # #### Export: the singlemulticluster level (<composite-dir>), added to the ENCODE clusters and every level below
-    pipeline_encode.export_singlemulticluster_levels(args, cpaths, mc_c5, c5_membership_df, html_column_desc_dict)
+    # #### Export: the singlemulticluster level (<composite-dir>); added to the ENCODE clusters and every level below
+    # (--update-constituents now)
+    pipeline_encode.export_singlemulticluster_level(args, cpaths, mc_c5, c5_membership_df, html_column_desc_dict)
+    if args.update_constituents == "now":
+        pipeline_encode.export_singlemulticluster_constituents(args, cpaths, mc_c5, c5_membership_df)
+    else:
+        logging.info("The levels below the singlemulticlusters: not updated (--update-constituents defer; later: --update-constituents only)")
 
     # Args JSON
     args_record = {
@@ -1737,7 +1745,10 @@ if __name__ == "__main__":
     stage_dir_args = pipeline_encode.atlas_stage_dir_args(args.tfatlas_dir, args.chromatlas_dir, args.procapatlas_dir)
     if args.time:
         start_time = time.time()
-    run_encode_composite(pipeline_encode.stage_args(args, **stage_dir_args))
+    if args.update_constituents == "only":
+        pipeline_encode.run_singlemulticluster_constituents(pipeline_encode.stage_args(args, **stage_dir_args))
+    else:
+        run_encode_composite(pipeline_encode.stage_args(args, **stage_dir_args))
     if args.time:
         logging.info(f"Time taken: {time.time() - start_time:.2f}s")
     logging.info(f'ENCODE composites: run completed: {time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())}')

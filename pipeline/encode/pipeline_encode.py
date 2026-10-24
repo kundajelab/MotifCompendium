@@ -69,6 +69,8 @@ def setup_parser():
     parser.add_argument("-o", "--output-dir", type=str, required=True,
                         help="Output directory of the ENCODE combine stage.")
     parser.add_argument("--mcid-version", type=str, default="V0", help="ENCODE MCID version.")
+    parser.add_argument("--update-constituents", choices=["now", "defer", "only"], default="now",
+                        help="This stage's update of the levels below its own (every atlas level and the motif indexes: their ENCODE cluster, final flags and confidence). now: by this stage; defer: not (they stay as they were, e.g. until the last level is made: run_pipeline_encode_propagate.sh); only: that update alone, from this stage's saved outputs (nothing else is run).")
 
     # Input: the atlas pipelines' output roots, each <dir>/{counts,profile,combined}
     parser.add_argument("--tfatlas-dir", type=str, required=True,
@@ -1323,7 +1325,7 @@ def export_composites(mc_encode, mc_encode_composite, composite_paths_ns, all_pa
 def motif_category_types(motif_index_df, name_col, flag_col, filtered_names):
     """Each motif's category (DirectTypeArgs.category_types): from its atlas, direct type, filter flag (flag_col) and
     cluster of the level (name_col; filtered_names: those of the level's filtered clusters). The motif index's
-    category (export_encode_levels(): the ENCODE clusters), or the singlemulticluster level's."""
+    category (export_encode_constituents(): the ENCODE clusters), or the singlemulticluster level's."""
     return np.select(
         [
             # TF Atlas: Direct
@@ -1389,18 +1391,11 @@ def motif_category_types(motif_index_df, name_col, flag_col, filtered_names):
     )
 
 
-def export_encode_levels(args, mc_encode, mc_atlascluster_combined, atlascluster2encode_name_map,
-                         atlascluster2encode_simple_map, encodecluster_cluster_col, html_column_desc_dict):
+def export_encode_level(args, mc_encode, mc_atlascluster_combined, html_column_desc_dict):
     """
-    Write the final ENCODE compendium out and propagate it to every level below. mc_encode is the whole compendium
-    (filtered and removed, by filter_flag_col); atlascluster2encode_*_map map each ENCODE cluster of
-    mc_atlascluster_combined (encodecluster_cluster_col) to its name and simple name in mc_encode.
-
-    In <output-dir>: the ENCODE compendia (all, filtered, removed: .mc, HTML, MEME, metadata TSV), the combined
-    atlasclusters and the motif index. In the atlas pipelines' directories: every level's compendia (all, filtered,
-    removed: .mc, metadata TSV, MEME, HTML but at the motif level) and the motif indexes, with their ENCODE cluster,
-    final filter flags and confidence, over the atlas pipelines' own files. The FiNeMo hits are annotated by
-    pipeline_encode_hits.py, from these outputs.
+    Write the ENCODE compendium out: mc_encode is the whole compendium (filtered and removed, by filter_flag_col). In
+    <output-dir>: the ENCODE compendia (all, filtered, removed: .mc, HTML, MEME, metadata TSV) and the combined
+    atlasclusters. The levels below: export_encode_constituents().
     """
     paths = encode_paths(args)
 
@@ -1631,6 +1626,24 @@ def export_encode_levels(args, mc_encode, mc_atlascluster_combined, atlascluster
     os.makedirs(os.path.dirname(paths.metadata_encode_path), exist_ok=True)
     mc_encode_removed.metadata.drop(columns=EncodeCombineArgs.remove_cols, errors='ignore').to_csv(paths.metadata_encode_removed_path, sep="\t", index=False)
 
+
+
+def export_encode_constituents(args, mc_encode, mc_atlascluster_combined, atlascluster2encode_name_map,
+                            atlascluster2encode_simple_map, encodecluster_cluster_col, html_column_desc_dict):
+    """
+    The ENCODE clusters, propagated to every level below (after export_encode_level(); --update-constituents only: on their own,
+    from the combine's saved outputs, run_encode_constituents()). atlascluster2encode_*_map map each ENCODE cluster of
+    mc_atlascluster_combined (encodecluster_cluster_col) to its name and simple name in mc_encode. In the atlas
+    pipelines' directories: every level's compendia (all, filtered, removed: .mc, metadata TSV, MEME, HTML but at the
+    motif level) and the motif indexes, with their ENCODE cluster, final filter flags and confidence, over the atlas
+    pipelines' own files (each level's atlascluster: the atlas pipelines' update of their levels); in <output-dir>, the
+    ENCODE motif index. The FiNeMo hits are annotated by pipeline_encode_hits.py, from these outputs.
+    """
+    paths = encode_paths(args)
+    mc_encode_filtered = mc_encode[~mc_encode[FilterArgs.filter_flag_col].astype(bool).to_numpy()]
+    # The levels' HTML column descriptions: the ENCODE level's (export_encode_level())
+    html_columns_encodecluster = [html_col for html_col in VisualizeArgs.html_columns if html_col in (mc_encode.columns() + mc_encode.images())]
+    html_column_desc_dict_encodecluster = {col: html_column_desc_dict.get(col, col) for col in html_columns_encodecluster}
 
     # ### Motif index
     # Load MotifCompendium
@@ -2059,19 +2072,13 @@ def export_encode_levels(args, mc_encode, mc_atlascluster_combined, atlascluster
                     )
 
 
-def export_singlemulticluster_levels(args, cpaths, mc_c5, membership, html_column_desc_dict):
+def export_singlemulticluster_level(args, cpaths, mc_c5, membership, html_column_desc_dict):
     """
     The singlemulticluster level (C5: pipeline_encode_composite.py's singles and merged composites, filtered, and the
     removed ENCODE clusters) as an ENCODE level, in <composite-dir> (cpaths): all, filtered, removed (.mc, HTML,
-    metadata TSV, MEME), the membership of the ENCODE clusters (one row per C4 ENCODE cluster) and the motif index of
-    the level. Added to every level below, as export_encode_levels() adds the ENCODE clusters, but keeping theirs: the
-    ENCODE clusters (C4, <output-dir>) get the number (CompositeArgs.c5_cluster_col), name
-    (VisualizeArgs.singlemulticluster_name_col) and filter flag (CompositeArgs.c5_flag_col) of their singlemulticluster;
-    every atlas level (by its ENCODE cluster) and the motif indexes its name and filter flag. Their names, MCIDs, flags
-    and confidence are those of the ENCODE stage; .mc and metadata TSV rewritten (their HTML and MEME do not show the
-    new columns).
+    metadata TSV, MEME) and the membership of the ENCODE clusters (one row per C4 ENCODE cluster). The levels below:
+    export_singlemulticluster_constituents().
     """
-    paths = encode_paths(args)
     name_col, id_col, flag_col = MetadataCols.name_col, MetadataCols.unique_id_col, FilterArgs.filter_flag_col
     c5_name_col, c5_flag_col, c5_cluster_col = (VisualizeArgs.singlemulticluster_name_col, CompositeArgs.c5_flag_col,
                                                 CompositeArgs.c5_cluster_col)
@@ -2124,6 +2131,24 @@ def export_singlemulticluster_levels(args, cpaths, mc_c5, membership, html_colum
     # Membership: each ENCODE cluster (C4), with its singlemulticluster
     os.makedirs(os.path.dirname(cpaths.metadata_singlemulticluster_membership_path), exist_ok=True)
     membership.to_csv(cpaths.metadata_singlemulticluster_membership_path, sep="\t", index=False)
+
+
+def export_singlemulticluster_constituents(args, cpaths, mc_c5, membership):
+    """
+    The singlemulticluster level (export_singlemulticluster_level()) added to every level below, as
+    export_encode_constituents() adds the ENCODE clusters, but keeping theirs (--update-constituents only: on its own, from the
+    level's saved outputs, run_singlemulticluster_constituents()): the ENCODE clusters (C4, <output-dir>) get the number
+    (CompositeArgs.c5_cluster_col), name (VisualizeArgs.singlemulticluster_name_col) and filter flag
+    (CompositeArgs.c5_flag_col) of their singlemulticluster; every atlas level (by its ENCODE cluster) and the motif
+    indexes its name and filter flag (each level's ENCODE cluster: export_encode_constituents()). Their names, MCIDs, flags
+    and confidence are those of the ENCODE stage; .mc and metadata TSV rewritten (their HTML and MEME do not show the
+    new columns). Then the motif index of the singlemulticluster level (the hits annotation's).
+    """
+    paths = encode_paths(args)
+    name_col, id_col, flag_col = MetadataCols.name_col, MetadataCols.unique_id_col, FilterArgs.filter_flag_col
+    c5_name_col, c5_flag_col, c5_cluster_col = (VisualizeArgs.singlemulticluster_name_col, CompositeArgs.c5_flag_col,
+                                                CompositeArgs.c5_cluster_col)
+    mc_c5_filtered = mc_c5[~mc_c5[flag_col].astype(bool).to_numpy()]
     c5_by_c4_id = membership.set_index(f"{id_col}_C4")
     c5_name_by_c4_name = dict(zip(membership[f"{name_col}_C4"], membership[name_col]))
     c5_flag_by_c4_name = dict(zip(membership[f"{name_col}_C4"], membership[flag_col].astype(bool)))
@@ -2156,7 +2181,7 @@ def export_singlemulticluster_levels(args, cpaths, mc_c5, membership, html_colum
     save_replace(mc_level, paths.mc_atlascluster_combined_path)
 
     #### Every atlas level, by its ENCODE cluster: the name and flag of its singlemulticluster -
-    #   File names as export_encode_levels(): {file_general}{level_suffix}{flag_suffix}{suffix}{filetype}
+    #   File names as export_encode_constituents(): {file_general}{level_suffix}{flag_suffix}{suffix}{filetype}
     logging.info("Atlas levels, with their singlemulticluster...")
     level_suffixs = {'metacluster': EncodeCombineArgs.suffix_metacluster, 'cluster': EncodeCombineArgs.suffix_cluster,
                      'motif': EncodeCombineArgs.suffix_motif}
@@ -2203,6 +2228,81 @@ def export_singlemulticluster_levels(args, cpaths, mc_c5, membership, html_colum
         motif_index_c5_df, VisualizeArgs.encodecluster_name_col, flag_col, mc_c5_filtered[name_col])
     motif_index_c5_df[VisualizeArgs.motif_index_cols].to_csv(cpaths.metadata_singlemulticluster_motif_index_path, sep="\t", index=False)
     logging.info(f"Motif index (singlemulticluster): {cpaths.metadata_singlemulticluster_motif_index_path}")
+
+
+def run_encode_constituents(args):
+    """--update-constituents only: the ENCODE clusters propagated to every level below (export_encode_constituents()), from the
+    combine's saved outputs (<output-dir>/mc: motifcompendium_encode_all.mc, motifcompendium_atlascluster_combined.mc)."""
+    log_dir = os.path.join(args.output_dir, "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    log_path = os.path.join(
+        log_dir,
+        f"log_pipeline_encode_constituents_{os.path.basename(os.path.normpath(args.output_dir))}"
+        f"_{time.strftime('%Y-%m-%d_%H-%M-%S', time.localtime())}.out",
+    )
+    logging.basicConfig(
+        force=True,
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[logging.StreamHandler(sys.stdout), logging.FileHandler(log_path)]
+    )
+    logging.info(f"Run started (the levels below the ENCODE clusters only): {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
+    logging.info(f"Writing run log to: {log_path}")
+    MotifCompendium.set_compute_options(
+        max_chunk=args.max_chunk,
+        max_cpus=args.max_cpus,
+        use_gpu=args.use_gpu,
+        ic_scale=args.ic,
+        fast_plotting=args.fast_plot,
+    )
+    paths = encode_paths(args)
+    mc_encode = MotifCompendium.load(paths.mc_encode_path, safe=args.safe)
+    mc_encode[FilterArgs.filter_flag_col] = mc_encode[FilterArgs.filter_flag_col].astype(bool)
+    mc_atlascluster_combined = MotifCompendium.load(paths.mc_atlascluster_combined_path, safe=args.safe)
+    html_column_desc_dict = pd.read_csv(args.column_desc_tsv, sep="\t", header=0).set_index('column_name')['column_desc'].to_dict()
+    export_encode_constituents(
+        args,
+        mc_encode,
+        mc_atlascluster_combined,
+        dict(zip(mc_encode[ClusterArgs.source_cluster_col], mc_encode[MetadataCols.name_col])),
+        dict(zip(mc_encode[ClusterArgs.source_cluster_col], mc_encode[MetadataCols.simple_name_col])),
+        encodecluster_cluster_col_name(),
+        html_column_desc_dict,
+    )
+    logging.info(f"Completed run: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
+
+
+def run_singlemulticluster_constituents(args):
+    """--update-constituents only (pipeline_encode_composite.py): the singlemulticluster level added to every level below
+    (export_singlemulticluster_constituents()), from its saved outputs (<composite-dir>: the level's _all .mc and the
+    membership of the ENCODE clusters)."""
+    log_dir = os.path.join(args.output_dir, "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    log_path = os.path.join(
+        log_dir,
+        f"log_pipeline_singlemulticluster_constituents_{os.path.basename(os.path.normpath(args.output_dir))}"
+        f"_{time.strftime('%Y-%m-%d_%H-%M-%S', time.localtime())}.out",
+    )
+    logging.basicConfig(
+        force=True,
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[logging.StreamHandler(sys.stdout), logging.FileHandler(log_path)]
+    )
+    logging.info(f"Run started (the levels below the singlemulticlusters only): {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
+    logging.info(f"Writing run log to: {log_path}")
+    MotifCompendium.set_compute_options(
+        max_chunk=args.max_chunk,
+        max_cpus=args.max_cpus,
+        use_gpu=args.use_gpu,
+        ic_scale=args.ic,
+        fast_plotting=args.fast_plot,
+    )
+    cpaths = composite_paths(getattr(args, "composite_dir", None) or default_composite_dir(args.output_dir))
+    mc_c5 = MotifCompendium.load(cpaths.mc_singlemulticluster_all_path, safe=args.safe)
+    membership = pd.read_csv(cpaths.metadata_singlemulticluster_membership_path, sep="\t", keep_default_na=False, na_values=[""])
+    export_singlemulticluster_constituents(args, cpaths, mc_c5, membership)
+    logging.info(f"Completed run: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
 
 
 def run_encode_combine(args):
@@ -3678,16 +3778,20 @@ def run_encode_combine(args):
     del mc_encode_composite
 
 
-    # #### Export: ENCODE compendia, motif index and every level below
-    export_encode_levels(
-        args,
-        mc_encode,
-        mc_atlascluster_combined,
-        atlascluster2encode_name_map,
-        atlascluster2encode_simple_map,
-        encodecluster_cluster_col,
-        html_column_desc_dict,
-    )
+    # #### Export: the ENCODE compendia; every level below and the motif indexes (--update-constituents now)
+    export_encode_level(args, mc_encode, mc_atlascluster_combined, html_column_desc_dict)
+    if args.update_constituents == "now":
+        export_encode_constituents(
+            args,
+            mc_encode,
+            mc_atlascluster_combined,
+            atlascluster2encode_name_map,
+            atlascluster2encode_simple_map,
+            encodecluster_cluster_col,
+            html_column_desc_dict,
+        )
+    else:
+        logging.info("The levels below the ENCODE clusters: not updated (--update-constituents defer; later: --update-constituents only)")
 
     # Args JSON
     args_record = {
@@ -3916,7 +4020,10 @@ if __name__ == "__main__":
     os.makedirs(args.output_dir, exist_ok=True)
     if args.time:
         start_time = time.time()
-    run_encode_combine(stage_args(args, **stage_dir_args))
+    if args.update_constituents == "only":
+        run_encode_constituents(stage_args(args, **stage_dir_args))
+    else:
+        run_encode_combine(stage_args(args, **stage_dir_args))
     if args.time:
         logging.info(f"Time taken: {time.time() - start_time:.2f}s")
     logging.info(f'ENCODE pipeline: run completed: {time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())}')
