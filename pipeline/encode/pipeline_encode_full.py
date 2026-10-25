@@ -123,6 +123,9 @@ def setup_parser():
     # Pipeline control
     parser.add_argument("--stages", nargs="+", choices=STAGE_ORDER, default=STAGE_ORDER,
                         help="Subset of stages to run, in pipeline order.")
+    parser.add_argument("--save-all", action="store_true",
+                        help="Also save every level's removed clusters (motifcompendium_*_removed: .mc, HTML, MEME, metadata "
+                             "TSV), the ISM evidence and the classified composites; the _all and _filtered ones are always saved.")
 
     # Output
     parser.add_argument("-o", "--output-dir", type=str, required=True,

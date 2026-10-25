@@ -80,6 +80,9 @@ def setup_parser():
                              "stage; defer: not (the levels below stay as the per-head stages wrote them, e.g. until the ENCODE "
                              "pipeline's last level is made); only: that update alone, from the combine's saved outputs (no "
                              "stage is run).")
+    parser.add_argument("--save-all", action="store_true",
+                        help="Also save every level's removed motifs/clusters (motifcompendium_*_removed: .mc, HTML, MEME, "
+                             "MoDISco H5); the _all and _filtered ones are always saved.")
 
     # Run type
     parser.add_argument("-vr", "--mcid-version", type=str, default="V0", help="The version to use in the unique identifier (e.g., V1).")
@@ -2721,17 +2724,20 @@ def run_chrom_sequential(args):
     # (1) Motifs
     mc.save(mc_motif_path)
     mc_filtered.save(mc_motif_filtered_path)
-    mc_removed.save(mc_motif_removed_path)
+    if args.save_all:
+        mc_removed.save(mc_motif_removed_path)
 
     # (2) Clusters
     mc_cluster.save(mc_cluster_path)
     mc_cluster_filtered.save(mc_cluster_filtered_path)
-    mc_cluster_removed.save(mc_cluster_removed_path)
+    if args.save_all:
+        mc_cluster_removed.save(mc_cluster_removed_path)
 
     # (3) Metaclusters
     mc_metacluster.save(mc_metacluster_path)
     mc_metacluster_filtered.save(mc_metacluster_filtered_path)
-    mc_metacluster_removed.save(mc_metacluster_removed_path)
+    if args.save_all:
+        mc_metacluster_removed.save(mc_metacluster_removed_path)
 
 
     ## HTML summary table
@@ -2739,14 +2745,15 @@ def run_chrom_sequential(args):
     os.makedirs(html_dir, exist_ok=True)
 
     # (1) Motifs: Removed only (sampled subset)
-    if mc_removed_sample is not None:
-        mc_removed_sample.summary_table_html(
-            html_out=html_motif_removed_path,
-            columns=(mc_removed_sample.columns() + mc_removed_sample.images()),
-            logo_trimming=VisualizeArgs.html_logo_trim,
-            editable=True,
-            column_desc_dict=html_column_desc_dict_metacluster,
-        )
+    if args.save_all:
+        if mc_removed_sample is not None:
+            mc_removed_sample.summary_table_html(
+                html_out=html_motif_removed_path,
+                columns=(mc_removed_sample.columns() + mc_removed_sample.images()),
+                logo_trimming=VisualizeArgs.html_logo_trim,
+                editable=True,
+                column_desc_dict=html_column_desc_dict_metacluster,
+            )
 
     # (2) Clusters
     mc_cluster.summary_table_html(
@@ -2763,13 +2770,14 @@ def run_chrom_sequential(args):
         editable=True,
         column_desc_dict=html_column_desc_dict_cluster,
     )
-    mc_cluster_removed.summary_table_html(
-        html_out=html_cluster_removed_path,
-        columns=[col for col in html_columns_cluster if col in (mc_cluster_removed.columns() + mc_cluster_removed.images())],
-        logo_trimming=VisualizeArgs.html_logo_trim,
-        editable=True,
-        column_desc_dict=html_column_desc_dict_cluster,
-    )
+    if args.save_all:
+        mc_cluster_removed.summary_table_html(
+            html_out=html_cluster_removed_path,
+            columns=[col for col in html_columns_cluster if col in (mc_cluster_removed.columns() + mc_cluster_removed.images())],
+            logo_trimming=VisualizeArgs.html_logo_trim,
+            editable=True,
+            column_desc_dict=html_column_desc_dict_cluster,
+        )
 
     # (3) Metaclusters
     mc_metacluster.summary_table_html(
@@ -2786,13 +2794,14 @@ def run_chrom_sequential(args):
         editable=True,
         column_desc_dict=html_column_desc_dict_metacluster,
     )
-    mc_metacluster_removed.summary_table_html(
-        html_out=html_metacluster_removed_path,
-        columns=[col for col in html_columns_metacluster if col in (mc_metacluster_removed.columns() + mc_metacluster_removed.images())],
-        logo_trimming=VisualizeArgs.html_logo_trim,
-        editable=True,
-        column_desc_dict=html_column_desc_dict_metacluster,
-    )
+    if args.save_all:
+        mc_metacluster_removed.summary_table_html(
+            html_out=html_metacluster_removed_path,
+            columns=[col for col in html_columns_metacluster if col in (mc_metacluster_removed.columns() + mc_metacluster_removed.images())],
+            logo_trimming=VisualizeArgs.html_logo_trim,
+            editable=True,
+            column_desc_dict=html_column_desc_dict_metacluster,
+        )
 
 
     ## EXPORT: MoDISco HDF5
@@ -2811,11 +2820,12 @@ def run_chrom_sequential(args):
             name_col=MetadataCols.name_col,
             save_loc=modisco_motif_filtered_path,
         )
-        utils_analysis.export_compendium_modisco(
-            mc=mc_removed,
-            name_col=MetadataCols.name_col,
-            save_loc=modisco_motif_removed_path,
-        )
+        if args.save_all:
+            utils_analysis.export_compendium_modisco(
+                mc=mc_removed,
+                name_col=MetadataCols.name_col,
+                save_loc=modisco_motif_removed_path,
+            )
 
         # (2) Clusters
         utils_analysis.export_compendium_modisco(
@@ -2828,11 +2838,12 @@ def run_chrom_sequential(args):
             name_col=MetadataCols.name_col,
             save_loc=modisco_cluster_filtered_path,
         )
-        utils_analysis.export_compendium_modisco(
-            mc=mc_cluster_removed,
-            name_col=MetadataCols.name_col,
-            save_loc=modisco_cluster_removed_path,
-        )
+        if args.save_all:
+            utils_analysis.export_compendium_modisco(
+                mc=mc_cluster_removed,
+                name_col=MetadataCols.name_col,
+                save_loc=modisco_cluster_removed_path,
+            )
 
         # (3) Metaclusters
         utils_analysis.export_compendium_modisco(
@@ -2845,11 +2856,12 @@ def run_chrom_sequential(args):
             name_col=MetadataCols.name_col,
             save_loc=modisco_metacluster_filtered_path,
         )
-        utils_analysis.export_compendium_modisco(
-            mc=mc_metacluster_removed,
-            name_col=MetadataCols.name_col,
-            save_loc=modisco_metacluster_removed_path,
-        )
+        if args.save_all:
+            utils_analysis.export_compendium_modisco(
+                mc=mc_metacluster_removed,
+                name_col=MetadataCols.name_col,
+                save_loc=modisco_metacluster_removed_path,
+            )
 
 
     ## EXPORT: MEME txt
@@ -2869,12 +2881,13 @@ def run_chrom_sequential(args):
         save_loc=meme_motif_filtered_path,
         trim_importance=(1/(2*mc_filtered.motifs.shape[1])),
     )
-    utils_analysis.export_compendium_meme(
-        mc=mc_removed,
-        name_col=MetadataCols.name_col,
-        save_loc=meme_motif_removed_path,
-        trim_importance=(1/(2*mc_removed.motifs.shape[1])),
-    )
+    if args.save_all:
+        utils_analysis.export_compendium_meme(
+            mc=mc_removed,
+            name_col=MetadataCols.name_col,
+            save_loc=meme_motif_removed_path,
+            trim_importance=(1/(2*mc_removed.motifs.shape[1])),
+        )
 
     # (2) Clusters
     utils_analysis.export_compendium_meme(
@@ -2889,12 +2902,13 @@ def run_chrom_sequential(args):
         save_loc=meme_cluster_filtered_path,
         trim_importance=(1/(2*mc_cluster_filtered.motifs.shape[1])),
     )
-    utils_analysis.export_compendium_meme(
-        mc=mc_cluster_removed,
-        name_col=MetadataCols.name_col,
-        save_loc=meme_cluster_removed_path,
-        trim_importance=(1/(2*mc_cluster_removed.motifs.shape[1])),
-    )
+    if args.save_all:
+        utils_analysis.export_compendium_meme(
+            mc=mc_cluster_removed,
+            name_col=MetadataCols.name_col,
+            save_loc=meme_cluster_removed_path,
+            trim_importance=(1/(2*mc_cluster_removed.motifs.shape[1])),
+        )
 
     # (3) Metaclusters
     utils_analysis.export_compendium_meme(
@@ -2909,12 +2923,13 @@ def run_chrom_sequential(args):
         save_loc=meme_metacluster_filtered_path,
         trim_importance=(1/(2*mc_metacluster_filtered.motifs.shape[1])),
     )
-    utils_analysis.export_compendium_meme(
-        mc=mc_metacluster_removed,
-        name_col=MetadataCols.name_col,
-        save_loc=meme_metacluster_removed_path,
-        trim_importance=(1/(2*mc_metacluster_removed.motifs.shape[1])),
-    )
+    if args.save_all:
+        utils_analysis.export_compendium_meme(
+            mc=mc_metacluster_removed,
+            name_col=MetadataCols.name_col,
+            save_loc=meme_metacluster_removed_path,
+            trim_importance=(1/(2*mc_metacluster_removed.motifs.shape[1])),
+        )
 
 
     ## EXPORT: Metadata TSV
@@ -4246,13 +4261,14 @@ def run_chrom_combine(args):
 
     os.makedirs(os.path.dirname(html_atlascluster_path), exist_ok=True)
     mc_chromatlas_removed = mc_chromatlas[mc_chromatlas[FilterArgs.filter_flag_col]]
-    mc_chromatlas_removed.summary_table_html(
-        html_out=html_atlascluster_removed_path,
-        columns=[col for col in html_columns_atlascluster if col in mc_chromatlas_removed.columns()],
-        logo_trimming=VisualizeArgs.html_logo_trim,
-        editable=True,
-        column_desc_dict=html_column_desc_dict_atlascluster,
-    )
+    if args.save_all:
+        mc_chromatlas_removed.summary_table_html(
+            html_out=html_atlascluster_removed_path,
+            columns=[col for col in html_columns_atlascluster if col in mc_chromatlas_removed.columns()],
+            logo_trimming=VisualizeArgs.html_logo_trim,
+            editable=True,
+            column_desc_dict=html_column_desc_dict_atlascluster,
+        )
 
     # os.makedirs(os.path.dirname(html_chromatlas_monomer_path), exist_ok=True)
     # mc_chromatlas_monomer = mc_chromatlas_filtered[~mc_chromatlas_filtered[composite_col]]
@@ -4283,8 +4299,9 @@ def run_chrom_combine(args):
     os.makedirs(os.path.dirname(mc_atlascluster_filtered_path), exist_ok=True)
     mc_chromatlas_filtered.save(mc_atlascluster_filtered_path)
 
-    os.makedirs(os.path.dirname(mc_atlascluster_removed_path), exist_ok=True)
-    mc_chromatlas_removed.save(mc_atlascluster_removed_path)
+    if args.save_all:
+        os.makedirs(os.path.dirname(mc_atlascluster_removed_path), exist_ok=True)
+        mc_chromatlas_removed.save(mc_atlascluster_removed_path)
 
     # os.makedirs(os.path.dirname(mc_chromatlas_monomer_path), exist_ok=True)
     # mc_chromatlas_monomer.save(mc_chromatlas_monomer_path)
@@ -4314,13 +4331,14 @@ def run_chrom_combine(args):
         trim_importance=(1/(2*mc_chromatlas_filtered.motifs.shape[1])),
     )
 
-    os.makedirs(os.path.dirname(meme_atlascluster_removed_path), exist_ok=True)
-    utils_analysis.export_compendium_meme(
-        mc=mc_chromatlas_removed,
-        name_col=MetadataCols.name_col,
-        save_loc=meme_atlascluster_removed_path,
-        trim_importance=(1/(2*mc_chromatlas_removed.motifs.shape[1])),
-    )
+    if args.save_all:
+        os.makedirs(os.path.dirname(meme_atlascluster_removed_path), exist_ok=True)
+        utils_analysis.export_compendium_meme(
+            mc=mc_chromatlas_removed,
+            name_col=MetadataCols.name_col,
+            save_loc=meme_atlascluster_removed_path,
+            trim_importance=(1/(2*mc_chromatlas_removed.motifs.shape[1])),
+        )
 
     ## EXPORT: MoDISco HDF5
     if args.export_modisco:
@@ -4336,11 +4354,12 @@ def run_chrom_combine(args):
             name_col=MetadataCols.name_col,
             save_loc=modisco_atlascluster_filtered_path,
         )
-        utils_analysis.export_compendium_modisco(
-            mc=mc_chromatlas_removed,
-            name_col=MetadataCols.name_col,
-            save_loc=modisco_atlascluster_removed_path,
-        )
+        if args.save_all:
+            utils_analysis.export_compendium_modisco(
+                mc=mc_chromatlas_removed,
+                name_col=MetadataCols.name_col,
+                save_loc=modisco_atlascluster_removed_path,
+            )
     # Metadata TSV
     os.makedirs(metadata_dir, exist_ok=True)
     mc_chromatlas.metadata.to_csv(metadata_atlascluster_path, sep="\t", index=False)

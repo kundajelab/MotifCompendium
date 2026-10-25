@@ -9,19 +9,22 @@ composite/validate_composite_motifs.ipynb (after the ISM runs):
 
   1. ISM: each composite's ISM contributions and results, per model, compared with the composite (similarity,
      spacing); each (composite, model) classified as hard, soft, hard & soft or no synergy, and each composite by its
-     strongest evidence across models. <composite-dir>/{mc,export,html}/ENCODE-motifcompendium_composite_ism*
+     strongest evidence across models. <composite-dir>/html/ENCODE-motifcompendium_composite_ism*.html; with
+     --save-all also the ISM evidence (mc/ENCODE-motifcompendium_composite_ism_motifs{_init,}.mc, its metadata TSVs in
+     export/) and the classified composites (mc/ENCODE-motifcompendium_composite_ism.mc)
   2. Merge: duplicate composites (centroids, until no pair is similar enough), then the soft and no-synergy composites
      of the same reference clusters; the merged ones reannotated; the no-synergy composites removed.
-  3. The singlemulticluster level (C5): the singles and the merged composites (filtered), and the removed ENCODE
-     clusters, with those left out of C5 (no-synergy and unannotated composites). As a clustering, each
-     singlemulticluster has a number (source_cluster) and a C5 MCID, and each ENCODE cluster of pipeline_encode.py (C4)
-     the number of its singlemulticluster (<composite-dir>/metadata/motifcompendium_singlemulticluster_membership.tsv);
-     the singlemulticlusters are named as pipeline_encode.py names its ENCODE clusters ({prename}_{counter}).
-  4. Exported as an ENCODE level, in <composite-dir> (motifcompendium_singlemulticluster_{all,filtered,removed}: .mc,
-     HTML, metadata TSV, MEME; the membership), and (--update-constituents now; defer: later, --update-constituents only) added to the
-     levels below, which keep their own names and flags: the ENCODE clusters (C4) get their singlemulticluster's
-     number, name and filter flag; every atlas level and the motif indexes its name and filter flag; then the motif
-     index of the level. Then pipeline_encode_hits.py --level singlemulticluster.
+  3. The singlemulticluster level (C5): the singles and the merged composites. Nothing is removed at this level: the
+     ENCODE clusters of pipeline_encode.py (C4) in no singlemulticluster are its removed ones and the composites left
+     out (no synergy; no subunits). As a clustering, each singlemulticluster has a number (source_cluster) and a C5
+     MCID, and each C4 ENCODE cluster its singlemulticluster's number, or why it has none
+     (<composite-dir>/metadata/motifcompendium_singlemulticluster_membership.tsv); the singlemulticlusters are named as
+     pipeline_encode.py names its ENCODE clusters ({prename}_{counter}).
+  4. Exported as an ENCODE level, in <composite-dir> (motifcompendium_singlemulticluster: .mc, HTML, metadata TSV, MEME;
+     the membership), and (--update-constituents now; defer: later, --update-constituents only) added to the levels
+     below, which keep their own names and flags: the ENCODE clusters (C4) get their singlemulticluster's number, name
+     and filter flag; every atlas level and the motif indexes its name and filter flag; then the motif index of the
+     level. Then pipeline_encode_hits.py --level singlemulticluster.
 
 This stage does not change the ENCODE stage's (pipeline_encode.py) names, MCIDs or flags: it can be rerun on its outputs
 (the singlemulticluster columns it added are replaced).
@@ -77,6 +80,9 @@ def setup_parser():
     parser.add_argument("--mcid-version", type=str, default="V0", help="ENCODE MCID version.")
     parser.add_argument("--update-constituents", choices=["now", "defer", "only"], default="now",
                         help="This stage's update of the levels below its own (the ENCODE clusters, every atlas level and the motif indexes: their singlemulticluster; the level's motif index). now: by this stage; defer: not (they stay as they were, e.g. until the last level is made: run_pipeline_encode_propagate.sh); only: that update alone, from this stage's saved outputs (nothing else is run).")
+    parser.add_argument("--save-all", action="store_true",
+                        help="Also save the ISM evidence (ENCODE-motifcompendium_composite_ism_motifs{_init,}.mc, its "
+                             "metadata TSVs) and the classified composites (ENCODE-motifcompendium_composite_ism.mc).")
     parser.add_argument("--tfatlas-dir", type=str, required=True,
                         help="Output root of the TF atlas pipeline (pipeline/bpnet/pipeline_bpnet.py).")
     parser.add_argument("--chromatlas-dir", type=str, required=True,
@@ -151,28 +157,23 @@ def align_columns(mcs):
 
 
 def final_encode_compendium(mc_encode, mc_encode_c4_filtered, mc_encode_c4_removed, mc_encode_composite_nosynergy,
-                            mcid_prefix, safe=False):
+                            mcid_prefix, safe):
     """
-    The singlemulticluster level (C5): filtered and removed (by filter_flag_col), numbered, with C5 MCIDs, and named,
-    with each ENCODE cluster of the combine (C4) mapped to its singlemulticluster.
-
-    Filtered: the C5 clusters (mc_encode: the singles and the merged composites). Removed: the combine's removed ENCODE
-    clusters (mc_encode_c4_removed), and its filtered ones left out of C5: the no-synergy composites and the composites
-    without subunits (dropped, with an error label).
-
-    As a clustering: each singlemulticluster has a number (its source_cluster: the C5 ones first, in mc_encode's order,
-    then the removed ones) and a C5 MCID (mcid_prefix + number), and each C4 ENCODE cluster the number of its
-    singlemulticluster (CompositeArgs.c5_cluster_col). A C5 composite holds the C4 composites merged into it (their
-    MCIDs: CompositeArgs.duplicate_members_col); a C5 single, and a removed ENCODE cluster, is its own C4 one. The
-    singlemulticlusters are named as the combine names its ENCODE clusters, {prename}_{counter} (simple name: prename);
-    mc_encode gets the same numbers, MCIDs and names. The singlemulticluster columns of an earlier run on the C4
-    compendia are dropped first.
+    The singlemulticluster level (C5): the C5 clusters of mc_encode (the singles and the merged composites), numbered as
+    a clustering (source_cluster 0..N-1, in mc_encode's order), with C5 MCIDs (mcid_prefix + number), named as the
+    combine names its ENCODE clusters ({prename}_{counter}; simple name: prename). Nothing is removed at this level: the
+    ENCODE clusters of the combine (C4) in no singlemulticluster are its removed ones (mc_encode_c4_removed) and its
+    filtered ones left out of C5 (the no-synergy composites, else the composites without subunits). A C5 composite
+    holds the C4 composites merged into it (their MCIDs: CompositeArgs.duplicate_members_col); a C5 single is its own
+    C4 one. The singlemulticluster columns of an earlier run on the C4 compendia are dropped first.
 
     Returns:
-        (mc_c5 (the singlemulticluster level), membership (one row per C4 ENCODE cluster), ENCODE clusters left out of
-         C5, by flag type)
+        (mc_c5 (mc_encode, numbered and named), membership (one row per C4 ENCODE cluster: its singlemulticluster's
+         number, MCID, name and simple name, or none: flag_remove True, flag_type the combine's for its removed ones,
+         no-synergy or composite-unannotated for those left out), ENCODE clusters left out of C5, by flag type)
     """
     id_col, name_col = MetadataCols.unique_id_col, MetadataCols.name_col
+    flag_col, flag_type_col = FilterArgs.filter_flag_col, FilterArgs.filter_flag_type_col
     members_col = CompositeArgs.duplicate_members_col
     c5_cluster_col = CompositeArgs.c5_cluster_col
     for mc_i in (mc_encode, mc_encode_c4_filtered, mc_encode_c4_removed):
@@ -215,76 +216,51 @@ def final_encode_compendium(mc_encode, mc_encode_c4_filtered, mc_encode_c4_remov
         for members in mc_encode_composite_nosynergy[members_col].dropna().astype(str)
         for c4_id in members.split(",") if c4_id.strip()
     } if members_col in mc_encode_composite_nosynergy.columns() else set()
-    dropped_mask = ~c4_filtered_ids.isin(c4_to_c5_row)
-    mc_encode_dropped = mc_encode_c4_filtered[dropped_mask]
-    flag_type_dropped = np.where(
-        mc_encode_dropped[id_col].astype(str).isin(nosynergy_c4_ids),
-        CompositeArgs.flag_type_no_synergy,
-        CompositeArgs.flag_type_unannotated,
-    )
-    mc_encode_dropped[FilterArgs.filter_flag_col] = True
-    mc_encode_dropped[FilterArgs.filter_flag_type_col] = flag_type_dropped
-    mc_encode_dropped[LabelCols.label_conf_col] = LabelCols.label_confs[-1]
-    for col in (LabelCols.label_readable_col, MetadataCols.prename_col, MetadataCols.simple_name_col):
-        mc_encode_dropped[col] = flag_type_dropped
-    logging.info(f"Left out of C5 (removed): {dict(pd.Series(flag_type_dropped).value_counts())}")
+    left_out_ids = c4_filtered_ids[~c4_filtered_ids.isin(c4_to_c5_row)]
+    left_out_type = dict(zip(left_out_ids, np.where(
+        left_out_ids.isin(nosynergy_c4_ids), CompositeArgs.flag_type_no_synergy, CompositeArgs.flag_type_unannotated)))
+    num_left_out = {str(k): int(n) for k, n in pd.Series(list(left_out_type.values()), dtype=object).value_counts().items()}
+    logging.info(f"Left out of C5: {num_left_out}")
 
-    mc_encode[FilterArgs.filter_flag_col] = False
-    mc_encode_removed = mc_encode_c4_removed
-    if len(mc_encode_dropped):
-        align_columns([mc_encode_c4_removed, mc_encode_dropped])
-        mc_encode_removed = MotifCompendium.combine([mc_encode_c4_removed, mc_encode_dropped], safe=safe)
-    align_columns([mc_encode, mc_encode_removed])
-    mc_encode_final = MotifCompendium.combine([mc_encode, mc_encode_removed], safe=safe)
-    mc_encode_final[FilterArgs.filter_flag_col] = mc_encode_final[FilterArgs.filter_flag_col].astype(bool)
-    logging.info(f"Singlemulticluster level: {len(mc_encode)} filtered, {len(mc_encode_removed)} removed")
-
-    # As a clustering: the singlemulticlusters' numbers (source_cluster) and C5 MCIDs; each C4 ENCODE cluster's number
-    num_c5 = len(mc_encode)
-    numbers = np.arange(len(mc_encode_final))
-    mc_encode_final[ClusterArgs.source_cluster_col] = numbers
-    mc_encode_final[id_col] = [f"{mcid_prefix}{number:08d}" for number in numbers]
-    c4_to_number = {
-        **c4_to_c5_row,
-        **{c4_id: num_c5 + i for i, c4_id in enumerate(mc_encode_removed[id_col].astype(str))},
-    }
-    c4_all = pd.concat([
-        mc_encode_c4_filtered.metadata[[id_col, name_col, ClusterArgs.source_cluster_col]],
-        mc_encode_c4_removed.metadata[[id_col, name_col, ClusterArgs.source_cluster_col]],
-    ], ignore_index=True)
-    c4_numbers = c4_all[id_col].astype(str).map(c4_to_number)
-    if c4_numbers.isna().any():
-        raise ValueError(f"ENCODE clusters of the combine in no singlemulticluster: {c4_all.loc[c4_numbers.isna(), id_col].tolist()[:5]}")
-    c4_numbers = c4_numbers.astype(int)
+    # As a clustering: the singlemulticlusters' numbers (source_cluster) and C5 MCIDs
+    mc_encode[flag_col] = False
+    numbers = np.arange(len(mc_encode))
+    mc_encode[ClusterArgs.source_cluster_col] = numbers
+    mc_encode[id_col] = [f"{mcid_prefix}{number:08d}" for number in numbers]
 
     # Names: as the combine names its ENCODE clusters (pipeline_encode.py, "Rename: {prename_col}_{counter}")
-    mc_encode_final.metadata[MetadataCols.counter_col] = mc_encode_final.metadata.dropna(subset=[MetadataCols.prename_col]).groupby(MetadataCols.prename_col).cumcount().fillna(0).astype(int)
-    mc_encode_final.metadata[MetadataCols.name_new_col] = mc_encode_final.metadata[MetadataCols.prename_col] + "_" + mc_encode_final.metadata[MetadataCols.counter_col].astype(str)
-    mc_encode_final.metadata[name_col] = mc_encode_final.metadata[MetadataCols.name_new_col]
-    mc_encode_final.metadata.drop(columns=[MetadataCols.name_new_col, MetadataCols.counter_col], axis=1, inplace=True)
-    mc_encode_final[MetadataCols.simple_name_col] = mc_encode_final[MetadataCols.prename_col]
-    if mc_encode_final[name_col].isna().any() or not mc_encode_final[name_col].is_unique:
+    mc_encode.metadata[MetadataCols.counter_col] = mc_encode.metadata.dropna(subset=[MetadataCols.prename_col]).groupby(MetadataCols.prename_col).cumcount().fillna(0).astype(int)
+    mc_encode.metadata[MetadataCols.name_new_col] = mc_encode.metadata[MetadataCols.prename_col] + "_" + mc_encode.metadata[MetadataCols.counter_col].astype(str)
+    mc_encode.metadata[name_col] = mc_encode.metadata[MetadataCols.name_new_col]
+    mc_encode.metadata.drop(columns=[MetadataCols.name_new_col, MetadataCols.counter_col], axis=1, inplace=True)
+    mc_encode[MetadataCols.simple_name_col] = mc_encode[MetadataCols.prename_col]
+    if mc_encode[name_col].isna().any() or not mc_encode[name_col].is_unique:
         raise ValueError("Singlemulticluster names are missing or not unique (prename)")
+    logging.info(f"Singlemulticluster level: {len(mc_encode)} singlemulticlusters")
 
-    # The C5 clusters (mc_encode): the same numbers, MCIDs and names
-    for col in (ClusterArgs.source_cluster_col, id_col, name_col, MetadataCols.simple_name_col):
-        mc_encode[col] = mc_encode_final[col].iloc[:num_c5].to_numpy()
-
-    # Membership table: each C4 ENCODE cluster, with its singlemulticluster
-    final_md = mc_encode_final.metadata
+    # Membership table: each C4 ENCODE cluster, with its singlemulticluster, or why it has none
+    c4_all = pd.concat([
+        mc_encode_c4_filtered.metadata[[id_col, name_col, ClusterArgs.source_cluster_col]].assign(**{flag_type_col: None}),
+        mc_encode_c4_removed.metadata[[id_col, name_col, ClusterArgs.source_cluster_col, flag_type_col]],
+    ], ignore_index=True)
+    c4_ids = c4_all[id_col].astype(str)
+    c4_numbers = pd.array([c4_to_c5_row.get(c4_id) for c4_id in c4_ids], dtype="Int64")
+    in_c5 = ~pd.isna(c4_numbers)
+    c5_md = mc_encode.metadata
+    take = lambda col: [c5_md[col].iloc[int(n)] if pd.notna(n) else None for n in c4_numbers]
     membership = pd.DataFrame({
-        f"{id_col}_C4": c4_all[id_col].astype(str).to_numpy(),
+        f"{id_col}_C4": c4_ids.to_numpy(),
         f"{name_col}_C4": c4_all[name_col].to_numpy(),
         f"{ClusterArgs.source_cluster_col}_C4": c4_all[ClusterArgs.source_cluster_col].to_numpy(),
-        c5_cluster_col: c4_numbers.to_numpy(),
-        id_col: final_md[id_col].to_numpy()[c4_numbers],
-        name_col: final_md[name_col].to_numpy()[c4_numbers],
-        MetadataCols.simple_name_col: final_md[MetadataCols.simple_name_col].to_numpy()[c4_numbers],
-        FilterArgs.filter_flag_col: final_md[FilterArgs.filter_flag_col].to_numpy()[c4_numbers],
+        c5_cluster_col: c4_numbers,
+        id_col: take(id_col),
+        name_col: take(name_col),
+        MetadataCols.simple_name_col: take(MetadataCols.simple_name_col),
+        flag_col: ~in_c5,
+        flag_type_col: [None if c5 else left_out_type.get(c4_id, flag_type)
+                        for c5, c4_id, flag_type in zip(in_c5, c4_ids, c4_all[flag_type_col])],
     })
-
-    num_left_out = dict(pd.Series(flag_type_dropped, dtype=object).value_counts())
-    return mc_encode_final, membership, num_left_out
+    return mc_encode, membership, num_left_out
 
 
 def run_encode_composite(args):
@@ -332,10 +308,12 @@ def run_encode_composite(args):
 
     ### INPUTS -------------------------------------------------------------------
     # The ENCODE stage's compendium (C4): filtered (the singles and the composites, with their decomposition) and
-    # removed ENCODE clusters
+    # removed ENCODE clusters (from its _all compendium: the _removed one is saved with --save-all only)
     logging.info("Loading the ENCODE compendia (pipeline_encode.py)...")
     mc_encode = MotifCompendium.load(paths.mc_encode_filtered_path, safe=args.safe)
-    mc_encode_removed = MotifCompendium.load(paths.mc_encode_removed_path, safe=args.safe)
+    mc_encode_all = MotifCompendium.load(paths.mc_encode_path, safe=args.safe)
+    mc_encode_removed = mc_encode_all[mc_encode_all[FilterArgs.filter_flag_col].astype(bool).to_numpy()]
+    del mc_encode_all
     if CompositeArgs.ism_class_col in mc_encode.columns():
         raise ValueError(
             f"{paths.mc_encode_filtered_path} is already the final compendium of an earlier run of this stage "
@@ -546,7 +524,8 @@ def run_encode_composite(args):
     # )
 
     # Save MotifCompendium: ISM contributions
-    save_replace(mc_encode_composite_ism_motifs, cpaths.mc_composite_ism_motifs_init_path)
+    if args.save_all:  # the ISM evidence: --save-all
+        save_replace(mc_encode_composite_ism_motifs, cpaths.mc_composite_ism_motifs_init_path)
     # mc_encode_composite_ism_footprints.save(mc_encode_composite_ism_footprints_init_path)
 
     # Calculate similarity: ENCODE composite vs ISM contributions
@@ -633,7 +612,8 @@ def run_encode_composite(args):
     # mc_encode_composite_ism_footprints[CompositeArgs.ism_class_col] = mc_encode_composite_ism_footprints.metadata.apply(classify_syntax, axis=1)
 
     # Save MotifCompendium: ISM contributions
-    save_replace(mc_encode_composite_ism_motifs, cpaths.mc_composite_ism_motifs_path)
+    if args.save_all:  # the ISM evidence: --save-all
+        save_replace(mc_encode_composite_ism_motifs, cpaths.mc_composite_ism_motifs_path)
     # mc_encode_composite_ism_footprints.save(mc_encode_composite_ism_footprints_path)
 
     # ### Classify: one classification per motif (aggregate)
@@ -767,10 +747,11 @@ def run_encode_composite(args):
     )
 
     # Save ISM cooperativity metadata
-    os.makedirs(os.path.dirname(cpaths.metadata_composite_ism_motifs_path), exist_ok=True)
-    mc_encode_composite_ism_motifs.metadata.to_csv(cpaths.metadata_composite_ism_motifs_path, sep="\t", index=False)
-    os.makedirs(os.path.dirname(cpaths.metadata_composite_ism_motifs_agg_path), exist_ok=True)
-    mc_encode_composite_ism_motifs_class_metadata.to_csv(cpaths.metadata_composite_ism_motifs_agg_path, sep="\t", index=True)
+    if args.save_all:  # the ISM evidence: --save-all
+        os.makedirs(os.path.dirname(cpaths.metadata_composite_ism_motifs_path), exist_ok=True)
+        mc_encode_composite_ism_motifs.metadata.to_csv(cpaths.metadata_composite_ism_motifs_path, sep="\t", index=False)
+        os.makedirs(os.path.dirname(cpaths.metadata_composite_ism_motifs_agg_path), exist_ok=True)
+        mc_encode_composite_ism_motifs_class_metadata.to_csv(cpaths.metadata_composite_ism_motifs_agg_path, sep="\t", index=True)
 
     # os.makedirs(os.path.dirname(mc_encode_composite_ism_footprints_metadata_path), exist_ok=True)
     # mc_encode_composite_ism_footprints.metadata.to_csv(mc_encode_composite_ism_footprints_metadata_path, sep="\t", index=False)
@@ -789,8 +770,9 @@ def run_encode_composite(args):
         column_desc_dict=html_column_desc_dict,
     )
 
-    # Save MotifCompendium: ENCODE composite with ISM metadata
-    save_replace(mc_encode_composite, cpaths.mc_composite_ism_path)
+    # Save MotifCompendium: ENCODE composite with ISM metadata (--save-all)
+    if args.save_all:
+        save_replace(mc_encode_composite, cpaths.mc_composite_ism_path)
 
     # ### Clean up composites
 
@@ -1684,25 +1666,12 @@ def run_encode_composite(args):
 
     ### SINGLEMULTICLUSTER LEVEL (C5) ------------------------------------------------------------------------------
     # Numbered (as a clustering), with C5 MCIDs, named, with each ENCODE cluster of the combine (C4) mapped to its
-    # singlemulticluster
-    logging.info("Singlemulticluster level (C5): the C5 clusters and the removed ENCODE clusters...")
+    # singlemulticluster (or why it has none)
+    logging.info("Singlemulticluster level (C5)...")
     mc_c5, c5_membership_df, num_left_out = final_encode_compendium(
         mc_encode, mc_encode_c4_filtered, mc_encode_c4_removed, mc_encode_composite_nosynergy,
         f"{unique_id_initial}.{CompositeArgs.mcid_level}.", safe=args.safe,
     )
-
-    # HTML report: the C5 clusters (with their composites' ISM columns), with their names
-    os.makedirs(os.path.dirname(cpaths.html_encode_vf_path), exist_ok=True)
-    mc_encode.summary_table_html(
-        html_out=cpaths.html_encode_vf_path,
-        columns=[col for col in VisualizeArgs.html_columns if col in (mc_encode.columns() + mc_encode.images())],
-        logo_trimming=VisualizeArgs.html_logo_trim,
-        editable=True,
-        column_desc_dict=html_column_desc_dict,
-    )
-
-    # Save: the C5 clusters
-    save_replace(mc_encode, cpaths.mc_encode_vf_path)
 
     # #### Export: the singlemulticluster level (<composite-dir>); added to the ENCODE clusters and every level below
     # (--update-constituents now)
@@ -1717,8 +1686,7 @@ def run_encode_composite(args):
         "parser_args": vars(args),
         "configs": pipeline_encode.collect_configs_snapshot(),
         "composite_dir": cpaths.composite_dir,
-        "num_singlemulticluster_filtered": int((~mc_c5[FilterArgs.filter_flag_col]).sum()),
-        "num_singlemulticluster_removed": int(mc_c5[FilterArgs.filter_flag_col].sum()),
+        "num_singlemulticluster": len(mc_c5),
         "num_left_out_of_c5": num_left_out,
         "log_path": log_path,
     }

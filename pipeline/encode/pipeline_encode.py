@@ -71,6 +71,9 @@ def setup_parser():
     parser.add_argument("--mcid-version", type=str, default="V0", help="ENCODE MCID version.")
     parser.add_argument("--update-constituents", choices=["now", "defer", "only"], default="now",
                         help="This stage's update of the levels below its own (every atlas level and the motif indexes: their ENCODE cluster, final flags and confidence). now: by this stage; defer: not (they stay as they were, e.g. until the last level is made: run_pipeline_encode_propagate.sh); only: that update alone, from this stage's saved outputs (nothing else is run).")
+    parser.add_argument("--save-all", action="store_true",
+                        help="Also save every level's removed clusters (motifcompendium_*_removed: .mc, HTML, MEME, metadata "
+                             "TSV); the _all and _filtered ones are always saved.")
 
     # Input: the atlas pipelines' output roots, each <dir>/{counts,profile,combined}
     parser.add_argument("--tfatlas-dir", type=str, required=True,
@@ -742,34 +745,29 @@ def composite_paths(composite_dir):
         composite_dir=composite_dir,
         ism_dir=os.path.join(composite_dir, "ism"),
         # Composites (pipeline_encode.py); the per-motif and per-model tables are the ISM stage's inputs
-        mc_composite_path=os.path.join(composite_dir, "mc", "ENCODE-motifcompendium_composite_vf.mc"),
+        mc_composite_path=os.path.join(composite_dir, "mc", "ENCODE-motifcompendium_composite.mc"),
         metadata_composite_path=os.path.join(composite_dir, "export", "ENCODE-motifcompendium_composite_metadata.tsv"),
         metadata_composite_model_path=os.path.join(composite_dir, "export", "ENCODE-motifcompendium_composite_metadata_model.tsv"),
         html_msw_path=os.path.join(composite_dir, "html", "ENCODE-motifcompendium_encode_msw.html"),
         html_composite_path=os.path.join(composite_dir, "html", "ENCODE-motifcompendium_composite.html"),
-        # ISM cooperativity, merged composites and the final compendium (pipeline_encode_composite.py)
+        # ISM cooperativity (the ISM evidence and the classified composites: --save-all) and the merged composites
+        # (pipeline_encode_composite.py)
         mc_composite_ism_motifs_init_path=os.path.join(composite_dir, "mc", "ENCODE-motifcompendium_composite_ism_motifs_init.mc"),
         mc_composite_ism_motifs_path=os.path.join(composite_dir, "mc", "ENCODE-motifcompendium_composite_ism_motifs.mc"),
         mc_composite_ism_path=os.path.join(composite_dir, "mc", "ENCODE-motifcompendium_composite_ism.mc"),
         mc_composite_ism_dedup_path=os.path.join(composite_dir, "mc", "ENCODE-motifcompendium_composite_ism_deduplicated.mc"),
-        mc_encode_vf_path=os.path.join(composite_dir, "mc", "ENCODE-motifcompendium_vf.mc"),
         metadata_composite_ism_motifs_path=os.path.join(composite_dir, "export", "ENCODE-motifcompendium_composite_ism_motifs_metadata.tsv"),
         metadata_composite_ism_motifs_agg_path=os.path.join(composite_dir, "export", "ENCODE-motifcompendium_composite_ism_motifs_metadata_agg.tsv"),
         html_composite_ism_path=os.path.join(composite_dir, "html", "ENCODE-motifcompendium_composite_ism.html"),
         html_composite_ism_dedup_path=os.path.join(composite_dir, "html", "ENCODE-motifcompendium_composite_ism_deduplicated.html"),
-        html_encode_vf_path=os.path.join(composite_dir, "html", "ENCODE-motifcompendium_vf.html"),
-        # The singlemulticluster level (C5; pipeline_encode_composite.py): all, filtered, removed (as an ENCODE level),
-        # the membership of the ENCODE clusters (C4), the motif index, the hits annotation (pipeline_encode_hits.py)
+        # The singlemulticluster level (C5; pipeline_encode_composite.py): one compendium (nothing is removed at this
+        # level), the membership of the ENCODE clusters (C4), the motif index, the hits annotation (pipeline_encode_hits.py)
         metadata_dir=os.path.join(composite_dir, "metadata"),
         export_dir=os.path.join(composite_dir, "export"),
-        **{f"mc_singlemulticluster_{flag}_path": os.path.join(composite_dir, "mc", f"motifcompendium_singlemulticluster_{flag}.mc")
-           for flag in ("all", "filtered", "removed")},
-        **{f"html_singlemulticluster_{flag}_path": os.path.join(composite_dir, "html", f"motifcompendium_singlemulticluster_{flag}.html")
-           for flag in ("all", "filtered", "removed")},
-        **{f"metadata_singlemulticluster_{flag}_path": os.path.join(composite_dir, "metadata", f"motifcompendium_singlemulticluster_{flag}_metadata.tsv")
-           for flag in ("all", "filtered", "removed")},
-        **{f"meme_singlemulticluster_{flag}_path": os.path.join(composite_dir, "export", f"motifcompendium_singlemulticluster_{flag}.meme.txt")
-           for flag in ("all", "filtered", "removed")},
+        mc_singlemulticluster_path=os.path.join(composite_dir, "mc", "motifcompendium_singlemulticluster.mc"),
+        html_singlemulticluster_path=os.path.join(composite_dir, "html", "motifcompendium_singlemulticluster.html"),
+        metadata_singlemulticluster_path=os.path.join(composite_dir, "metadata", "motifcompendium_singlemulticluster_metadata.tsv"),
+        meme_singlemulticluster_path=os.path.join(composite_dir, "export", "motifcompendium_singlemulticluster.meme.txt"),
         metadata_singlemulticluster_membership_path=os.path.join(composite_dir, "metadata", "motifcompendium_singlemulticluster_membership.tsv"),
         metadata_singlemulticluster_motif_index_path=os.path.join(composite_dir, "metadata", "motifcompendium_singlemulticluster_motif_index.tsv"),
         metadata_hits_path=os.path.join(composite_dir, "metadata", "motifcompendium_singlemulticluster_metadata_hits.tsv"),
@@ -779,13 +777,14 @@ def composite_paths(composite_dir):
 
 def singlemulticluster_level_paths(args, cpaths):
     """encode_paths(args), with the ENCODE level's compendia, motif index and hits outputs those of the singlemulticluster
-    level (cpaths: composite_paths()): for the hits annotation by singlemulticluster (pipeline_encode_hits.py)."""
+    level (cpaths: composite_paths()): for the hits annotation by singlemulticluster (pipeline_encode_hits.py). The level is
+    one compendium (its "filtered" one); it has no removed one (None)."""
     paths = encode_paths(args)
-    for flag, suffix in (("all", ""), ("filtered", "_filtered"), ("removed", "_removed")):
-        setattr(paths, f"mc_encode{suffix}_path", getattr(cpaths, f"mc_singlemulticluster_{flag}_path"))
-        setattr(paths, f"html_encode{suffix}_path", getattr(cpaths, f"html_singlemulticluster_{flag}_path"))
-        setattr(paths, f"metadata_encode{suffix}_path", getattr(cpaths, f"metadata_singlemulticluster_{flag}_path"))
-        setattr(paths, f"meme_encode{suffix}_path", getattr(cpaths, f"meme_singlemulticluster_{flag}_path"))
+    for kind in ("mc", "html", "metadata", "meme"):
+        level_path = getattr(cpaths, f"{kind}_singlemulticluster_path")
+        setattr(paths, f"{kind}_encode_path", level_path)
+        setattr(paths, f"{kind}_encode_filtered_path", level_path)  # the level: one compendium, nothing removed
+        setattr(paths, f"{kind}_encode_removed_path", None)
     paths.metadata_motif_index_path = cpaths.metadata_singlemulticluster_motif_index_path
     for name in ("metadata_dir", "export_dir", "metadata_hits_path", "hits_annotated_dir"):
         setattr(paths, name, getattr(cpaths, name))
@@ -1521,15 +1520,16 @@ def export_encode_level(args, mc_encode, mc_atlascluster_combined, html_column_d
         column_desc_dict=html_column_desc_dict_encodecluster,
     )
 
-    os.makedirs(os.path.dirname(paths.html_encode_removed_path), exist_ok=True)
     mc_encode_removed = mc_encode[mc_encode[FilterArgs.filter_flag_col]]
-    mc_encode_removed.summary_table_html(
-        html_out=paths.html_encode_removed_path,
-        columns=html_columns_encodecluster,
-        logo_trimming=VisualizeArgs.html_logo_trim,
-        editable=True,
-        column_desc_dict=html_column_desc_dict_encodecluster,
-    )
+    if getattr(args, "save_all", False):
+        os.makedirs(os.path.dirname(paths.html_encode_removed_path), exist_ok=True)
+        mc_encode_removed.summary_table_html(
+            html_out=paths.html_encode_removed_path,
+            columns=html_columns_encodecluster,
+            logo_trimming=VisualizeArgs.html_logo_trim,
+            editable=True,
+            column_desc_dict=html_column_desc_dict_encodecluster,
+        )
 
     # # Create HTML: Edited
     # html_columns_encodecluster = [html_col for html_col in html_columns if html_col in (mc_encode.columns() + mc_encode.images())]
@@ -1577,8 +1577,9 @@ def export_encode_level(args, mc_encode, mc_atlascluster_combined, html_column_d
     os.makedirs(os.path.dirname(paths.mc_encode_filtered_path), exist_ok=True)
     mc_encode_filtered.save(paths.mc_encode_filtered_path)
 
-    os.makedirs(os.path.dirname(paths.mc_encode_removed_path), exist_ok=True)
-    mc_encode_removed.save(paths.mc_encode_removed_path)
+    if getattr(args, "save_all", False):
+        os.makedirs(os.path.dirname(paths.mc_encode_removed_path), exist_ok=True)
+        mc_encode_removed.save(paths.mc_encode_removed_path)
 
     os.makedirs(os.path.dirname(paths.mc_atlascluster_combined_path), exist_ok=True)
     mc_atlascluster_combined.save(paths.mc_atlascluster_combined_path)
@@ -1605,13 +1606,14 @@ def export_encode_level(args, mc_encode, mc_atlascluster_combined, html_column_d
         trim_importance=(1/(2*mc_encode_filtered.motifs.shape[1])),
     )
 
-    os.makedirs(os.path.dirname(paths.meme_encode_removed_path), exist_ok=True)
-    utils_analysis.export_compendium_meme(
-        mc=mc_encode_removed,
-        name_col=MetadataCols.name_col,
-        save_loc=paths.meme_encode_removed_path,
-        trim_importance=(1/(2*mc_encode_removed.motifs.shape[1])),
-    )
+    if getattr(args, "save_all", False):
+        os.makedirs(os.path.dirname(paths.meme_encode_removed_path), exist_ok=True)
+        utils_analysis.export_compendium_meme(
+            mc=mc_encode_removed,
+            name_col=MetadataCols.name_col,
+            save_loc=paths.meme_encode_removed_path,
+            trim_importance=(1/(2*mc_encode_removed.motifs.shape[1])),
+        )
 
     # Metadata TSV
     os.makedirs(os.path.dirname(paths.metadata_atlascluster_combined_path), exist_ok=True)
@@ -1624,7 +1626,8 @@ def export_encode_level(args, mc_encode, mc_atlascluster_combined, html_column_d
     mc_encode_filtered.metadata.drop(columns=EncodeCombineArgs.remove_cols, errors='ignore').to_csv(paths.metadata_encode_filtered_path, sep="\t", index=False)
 
     os.makedirs(os.path.dirname(paths.metadata_encode_path), exist_ok=True)
-    mc_encode_removed.metadata.drop(columns=EncodeCombineArgs.remove_cols, errors='ignore').to_csv(paths.metadata_encode_removed_path, sep="\t", index=False)
+    if getattr(args, "save_all", False):
+        mc_encode_removed.metadata.drop(columns=EncodeCombineArgs.remove_cols, errors='ignore').to_csv(paths.metadata_encode_removed_path, sep="\t", index=False)
 
 
 
@@ -2051,6 +2054,8 @@ def export_encode_constituents(args, mc_encode, mc_atlascluster_combined, atlasc
         level = 'combined'
         mc_level = atlas_dict[level]
         for suffix_flag, flag_bool in EncodeCombineArgs.flags:
+            if flag_bool is True and not getattr(args, "save_all", False):
+                continue  # the removed ones: --save-all
             export_level_flag(
                 mc_level_flag=mc_level if flag_bool is None else mc_level[mc_level[FilterArgs.filter_flag_col] == flag_bool],
                 mc_level_dir=paths.mc_dirs[atlas][level],
@@ -2063,6 +2068,8 @@ def export_encode_constituents(args, mc_encode, mc_atlascluster_combined, atlasc
         for head in ['counts', 'profile']:
             for level, mc_level in atlas_dict[head].items():
                 for suffix_flag, flag_bool in EncodeCombineArgs.flags:
+                    if flag_bool is True and not getattr(args, "save_all", False):
+                        continue  # the removed ones: --save-all
                     export_level_flag(
                         mc_level_flag=mc_level if flag_bool is None else mc_level[mc_level[FilterArgs.filter_flag_col] == flag_bool],
                         mc_level_dir=paths.mc_dirs[atlas][head],
@@ -2074,18 +2081,16 @@ def export_encode_constituents(args, mc_encode, mc_atlascluster_combined, atlasc
 
 def export_singlemulticluster_level(args, cpaths, mc_c5, membership, html_column_desc_dict):
     """
-    The singlemulticluster level (C5: pipeline_encode_composite.py's singles and merged composites, filtered, and the
-    removed ENCODE clusters) as an ENCODE level, in <composite-dir> (cpaths): all, filtered, removed (.mc, HTML,
-    metadata TSV, MEME) and the membership of the ENCODE clusters (one row per C4 ENCODE cluster). The levels below:
+    The singlemulticluster level (C5: pipeline_encode_composite.py's singles and merged composites) as an ENCODE level, in
+    <composite-dir> (cpaths): motifcompendium_singlemulticluster (.mc, HTML, metadata TSV, MEME; nothing is removed at
+    this level: the ENCODE clusters not in it are the combine's, C4), and the membership of the ENCODE clusters (one row
+    per C4 ENCODE cluster: its singlemulticluster, or why it has none). The levels below:
     export_singlemulticluster_constituents().
     """
-    name_col, id_col, flag_col = MetadataCols.name_col, MetadataCols.unique_id_col, FilterArgs.filter_flag_col
-    c5_name_col, c5_flag_col, c5_cluster_col = (VisualizeArgs.singlemulticluster_name_col, CompositeArgs.c5_flag_col,
-                                                CompositeArgs.c5_cluster_col)
-    c5_cols = [c5_cluster_col, c5_name_col, c5_flag_col]
+    name_col, flag_col = MetadataCols.name_col, FilterArgs.filter_flag_col
     mc_c5[flag_col] = mc_c5[flag_col].astype(bool)
 
-    # Logos of the rows without one (parts of the level combined with and without them): summary_table_html() draws
+    # Logos of the rows without one (singles and composites combined with and without them): summary_table_html() draws
     # them only for a compendium without the image column
     for image_name, reverse in (("logo (fwd)", False), ("logo (rev)", True)):
         if image_name not in mc_c5.images():
@@ -2101,34 +2106,32 @@ def export_singlemulticluster_level(args, cpaths, mc_c5, membership, html_column
                 images[i] = image
             mc_c5.set_images(image_name, images)
             logging.info(f"{image_name}: drawn for the {len(missing)} singlemulticlusters without one")
-    mc_c5_filtered = mc_c5[~mc_c5[flag_col].to_numpy()]
-    mc_c5_removed = mc_c5[mc_c5[flag_col].to_numpy()]
 
-    #### The singlemulticluster level: all, filtered, removed ----------------------------------
-    logging.info(f"Singlemulticluster level: {len(mc_c5_filtered)} filtered, {len(mc_c5_removed)} removed -> {cpaths.composite_dir}")
+    #### The singlemulticluster level --------------------------------------------------------------------
+    logging.info(f"Singlemulticluster level: {len(mc_c5)} singlemulticlusters -> {cpaths.composite_dir}")
     html_columns_level = [col for col in VisualizeArgs.html_columns if col in (mc_c5.columns() + mc_c5.images())]
     html_column_desc_dict_level = {col: html_column_desc_dict.get(col, col) for col in html_columns_level}
-    for flag, mc_level in (("all", mc_c5), ("filtered", mc_c5_filtered), ("removed", mc_c5_removed)):
-        for path in (getattr(cpaths, f"{kind}_singlemulticluster_{flag}_path") for kind in ("mc", "html", "metadata", "meme")):
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-        mc_level.summary_table_html(
-            html_out=getattr(cpaths, f"html_singlemulticluster_{flag}_path"),
-            columns=html_columns_level,
-            logo_trimming=VisualizeArgs.html_logo_trim,
-            editable=True,
-            column_desc_dict=html_column_desc_dict_level,
-        )
-        utils_analysis.export_compendium_meme(
-            mc=mc_level,
-            name_col=name_col,
-            save_loc=getattr(cpaths, f"meme_singlemulticluster_{flag}_path"),
-            trim_importance=(1/(2*mc_level.motifs.shape[1])),
-        )
-        mc_level.metadata.drop(columns=EncodeCombineArgs.remove_cols, errors='ignore').to_csv(
-            getattr(cpaths, f"metadata_singlemulticluster_{flag}_path"), sep="\t", index=False)
-        save_replace(mc_level, getattr(cpaths, f"mc_singlemulticluster_{flag}_path"))
+    for path in (cpaths.mc_singlemulticluster_path, cpaths.html_singlemulticluster_path,
+                 cpaths.metadata_singlemulticluster_path, cpaths.meme_singlemulticluster_path):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+    mc_c5.summary_table_html(
+        html_out=cpaths.html_singlemulticluster_path,
+        columns=html_columns_level,
+        logo_trimming=VisualizeArgs.html_logo_trim,
+        editable=True,
+        column_desc_dict=html_column_desc_dict_level,
+    )
+    utils_analysis.export_compendium_meme(
+        mc=mc_c5,
+        name_col=name_col,
+        save_loc=cpaths.meme_singlemulticluster_path,
+        trim_importance=(1/(2*mc_c5.motifs.shape[1])),
+    )
+    mc_c5.metadata.drop(columns=EncodeCombineArgs.remove_cols, errors='ignore').to_csv(
+        cpaths.metadata_singlemulticluster_path, sep="\t", index=False)
+    save_replace(mc_c5, cpaths.mc_singlemulticluster_path)
 
-    # Membership: each ENCODE cluster (C4), with its singlemulticluster
+    # Membership: each ENCODE cluster (C4), with its singlemulticluster (or why it has none)
     os.makedirs(os.path.dirname(cpaths.metadata_singlemulticluster_membership_path), exist_ok=True)
     membership.to_csv(cpaths.metadata_singlemulticluster_membership_path, sep="\t", index=False)
 
@@ -2136,27 +2139,33 @@ def export_singlemulticluster_level(args, cpaths, mc_c5, membership, html_column
 def export_singlemulticluster_constituents(args, cpaths, mc_c5, membership):
     """
     The singlemulticluster level (export_singlemulticluster_level()) added to every level below, as
-    export_encode_constituents() adds the ENCODE clusters, but keeping theirs (--update-constituents only: on its own, from the
-    level's saved outputs, run_singlemulticluster_constituents()): the ENCODE clusters (C4, <output-dir>) get the number
-    (CompositeArgs.c5_cluster_col), name (VisualizeArgs.singlemulticluster_name_col) and filter flag
-    (CompositeArgs.c5_flag_col) of their singlemulticluster; every atlas level (by its ENCODE cluster) and the motif
-    indexes its name and filter flag (each level's ENCODE cluster: export_encode_constituents()). Their names, MCIDs, flags
-    and confidence are those of the ENCODE stage; .mc and metadata TSV rewritten (their HTML and MEME do not show the
-    new columns). Then the motif index of the singlemulticluster level (the hits annotation's).
+    export_encode_constituents() adds the ENCODE clusters, but keeping theirs (--update-constituents only: on its own,
+    from the level's saved outputs, run_singlemulticluster_constituents()): the ENCODE clusters (C4, <output-dir>) get the
+    number (CompositeArgs.c5_cluster_col), name (VisualizeArgs.singlemulticluster_name_col) and filter flag
+    (CompositeArgs.c5_flag_col: True when in no singlemulticluster) of their singlemulticluster; every atlas level (by its
+    ENCODE cluster) and the motif indexes its name and filter flag (each level's ENCODE cluster:
+    export_encode_constituents()). Their names, MCIDs, flags and confidence are those of the ENCODE stage; .mc and
+    metadata TSV rewritten (their HTML and MEME do not show the new columns). Then the motif index of the
+    singlemulticluster level (the hits annotation's).
     """
     paths = encode_paths(args)
     name_col, id_col, flag_col = MetadataCols.name_col, MetadataCols.unique_id_col, FilterArgs.filter_flag_col
+    flag_type_col = FilterArgs.filter_flag_type_col
     c5_name_col, c5_flag_col, c5_cluster_col = (VisualizeArgs.singlemulticluster_name_col, CompositeArgs.c5_flag_col,
                                                 CompositeArgs.c5_cluster_col)
-    mc_c5_filtered = mc_c5[~mc_c5[flag_col].astype(bool).to_numpy()]
+    in_c5 = membership[c5_cluster_col].notna()
     c5_by_c4_id = membership.set_index(f"{id_col}_C4")
-    c5_name_by_c4_name = dict(zip(membership[f"{name_col}_C4"], membership[name_col]))
-    c5_flag_by_c4_name = dict(zip(membership[f"{name_col}_C4"], membership[flag_col].astype(bool)))
+    c5_name_by_c4_name = dict(zip(membership.loc[in_c5, f"{name_col}_C4"], membership.loc[in_c5, name_col]))
+    # Why an ENCODE cluster of the combine is in no singlemulticluster, when the combine kept it (left out of C5)
+    left_out_type_by_c4_name = dict(zip(
+        membership.loc[~in_c5 & membership[flag_type_col].isin([CompositeArgs.flag_type_no_synergy, CompositeArgs.flag_type_unannotated]), f"{name_col}_C4"],
+        membership.loc[~in_c5 & membership[flag_type_col].isin([CompositeArgs.flag_type_no_synergy, CompositeArgs.flag_type_unannotated]), flag_type_col],
+    ))
 
     def add_c5_cols(metadata_df, by_c4_name_col):
-        """Its singlemulticluster's name and filter flag (True: none, or a removed one), by its ENCODE cluster's name."""
+        """Its singlemulticluster's name and filter flag (True: none), by its ENCODE cluster's name."""
         metadata_df[c5_name_col] = metadata_df[by_c4_name_col].map(c5_name_by_c4_name)
-        metadata_df[c5_flag_col] = metadata_df[by_c4_name_col].map(c5_flag_by_c4_name).fillna(True).astype(bool)
+        metadata_df[c5_flag_col] = metadata_df[c5_name_col].isna()
         return metadata_df
 
     #### The ENCODE clusters (C4): the number, name and flag of their singlemulticluster -------
@@ -2164,14 +2173,17 @@ def export_singlemulticluster_constituents(args, cpaths, mc_c5, membership):
     for mc_path, metadata_path in ((paths.mc_encode_path, paths.metadata_encode_path),
                                    (paths.mc_encode_filtered_path, paths.metadata_encode_filtered_path),
                                    (paths.mc_encode_removed_path, paths.metadata_encode_removed_path)):
+        if not os.path.exists(mc_path):  # the removed ones: --save-all
+            continue
         mc_level = MotifCompendium.load(mc_path, safe=args.safe)
         c4_ids = mc_level[id_col].astype(str)
         if not c4_ids.isin(c5_by_c4_id.index).all():
-            raise ValueError(f"{mc_path}: ENCODE clusters without a singlemulticluster, e.g. "
+            raise ValueError(f"{mc_path}: ENCODE clusters not in the membership, e.g. "
                              f"{c4_ids[~c4_ids.isin(c5_by_c4_id.index)].tolist()[:3]}")
-        mc_level[c5_cluster_col] = c4_ids.map(c5_by_c4_id[c5_cluster_col]).to_numpy()
+        numbers = c4_ids.map(c5_by_c4_id[c5_cluster_col])
+        mc_level[c5_cluster_col] = np.array([None if pd.isna(n) else int(n) for n in numbers], dtype=object)
         mc_level[c5_name_col] = c4_ids.map(c5_by_c4_id[name_col]).to_numpy()
-        mc_level[c5_flag_col] = c4_ids.map(c5_by_c4_id[flag_col]).astype(bool).to_numpy()
+        mc_level[c5_flag_col] = numbers.isna().to_numpy()
         mc_level.metadata.drop(columns=EncodeCombineArgs.remove_cols, errors='ignore').to_csv(metadata_path, sep="\t", index=False)
         save_replace(mc_level, mc_path)
     # The atlasclusters the ENCODE clusters were combined from
@@ -2189,12 +2201,13 @@ def export_singlemulticluster_constituents(args, cpaths, mc_c5, membership):
         levels = [(atlas_dirs['combined'], EncodeCombineArgs.suffix_atlascluster)] + [
             (atlas_dirs[head], level_suffix) for head in ('counts', 'profile') for level_suffix in level_suffixs.values()]
         for level_dir, level_suffix in levels:
-            for suffix_flag, _ in EncodeCombineArgs.flags:
+            for suffix_flag, flag_bool in EncodeCombineArgs.flags:
                 file_name = EncodeCombineArgs.file_general + level_suffix + suffix_flag
                 mc_path = os.path.join(level_dir, "mc", file_name + ".mc")
                 metadata_path = os.path.join(level_dir, "metadata", file_name + EncodeCombineArgs.suffix_metadata + ".tsv")
                 if not os.path.exists(mc_path):
-                    logging.warning(f"Not found (skipped): {mc_path}")
+                    if not (flag_bool is True and not getattr(args, "save_all", False)):  # the removed ones: --save-all
+                        logging.warning(f"Not found (skipped): {mc_path}")
                     continue
                 mc_level = MotifCompendium.load(mc_path, safe=args.safe)
                 add_c5_cols(mc_level.metadata, VisualizeArgs.encodecluster_name_col)
@@ -2215,17 +2228,20 @@ def export_singlemulticluster_constituents(args, cpaths, mc_c5, membership):
                 add_c5_cols(atlas_index_df, VisualizeArgs.encodecluster_name_col).to_csv(atlas_index_path, sep="\t", index=False)
 
     # The singlemulticluster level's motif index: each motif with its singlemulticluster in the motif index's columns
-    # (name, filter flag, confidence, simple name, category): the hits annotation's (pipeline_encode_hits.py)
+    # (name, filter flag, confidence, simple name, category): the hits annotation's (pipeline_encode_hits.py). A motif
+    # in no singlemulticluster keeps its ENCODE cluster's simple name (the combine's removed ones: their flag type), or
+    # gets why its ENCODE cluster was left out (no-synergy, composite-unannotated): its hits' name
     c5_metadata = mc_c5.metadata.set_index(name_col)
     motif_index_c5_df = motif_index_df.copy()
     motif_index_c5_df[VisualizeArgs.encodecluster_name_col] = motif_index_df[c5_name_col]
     motif_index_c5_df[flag_col] = motif_index_df[c5_flag_col]
     motif_index_c5_df[LabelCols.label_conf_col] = motif_index_c5_df[VisualizeArgs.encodecluster_name_col].map(
         c5_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
+    left_out_type = motif_index_df[VisualizeArgs.encodecluster_name_col].map(left_out_type_by_c4_name)
     motif_index_c5_df[MetadataCols.simple_name_col] = motif_index_c5_df[VisualizeArgs.encodecluster_name_col].map(
-        c5_metadata[MetadataCols.simple_name_col]).fillna(motif_index_df[MetadataCols.simple_name_col])
+        c5_metadata[MetadataCols.simple_name_col]).fillna(left_out_type).fillna(motif_index_df[MetadataCols.simple_name_col])
     motif_index_c5_df[DirectTypeArgs.category_type_col] = motif_category_types(
-        motif_index_c5_df, VisualizeArgs.encodecluster_name_col, flag_col, mc_c5_filtered[name_col])
+        motif_index_c5_df, VisualizeArgs.encodecluster_name_col, flag_col, mc_c5[name_col])
     motif_index_c5_df[VisualizeArgs.motif_index_cols].to_csv(cpaths.metadata_singlemulticluster_motif_index_path, sep="\t", index=False)
     logging.info(f"Motif index (singlemulticluster): {cpaths.metadata_singlemulticluster_motif_index_path}")
 
@@ -2274,7 +2290,7 @@ def run_encode_constituents(args):
 
 def run_singlemulticluster_constituents(args):
     """--update-constituents only (pipeline_encode_composite.py): the singlemulticluster level added to every level below
-    (export_singlemulticluster_constituents()), from its saved outputs (<composite-dir>: the level's _all .mc and the
+    (export_singlemulticluster_constituents()), from its saved outputs (<composite-dir>: the level's .mc and the
     membership of the ENCODE clusters)."""
     log_dir = os.path.join(args.output_dir, "logs")
     os.makedirs(log_dir, exist_ok=True)
@@ -2299,7 +2315,7 @@ def run_singlemulticluster_constituents(args):
         fast_plotting=args.fast_plot,
     )
     cpaths = composite_paths(getattr(args, "composite_dir", None) or default_composite_dir(args.output_dir))
-    mc_c5 = MotifCompendium.load(cpaths.mc_singlemulticluster_all_path, safe=args.safe)
+    mc_c5 = MotifCompendium.load(cpaths.mc_singlemulticluster_path, safe=args.safe)
     membership = pd.read_csv(cpaths.metadata_singlemulticluster_membership_path, sep="\t", keep_default_na=False, na_values=[""])
     export_singlemulticluster_constituents(args, cpaths, mc_c5, membership)
     logging.info(f"Completed run: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")

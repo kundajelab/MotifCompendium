@@ -377,11 +377,16 @@ stay as their stages wrote them, so they can be redone) until C5 is made:
 with the last one's. After that, the atlas's own selection is gone, so the combine
 stages refuse to rerun on it: rerun the atlas first.
 
-Each level saves only `mc/motifcompendium_{level}_{filtered,removed,all}.mc`
+Each level saves only `mc/motifcompendium_{level}_{all,filtered}.mc`
 (`{level}`: `motif`, `cluster`, `metacluster`, `atlascluster`, `encode`), plus
 `motifcompendium_metacluster_combined.mc` (atlas combine),
 `motifcompendium_atlascluster_combined.mc` (ENCODE combine) and
-`motifcompendium_motif_init.mc` (head stages).
+`motifcompendium_motif_init.mc` (head stages). Its removed clusters
+(`motifcompendium_{level}_removed`: `.mc`, HTML, MEME, metadata TSV, MoDISco H5)
+are saved only with `--save-all` (every script of the ENCODE pipeline has it; the
+encode/src launchers pass it); the later stages read the `_all` and `_filtered`
+ones. The singlemulticluster level (C5) is one compendium,
+`single_multi/mc/motifcompendium_singlemulticluster.mc`: nothing is removed there.
 
 Each stage writes some combination of `mc/`, `html/`, `export/`, `metadata/`,
 and `logs/`. Every stage records arguments/configuration in
@@ -480,7 +485,7 @@ level's as `--composite-dir` (default: `single_multi/`, next to `--output-dir`):
     ones into reference monomers (modified Smith-Waterman), before exporting
     them (and, at `encode-propagate`, to every level below). The composites and their subunits are written to
     `single_multi/` (`export/ENCODE-motifcompendium_composite_metadata{,_model}.tsv`,
-    `mc/ENCODE-motifcompendium_composite_vf.mc`). `--all-paths-tsv` (optional)
+    `mc/ENCODE-motifcompendium_composite.mc`). `--all-paths-tsv` (optional)
     adds each model's model, assay and atlas to the per-model table. Its
     update of every level below writes, over the atlas pipelines' files, each
     level's compendia (all, filtered, removed: `.mc`, metadata TSV, MEME, HTML)
@@ -497,12 +502,19 @@ level's as `--composite-dir` (default: `single_multi/`, next to `--output-dir`):
     ones and the soft and no-synergy ones of the same reference clusters,
     removes the no-synergy ones, and combines the rest with the singles: the
     singlemulticluster level (C5), written like an ENCODE level to
-    `single_multi/` (`motifcompendium_singlemulticluster_{all,filtered,removed}`:
-    `.mc`, HTML, metadata TSV, MEME). As a clustering, each
-    singlemulticluster has a number (`source_cluster`) and a C5 MCID, and each
-    ENCODE cluster of `encode-combine` the number of its singlemulticluster
+    `single_multi/` (`motifcompendium_singlemulticluster`: `.mc`, HTML, metadata
+    TSV, MEME; nothing is removed at this level: the ENCODE clusters in no
+    singlemulticluster are the combine's removed ones and the composites left
+    out). As a clustering, each singlemulticluster has a number
+    (`source_cluster`) and a C5 MCID, and each ENCODE cluster of
+    `encode-combine` its singlemulticluster's number, or why it has none
     (`single_multi/metadata/motifcompendium_singlemulticluster_membership.tsv`);
     they are named as `encode-combine` names its own (`{prename}_{counter}`).
+    Its HTML reports (`single_multi/html/ENCODE-motifcompendium_composite_ism*.html`)
+    are always written; the ISM evidence
+    (`mc/ENCODE-motifcompendium_composite_ism_motifs{_init,}.mc`, its metadata
+    TSVs) and the classified composites (`mc/ENCODE-motifcompendium_composite_ism.mc`)
+    only with `--save-all`.
     Its update of the levels below keeps their names, MCIDs and flags and adds
     columns: the ENCODE clusters `singlemulticluster_cluster`,
     `singlemulticluster_name` and `singlemulticluster_flag_remove`; every atlas

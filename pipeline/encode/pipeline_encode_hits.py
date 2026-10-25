@@ -300,15 +300,18 @@ def run_encode_hits(args):
     html_column_desc_dict = html_column_desc_df.set_index('column_name')['column_desc'].to_dict()
 
     ### INPUTS -------------------------------------------------------------------
-    # The final ENCODE compendium: filtered and removed ENCODE clusters, and the motif index (every motif with its
-    # ENCODE cluster, final filter flag, confidence and category)
+    # The level's compendia: its filtered and removed clusters (the singlemulticluster level: one compendium; an ENCODE
+    # level's removed ones: saved with --save-all only), and the motif index (every motif with its cluster, final filter
+    # flag, confidence and category)
     logging.info("Loading the final ENCODE compendia and the motif index...")
     if not os.path.exists(paths.metadata_motif_index_path):
         raise FileNotFoundError(
             f"{paths.metadata_motif_index_path}: no motif index of the {level} level yet: the levels below it are "
             "updated first (run_pipeline_encode_propagate.sh: each stage's --update-constituents only)")
     mc_encode_filtered = MotifCompendium.load(paths.mc_encode_filtered_path, safe=args.safe)
-    mc_encode_removed = MotifCompendium.load(paths.mc_encode_removed_path, safe=args.safe)
+    mc_encode_removed = (MotifCompendium.load(paths.mc_encode_removed_path, safe=args.safe)
+                         if paths.mc_encode_removed_path and os.path.exists(paths.mc_encode_removed_path) else None)
+    level_mcs = [mc_level for mc_level in (mc_encode_filtered, mc_encode_removed) if mc_level is not None]
     mc_motif_index = pd.read_csv(paths.metadata_motif_index_path, sep="\t", keep_default_na=False, na_values=[""])
 
     # FiNeMo and peaks paths, per experiment and head: the per-head motif compendia (metadata only), for the hits
@@ -813,7 +816,7 @@ def run_encode_hits(args):
             mc_encode_i.metadata[summary_cols] = compiled
 
         # Recompile hits summary
-        for mc_encode_i in (mc_encode_filtered, mc_encode_removed):
+        for mc_encode_i in level_mcs:
             recompile_hits_summary(mc_encode_i, hits_summary_df)
 
             # Calculate fractions
@@ -893,7 +896,7 @@ def run_encode_hits(args):
         )
 
         # Plot per-motif figures
-        for mc_encode_i in (mc_encode_filtered, mc_encode_removed):
+        for mc_encode_i in level_mcs:
             region_type_images = []
             disttotss_images = []
             for _, row in mc_encode_i.metadata.iterrows():
@@ -920,8 +923,8 @@ def run_encode_hits(args):
             mc_encode_i.set_images(HitsCols.distToTSS_boxplot_col, disttotss_images)
 
         # Drop columns: distToTSS_values (full distribution, not needed for HTML)
-        mc_encode_filtered.metadata.drop(columns=[HitsCols.distToTSS_values_col], inplace=True)
-        mc_encode_removed.metadata.drop(columns=[HitsCols.distToTSS_values_col], inplace=True)
+        for mc_encode_i in level_mcs:
+            mc_encode_i.metadata.drop(columns=[HitsCols.distToTSS_values_col], inplace=True)
 
     # Create HTML
     html_columns_encodecluster = [html_col for html_col in VisualizeArgs.html_columns if html_col in (mc_encode_filtered.columns() + mc_encode_filtered.images())] + [
@@ -948,25 +951,27 @@ def run_encode_hits(args):
         column_desc_dict=html_column_desc_dict_encodecluster,
     )
 
-    os.makedirs(os.path.dirname(paths.html_encode_removed_path), exist_ok=True)
-    mc_encode_removed.summary_table_html(
-        html_out=paths.html_encode_removed_path,
-        columns=html_columns_encodecluster,
-        logo_trimming=VisualizeArgs.html_logo_trim,
-        editable=True,
-        column_desc_dict=html_column_desc_dict_encodecluster,
-    )
+    if mc_encode_removed is not None:
+        os.makedirs(os.path.dirname(paths.html_encode_removed_path), exist_ok=True)
+        mc_encode_removed.summary_table_html(
+            html_out=paths.html_encode_removed_path,
+            columns=html_columns_encodecluster,
+            logo_trimming=VisualizeArgs.html_logo_trim,
+            editable=True,
+            column_desc_dict=html_column_desc_dict_encodecluster,
+        )
 
     # Metadata TSV
     os.makedirs(os.path.dirname(paths.metadata_encode_path), exist_ok=True)
     mc_encode_filtered.metadata.drop(columns=EncodeCombineArgs.remove_cols, errors='ignore').to_csv(paths.metadata_encode_filtered_path, sep="\t", index=False)
 
-    os.makedirs(os.path.dirname(paths.metadata_encode_path), exist_ok=True)
-    mc_encode_removed.metadata.drop(columns=EncodeCombineArgs.remove_cols, errors='ignore').to_csv(paths.metadata_encode_removed_path, sep="\t", index=False)
+    if mc_encode_removed is not None:
+        mc_encode_removed.metadata.drop(columns=EncodeCombineArgs.remove_cols, errors='ignore').to_csv(paths.metadata_encode_removed_path, sep="\t", index=False)
 
     # Save MotifCompendium: ENCODE, with the hits annotation (over the ones saved before it)
     save_replace(mc_encode_filtered, paths.mc_encode_filtered_path)
-    save_replace(mc_encode_removed, paths.mc_encode_removed_path)
+    if mc_encode_removed is not None:
+        save_replace(mc_encode_removed, paths.mc_encode_removed_path)
 
     # Args JSON
     args_record = {
