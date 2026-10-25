@@ -507,9 +507,14 @@ level's as `--composite-dir` (default: `single_multi/`, next to `--output-dir`):
     singlemulticluster are the combine's removed ones and the composites left
     out). As a clustering, each singlemulticluster has a number
     (`source_cluster`) and a C5 MCID, and each ENCODE cluster of
-    `encode-combine` its singlemulticluster's number, or why it has none
-    (`single_multi/metadata/motifcompendium_singlemulticluster_membership.tsv`);
+    `encode-combine` its singlemulticluster, or why it has none
+    (`single_multi/metadata/motifcompendium_singlemulticluster_membership.tsv`:
+    the ENCODE cluster's `MCID`, `name`, `source_cluster`, its
+    singlemulticluster's `singlemulticluster_{cluster,MCID,name,simple_name}`,
+    `singlemulticluster_flag_remove` and `singlemulticluster_flag_type`);
     they are named as `encode-combine` names its own (`{prename}_{counter}`).
+    As at the other levels, a column about another level is named after it
+    (`atlascluster_name`, `ENCODE_name`, `singlemulticluster_*`).
     Its HTML reports (`single_multi/html/ENCODE-motifcompendium_composite_ism*.html`)
     are always written; the ISM evidence
     (`mc/ENCODE-motifcompendium_composite_ism_motifs{_init,}.mc`, its metadata
@@ -519,7 +524,10 @@ level's as `--composite-dir` (default: `single_multi/`, next to `--output-dir`):
     columns: the ENCODE clusters `singlemulticluster_cluster`,
     `singlemulticluster_name` and `singlemulticluster_flag_remove`; every atlas
     level and the motif indexes `singlemulticluster_name` and
-    `singlemulticluster_flag_remove`; then the level's motif index (the hits').
+    `singlemulticluster_flag_remove`; then the level's motif index (the hits':
+    each motif's `singlemulticluster_name`, with its ENCODE cluster's
+    `ENCODE_name`, and the singlemulticluster's flag, confidence, simple name
+    and category).
     It can be rerun on the same `encode-combine` outputs.
 13. `encode-propagate`: the levels below C5, once it is checked (`--stages ...
     encode-composite`, then `--stages encode-propagate encode-hits`): each atlas

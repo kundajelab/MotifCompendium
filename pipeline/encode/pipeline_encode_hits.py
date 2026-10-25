@@ -342,7 +342,7 @@ def run_encode_hits(args):
     category_type_simple_col = 'category'
     label_conf_simple_col = 'confidence'
     name_tfmodisco_col = 'name_tfmodisco'
-    hits_bed_cluster_col = 'hits_bed_cluster'  # Matched to: encodecluster_name_col
+    hits_bed_cluster_col = 'hits_bed_cluster'  # Matched to: the level's cluster (paths.level_name_col)
 
     NARROWPEAKS_CUSTOM_COLS = [
         'chrom',
@@ -372,17 +372,17 @@ def run_encode_hits(args):
     hits_indexed_dir = os.path.join(paths.export_dir, "hits_indexed")
     hits_index_df = mc_motif_index.copy()
 
-    # Hits BED name and ENCODE cluster, per motif
+    # Hits BED name and cluster of the level (ENCODE_name; the singlemulticluster level: singlemulticluster_name), per motif
     flagged = hits_index_df[FilterArgs.filter_flag_col].fillna(True).astype(bool)
     simple_name = hits_index_df[MetadataCols.simple_name_col]
-    encode_name = hits_index_df[VisualizeArgs.encodecluster_name_col]
+    level_name = hits_index_df[paths.level_name_col]
     confidence_simple = pd.Series(np.select(
         [hits_index_df[LabelCols.label_conf_col] == confidence for confidence in HITS_CONFIDENCES],
         HITS_CONFIDENCES_SIMPLE,
         default=HITS_CONFIDENCES_SIMPLE[-1],
     ), index=hits_index_df.index)
     hits_bed_name = simple_name.fillna(HITS_NAME_UNKNOWN)
-    hits_bed_cluster = encode_name.fillna(simple_name).fillna(HITS_NAME_NONE)
+    hits_bed_cluster = level_name.fillna(simple_name).fillna(HITS_NAME_NONE)
 
     # TF atlas: Direct motifs named by their TF; others by their ENCODE simple name
     mask_tf = hits_index_df[VisualizeArgs.atlas_col] == EncodeCombineArgs.tfatlas_id
@@ -391,18 +391,18 @@ def run_encode_hits(args):
     hits_bed_name[mask] = (hits_index_df[MetadataCols.tf_col] + "_" + hits_index_df[MetadataCols.posneg_col] + "_" + confidence_simple)[mask]
     mask = mask_tf & (flagged | ~mask_direct) & simple_name.astype(bool)
     hits_bed_name[mask] = simple_name[mask]
-    hits_bed_cluster[mask_tf & ~flagged] = encode_name[mask_tf & ~flagged]
+    hits_bed_cluster[mask_tf & ~flagged] = level_name[mask_tf & ~flagged]
 
     # Chromatin, ProCap atlases: ENCODE simple name
     mask = hits_index_df[VisualizeArgs.atlas_col].isin([EncodeCombineArgs.chromatlas_id, EncodeCombineArgs.procapatlas_id]) & simple_name.astype(bool)
     hits_bed_name[mask] = simple_name[mask]
-    hits_bed_cluster[mask] = encode_name[mask]
+    hits_bed_cluster[mask] = level_name[mask]
 
     # Flagged: Simple name = filter flag type (CpG, tandem-repeats, high-GC/AT, low-complexity, unvalidated)
     hits_bed_name[flagged] = simple_name[flagged]
     hits_bed_cluster[flagged] = simple_name[flagged]
     hits_index_df["hits_bed_name"] = hits_bed_name.fillna(simple_name).fillna(HITS_NAME_UNKNOWN)
-    hits_index_df["hits_bed_cluster"] = hits_bed_cluster.fillna(encode_name).fillna(simple_name).fillna(HITS_NAME_NONE)
+    hits_index_df["hits_bed_cluster"] = hits_bed_cluster.fillna(level_name).fillna(simple_name).fillna(HITS_NAME_NONE)
     hits_index_df["flagged"] = flagged
     hits_index_df["pattern_key"] = _hits_pattern_key(hits_index_df[MetadataCols.posneg_col], hits_index_df[MetadataCols.name_col])
 
@@ -723,7 +723,7 @@ def run_encode_hits(args):
     # Functions: Compile hits summary per motif
     # Compile hits summary per motif -- pool per-hit annotations (peakType,
     # distToTSS, distToPeakSummit) across every experiment that contributes to the
-    # same final combined motif cluster (hits_bed_cluster / ENCODE_name),
+    # same final combined motif cluster (hits_bed_cluster: the level's cluster),
     # parallelized across annotated files
     from collections import defaultdict
 

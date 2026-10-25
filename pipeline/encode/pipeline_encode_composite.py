@@ -168,57 +168,59 @@ def final_encode_compendium(mc_encode, mc_encode_c4_filtered, mc_encode_c4_remov
     C4 one. The singlemulticluster columns of an earlier run on the C4 compendia are dropped first.
 
     Returns:
-        (mc_c5 (mc_encode, numbered and named), membership (one row per C4 ENCODE cluster: its singlemulticluster's
-         number, MCID, name and simple name, or none: flag_remove True, flag_type the combine's for its removed ones,
-         no-synergy or composite-unannotated for those left out), ENCODE clusters left out of C5, by flag type)
+        (mc_singlemulticluster (mc_encode, numbered and named), membership (one row per C4 ENCODE cluster: its MCID,
+         name and source_cluster, and its singlemulticluster's (VisualizeArgs.singlemulticluster_*_col) number, MCID,
+         name and simple name, or none: flag True, flag type the combine's for its removed ones, no-synergy or
+         composite-unannotated for those left out), ENCODE clusters left out of C5, by flag type)
     """
     id_col, name_col = MetadataCols.unique_id_col, MetadataCols.name_col
     flag_col, flag_type_col = FilterArgs.filter_flag_col, FilterArgs.filter_flag_type_col
     members_col = CompositeArgs.duplicate_members_col
-    c5_cluster_col = CompositeArgs.c5_cluster_col
+    singlemulticluster_cluster_col = VisualizeArgs.singlemulticluster_cluster_col
     for mc_i in (mc_encode, mc_encode_c4_filtered, mc_encode_c4_removed):
-        mc_i.metadata.drop(columns=[c5_cluster_col, VisualizeArgs.singlemulticluster_name_col, CompositeArgs.c5_flag_col],
-                           errors="ignore", inplace=True)
+        mc_i.metadata.drop(columns=[singlemulticluster_cluster_col, VisualizeArgs.singlemulticluster_name_col,
+                                    VisualizeArgs.singlemulticluster_flag_col], errors="ignore", inplace=True)
 
     # C4 ENCODE clusters of each C5 one: a composite's are its members' MCIDs; a single is its own C4 ENCODE cluster,
     # found by its name (its MCID is the C5 one by now)
-    c4_filtered_ids = mc_encode_c4_filtered[id_col].astype(str)
-    c4_id_by_name = dict(zip(mc_encode_c4_filtered[name_col].astype(str), c4_filtered_ids))
-    c5_members_values = mc_encode[members_col] if members_col in mc_encode.columns() else pd.Series([None] * len(mc_encode))
-    c4_to_c5_row = {}
+    encode_filtered_ids = mc_encode_c4_filtered[id_col].astype(str)
+    encode_id_by_name = dict(zip(mc_encode_c4_filtered[name_col].astype(str), encode_filtered_ids))
+    members_values = mc_encode[members_col] if members_col in mc_encode.columns() else pd.Series([None] * len(mc_encode))
+    singlemulticluster_row_by_encode_id = {}
     in_two = []  # (C4 ENCODE cluster, its first C5 row, its second)
-    for row, (name, members) in enumerate(zip(mc_encode[name_col].astype(str), c5_members_values)):
+    for row, (name, members) in enumerate(zip(mc_encode[name_col].astype(str), members_values)):
         if pd.notna(members) and str(members).strip():
-            c4_ids = [c4_id.strip() for c4_id in str(members).split(",") if c4_id.strip()]
-        elif name in c4_id_by_name:
-            c4_ids = [c4_id_by_name[name]]
+            encode_ids = [encode_id.strip() for encode_id in str(members).split(",") if encode_id.strip()]
+        elif name in encode_id_by_name:
+            encode_ids = [encode_id_by_name[name]]
         else:
             raise ValueError(f"C5 single {name} (row {row}) is not a filtered ENCODE cluster of the combine")
-        for c4_id in c4_ids:
-            if c4_id in c4_to_c5_row:
-                in_two.append((c4_id, c4_to_c5_row[c4_id], row))
-            c4_to_c5_row[c4_id] = row
+        for encode_id in encode_ids:
+            if encode_id in singlemulticluster_row_by_encode_id:
+                in_two.append((encode_id, singlemulticluster_row_by_encode_id[encode_id], row))
+            singlemulticluster_row_by_encode_id[encode_id] = row
     if in_two:
-        c4_id, row_a, row_b = in_two[0]
-        c5_names = mc_encode[name_col].astype(str).to_numpy()
+        encode_id, row_a, row_b = in_two[0]
+        singlemulticluster_names = mc_encode[name_col].astype(str).to_numpy()
         raise ValueError(
-            f"{len(in_two)} ENCODE clusters of the combine are in two C5 ENCODE clusters, e.g. {c4_id}: rows {row_a} "
-            f"({c5_names[row_a]}) and {row_b} ({c5_names[row_b]}). The C5 singles and composites must come from the "
-            "same composites (the singles: the filtered ENCODE clusters outside the composites of the ISM analysis)."
+            f"{len(in_two)} ENCODE clusters of the combine are in two C5 ENCODE clusters, e.g. {encode_id}: rows {row_a} "
+            f"({singlemulticluster_names[row_a]}) and {row_b} ({singlemulticluster_names[row_b]}). The C5 singles and "
+            "composites must come from the same composites (the singles: the filtered ENCODE clusters outside the "
+            "composites of the ISM analysis)."
         )
-    not_filtered = set(c4_to_c5_row) - set(c4_filtered_ids)
+    not_filtered = set(singlemulticluster_row_by_encode_id) - set(encode_filtered_ids)
     if not_filtered:
         raise ValueError(f"C5 members that are not filtered ENCODE clusters of the combine: {sorted(not_filtered)[:5]}")
 
     # Left out of C5: the no-synergy composites, else the composites without subunits
-    nosynergy_c4_ids = {
-        c4_id.strip()
+    nosynergy_encode_ids = {
+        encode_id.strip()
         for members in mc_encode_composite_nosynergy[members_col].dropna().astype(str)
-        for c4_id in members.split(",") if c4_id.strip()
+        for encode_id in members.split(",") if encode_id.strip()
     } if members_col in mc_encode_composite_nosynergy.columns() else set()
-    left_out_ids = c4_filtered_ids[~c4_filtered_ids.isin(c4_to_c5_row)]
+    left_out_ids = encode_filtered_ids[~encode_filtered_ids.isin(singlemulticluster_row_by_encode_id)]
     left_out_type = dict(zip(left_out_ids, np.where(
-        left_out_ids.isin(nosynergy_c4_ids), CompositeArgs.flag_type_no_synergy, CompositeArgs.flag_type_unannotated)))
+        left_out_ids.isin(nosynergy_encode_ids), CompositeArgs.flag_type_no_synergy, CompositeArgs.flag_type_unannotated)))
     num_left_out = {str(k): int(n) for k, n in pd.Series(list(left_out_type.values()), dtype=object).value_counts().items()}
     logging.info(f"Left out of C5: {num_left_out}")
 
@@ -238,27 +240,29 @@ def final_encode_compendium(mc_encode, mc_encode_c4_filtered, mc_encode_c4_remov
         raise ValueError("Singlemulticluster names are missing or not unique (prename)")
     logging.info(f"Singlemulticluster level: {len(mc_encode)} singlemulticlusters")
 
-    # Membership table: each C4 ENCODE cluster, with its singlemulticluster, or why it has none
-    c4_all = pd.concat([
+    # Membership table: each C4 ENCODE cluster (its MCID, name, source_cluster), with its singlemulticluster
+    # (singlemulticluster_*), or why it has none
+    encode_all = pd.concat([
         mc_encode_c4_filtered.metadata[[id_col, name_col, ClusterArgs.source_cluster_col]].assign(**{flag_type_col: None}),
         mc_encode_c4_removed.metadata[[id_col, name_col, ClusterArgs.source_cluster_col, flag_type_col]],
     ], ignore_index=True)
-    c4_ids = c4_all[id_col].astype(str)
-    c4_numbers = pd.array([c4_to_c5_row.get(c4_id) for c4_id in c4_ids], dtype="Int64")
-    in_c5 = ~pd.isna(c4_numbers)
-    c5_md = mc_encode.metadata
-    take = lambda col: [c5_md[col].iloc[int(n)] if pd.notna(n) else None for n in c4_numbers]
+    encode_ids = encode_all[id_col].astype(str)
+    singlemulticluster_numbers = pd.array([singlemulticluster_row_by_encode_id.get(encode_id) for encode_id in encode_ids], dtype="Int64")
+    in_singlemulticluster = ~pd.isna(singlemulticluster_numbers)
+    singlemulticluster_md = mc_encode.metadata
+    take = lambda col: [singlemulticluster_md[col].iloc[int(n)] if pd.notna(n) else None for n in singlemulticluster_numbers]
     membership = pd.DataFrame({
-        f"{id_col}_C4": c4_ids.to_numpy(),
-        f"{name_col}_C4": c4_all[name_col].to_numpy(),
-        f"{ClusterArgs.source_cluster_col}_C4": c4_all[ClusterArgs.source_cluster_col].to_numpy(),
-        c5_cluster_col: c4_numbers,
-        id_col: take(id_col),
-        name_col: take(name_col),
-        MetadataCols.simple_name_col: take(MetadataCols.simple_name_col),
-        flag_col: ~in_c5,
-        flag_type_col: [None if c5 else left_out_type.get(c4_id, flag_type)
-                        for c5, c4_id, flag_type in zip(in_c5, c4_ids, c4_all[flag_type_col])],
+        id_col: encode_ids.to_numpy(),
+        name_col: encode_all[name_col].to_numpy(),
+        ClusterArgs.source_cluster_col: encode_all[ClusterArgs.source_cluster_col].to_numpy(),
+        singlemulticluster_cluster_col: singlemulticluster_numbers,
+        VisualizeArgs.singlemulticluster_mcid_col: take(id_col),
+        VisualizeArgs.singlemulticluster_name_col: take(name_col),
+        VisualizeArgs.singlemulticluster_simple_name_col: take(MetadataCols.simple_name_col),
+        VisualizeArgs.singlemulticluster_flag_col: ~in_singlemulticluster,
+        VisualizeArgs.singlemulticluster_flag_type_col: [
+            None if in_level else left_out_type.get(encode_id, flag_type)
+            for in_level, encode_id, flag_type in zip(in_singlemulticluster, encode_ids, encode_all[flag_type_col])],
     })
     return mc_encode, membership, num_left_out
 
@@ -1668,16 +1672,16 @@ def run_encode_composite(args):
     # Numbered (as a clustering), with C5 MCIDs, named, with each ENCODE cluster of the combine (C4) mapped to its
     # singlemulticluster (or why it has none)
     logging.info("Singlemulticluster level (C5)...")
-    mc_c5, c5_membership_df, num_left_out = final_encode_compendium(
+    mc_singlemulticluster, singlemulticluster_membership_df, num_left_out = final_encode_compendium(
         mc_encode, mc_encode_c4_filtered, mc_encode_c4_removed, mc_encode_composite_nosynergy,
         f"{unique_id_initial}.{CompositeArgs.mcid_level}.", safe=args.safe,
     )
 
     # #### Export: the singlemulticluster level (<composite-dir>); added to the ENCODE clusters and every level below
     # (--update-constituents now)
-    pipeline_encode.export_singlemulticluster_level(args, cpaths, mc_c5, c5_membership_df, html_column_desc_dict)
+    pipeline_encode.export_singlemulticluster_level(args, cpaths, mc_singlemulticluster, singlemulticluster_membership_df, html_column_desc_dict)
     if args.update_constituents == "now":
-        pipeline_encode.export_singlemulticluster_constituents(args, cpaths, mc_c5, c5_membership_df)
+        pipeline_encode.export_singlemulticluster_constituents(args, cpaths, mc_singlemulticluster, singlemulticluster_membership_df)
     else:
         logging.info("The levels below the singlemulticlusters: not updated (--update-constituents defer; later: --update-constituents only)")
 
@@ -1686,8 +1690,8 @@ def run_encode_composite(args):
         "parser_args": vars(args),
         "configs": pipeline_encode.collect_configs_snapshot(),
         "composite_dir": cpaths.composite_dir,
-        "num_singlemulticluster": len(mc_c5),
-        "num_left_out_of_c5": num_left_out,
+        "num_singlemulticluster": len(mc_singlemulticluster),
+        "num_left_out_of_singlemulticluster": num_left_out,
         "log_path": log_path,
     }
     args_json_path = os.path.join(cpaths.metadata_dir, "args_singlemulticluster.json")
