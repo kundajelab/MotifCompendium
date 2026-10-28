@@ -5,9 +5,9 @@ ChromBPNet (DNase/ATAC-seq): end-to-end MotifCompendium pipeline.
 
 Runs the full ChromBPNet hierarchy from a single CLI, in order:
 
-  1. counts   - counts head  : motif -> cell-type cluster -> meta-cluster
-  2. profile  - profile head : motif -> cell-type cluster -> meta-cluster
-  3. combine  - counts + profile meta-clusters -> atlasclusters
+  1. counts   - counts head  : motif -> cell-type cluster -> contribcluster
+  2. profile  - profile head : motif -> cell-type cluster -> contribcluster
+  3. combine  - counts + profile contribclusters -> modelclusters
 
 The per-head stages (1-2) are this script's former stand-alone sequential pipeline, run once
 per head; the combine stage (3) is the Chromatin Atlas combine step
@@ -75,8 +75,8 @@ def setup_parser():
     # Pipeline control
     parser.add_argument("--stages", nargs="+", choices=STAGE_ORDER, default=STAGE_ORDER, help="Subset of stages to run, in pipeline order.")
     parser.add_argument("--update-constituents", choices=["now", "defer", "only"], default="now",
-                        help="The combine stage's update of the levels below the atlasclusters (each head's metacluster, cluster "
-                             "and motif compendia: their atlascluster; the atlascluster motif index). now: by the combine "
+                        help="The combine stage's update of the levels below the modelclusters (each head's contribcluster, cluster "
+                             "and motif compendia: their modelcluster; the modelcluster motif index). now: by the combine "
                              "stage; defer: not (the levels below stay as the per-head stages wrote them, e.g. until the ENCODE "
                              "pipeline's last level is made); only: that update alone, from the combine's saved outputs (no "
                              "stage is run).")
@@ -138,7 +138,7 @@ def set_default_configs():
     DirectTypeArgs = configs.DirectTypeArgs()
     FilterArgs = configs.FilterArgs()
     # The per-head stages use MotifFilterArgs (per-head pipeline thresholds); the combine
-    # (atlascluster) stage uses AtlasFilterArgs (combine_counts-profile.ipynb thresholds).
+    # (modelcluster) stage uses AtlasFilterArgs (combine_counts-profile.ipynb thresholds).
     # See configs.AtlasFilterArgs.
     MotifFilterArgs = configs.MotifFilterArgs()
     AtlasFilterArgs = configs.AtlasFilterArgs()
@@ -805,7 +805,7 @@ def save_replace(mc, path):
 
 
 def run_chrom_sequential(args):
-    """Chromatin atlas, one head: motif -> cell-type cluster -> meta-cluster"""
+    """Chromatin atlas, one head: motif -> cell-type cluster -> contribcluster"""
 
 
     ### OPTIONS -----------------------------------------------------------------
@@ -866,7 +866,7 @@ def run_chrom_sequential(args):
 
     ## Derived clustering column names
     cluster_cluster_col = f"Within-{ClusterArgs.cluster_within}_{ClusterArgs.cluster_algorithm_main}-{ClusterArgs.cluster_sim_threshold}_rec_{ClusterArgs.cluster_algorithm_kmeans}-{ClusterArgs.cluster_sim_assignment_threshold_kmeans}_{ClusterArgs.cluster_algorithm_force}-{ClusterArgs.cluster_sim_threshold_force}"
-    metacluster_cluster_col = f"{ClusterArgs.cluster_algorithm_main}-{ClusterArgs.cluster_sim_threshold}_rec_{ClusterArgs.cluster_algorithm_kmeans}-{ClusterArgs.cluster_sim_assignment_threshold_kmeans}_{ClusterArgs.cluster_algorithm_force}-{ClusterArgs.cluster_sim_threshold_force}"
+    contribcluster_cluster_col = f"{ClusterArgs.cluster_algorithm_main}-{ClusterArgs.cluster_sim_threshold}_rec_{ClusterArgs.cluster_algorithm_kmeans}-{ClusterArgs.cluster_sim_assignment_threshold_kmeans}_{ClusterArgs.cluster_algorithm_force}-{ClusterArgs.cluster_sim_threshold_force}"
 
     ## HTML column descriptions
     html_column_desc_df = pd.read_csv(args.column_desc_tsv, sep="\t", header=0)
@@ -887,10 +887,10 @@ def run_chrom_sequential(args):
     mc_cluster_filtered_path = os.path.join(mc_dir, "motifcompendium_cluster_filtered.mc")
     mc_cluster_removed_path = os.path.join(mc_dir, "motifcompendium_cluster_removed.mc")
 
-    # Metaclusters
-    mc_metacluster_path = os.path.join(mc_dir, "motifcompendium_metacluster_all.mc")
-    mc_metacluster_filtered_path = os.path.join(mc_dir, "motifcompendium_metacluster_filtered.mc")
-    mc_metacluster_removed_path = os.path.join(mc_dir, "motifcompendium_metacluster_removed.mc")
+    # Contribclusters
+    mc_contribcluster_path = os.path.join(mc_dir, "motifcompendium_contribcluster_all.mc")
+    mc_contribcluster_filtered_path = os.path.join(mc_dir, "motifcompendium_contribcluster_filtered.mc")
+    mc_contribcluster_removed_path = os.path.join(mc_dir, "motifcompendium_contribcluster_removed.mc")
 
     ## HTML summary table
     html_dir = os.path.join(args.output_dir, "html")
@@ -901,9 +901,9 @@ def run_chrom_sequential(args):
     html_cluster_filtered_path = os.path.join(html_dir, "motifcompendium_cluster_filtered.html")
     html_cluster_removed_path = os.path.join(html_dir, "motifcompendium_cluster_removed.html")
 
-    html_metacluster_path = os.path.join(html_dir, "motifcompendium_metacluster_all.html")
-    html_metacluster_filtered_path = os.path.join(html_dir, "motifcompendium_metacluster_filtered.html")
-    html_metacluster_removed_path = os.path.join(html_dir, "motifcompendium_metacluster_removed.html")
+    html_contribcluster_path = os.path.join(html_dir, "motifcompendium_contribcluster_all.html")
+    html_contribcluster_filtered_path = os.path.join(html_dir, "motifcompendium_contribcluster_filtered.html")
+    html_contribcluster_removed_path = os.path.join(html_dir, "motifcompendium_contribcluster_removed.html")
 
     ## Export: MoDISco HDF5, MEME
     export_dir = os.path.join(args.output_dir, "export")
@@ -916,9 +916,9 @@ def run_chrom_sequential(args):
     modisco_cluster_filtered_path = os.path.join(export_dir, "motifcompendium_cluster_filtered.h5")
     modisco_cluster_removed_path = os.path.join(export_dir, "motifcompendium_cluster_removed.h5")
 
-    modisco_metacluster_path = os.path.join(export_dir, "motifcompendium_metacluster_all.h5")
-    modisco_metacluster_filtered_path = os.path.join(export_dir, "motifcompendium_metacluster_filtered.h5")
-    modisco_metacluster_removed_path = os.path.join(export_dir, "motifcompendium_metacluster_removed.h5")
+    modisco_contribcluster_path = os.path.join(export_dir, "motifcompendium_contribcluster_all.h5")
+    modisco_contribcluster_filtered_path = os.path.join(export_dir, "motifcompendium_contribcluster_filtered.h5")
+    modisco_contribcluster_removed_path = os.path.join(export_dir, "motifcompendium_contribcluster_removed.h5")
 
     meme_motif_path = os.path.join(export_dir, "motifcompendium_motif_all.meme.txt")
     meme_motif_filtered_path = os.path.join(export_dir, "motifcompendium_motif_filtered.meme.txt")
@@ -928,16 +928,16 @@ def run_chrom_sequential(args):
     meme_cluster_filtered_path = os.path.join(export_dir, "motifcompendium_cluster_filtered.meme.txt")
     meme_cluster_removed_path = os.path.join(export_dir, "motifcompendium_cluster_removed.meme.txt")
 
-    meme_metacluster_path = os.path.join(export_dir, "motifcompendium_metacluster_all.meme.txt")
-    meme_metacluster_filtered_path = os.path.join(export_dir, "motifcompendium_metacluster_filtered.meme.txt")
-    meme_metacluster_removed_path = os.path.join(export_dir, "motifcompendium_metacluster_removed.meme.txt")
+    meme_contribcluster_path = os.path.join(export_dir, "motifcompendium_contribcluster_all.meme.txt")
+    meme_contribcluster_filtered_path = os.path.join(export_dir, "motifcompendium_contribcluster_filtered.meme.txt")
+    meme_contribcluster_removed_path = os.path.join(export_dir, "motifcompendium_contribcluster_removed.meme.txt")
 
     ## Export: Metadata
     metadata_dir = os.path.join(args.output_dir, "metadata")
 
     metadata_motif_path = os.path.join(metadata_dir, "motifcompendium_motif_all_metadata.tsv")
     metadata_cluster_path = os.path.join(metadata_dir, "motifcompendium_cluster_all_metadata.tsv")
-    metadata_metacluster_path = os.path.join(metadata_dir, "motifcompendium_metacluster_all_metadata.tsv")
+    metadata_contribcluster_path = os.path.join(metadata_dir, "motifcompendium_contribcluster_all_metadata.tsv")
     metadata_motif_index_path = os.path.join(metadata_dir, "motifcompendium_motif_index.tsv")
 
     args_json_path = os.path.join(metadata_dir, "args.json")
@@ -1844,7 +1844,7 @@ def run_chrom_sequential(args):
 
     # ## META-CLUSTERS
     # ### Clustering: Clusters
-    logging.info("Clustering clusters into meta-clusters...")
+    logging.info("Clustering clusters into contribclusters...")
     # - Process:
     #     - Cluster (without boundary)
     #     - Initial clustering
@@ -1856,8 +1856,8 @@ def run_chrom_sequential(args):
     mc_cluster_filtered.cluster(
         algorithm=ClusterArgs.cluster_algorithm_main,
         similarity_threshold=ClusterArgs.cluster_sim_threshold,
-        cluster_within=ClusterArgs.metacluster_within,
-        save_name=metacluster_cluster_col,
+        cluster_within=ClusterArgs.contribcluster_within,
+        save_name=contribcluster_cluster_col,
         largest_clusters_first=True,
         n_iterations=ClusterArgs.n_iterations,
         seeds=ClusterArgs.seeds,
@@ -1865,16 +1865,16 @@ def run_chrom_sequential(args):
     # Reassign: K-means
     mc_cluster_filtered.cluster(
         algorithm=ClusterArgs.cluster_algorithm_kmeans,
-        cluster_within=ClusterArgs.metacluster_within,
-        save_name=metacluster_cluster_col,
+        cluster_within=ClusterArgs.contribcluster_within,
+        save_name=contribcluster_cluster_col,
         largest_clusters_first=True,
-        init_clustering_col=metacluster_cluster_col,
+        init_clustering_col=contribcluster_cluster_col,
         weight_col=ClusterArgs.average_weight_col,
         assignment_threshold=ClusterArgs.cluster_sim_assignment_threshold_kmeans,
         n_iterations=ClusterArgs.n_iterations,
     )
 
-    membership_cluster = mc_cluster_filtered[metacluster_cluster_col]
+    membership_cluster = mc_cluster_filtered[contribcluster_cluster_col]
     logging.info(f"Unique clusters: {len(set(membership_cluster))}")
 
 
@@ -1885,9 +1885,9 @@ def run_chrom_sequential(args):
         mc_cluster_filtered.cluster(
             algorithm=ClusterArgs.cluster_algorithm_main,
             similarity_threshold=ClusterArgs.cluster_sim_threshold,
-            cluster_within_on=(ClusterArgs.metacluster_within, metacluster_cluster_col),
+            cluster_within_on=(ClusterArgs.contribcluster_within, contribcluster_cluster_col),
             cluster_on_weight=ClusterArgs.average_weight_col,
-            save_name=metacluster_cluster_col,
+            save_name=contribcluster_cluster_col,
             largest_clusters_first=True,
             n_iterations=ClusterArgs.n_iterations,
             seeds=ClusterArgs.seeds,
@@ -1895,17 +1895,17 @@ def run_chrom_sequential(args):
         # Reassign: K-means
         mc_cluster_filtered.cluster(
             algorithm=ClusterArgs.cluster_algorithm_kmeans,
-            cluster_within=ClusterArgs.metacluster_within,
-            save_name=metacluster_cluster_col,
+            cluster_within=ClusterArgs.contribcluster_within,
+            save_name=contribcluster_cluster_col,
             largest_clusters_first=True,
-            init_clustering_col=metacluster_cluster_col,
+            init_clustering_col=contribcluster_cluster_col,
             weight_col=ClusterArgs.average_weight_col,
             assignment_threshold=ClusterArgs.cluster_sim_assignment_threshold_kmeans,
             n_iterations=ClusterArgs.n_iterations,
         )
 
         # Check convergence
-        new_membership_cluster = mc_cluster_filtered[metacluster_cluster_col]
+        new_membership_cluster = mc_cluster_filtered[contribcluster_cluster_col]
         logging.info(f"  Unique clusters: {len(set(new_membership_cluster))}")
         if np.array_equal(membership_cluster, new_membership_cluster):
             logging.info(f"Final Unique clusters: {len(set(new_membership_cluster))}")
@@ -1921,9 +1921,9 @@ def run_chrom_sequential(args):
         mc_cluster_filtered.cluster(
             algorithm=ClusterArgs.cluster_algorithm_force,
             similarity_threshold=ClusterArgs.cluster_sim_threshold_force,
-            cluster_within_on=(ClusterArgs.metacluster_within, metacluster_cluster_col),
+            cluster_within_on=(ClusterArgs.contribcluster_within, contribcluster_cluster_col),
             cluster_on_weight=ClusterArgs.average_weight_col,
-            save_name=metacluster_cluster_col,
+            save_name=contribcluster_cluster_col,
             largest_clusters_first=True,
             density=ClusterArgs.cluster_force_density,
             seed=ClusterArgs.seeds[0],
@@ -1931,17 +1931,17 @@ def run_chrom_sequential(args):
         # Reassign: K-means
         mc_cluster_filtered.cluster(
             algorithm=ClusterArgs.cluster_algorithm_kmeans,
-            cluster_within=ClusterArgs.metacluster_within,
-            save_name=metacluster_cluster_col,
+            cluster_within=ClusterArgs.contribcluster_within,
+            save_name=contribcluster_cluster_col,
             largest_clusters_first=True,
-            init_clustering_col=metacluster_cluster_col,
+            init_clustering_col=contribcluster_cluster_col,
             weight_col=ClusterArgs.average_weight_col,
             assignment_threshold=ClusterArgs.cluster_sim_assignment_threshold_kmeans,
             n_iterations=ClusterArgs.n_iterations,
         )
 
         # Check convergence
-        new_membership_cluster = mc_cluster_filtered[metacluster_cluster_col]
+        new_membership_cluster = mc_cluster_filtered[contribcluster_cluster_col]
         logging.info(f"  Unique clusters: {len(set(new_membership_cluster))}")
         if np.array_equal(membership_cluster, new_membership_cluster):
             logging.info(f"Final Unique clusters: {len(set(new_membership_cluster))}")
@@ -1950,48 +1950,48 @@ def run_chrom_sequential(args):
             membership_cluster = new_membership_cluster
 
 
-    # ### Create metaclusters, by averaging
-    logging.info("Creating meta-clusters, by averaging...")
+    # ### Create contribclusters, by averaging
+    logging.info("Creating contribclusters, by averaging...")
     # Average MotifCompendium
-    aggregations_metacluster = []
+    aggregations_contribcluster = []
     for (agg_col_in, agg, agg_col_out) in ClusterArgs.aggregations:
         if agg_col_in in mc_cluster_filtered.columns():
-            aggregations_metacluster.append((agg_col_in, agg, agg_col_out))
+            aggregations_contribcluster.append((agg_col_in, agg, agg_col_out))
 
-    mc_metacluster = mc_cluster_filtered.cluster_averages(
-        clustering=metacluster_cluster_col,
-        aggregations=aggregations_metacluster,
+    mc_contribcluster = mc_cluster_filtered.cluster_averages(
+        clustering=contribcluster_cluster_col,
+        aggregations=aggregations_contribcluster,
         weight_col=ClusterArgs.average_weight_col,
         compute_quality_stats=False,
     )
 
     # Weighted ClusterArgs.aggregations
-    weighted_aggregations_metacluster = []
+    weighted_aggregations_contribcluster = []
     for (agg_col_in, agg, agg_col_out) in ClusterArgs.weighted_aggregations:
         if agg_col_in in mc_cluster_filtered.columns():
-            weighted_aggregations_metacluster.append((agg_col_in, agg, agg_col_out))
+            weighted_aggregations_contribcluster.append((agg_col_in, agg, agg_col_out))
 
-    for (agg_col_old, _, agg_col_new) in weighted_aggregations_metacluster:
+    for (agg_col_old, _, agg_col_new) in weighted_aggregations_contribcluster:
         aggregate_weighted_avg(
             mc=mc_cluster_filtered,
-            mc_cluster=mc_metacluster,
-            cluster_col=metacluster_cluster_col,
+            mc_cluster=mc_contribcluster,
+            cluster_col=contribcluster_cluster_col,
             agg_col=agg_col_old,
             new_col=agg_col_new,
             weight_col=ClusterArgs.average_weight_col,
         )
 
     # Merge ClusterArgs.aggregations
-    merge_aggregations_metacluster = []
+    merge_aggregations_contribcluster = []
     for i, aggregate in enumerate(ClusterArgs.merge_aggregations):
         (agg_col_old, action, agg_col_new) = aggregate
-        if agg_col_old in mc_metacluster.columns():
-            merge_aggregations_metacluster.append(aggregate)
-        if agg_col_new not in mc_metacluster.columns():
-            mc_metacluster.metadata[agg_col_new] = None
+        if agg_col_old in mc_contribcluster.columns():
+            merge_aggregations_contribcluster.append(aggregate)
+        if agg_col_new not in mc_contribcluster.columns():
+            mc_contribcluster.metadata[agg_col_new] = None
 
-    for (agg_col_old, _, agg_col_new) in merge_aggregations_metacluster:
-        mc_metacluster.metadata[agg_col_new] = mc_metacluster.metadata[[agg_col_old, agg_col_new]].apply(
+    for (agg_col_old, _, agg_col_new) in merge_aggregations_contribcluster:
+        mc_contribcluster.metadata[agg_col_new] = mc_contribcluster.metadata[[agg_col_old, agg_col_new]].apply(
             lambda row: ",".join(dict.fromkeys(
                 part
                 for agg in row
@@ -2003,31 +2003,31 @@ def run_chrom_sequential(args):
         )
 
 
-    # #### Calculations: Metaclusters
+    # #### Calculations: Contribclusters
     # Calculations
-    mc_metacluster[MetadataCols.total_contrib_score_ratio_col] = mc_metacluster[MetadataCols.total_contrib_score_col] / mc_metacluster[MetadataCols.group_total_contrib_score_col]  # Contribution score
-    mc_metacluster[MetadataCols.posneg_col] = utils_motif.motif_posneg_sum(mc_metacluster.get_standard_motif_stack())  # Positive / negative
-    mc_metacluster[MetadataCols.composite_col] = mc_metacluster[MetadataCols.composite_col].astype(bool)
+    mc_contribcluster[MetadataCols.total_contrib_score_ratio_col] = mc_contribcluster[MetadataCols.total_contrib_score_col] / mc_contribcluster[MetadataCols.group_total_contrib_score_col]  # Contribution score
+    mc_contribcluster[MetadataCols.posneg_col] = utils_motif.motif_posneg_sum(mc_contribcluster.get_standard_motif_stack())  # Positive / negative
+    mc_contribcluster[MetadataCols.composite_col] = mc_contribcluster[MetadataCols.composite_col].astype(bool)
 
-    mc_metacluster.sort(by=[MetadataCols.posneg_col, MetadataCols.num_seqlets_col], ascending=False, inplace=True)  # Sort by pos/neg, num_seqlets
-    # mc_metacluster.sort(by=[MetadataCols.composite_col], ascending=True, inplace=True)  # Sort by composite
-    mc_metacluster.add_motif_strings(
+    mc_contribcluster.sort(by=[MetadataCols.posneg_col, MetadataCols.num_seqlets_col], ascending=False, inplace=True)  # Sort by pos/neg, num_seqlets
+    # mc_contribcluster.sort(by=[MetadataCols.composite_col], ascending=True, inplace=True)  # Sort by composite
+    mc_contribcluster.add_motif_strings(
         name=VisualizeArgs.motif_string_col,
         importance=VisualizeArgs.motif_string_importance,
         specificity=VisualizeArgs.motif_string_specificity
     )  # Add strings
 
     ## Add: Unique ID
-    mc_metacluster[MetadataCols.unique_id_col] = unique_id_initial + f".C2.{MetadataCols.atlas_type}.{head_type}." + mc_metacluster.metadata.index.map('{:08d}'.format)
+    mc_contribcluster[MetadataCols.unique_id_col] = unique_id_initial + f".C2.{MetadataCols.atlas_type}.{head_type}." + mc_contribcluster.metadata.index.map('{:08d}'.format)
 
     ### Aggregate: Annotations
-    mc_metacluster_metadata_updates = []
-    mc_metacluster_images_updated = pd.DataFrame(index=mc_metacluster[MetadataCols.unique_id_col])
-    mc_metacluster_images_existing = set(mc_metacluster.images())
+    mc_contribcluster_metadata_updates = []
+    mc_contribcluster_images_updated = pd.DataFrame(index=mc_contribcluster[MetadataCols.unique_id_col])
+    mc_contribcluster_images_existing = set(mc_contribcluster.images())
 
-    for i, row in mc_metacluster.metadata.iterrows():
+    for i, row in mc_contribcluster.metadata.iterrows():
         # MotifCompendium: Subset
-        mc_metacluster_i = mc_metacluster[[i]]
+        mc_contribcluster_i = mc_contribcluster[[i]]
         ref_name_constituents_i = row[ReferenceMatchCols.ref_name_constit_all_col].split(",") if pd.notna(row[ReferenceMatchCols.ref_name_constit_all_col]) else []
         composite_i = row[MetadataCols.composite_col]
         max_submotifs_i = 2 if composite_i else 1
@@ -2038,7 +2038,7 @@ def run_chrom_sequential(args):
 
             # Annotate with best reference constituents
             utils_analysis.assign_label_from_other_compendium(
-                assign_to_mc=mc_metacluster_i,
+                assign_to_mc=mc_contribcluster_i,
                 assign_from_mc=mc_ref_qc_i,
                 save_col_prefix=ReferenceMatchCols.best_ref_constit_col,
                 min_score=0,
@@ -2049,41 +2049,41 @@ def run_chrom_sequential(args):
             )
         
         ## Update: Metadata, Images
-        mc_metacluster_metadata_updates.append(mc_metacluster_i.metadata.set_index(MetadataCols.unique_id_col))
+        mc_contribcluster_metadata_updates.append(mc_contribcluster_i.metadata.set_index(MetadataCols.unique_id_col))
 
-        new_image_cols = [image_col for image_col in mc_metacluster_i.images() if image_col not in mc_metacluster_images_existing]
-        mc_metacluster_i_new_images = pd.DataFrame({
+        new_image_cols = [image_col for image_col in mc_contribcluster_i.images() if image_col not in mc_contribcluster_images_existing]
+        mc_contribcluster_i_new_images = pd.DataFrame({
             image_col: pd.Series(
-                mc_metacluster_i.get_images(image_col),
-                index=mc_metacluster_i[MetadataCols.unique_id_col],
+                mc_contribcluster_i.get_images(image_col),
+                index=mc_contribcluster_i[MetadataCols.unique_id_col],
             )
             for image_col in new_image_cols
         })
-        mc_metacluster_images_updated = mc_metacluster_images_updated.combine_first(mc_metacluster_i_new_images)
-        mc_metacluster_images_updated.update(mc_metacluster_i_new_images)
+        mc_contribcluster_images_updated = mc_contribcluster_images_updated.combine_first(mc_contribcluster_i_new_images)
+        mc_contribcluster_images_updated.update(mc_contribcluster_i_new_images)
 
     # Apply updates: Metadata, Images
-    mc_metacluster_metadata_updates_df = pd.concat(mc_metacluster_metadata_updates)
-    mc_metacluster.metadata.set_index(MetadataCols.unique_id_col, inplace=True)
-    mc_metacluster.metadata = mc_metacluster.metadata.combine_first(mc_metacluster_metadata_updates_df)
-    mc_metacluster.metadata.update(mc_metacluster_metadata_updates_df)
-    mc_metacluster.metadata.reset_index(inplace=True)
-    del mc_metacluster_metadata_updates_df, mc_metacluster_metadata_updates
+    mc_contribcluster_metadata_updates_df = pd.concat(mc_contribcluster_metadata_updates)
+    mc_contribcluster.metadata.set_index(MetadataCols.unique_id_col, inplace=True)
+    mc_contribcluster.metadata = mc_contribcluster.metadata.combine_first(mc_contribcluster_metadata_updates_df)
+    mc_contribcluster.metadata.update(mc_contribcluster_metadata_updates_df)
+    mc_contribcluster.metadata.reset_index(inplace=True)
+    del mc_contribcluster_metadata_updates_df, mc_contribcluster_metadata_updates
 
-    for image_col in mc_metacluster_images_updated.columns:
-        mc_metacluster.set_images(
+    for image_col in mc_contribcluster_images_updated.columns:
+        mc_contribcluster.set_images(
             image_name=image_col,
             images=[x if pd.notna(x) else None
-                for x in mc_metacluster_images_updated[image_col]]
+                for x in mc_contribcluster_images_updated[image_col]]
         )
-    del mc_metacluster_images_updated, mc_metacluster_images_existing
+    del mc_contribcluster_images_updated, mc_contribcluster_images_existing
 
 
-    # ### Annotate: Meta-clusters
-    logging.info("Annotating meta-clusters against the reference...")
+    # ### Annotate: Contribclusters
+    logging.info("Annotating contribclusters against the reference...")
     # Initialize columns
     # Experiment: Determined by motif; Composite: Determined by cluster
-    mc_metacluster.metadata = mc_metacluster.metadata.assign(**{
+    mc_contribcluster.metadata = mc_contribcluster.metadata.assign(**{
         LabelCols.label_col:                  MetadataCols.name_unknown,
         LabelCols.label_core_col:             None,
         LabelCols.label_core_readable_col:    None,
@@ -2093,7 +2093,7 @@ def run_chrom_sequential(args):
 
     # [General] Label clusters
     utils_analysis.assign_label_from_other_compendium(
-        assign_to_mc=mc_metacluster,
+        assign_to_mc=mc_contribcluster,
         assign_from_mc=mc_ref_qc,
         save_col_prefix=ReferenceMatchCols.ref_col,
         min_score=MotifMatchArgs.min_composite_score,
@@ -2108,83 +2108,83 @@ def run_chrom_sequential(args):
     ref_readable_name_cols = [f'{ReferenceMatchCols.ref_readable_col}_name{i}' for i in range(MotifMatchArgs.max_submotifs)]
     ref_score_cols = [f'{ReferenceMatchCols.ref_col}_score{i}' for i in range(MotifMatchArgs.max_submotifs)]
     for i, (ref_readable_name_col, ref_score_col) in enumerate(zip(ref_readable_name_cols, ref_score_cols)):    
-        mc_metacluster[ref_readable_name_col] = mc_metacluster[f'{ReferenceMatchCols.ref_col}_name{i}'].map(mc_ref_qc_hr_dict)
+        mc_contribcluster[ref_readable_name_col] = mc_contribcluster[f'{ReferenceMatchCols.ref_col}_name{i}'].map(mc_ref_qc_hr_dict)
 
     # Classification: Mask
-    mask_monomer_metacluster = (
-        (mc_metacluster[f'{ReferenceMatchCols.ref_col}_score0'] > MotifMatchArgs.min_single_score)
-        & ~(mc_metacluster[f'{ReferenceMatchCols.ref_col}_score1'] > MotifMatchArgs.min_composite_score)
-        & ~(mc_metacluster[f'{ReferenceMatchCols.ref_col}_score2'] > MotifMatchArgs.min_composite_score)
+    mask_monomer_contribcluster = (
+        (mc_contribcluster[f'{ReferenceMatchCols.ref_col}_score0'] > MotifMatchArgs.min_single_score)
+        & ~(mc_contribcluster[f'{ReferenceMatchCols.ref_col}_score1'] > MotifMatchArgs.min_composite_score)
+        & ~(mc_contribcluster[f'{ReferenceMatchCols.ref_col}_score2'] > MotifMatchArgs.min_composite_score)
     )
-    mask_dimer_metacluster = (
-        (mc_metacluster[f'{ReferenceMatchCols.ref_col}_score0'] > MotifMatchArgs.min_composite_score)
-        & (mc_metacluster[f'{ReferenceMatchCols.ref_col}_score1'] > MotifMatchArgs.min_composite_score)
-        & ~(mc_metacluster[f'{ReferenceMatchCols.ref_col}_score2'] > MotifMatchArgs.min_composite_score)
+    mask_dimer_contribcluster = (
+        (mc_contribcluster[f'{ReferenceMatchCols.ref_col}_score0'] > MotifMatchArgs.min_composite_score)
+        & (mc_contribcluster[f'{ReferenceMatchCols.ref_col}_score1'] > MotifMatchArgs.min_composite_score)
+        & ~(mc_contribcluster[f'{ReferenceMatchCols.ref_col}_score2'] > MotifMatchArgs.min_composite_score)
     )
-    mask_trimer_metacluster = (
-        (mc_metacluster[f'{ReferenceMatchCols.ref_col}_score0'] > MotifMatchArgs.min_composite_score)
-        & (mc_metacluster[f'{ReferenceMatchCols.ref_col}_score1'] > MotifMatchArgs.min_composite_score)
-        & (mc_metacluster[f'{ReferenceMatchCols.ref_col}_score2'] > MotifMatchArgs.min_composite_score)
+    mask_trimer_contribcluster = (
+        (mc_contribcluster[f'{ReferenceMatchCols.ref_col}_score0'] > MotifMatchArgs.min_composite_score)
+        & (mc_contribcluster[f'{ReferenceMatchCols.ref_col}_score1'] > MotifMatchArgs.min_composite_score)
+        & (mc_contribcluster[f'{ReferenceMatchCols.ref_col}_score2'] > MotifMatchArgs.min_composite_score)
     )
-    mask_multimer_metacluster = (
-        mask_dimer_metacluster | mask_trimer_metacluster
+    mask_multimer_contribcluster = (
+        mask_dimer_contribcluster | mask_trimer_contribcluster
     )
-    mask_matched_metacluster = (
-        mask_monomer_metacluster | mask_dimer_metacluster | mask_trimer_metacluster
+    mask_matched_contribcluster = (
+        mask_monomer_contribcluster | mask_dimer_contribcluster | mask_trimer_contribcluster
     )
 
     # Dimer-style notation
-    mc_metacluster.metadata.loc[mask_matched_metacluster, LabelCols.label_core_col] = mc_metacluster.metadata.loc[mask_matched_metacluster, ref_readable_name_cols[0]]
-    mc_metacluster.metadata.loc[mask_matched_metacluster, LabelCols.label_core_readable_col] = mc_metacluster.metadata.loc[mask_matched_metacluster, ref_readable_name_cols[0]]
-    mc_metacluster.metadata.loc[mask_dimer_metacluster, LabelCols.label_flank_col] = mc_metacluster.metadata.loc[mask_dimer_metacluster, ref_readable_name_cols[1]]
-    mc_metacluster.metadata.loc[mask_trimer_metacluster, LabelCols.label_flank_col] = mc_metacluster.metadata.loc[mask_trimer_metacluster, ref_readable_name_cols[1]] + "::" + mc_metacluster.metadata.loc[mask_trimer_metacluster, ref_readable_name_cols[2]]
-    # mc_metacluster.metadata.loc[mask_dimer_metacluster, MetadataCols.num_subunit_col] = 2  # Composite: Determined with clusters
-    # mc_metacluster.metadata.loc[mask_trimer_metacluster, MetadataCols.num_subunit_col] = 3
-    # mc_metacluster.metadata[MetadataCols.composite_col] = mc_metacluster.metadata[MetadataCols.num_subunit_col] > MotifMatchArgs.min_composite_subunit
+    mc_contribcluster.metadata.loc[mask_matched_contribcluster, LabelCols.label_core_col] = mc_contribcluster.metadata.loc[mask_matched_contribcluster, ref_readable_name_cols[0]]
+    mc_contribcluster.metadata.loc[mask_matched_contribcluster, LabelCols.label_core_readable_col] = mc_contribcluster.metadata.loc[mask_matched_contribcluster, ref_readable_name_cols[0]]
+    mc_contribcluster.metadata.loc[mask_dimer_contribcluster, LabelCols.label_flank_col] = mc_contribcluster.metadata.loc[mask_dimer_contribcluster, ref_readable_name_cols[1]]
+    mc_contribcluster.metadata.loc[mask_trimer_contribcluster, LabelCols.label_flank_col] = mc_contribcluster.metadata.loc[mask_trimer_contribcluster, ref_readable_name_cols[1]] + "::" + mc_contribcluster.metadata.loc[mask_trimer_contribcluster, ref_readable_name_cols[2]]
+    # mc_contribcluster.metadata.loc[mask_dimer_contribcluster, MetadataCols.num_subunit_col] = 2  # Composite: Determined with clusters
+    # mc_contribcluster.metadata.loc[mask_trimer_contribcluster, MetadataCols.num_subunit_col] = 3
+    # mc_contribcluster.metadata[MetadataCols.composite_col] = mc_contribcluster.metadata[MetadataCols.num_subunit_col] > MotifMatchArgs.min_composite_subunit
 
 
     # Concatenate all unique annotations
-    mc_metacluster[ReferenceMatchCols.ref_name_col] = mc_metacluster.metadata[
+    mc_contribcluster[ReferenceMatchCols.ref_name_col] = mc_contribcluster.metadata[
         [f'{ReferenceMatchCols.ref_col}_name{submotif_i}' for submotif_i in range(MotifMatchArgs.max_submotifs)]
     ].agg(
         lambda x: ",".join(pd.unique(x.dropna().astype(str))),
         axis=1
     )
 
-    # #### Filter: Meta-clusters
+    # #### Filter: Contribclusters
     # Calculate filters
-    mc_metacluster[FilterArgs.filter_flag_col] = False
+    mc_contribcluster[FilterArgs.filter_flag_col] = False
 
     utils_analysis.calculate_filters(
-        mc=mc_metacluster,
+        mc=mc_contribcluster,
         metric_list=MotifFilterArgs.motif_metrics,
         trim_importance=FilterArgs.filter_trim_importance,
         trim_length=FilterArgs.filter_trim_length,
     )
     # Calculate filters: No scaling, trim zeros
     utils_analysis.calculate_filters(
-        mc=mc_metacluster,
+        mc=mc_contribcluster,
         metric_list=['posneg_inverted', 'truncated',],
         trim_importance=0,
     )
 
     # Apply filters
     apply_filter_clusters(
-        mc=mc_metacluster,
+        mc=mc_contribcluster,
         motif_filter_args=MotifFilterArgs,
         filter_flag_col=FilterArgs.filter_flag_col,
         filter_flag_type_col=FilterArgs.filter_flag_type_col,
     )
 
     # Remove flagged clusters
-    mc_metacluster_removed = mc_metacluster[mc_metacluster[FilterArgs.filter_flag_col]]
-    mc_metacluster_filtered = mc_metacluster[~mc_metacluster[FilterArgs.filter_flag_col]]
+    mc_contribcluster_removed = mc_contribcluster[mc_contribcluster[FilterArgs.filter_flag_col]]
+    mc_contribcluster_filtered = mc_contribcluster[~mc_contribcluster[FilterArgs.filter_flag_col]]
 
 
     ## Cluster: For sorting only
-    logging.info("Clustering meta-clusters (for sorting only)...")
+    logging.info("Clustering contribclusters (for sorting only)...")
     # Cluster: Leiden CPM
-    mc_metacluster_filtered.cluster(
+    mc_contribcluster_filtered.cluster(
         algorithm=ClusterArgs.cluster_algorithm_main,
         similarity_threshold=ClusterArgs.cluster_sim_threshold,
         save_name=VisualizeArgs.sort_col,
@@ -2194,7 +2194,7 @@ def run_chrom_sequential(args):
     )
 
     # Reassign: K-means
-    mc_metacluster_filtered.cluster(
+    mc_contribcluster_filtered.cluster(
         algorithm=ClusterArgs.cluster_algorithm_kmeans,
         save_name=VisualizeArgs.sort_col,
         largest_clusters_first=True,
@@ -2203,7 +2203,7 @@ def run_chrom_sequential(args):
         assignment_threshold=ClusterArgs.cluster_sim_assignment_threshold_kmeans,
         n_iterations=ClusterArgs.n_iterations,
     )
-    membership_cluster = mc_metacluster_filtered[VisualizeArgs.sort_col]
+    membership_cluster = mc_contribcluster_filtered[VisualizeArgs.sort_col]
     if args.verbose:
         logging.info(f"Unique clusters (for sorting only): {len(set(membership_cluster))}")
 
@@ -2213,7 +2213,7 @@ def run_chrom_sequential(args):
         if args.verbose:
             logging.info(f"Recursively clustering: {i}")
         # Cluster: Leiden CPM
-        mc_metacluster_filtered.cluster(
+        mc_contribcluster_filtered.cluster(
             algorithm=ClusterArgs.cluster_algorithm_main,
             similarity_threshold=ClusterArgs.cluster_sim_threshold,
             cluster_on=VisualizeArgs.sort_col,
@@ -2224,7 +2224,7 @@ def run_chrom_sequential(args):
             seeds=ClusterArgs.seeds,
         )
         # Reassign: K-means
-        mc_metacluster_filtered.cluster(
+        mc_contribcluster_filtered.cluster(
             algorithm=ClusterArgs.cluster_algorithm_kmeans,
             save_name=VisualizeArgs.sort_col,
             largest_clusters_first=True,
@@ -2235,7 +2235,7 @@ def run_chrom_sequential(args):
         )
 
         # Check convergence
-        new_membership_cluster = mc_metacluster_filtered[VisualizeArgs.sort_col]
+        new_membership_cluster = mc_contribcluster_filtered[VisualizeArgs.sort_col]
         if args.verbose:
             logging.info(f"Unique clusters (for sorting only): {len(set(new_membership_cluster))}")
         if np.array_equal(membership_cluster, new_membership_cluster):
@@ -2249,7 +2249,7 @@ def run_chrom_sequential(args):
         if args.verbose:
             logging.info(f"Recursively clustering: {i}")
         # Cluster: DCC
-        mc_metacluster_filtered.cluster(
+        mc_contribcluster_filtered.cluster(
             algorithm=ClusterArgs.cluster_algorithm_force,
             similarity_threshold=ClusterArgs.cluster_sim_threshold_force,
             cluster_on=VisualizeArgs.sort_col,
@@ -2260,7 +2260,7 @@ def run_chrom_sequential(args):
             seed=ClusterArgs.seeds[0],
         )
         # Reassign: K-means
-        mc_metacluster_filtered.cluster(
+        mc_contribcluster_filtered.cluster(
             algorithm=ClusterArgs.cluster_algorithm_kmeans,
             save_name=VisualizeArgs.sort_col,
             largest_clusters_first=True,
@@ -2271,7 +2271,7 @@ def run_chrom_sequential(args):
         )
         
         # Check convergence
-        new_membership_cluster = mc_metacluster_filtered[VisualizeArgs.sort_col]
+        new_membership_cluster = mc_contribcluster_filtered[VisualizeArgs.sort_col]
         if args.verbose:
             logging.info(f"Unique clusters (for sorting only): {len(set(new_membership_cluster))}")
         if np.array_equal(membership_cluster, new_membership_cluster):
@@ -2279,8 +2279,8 @@ def run_chrom_sequential(args):
         else:
             membership_cluster = new_membership_cluster
 
-    # ### Final meta-cluster names
-    logging.info("Assigning final meta-cluster names...")
+    # ### Final contribcluster names
+    logging.info("Assigning final contribcluster names...")
     # Count occurrence: Core TF family
     mc_cluster_filtered[LabelCols.label_core_readable_col_set] = mc_cluster_filtered[LabelCols.label_core_readable_col].apply(lambda x: set(re.split(r",|-", x)) if pd.notna(x) else x)
     mc_cluster_explode_core_readable = mc_cluster_filtered.metadata.explode(LabelCols.label_core_readable_col_set)
@@ -2293,7 +2293,7 @@ def run_chrom_sequential(args):
     # Core: All
     mc_cluster_core_readable_pivot = pd.pivot_table(
         mc_cluster_explode_core_readable,
-        index=metacluster_cluster_col,
+        index=contribcluster_cluster_col,
         columns=LabelCols.label_core_readable_col_set,
         values=MetadataCols.total_contrib_score_col,
         aggfunc='sum',
@@ -2305,7 +2305,7 @@ def run_chrom_sequential(args):
     # Composite
     mc_cluster_flank_pivot = pd.pivot_table(
         mc_cluster_explode_readable_composite,
-        index=metacluster_cluster_col,
+        index=contribcluster_cluster_col,
         columns=LabelCols.label_flank_col_set,
         values=MetadataCols.total_contrib_score_col,
         aggfunc='sum',
@@ -2314,11 +2314,11 @@ def run_chrom_sequential(args):
     mc_cluster_flank_pivot = mc_cluster_flank_pivot.div(
         mc_cluster_flank_pivot.sum(axis=1), axis=0)
 
-    # Match order of metaclusters
+    # Match order of contribclusters
     mc_cluster_core_readable_pivot = mc_cluster_core_readable_pivot.reindex(
-        mc_metacluster_filtered[ClusterArgs.source_cluster_col]).fillna(0).drop([''], axis=1, errors='ignore')
+        mc_contribcluster_filtered[ClusterArgs.source_cluster_col]).fillna(0).drop([''], axis=1, errors='ignore')
     mc_cluster_flank_pivot = mc_cluster_flank_pivot.reindex(
-        mc_metacluster_filtered[ClusterArgs.source_cluster_col]).fillna(0).drop([''], axis=1, errors='ignore')
+        mc_contribcluster_filtered[ClusterArgs.source_cluster_col]).fillna(0).drop([''], axis=1, errors='ignore')
 
 
     def is_valid(x):
@@ -2459,32 +2459,32 @@ def run_chrom_sequential(args):
 
     # Add human-readable label
     label_cols = [LabelCols.label_core_col, LabelCols.label_core_readable_col, LabelCols.label_flank_col, LabelCols.label_col]
-    mc_metacluster_filtered.metadata[label_cols] = pd.DataFrame(
-        mc_metacluster_filtered.metadata.apply(assign_label, axis=1).tolist(),
-        index=mc_metacluster_filtered.metadata.index,
+    mc_contribcluster_filtered.metadata[label_cols] = pd.DataFrame(
+        mc_contribcluster_filtered.metadata.apply(assign_label, axis=1).tolist(),
+        index=mc_contribcluster_filtered.metadata.index,
         columns=label_cols,
     )
 
-    ### Name: Metacluster - Removed
-    mc_metacluster_removed[LabelCols.label_col] = mc_metacluster_removed[FilterArgs.filter_flag_type_col]
+    ### Name: Contribcluster - Removed
+    mc_contribcluster_removed[LabelCols.label_col] = mc_contribcluster_removed[FilterArgs.filter_flag_type_col]
 
     ## Prename
-    mc_metacluster_filtered[MetadataCols.prename_col] = label_initial + "_" + mc_metacluster_filtered[LabelCols.label_col]
-    mc_metacluster_removed[MetadataCols.prename_col] = label_initial + "_" + mc_metacluster_removed[LabelCols.label_col]
+    mc_contribcluster_filtered[MetadataCols.prename_col] = label_initial + "_" + mc_contribcluster_filtered[LabelCols.label_col]
+    mc_contribcluster_removed[MetadataCols.prename_col] = label_initial + "_" + mc_contribcluster_removed[LabelCols.label_col]
 
     ## Simple name
-    mc_metacluster_filtered[MetadataCols.simple_name_col] = mc_metacluster_filtered[LabelCols.label_col]
-    mc_metacluster_removed[MetadataCols.simple_name_col] = mc_metacluster_removed[LabelCols.label_col]
+    mc_contribcluster_filtered[MetadataCols.simple_name_col] = mc_contribcluster_filtered[LabelCols.label_col]
+    mc_contribcluster_removed[MetadataCols.simple_name_col] = mc_contribcluster_removed[LabelCols.label_col]
 
 
     ### Annotate: Best label
-    mc_metacluster_filtered_metadata_updates = []
-    mc_metacluster_filtered_images_updated = pd.DataFrame(index=mc_metacluster_filtered[MetadataCols.unique_id_col])
-    mc_metacluster_filtered_images_existing = set(mc_metacluster_filtered.images())
+    mc_contribcluster_filtered_metadata_updates = []
+    mc_contribcluster_filtered_images_updated = pd.DataFrame(index=mc_contribcluster_filtered[MetadataCols.unique_id_col])
+    mc_contribcluster_filtered_images_existing = set(mc_contribcluster_filtered.images())
 
-    for i, row in mc_metacluster_filtered.metadata.iterrows():
+    for i, row in mc_contribcluster_filtered.metadata.iterrows():
         # MotifCompendium: Subset
-        mc_metacluster_filtered_i = mc_metacluster_filtered[[i]]
+        mc_contribcluster_filtered_i = mc_contribcluster_filtered[[i]]
         label_core_i = row[LabelCols.label_core_col].split("-") if pd.notna(row[LabelCols.label_core_col]) else []
         label_flank_i = row[LabelCols.label_flank_col].split("-") if pd.notna(row[LabelCols.label_flank_col]) else []
         composite_i = row[MetadataCols.composite_col]
@@ -2504,7 +2504,7 @@ def run_chrom_sequential(args):
         # Annotate with name references
         if len(mc_ref_core_i) > 0:
             assign_direct_composite(
-                target_mc=mc_metacluster_filtered_i,
+                target_mc=mc_contribcluster_filtered_i,
                 direct_reference_mc=mc_ref_core_i,
                 indirect_reference_mc=mc_ref_composite_i,
                 save_col_prefix=LabelCols.best_label_ref_col,
@@ -2516,94 +2516,94 @@ def run_chrom_sequential(args):
             )
         
         ## Update: Metadata, Images
-        mc_metacluster_filtered_metadata_updates.append(mc_metacluster_filtered_i.metadata.set_index(MetadataCols.unique_id_col))
+        mc_contribcluster_filtered_metadata_updates.append(mc_contribcluster_filtered_i.metadata.set_index(MetadataCols.unique_id_col))
 
-        new_image_cols = [image_col for image_col in mc_metacluster_filtered_i.images() if image_col not in mc_metacluster_filtered_images_existing]
-        mc_metacluster_filtered_i_new_images = pd.DataFrame({
+        new_image_cols = [image_col for image_col in mc_contribcluster_filtered_i.images() if image_col not in mc_contribcluster_filtered_images_existing]
+        mc_contribcluster_filtered_i_new_images = pd.DataFrame({
             image_col: pd.Series(
-                mc_metacluster_filtered_i.get_images(image_col),
-                index=mc_metacluster_filtered_i[MetadataCols.unique_id_col],
+                mc_contribcluster_filtered_i.get_images(image_col),
+                index=mc_contribcluster_filtered_i[MetadataCols.unique_id_col],
             )
             for image_col in new_image_cols
         })
-        mc_metacluster_filtered_images_updated = mc_metacluster_filtered_images_updated.combine_first(mc_metacluster_filtered_i_new_images)
-        mc_metacluster_filtered_images_updated.update(mc_metacluster_filtered_i_new_images)
+        mc_contribcluster_filtered_images_updated = mc_contribcluster_filtered_images_updated.combine_first(mc_contribcluster_filtered_i_new_images)
+        mc_contribcluster_filtered_images_updated.update(mc_contribcluster_filtered_i_new_images)
 
     # Apply updates: Metadata, Images
-    mc_metacluster_filtered_metadata_updates_df = pd.concat(mc_metacluster_filtered_metadata_updates)
-    mc_metacluster_filtered.metadata.set_index(MetadataCols.unique_id_col, inplace=True)
-    mc_metacluster_filtered.metadata = mc_metacluster_filtered.metadata.combine_first(mc_metacluster_filtered_metadata_updates_df)
-    mc_metacluster_filtered.metadata.update(mc_metacluster_filtered_metadata_updates_df)
-    mc_metacluster_filtered.metadata.reset_index(inplace=True)
-    del mc_metacluster_filtered_metadata_updates_df, mc_metacluster_filtered_metadata_updates
+    mc_contribcluster_filtered_metadata_updates_df = pd.concat(mc_contribcluster_filtered_metadata_updates)
+    mc_contribcluster_filtered.metadata.set_index(MetadataCols.unique_id_col, inplace=True)
+    mc_contribcluster_filtered.metadata = mc_contribcluster_filtered.metadata.combine_first(mc_contribcluster_filtered_metadata_updates_df)
+    mc_contribcluster_filtered.metadata.update(mc_contribcluster_filtered_metadata_updates_df)
+    mc_contribcluster_filtered.metadata.reset_index(inplace=True)
+    del mc_contribcluster_filtered_metadata_updates_df, mc_contribcluster_filtered_metadata_updates
 
-    for image_col in mc_metacluster_filtered_images_updated.columns:
-        mc_metacluster_filtered.set_images(
+    for image_col in mc_contribcluster_filtered_images_updated.columns:
+        mc_contribcluster_filtered.set_images(
             image_name=image_col,
             images=[x if pd.notna(x) else None 
-                for x in mc_metacluster_filtered_images_updated[image_col]]
+                for x in mc_contribcluster_filtered_images_updated[image_col]]
         )
-    del mc_metacluster_filtered_images_updated, mc_metacluster_filtered_images_existing
+    del mc_contribcluster_filtered_images_updated, mc_contribcluster_filtered_images_existing
 
     #### Update original MotifCompendium
-    logging.info("Propagating cluster / meta-cluster labels to all levels...")
-    ### (3) Metacluster:
-    # Update original Metacluster MotifCompendium: Metadata, Images
-    mc_metaclusters = [mc_metacluster_filtered, mc_metacluster_removed]
+    logging.info("Propagating cluster / contribcluster labels to all levels...")
+    ### (3) Contribcluster:
+    # Update original Contribcluster MotifCompendium: Metadata, Images
+    mc_contribclusters = [mc_contribcluster_filtered, mc_contribcluster_removed]
 
-    mc_metacluster.metadata.set_index(MetadataCols.unique_id_col, inplace=True)
-    mc_metacluster_images_updated = pd.DataFrame(index=mc_metacluster.metadata.index)
-    mc_metacluster_images_existing = set(mc_metacluster.images())
+    mc_contribcluster.metadata.set_index(MetadataCols.unique_id_col, inplace=True)
+    mc_contribcluster_images_updated = pd.DataFrame(index=mc_contribcluster.metadata.index)
+    mc_contribcluster_images_existing = set(mc_contribcluster.images())
 
     # Build updates: Metadata, Images
-    for mc_metacluster_i in mc_metaclusters:
+    for mc_contribcluster_i in mc_contribclusters:
         # Metadata
-        mc_metacluster.metadata = mc_metacluster.metadata.combine_first(mc_metacluster_i.metadata.set_index(MetadataCols.unique_id_col))
-        mc_metacluster.metadata.update(mc_metacluster_i.metadata.set_index(MetadataCols.unique_id_col))
+        mc_contribcluster.metadata = mc_contribcluster.metadata.combine_first(mc_contribcluster_i.metadata.set_index(MetadataCols.unique_id_col))
+        mc_contribcluster.metadata.update(mc_contribcluster_i.metadata.set_index(MetadataCols.unique_id_col))
         # Images
-        new_image_cols = [image_col for image_col in mc_metacluster_i.images() if image_col not in mc_metacluster_images_existing]
-        mc_metacluster_i_new_images = pd.DataFrame({
+        new_image_cols = [image_col for image_col in mc_contribcluster_i.images() if image_col not in mc_contribcluster_images_existing]
+        mc_contribcluster_i_new_images = pd.DataFrame({
             image_col: pd.Series(
-                mc_metacluster_i.get_images(image_col),
-                index=mc_metacluster_i[MetadataCols.unique_id_col],
+                mc_contribcluster_i.get_images(image_col),
+                index=mc_contribcluster_i[MetadataCols.unique_id_col],
             )
             for image_col in new_image_cols
         })
-        mc_metacluster_images_updated = mc_metacluster_images_updated.combine_first(mc_metacluster_i_new_images)
-        mc_metacluster_images_updated.update(mc_metacluster_i_new_images)
+        mc_contribcluster_images_updated = mc_contribcluster_images_updated.combine_first(mc_contribcluster_i_new_images)
+        mc_contribcluster_images_updated.update(mc_contribcluster_i_new_images)
 
     # Apply updates: Metadata, Images
-    mc_metacluster.metadata.reset_index(inplace=True)
-    for image_col in mc_metacluster_images_updated.columns:
-        mc_metacluster.set_images(
+    mc_contribcluster.metadata.reset_index(inplace=True)
+    for image_col in mc_contribcluster_images_updated.columns:
+        mc_contribcluster.set_images(
             image_name=image_col,
             images=[x if pd.notna(x) else None
-                for x in mc_metacluster_images_updated[image_col]]
+                for x in mc_contribcluster_images_updated[image_col]]
         )
-    del mc_metacluster_images_updated, mc_metacluster_images_existing
+    del mc_contribcluster_images_updated, mc_contribcluster_images_existing
 
 
     # Readable label: Type
-    mask_indirect = ~mc_metacluster[LabelCols.label_col].isin(FilterArgs.filter_flag_types)
-    mc_metacluster.metadata.loc[mask_indirect, LabelCols.label_conf_col] = LabelCols.label_confs[2]
-    mc_metacluster.metadata.loc[~mask_indirect, LabelCols.label_conf_col] = LabelCols.label_confs[-1]
+    mask_indirect = ~mc_contribcluster[LabelCols.label_col].isin(FilterArgs.filter_flag_types)
+    mc_contribcluster.metadata.loc[mask_indirect, LabelCols.label_conf_col] = LabelCols.label_confs[2]
+    mc_contribcluster.metadata.loc[~mask_indirect, LabelCols.label_conf_col] = LabelCols.label_confs[-1]
 
 
     # Rename: {readable_name}_{counter}
-    mc_metacluster.metadata[MetadataCols.counter_col] = mc_metacluster.metadata.dropna(subset=[MetadataCols.prename_col]).groupby(MetadataCols.prename_col).cumcount().fillna(0).astype(int)
-    mc_metacluster.metadata[MetadataCols.name_new_col] = mc_metacluster.metadata[MetadataCols.prename_col] + "_" + mc_metacluster.metadata[MetadataCols.counter_col].astype(str)
-    mc_metacluster.metadata[MetadataCols.name_col] = mc_metacluster.metadata[MetadataCols.name_new_col]
-    mc_metacluster.metadata.drop(columns=[MetadataCols.name_new_col, MetadataCols.counter_col], axis=1, inplace=True)
+    mc_contribcluster.metadata[MetadataCols.counter_col] = mc_contribcluster.metadata.dropna(subset=[MetadataCols.prename_col]).groupby(MetadataCols.prename_col).cumcount().fillna(0).astype(int)
+    mc_contribcluster.metadata[MetadataCols.name_new_col] = mc_contribcluster.metadata[MetadataCols.prename_col] + "_" + mc_contribcluster.metadata[MetadataCols.counter_col].astype(str)
+    mc_contribcluster.metadata[MetadataCols.name_col] = mc_contribcluster.metadata[MetadataCols.name_new_col]
+    mc_contribcluster.metadata.drop(columns=[MetadataCols.name_new_col, MetadataCols.counter_col], axis=1, inplace=True)
 
-    ## Map: Cluster to Metacluster: Name, Simple name
-    cluster2metacluster_metacluster_map = dict(zip(mc_metacluster[ClusterArgs.source_cluster_col], mc_metacluster[MetadataCols.name_col]))
-    cluster2metacluster_simple_map = dict(zip(mc_metacluster[ClusterArgs.source_cluster_col], mc_metacluster[MetadataCols.simple_name_col]))
+    ## Map: Cluster to Contribcluster: Name, Simple name
+    cluster2contribcluster_contribcluster_map = dict(zip(mc_contribcluster[ClusterArgs.source_cluster_col], mc_contribcluster[MetadataCols.name_col]))
+    cluster2contribcluster_simple_map = dict(zip(mc_contribcluster[ClusterArgs.source_cluster_col], mc_contribcluster[MetadataCols.simple_name_col]))
 
-    mc_cluster_filtered[VisualizeArgs.metacluster_name_col] = mc_cluster_filtered[metacluster_cluster_col].map(cluster2metacluster_metacluster_map)
-    mc_cluster_filtered[MetadataCols.simple_name_col] = mc_cluster_filtered[metacluster_cluster_col].map(cluster2metacluster_simple_map)
+    mc_cluster_filtered[VisualizeArgs.contribcluster_name_col] = mc_cluster_filtered[contribcluster_cluster_col].map(cluster2contribcluster_contribcluster_map)
+    mc_cluster_filtered[MetadataCols.simple_name_col] = mc_cluster_filtered[contribcluster_cluster_col].map(cluster2contribcluster_simple_map)
 
     ### (2) Cluster:
-    # Update original Metacluster MotifCompendium: Metadata, Images
+    # Update original Contribcluster MotifCompendium: Metadata, Images
     mc_clusters = [mc_cluster_filtered, mc_cluster_removed]
 
     mc_cluster.metadata.set_index(MetadataCols.unique_id_col, inplace=True)
@@ -2646,11 +2646,11 @@ def run_chrom_sequential(args):
 
     ## Map: Motif to Cluster: Name, Cluster, Simple name
     motif2cluster_cluster_map = dict(zip(mc_cluster[ClusterArgs.source_cluster_col], mc_cluster[MetadataCols.name_col]))
-    motif2cluster_metacluster_map = dict(zip(mc_cluster[ClusterArgs.source_cluster_col], mc_cluster[VisualizeArgs.metacluster_name_col]))
+    motif2cluster_contribcluster_map = dict(zip(mc_cluster[ClusterArgs.source_cluster_col], mc_cluster[VisualizeArgs.contribcluster_name_col]))
     motif2cluster_simple_map = dict(zip(mc_cluster[ClusterArgs.source_cluster_col], mc_cluster[MetadataCols.simple_name_col]))
 
     mc_filtered[VisualizeArgs.cluster_name_col] = mc_filtered[cluster_cluster_col].map(motif2cluster_cluster_map)
-    mc_filtered[VisualizeArgs.metacluster_name_col] = mc_filtered[cluster_cluster_col].map(motif2cluster_metacluster_map)
+    mc_filtered[VisualizeArgs.contribcluster_name_col] = mc_filtered[cluster_cluster_col].map(motif2cluster_contribcluster_map)
     mc_filtered[MetadataCols.simple_name_col] = mc_filtered[cluster_cluster_col].map(motif2cluster_simple_map)
 
     ### (1) Motif:
@@ -2678,12 +2678,12 @@ def run_chrom_sequential(args):
     # slice the filtered / removed views, and resolve the HTML columns once.
     logging.info("Preparing final MotifCompendium objects...")
 
-    ## (3) Metaclusters
-    mc_metacluster_filtered = mc_metacluster[~mc_metacluster[FilterArgs.filter_flag_col]]
-    mc_metacluster_removed = mc_metacluster[mc_metacluster[FilterArgs.filter_flag_col]]
+    ## (3) Contribclusters
+    mc_contribcluster_filtered = mc_contribcluster[~mc_contribcluster[FilterArgs.filter_flag_col]]
+    mc_contribcluster_removed = mc_contribcluster[mc_contribcluster[FilterArgs.filter_flag_col]]
 
-    ## (2) Clusters: Sort by metacluster
-    mc_cluster[VisualizeArgs.sort_col] = mc_cluster[metacluster_cluster_col]
+    ## (2) Clusters: Sort by contribcluster
+    mc_cluster[VisualizeArgs.sort_col] = mc_cluster[contribcluster_cluster_col]
     mc_cluster_filtered = mc_cluster[~mc_cluster[FilterArgs.filter_flag_col]]
     mc_cluster_removed = mc_cluster[mc_cluster[FilterArgs.filter_flag_col]]
 
@@ -2701,8 +2701,8 @@ def run_chrom_sequential(args):
     )] if n_removed_sample > 0 else None
 
     ## HTML summary table columns, per level
-    html_columns_metacluster = [html_col for html_col in VisualizeArgs.html_columns if html_col in (mc_metacluster.columns() + mc_metacluster.images())]
-    html_column_desc_dict_metacluster = {col: html_column_desc_dict.get(col, col) for col in html_columns_metacluster}
+    html_columns_contribcluster = [html_col for html_col in VisualizeArgs.html_columns if html_col in (mc_contribcluster.columns() + mc_contribcluster.images())]
+    html_column_desc_dict_contribcluster = {col: html_column_desc_dict.get(col, col) for col in html_columns_contribcluster}
 
     html_columns_cluster = [html_col for html_col in VisualizeArgs.html_columns if html_col in (mc_cluster.columns() + mc_cluster.images())]
     html_column_desc_dict_cluster = {col: html_column_desc_dict.get(col, col) for col in html_columns_cluster}
@@ -2712,7 +2712,7 @@ def run_chrom_sequential(args):
             f"Final object sizes:\n"
             f"  Motifs:       {len(mc)} ({len(mc_filtered)} filtered, {len(mc_removed)} removed)\n"
             f"  Clusters:     {len(mc_cluster)} ({len(mc_cluster_filtered)} filtered, {len(mc_cluster_removed)} removed)\n"
-            f"  Metaclusters: {len(mc_metacluster)} ({len(mc_metacluster_filtered)} filtered, {len(mc_metacluster_removed)} removed)"
+            f"  Contribclusters: {len(mc_contribcluster)} ({len(mc_contribcluster_filtered)} filtered, {len(mc_contribcluster_removed)} removed)"
         )
 
 
@@ -2733,11 +2733,11 @@ def run_chrom_sequential(args):
     if args.save_all:
         mc_cluster_removed.save(mc_cluster_removed_path)
 
-    # (3) Metaclusters
-    mc_metacluster.save(mc_metacluster_path)
-    mc_metacluster_filtered.save(mc_metacluster_filtered_path)
+    # (3) Contribclusters
+    mc_contribcluster.save(mc_contribcluster_path)
+    mc_contribcluster_filtered.save(mc_contribcluster_filtered_path)
     if args.save_all:
-        mc_metacluster_removed.save(mc_metacluster_removed_path)
+        mc_contribcluster_removed.save(mc_contribcluster_removed_path)
 
 
     ## HTML summary table
@@ -2752,7 +2752,7 @@ def run_chrom_sequential(args):
                 columns=(mc_removed_sample.columns() + mc_removed_sample.images()),
                 logo_trimming=VisualizeArgs.html_logo_trim,
                 editable=True,
-                column_desc_dict=html_column_desc_dict_metacluster,
+                column_desc_dict=html_column_desc_dict_contribcluster,
             )
 
     # (2) Clusters
@@ -2779,28 +2779,28 @@ def run_chrom_sequential(args):
             column_desc_dict=html_column_desc_dict_cluster,
         )
 
-    # (3) Metaclusters
-    mc_metacluster.summary_table_html(
-        html_out=html_metacluster_path,
-        columns=[FilterArgs.filter_flag_col] + html_columns_metacluster,
+    # (3) Contribclusters
+    mc_contribcluster.summary_table_html(
+        html_out=html_contribcluster_path,
+        columns=[FilterArgs.filter_flag_col] + html_columns_contribcluster,
         logo_trimming=VisualizeArgs.html_logo_trim,
         editable=True,
-        column_desc_dict=html_column_desc_dict_metacluster,
+        column_desc_dict=html_column_desc_dict_contribcluster,
     )
-    mc_metacluster_filtered.summary_table_html(
-        html_out=html_metacluster_filtered_path,
-        columns=html_columns_metacluster,
+    mc_contribcluster_filtered.summary_table_html(
+        html_out=html_contribcluster_filtered_path,
+        columns=html_columns_contribcluster,
         logo_trimming=VisualizeArgs.html_logo_trim,
         editable=True,
-        column_desc_dict=html_column_desc_dict_metacluster,
+        column_desc_dict=html_column_desc_dict_contribcluster,
     )
     if args.save_all:
-        mc_metacluster_removed.summary_table_html(
-            html_out=html_metacluster_removed_path,
-            columns=[col for col in html_columns_metacluster if col in (mc_metacluster_removed.columns() + mc_metacluster_removed.images())],
+        mc_contribcluster_removed.summary_table_html(
+            html_out=html_contribcluster_removed_path,
+            columns=[col for col in html_columns_contribcluster if col in (mc_contribcluster_removed.columns() + mc_contribcluster_removed.images())],
             logo_trimming=VisualizeArgs.html_logo_trim,
             editable=True,
-            column_desc_dict=html_column_desc_dict_metacluster,
+            column_desc_dict=html_column_desc_dict_contribcluster,
         )
 
 
@@ -2845,22 +2845,22 @@ def run_chrom_sequential(args):
                 save_loc=modisco_cluster_removed_path,
             )
 
-        # (3) Metaclusters
+        # (3) Contribclusters
         utils_analysis.export_compendium_modisco(
-            mc=mc_metacluster,
+            mc=mc_contribcluster,
             name_col=MetadataCols.name_col,
-            save_loc=modisco_metacluster_path,
+            save_loc=modisco_contribcluster_path,
         )
         utils_analysis.export_compendium_modisco(
-            mc=mc_metacluster_filtered,
+            mc=mc_contribcluster_filtered,
             name_col=MetadataCols.name_col,
-            save_loc=modisco_metacluster_filtered_path,
+            save_loc=modisco_contribcluster_filtered_path,
         )
         if args.save_all:
             utils_analysis.export_compendium_modisco(
-                mc=mc_metacluster_removed,
+                mc=mc_contribcluster_removed,
                 name_col=MetadataCols.name_col,
-                save_loc=modisco_metacluster_removed_path,
+                save_loc=modisco_contribcluster_removed_path,
             )
 
 
@@ -2910,25 +2910,25 @@ def run_chrom_sequential(args):
             trim_importance=(1/(2*mc_cluster_removed.motifs.shape[1])),
         )
 
-    # (3) Metaclusters
+    # (3) Contribclusters
     utils_analysis.export_compendium_meme(
-        mc=mc_metacluster,
+        mc=mc_contribcluster,
         name_col=MetadataCols.name_col,
-        save_loc=meme_metacluster_path,
-        trim_importance=(1/(2*mc_metacluster.motifs.shape[1])),
+        save_loc=meme_contribcluster_path,
+        trim_importance=(1/(2*mc_contribcluster.motifs.shape[1])),
     )
     utils_analysis.export_compendium_meme(
-        mc=mc_metacluster_filtered,
+        mc=mc_contribcluster_filtered,
         name_col=MetadataCols.name_col,
-        save_loc=meme_metacluster_filtered_path,
-        trim_importance=(1/(2*mc_metacluster_filtered.motifs.shape[1])),
+        save_loc=meme_contribcluster_filtered_path,
+        trim_importance=(1/(2*mc_contribcluster_filtered.motifs.shape[1])),
     )
     if args.save_all:
         utils_analysis.export_compendium_meme(
-            mc=mc_metacluster_removed,
+            mc=mc_contribcluster_removed,
             name_col=MetadataCols.name_col,
-            save_loc=meme_metacluster_removed_path,
-            trim_importance=(1/(2*mc_metacluster_removed.motifs.shape[1])),
+            save_loc=meme_contribcluster_removed_path,
+            trim_importance=(1/(2*mc_contribcluster_removed.motifs.shape[1])),
         )
 
 
@@ -2938,7 +2938,7 @@ def run_chrom_sequential(args):
 
     mc.metadata.to_csv(metadata_motif_path, sep="\t", index=False)
     mc_cluster.metadata.to_csv(metadata_cluster_path, sep="\t", index=False)
-    mc_metacluster.metadata.to_csv(metadata_metacluster_path, sep="\t", index=False)
+    mc_contribcluster.metadata.to_csv(metadata_contribcluster_path, sep="\t", index=False)
 
     # Motif index
     mc.metadata[VisualizeArgs.motif_index_cols].to_csv(metadata_motif_index_path, sep="\t", index=False)
@@ -3058,9 +3058,9 @@ def run_chrom_sequential(args):
         "cluster_force_density": ClusterArgs.cluster_force_density,
         "cluster_sim_assignment_threshold_kmeans": ClusterArgs.cluster_sim_assignment_threshold_kmeans,
         "cluster_within": ClusterArgs.cluster_within,
-        "metacluster_within": ClusterArgs.metacluster_within,
+        "contribcluster_within": ClusterArgs.contribcluster_within,
         "cluster_cluster_col": cluster_cluster_col,
-        "metacluster_cluster_col": metacluster_cluster_col,
+        "contribcluster_cluster_col": contribcluster_cluster_col,
         "cluster_max_iter_main": ClusterArgs.cluster_max_iter_main,
         "cluster_max_iter_force": ClusterArgs.cluster_max_iter_force,
         "average_weight_col": ClusterArgs.average_weight_col,
@@ -3081,8 +3081,8 @@ def run_chrom_sequential(args):
 
         # Parameters: Hierarchy
         "cluster_name_col": VisualizeArgs.cluster_name_col,
-        "metacluster_name_col": VisualizeArgs.metacluster_name_col,
-        "metacluster_name": VisualizeArgs.metacluster_name,
+        "contribcluster_name_col": VisualizeArgs.contribcluster_name_col,
+        "contribcluster_name": VisualizeArgs.contribcluster_name,
         "sort_col": VisualizeArgs.sort_col,
         "max_major_family_frac": VisualizeArgs.max_major_family_frac,
         "major_family_increment": VisualizeArgs.major_family_increment,
@@ -3110,7 +3110,7 @@ def run_chrom_sequential(args):
     _size_targets = [
         "mc", "mc_qc", "mc_filtered", "mc_removed",
         "mc_cluster", "mc_cluster_filtered", "mc_cluster_removed",
-        "mc_metacluster", "mc_metacluster_filtered", "mc_metacluster_removed",
+        "mc_contribcluster", "mc_contribcluster_filtered", "mc_contribcluster_removed",
     ]
     _scope = locals()
     object_sizes = {}
@@ -3151,63 +3151,63 @@ def run_chrom_sequential(args):
     logging.info(f'Run completed: {time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())}')
 
 
-def update_constituents(args, mc_metacluster_combined, metacluster2atlas_name_map, metacluster2atlas_simple_map):
+def update_constituents(args, mc_contribcluster_combined, contribcluster2modelcluster_name_map, contribcluster2modelcluster_simple_map):
     """
-    The levels below the atlasclusters: each head's metacluster, cluster and motif compendia (motifcompendium_*_all.mc)
-    get their atlascluster (name, simple name), by their metacluster; then the atlascluster motif index. Run by the
+    The levels below the modelclusters: each head's contribcluster, cluster and motif compendia (motifcompendium_*_all.mc)
+    get their modelcluster (name, simple name), by their contribcluster; then the modelcluster motif index. Run by the
     combine stage (--update-constituents now), or on its own from the combine's saved outputs (--update-constituents only:
     run_chrom_constituents()).
     """
-    atlascluster_cluster_col = f"rec_{ClusterArgs.cluster_algorithm_force}-{ClusterArgs.cluster_sim_threshold_force}_{ClusterArgs.cluster_algorithm_kmeans}-{ClusterArgs.cluster_sim_assignment_threshold_kmeans}"
+    modelcluster_cluster_col = f"rec_{ClusterArgs.cluster_algorithm_force}-{ClusterArgs.cluster_sim_threshold_force}_{ClusterArgs.cluster_algorithm_kmeans}-{ClusterArgs.cluster_sim_assignment_threshold_kmeans}"
     mc_counts_path = os.path.join(args.counts_dir, "mc", "motifcompendium_motif_all.mc")
     mc_cluster_counts_path = os.path.join(args.counts_dir, "mc", "motifcompendium_cluster_all.mc")
-    mc_metacluster_counts_path = os.path.join(args.counts_dir, "mc", "motifcompendium_metacluster_all.mc")
+    mc_contribcluster_counts_path = os.path.join(args.counts_dir, "mc", "motifcompendium_contribcluster_all.mc")
     mc_profile_path = os.path.join(args.profile_dir, "mc", "motifcompendium_motif_all.mc")
     mc_cluster_profile_path = os.path.join(args.profile_dir, "mc", "motifcompendium_cluster_all.mc")
-    mc_metacluster_profile_path = os.path.join(args.profile_dir, "mc", "motifcompendium_metacluster_all.mc")
-    metadata_motif_index_path = os.path.join(args.output_dir, "metadata", "motifcompendium_atlascluster_motif_index.tsv")
+    mc_contribcluster_profile_path = os.path.join(args.profile_dir, "mc", "motifcompendium_contribcluster_all.mc")
+    metadata_motif_index_path = os.path.join(args.output_dir, "metadata", "motifcompendium_modelcluster_motif_index.tsv")
     os.makedirs(os.path.dirname(metadata_motif_index_path), exist_ok=True)
 
     # #### Motif index
     # Load MotifCompendium
-    mc_metacluster_counts = MotifCompendium.load(mc_metacluster_counts_path, safe=args.safe)
-    mc_metacluster_profile = MotifCompendium.load(mc_metacluster_profile_path, safe=args.safe)
+    mc_contribcluster_counts = MotifCompendium.load(mc_contribcluster_counts_path, safe=args.safe)
+    mc_contribcluster_profile = MotifCompendium.load(mc_contribcluster_profile_path, safe=args.safe)
 
     mc_cluster_counts = MotifCompendium.load(mc_cluster_counts_path, safe=args.safe)
     mc_cluster_profile = MotifCompendium.load(mc_cluster_profile_path, safe=args.safe)
 
     mc_counts = MotifCompendium.load(mc_counts_path, safe=args.safe)
     mc_profile = MotifCompendium.load(mc_profile_path, safe=args.safe)
-    # Update Metaclusters
-    for mc_metacluster_i in [mc_metacluster_counts, mc_metacluster_profile]:
-        for metadata_col in mc_metacluster_combined.columns():
-            if metadata_col not in mc_metacluster_i.columns():
-                mc_metacluster_i.metadata[metadata_col] = None
-        mc_metacluster_i.metadata.set_index(MetadataCols.unique_id_col, inplace=True)
-        mc_metacluster_i.metadata.update(mc_metacluster_combined.metadata.set_index(MetadataCols.unique_id_col))
-        mc_metacluster_i.metadata.reset_index(inplace=True)
-    # Map: Metacluster to Atlas-cluster: Name, Simple name
-    mc_metacluster_counts[VisualizeArgs.atlascluster_name_col] = mc_metacluster_counts[atlascluster_cluster_col].map(metacluster2atlas_name_map)
-    mc_metacluster_counts[MetadataCols.simple_name_col] = mc_metacluster_counts[atlascluster_cluster_col].map(metacluster2atlas_simple_map).fillna(mc_metacluster_counts[MetadataCols.simple_name_col])
+    # Update Contribclusters
+    for mc_contribcluster_i in [mc_contribcluster_counts, mc_contribcluster_profile]:
+        for metadata_col in mc_contribcluster_combined.columns():
+            if metadata_col not in mc_contribcluster_i.columns():
+                mc_contribcluster_i.metadata[metadata_col] = None
+        mc_contribcluster_i.metadata.set_index(MetadataCols.unique_id_col, inplace=True)
+        mc_contribcluster_i.metadata.update(mc_contribcluster_combined.metadata.set_index(MetadataCols.unique_id_col))
+        mc_contribcluster_i.metadata.reset_index(inplace=True)
+    # Map: Contribcluster to Atlas-cluster: Name, Simple name
+    mc_contribcluster_counts[VisualizeArgs.modelcluster_name_col] = mc_contribcluster_counts[modelcluster_cluster_col].map(contribcluster2modelcluster_name_map)
+    mc_contribcluster_counts[MetadataCols.simple_name_col] = mc_contribcluster_counts[modelcluster_cluster_col].map(contribcluster2modelcluster_simple_map).fillna(mc_contribcluster_counts[MetadataCols.simple_name_col])
 
-    mc_metacluster_profile[VisualizeArgs.atlascluster_name_col] = mc_metacluster_profile[atlascluster_cluster_col].map(metacluster2atlas_name_map)
-    mc_metacluster_profile[MetadataCols.simple_name_col] = mc_metacluster_profile[atlascluster_cluster_col].map(metacluster2atlas_simple_map).fillna(mc_metacluster_profile[MetadataCols.simple_name_col])
+    mc_contribcluster_profile[VisualizeArgs.modelcluster_name_col] = mc_contribcluster_profile[modelcluster_cluster_col].map(contribcluster2modelcluster_name_map)
+    mc_contribcluster_profile[MetadataCols.simple_name_col] = mc_contribcluster_profile[modelcluster_cluster_col].map(contribcluster2modelcluster_simple_map).fillna(mc_contribcluster_profile[MetadataCols.simple_name_col])
     ## Map: Motif, Cluster to Atlas-cluster
-    cluster2metacluster_atlascluster_map = dict(zip(mc_metacluster_combined[MetadataCols.name_col], mc_metacluster_combined[VisualizeArgs.atlascluster_name_col]))
-    cluster2metacluster_simple_map = dict(zip(mc_metacluster_combined[MetadataCols.name_col], mc_metacluster_combined[MetadataCols.simple_name_col]))
+    cluster2contribcluster_modelcluster_map = dict(zip(mc_contribcluster_combined[MetadataCols.name_col], mc_contribcluster_combined[VisualizeArgs.modelcluster_name_col]))
+    cluster2contribcluster_simple_map = dict(zip(mc_contribcluster_combined[MetadataCols.name_col], mc_contribcluster_combined[MetadataCols.simple_name_col]))
 
-    mc_cluster_counts[VisualizeArgs.atlascluster_name_col] = mc_cluster_counts[VisualizeArgs.metacluster_name_col].map(cluster2metacluster_atlascluster_map)
-    mc_cluster_counts[MetadataCols.simple_name_col] = mc_cluster_counts[VisualizeArgs.metacluster_name_col].map(cluster2metacluster_simple_map).fillna(mc_cluster_counts[MetadataCols.simple_name_col])
-    mc_cluster_profile[VisualizeArgs.atlascluster_name_col] = mc_cluster_profile[VisualizeArgs.metacluster_name_col].map(cluster2metacluster_atlascluster_map)
-    mc_cluster_profile[MetadataCols.simple_name_col] = mc_cluster_profile[VisualizeArgs.metacluster_name_col].map(cluster2metacluster_simple_map).fillna(mc_cluster_profile[MetadataCols.simple_name_col])
+    mc_cluster_counts[VisualizeArgs.modelcluster_name_col] = mc_cluster_counts[VisualizeArgs.contribcluster_name_col].map(cluster2contribcluster_modelcluster_map)
+    mc_cluster_counts[MetadataCols.simple_name_col] = mc_cluster_counts[VisualizeArgs.contribcluster_name_col].map(cluster2contribcluster_simple_map).fillna(mc_cluster_counts[MetadataCols.simple_name_col])
+    mc_cluster_profile[VisualizeArgs.modelcluster_name_col] = mc_cluster_profile[VisualizeArgs.contribcluster_name_col].map(cluster2contribcluster_modelcluster_map)
+    mc_cluster_profile[MetadataCols.simple_name_col] = mc_cluster_profile[VisualizeArgs.contribcluster_name_col].map(cluster2contribcluster_simple_map).fillna(mc_cluster_profile[MetadataCols.simple_name_col])
 
-    mc_counts[VisualizeArgs.atlascluster_name_col] = mc_counts[VisualizeArgs.metacluster_name_col].map(cluster2metacluster_atlascluster_map)
-    mc_counts[MetadataCols.simple_name_col] = mc_counts[VisualizeArgs.metacluster_name_col].map(cluster2metacluster_simple_map).fillna(mc_counts[MetadataCols.simple_name_col])
-    mc_profile[VisualizeArgs.atlascluster_name_col] = mc_profile[VisualizeArgs.metacluster_name_col].map(cluster2metacluster_atlascluster_map)
-    mc_profile[MetadataCols.simple_name_col] = mc_profile[VisualizeArgs.metacluster_name_col].map(cluster2metacluster_simple_map).fillna(mc_profile[MetadataCols.simple_name_col])
+    mc_counts[VisualizeArgs.modelcluster_name_col] = mc_counts[VisualizeArgs.contribcluster_name_col].map(cluster2contribcluster_modelcluster_map)
+    mc_counts[MetadataCols.simple_name_col] = mc_counts[VisualizeArgs.contribcluster_name_col].map(cluster2contribcluster_simple_map).fillna(mc_counts[MetadataCols.simple_name_col])
+    mc_profile[VisualizeArgs.modelcluster_name_col] = mc_profile[VisualizeArgs.contribcluster_name_col].map(cluster2contribcluster_modelcluster_map)
+    mc_profile[MetadataCols.simple_name_col] = mc_profile[VisualizeArgs.contribcluster_name_col].map(cluster2contribcluster_simple_map).fillna(mc_profile[MetadataCols.simple_name_col])
     # Save MotifCompendium: with the motif index, over the per-head inputs (motifcompendium_*_all.mc)
-    save_replace(mc_metacluster_counts, mc_metacluster_counts_path)
-    save_replace(mc_metacluster_profile, mc_metacluster_profile_path)
+    save_replace(mc_contribcluster_counts, mc_contribcluster_counts_path)
+    save_replace(mc_contribcluster_profile, mc_contribcluster_profile_path)
 
     save_replace(mc_cluster_counts, mc_cluster_counts_path)
     save_replace(mc_cluster_profile, mc_cluster_profile_path)
@@ -3220,12 +3220,12 @@ def update_constituents(args, mc_metacluster_combined, metacluster2atlas_name_ma
         mc_profile.metadata,
     ], axis=0)
     # Export: Motif index
-    mc_motif_index[VisualizeArgs.motif_index_cols_atlascluster].to_csv(metadata_motif_index_path, sep="\t", index=False)
+    mc_motif_index[VisualizeArgs.motif_index_cols_modelcluster].to_csv(metadata_motif_index_path, sep="\t", index=False)
 
 
 def run_chrom_constituents(args):
-    """--update-constituents only: the combine stage's update of the levels below the atlasclusters (update_constituents()), from its
-    saved outputs (<output-dir>/mc: motifcompendium_atlascluster_all.mc, motifcompendium_metacluster_combined.mc)."""
+    """--update-constituents only: the combine stage's update of the levels below the modelclusters (update_constituents()), from its
+    saved outputs (<output-dir>/mc: motifcompendium_modelcluster_all.mc, motifcompendium_contribcluster_combined.mc)."""
     log_dir = os.path.join(args.output_dir, "logs")
     os.makedirs(log_dir, exist_ok=True)
     log_path = os.path.join(
@@ -3239,7 +3239,7 @@ def run_chrom_constituents(args):
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=[logging.StreamHandler(sys.stdout), logging.FileHandler(log_path)]
     )
-    logging.info(f"Run started (the levels below the atlasclusters only): {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
+    logging.info(f"Run started (the levels below the modelclusters only): {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
     logging.info(f"Writing run log to: {log_path}")
     MotifCompendium.set_compute_options(
         max_chunk=args.max_chunk,
@@ -3249,19 +3249,19 @@ def run_chrom_constituents(args):
         fast_plotting=args.fast_plot,
     )
     mc_dir = os.path.join(args.output_dir, "mc")
-    mc_atlascluster = MotifCompendium.load(os.path.join(mc_dir, "motifcompendium_atlascluster_all.mc"), safe=args.safe)
-    mc_metacluster_combined = MotifCompendium.load(os.path.join(mc_dir, "motifcompendium_metacluster_combined.mc"), safe=args.safe)
+    mc_modelcluster = MotifCompendium.load(os.path.join(mc_dir, "motifcompendium_modelcluster_all.mc"), safe=args.safe)
+    mc_contribcluster_combined = MotifCompendium.load(os.path.join(mc_dir, "motifcompendium_contribcluster_combined.mc"), safe=args.safe)
     update_constituents(
         args,
-        mc_metacluster_combined,
-        dict(zip(mc_atlascluster[ClusterArgs.source_cluster_col], mc_atlascluster[MetadataCols.name_col])),
-        dict(zip(mc_atlascluster[ClusterArgs.source_cluster_col], mc_atlascluster[MetadataCols.simple_name_col])),
+        mc_contribcluster_combined,
+        dict(zip(mc_modelcluster[ClusterArgs.source_cluster_col], mc_modelcluster[MetadataCols.name_col])),
+        dict(zip(mc_modelcluster[ClusterArgs.source_cluster_col], mc_modelcluster[MetadataCols.simple_name_col])),
     )
     logging.info(f"Completed run: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
 
 
 def run_chrom_combine(args):
-    """Chromatin atlas: combine the counts and profile meta-clusters into atlasclusters"""
+    """Chromatin atlas: combine the counts and profile contribclusters into modelclusters"""
 
 
     ### OPTIONS -----------------------------------------------------------------
@@ -3314,7 +3314,7 @@ def run_chrom_combine(args):
     label_initial = MetadataCols.atlas_type
 
     ## Derived clustering column name
-    atlascluster_cluster_col = f"rec_{ClusterArgs.cluster_algorithm_force}-{ClusterArgs.cluster_sim_threshold_force}_{ClusterArgs.cluster_algorithm_kmeans}-{ClusterArgs.cluster_sim_assignment_threshold_kmeans}"
+    modelcluster_cluster_col = f"rec_{ClusterArgs.cluster_algorithm_force}-{ClusterArgs.cluster_sim_threshold_force}_{ClusterArgs.cluster_algorithm_kmeans}-{ClusterArgs.cluster_sim_assignment_threshold_kmeans}"
 
     ## HTML column descriptions
     html_column_desc_df = pd.read_csv(args.column_desc_tsv, sep="\t", header=0)
@@ -3323,66 +3323,66 @@ def run_chrom_combine(args):
     ## Input: counts head
     mc_counts_path = os.path.join(args.counts_dir, "mc", "motifcompendium_motif_all.mc")
     mc_cluster_counts_path = os.path.join(args.counts_dir, "mc", "motifcompendium_cluster_all.mc")
-    mc_metacluster_filtered_counts_path = os.path.join(args.counts_dir, "mc", "motifcompendium_metacluster_filtered.mc")
-    mc_metacluster_counts_path = os.path.join(args.counts_dir, "mc", "motifcompendium_metacluster_all.mc")
+    mc_contribcluster_filtered_counts_path = os.path.join(args.counts_dir, "mc", "motifcompendium_contribcluster_filtered.mc")
+    mc_contribcluster_counts_path = os.path.join(args.counts_dir, "mc", "motifcompendium_contribcluster_all.mc")
 
     ## Input: profile head
     mc_profile_path = os.path.join(args.profile_dir, "mc", "motifcompendium_motif_all.mc")
     mc_cluster_profile_path = os.path.join(args.profile_dir, "mc", "motifcompendium_cluster_all.mc")
-    mc_metacluster_filtered_profile_path = os.path.join(args.profile_dir, "mc", "motifcompendium_metacluster_filtered.mc")
-    mc_metacluster_profile_path = os.path.join(args.profile_dir, "mc", "motifcompendium_metacluster_all.mc")
+    mc_contribcluster_filtered_profile_path = os.path.join(args.profile_dir, "mc", "motifcompendium_contribcluster_filtered.mc")
+    mc_contribcluster_profile_path = os.path.join(args.profile_dir, "mc", "motifcompendium_contribcluster_all.mc")
 
     ## Output: MotifCompendium object
     mc_dir = os.path.join(args.output_dir, "mc")
 
-    mc_metacluster_combined_path = os.path.join(mc_dir, "motifcompendium_metacluster_combined.mc")
-    mc_atlascluster_path = os.path.join(mc_dir, "motifcompendium_atlascluster_all.mc")
-    mc_atlascluster_filtered_path = os.path.join(mc_dir, "motifcompendium_atlascluster_filtered.mc")
-    mc_atlascluster_removed_path = os.path.join(mc_dir, "motifcompendium_atlascluster_removed.mc")
+    mc_contribcluster_combined_path = os.path.join(mc_dir, "motifcompendium_contribcluster_combined.mc")
+    mc_modelcluster_path = os.path.join(mc_dir, "motifcompendium_modelcluster_all.mc")
+    mc_modelcluster_filtered_path = os.path.join(mc_dir, "motifcompendium_modelcluster_filtered.mc")
+    mc_modelcluster_removed_path = os.path.join(mc_dir, "motifcompendium_modelcluster_removed.mc")
 
     ## Output: HTML summary table
     html_dir = os.path.join(args.output_dir, "html")
 
-    html_atlascluster_path = os.path.join(html_dir, "motifcompendium_atlascluster_all.html")
-    html_atlascluster_filtered_path = os.path.join(html_dir, "motifcompendium_atlascluster_filtered.html")
-    html_atlascluster_removed_path = os.path.join(html_dir, "motifcompendium_atlascluster_removed.html")
+    html_modelcluster_path = os.path.join(html_dir, "motifcompendium_modelcluster_all.html")
+    html_modelcluster_filtered_path = os.path.join(html_dir, "motifcompendium_modelcluster_filtered.html")
+    html_modelcluster_removed_path = os.path.join(html_dir, "motifcompendium_modelcluster_removed.html")
 
     ## Output: Export - MoDISco HDF5, MEME
     export_dir = os.path.join(args.output_dir, "export")
 
-    modisco_atlascluster_path = os.path.join(export_dir, "motifcompendium_atlascluster_all.h5")
-    modisco_atlascluster_filtered_path = os.path.join(export_dir, "motifcompendium_atlascluster_filtered.h5")
-    modisco_atlascluster_removed_path = os.path.join(export_dir, "motifcompendium_atlascluster_removed.h5")
+    modisco_modelcluster_path = os.path.join(export_dir, "motifcompendium_modelcluster_all.h5")
+    modisco_modelcluster_filtered_path = os.path.join(export_dir, "motifcompendium_modelcluster_filtered.h5")
+    modisco_modelcluster_removed_path = os.path.join(export_dir, "motifcompendium_modelcluster_removed.h5")
 
-    meme_atlascluster_path = os.path.join(export_dir, "motifcompendium_atlascluster_all.meme.txt")
-    meme_atlascluster_filtered_path = os.path.join(export_dir, "motifcompendium_atlascluster_filtered.meme.txt")
-    meme_atlascluster_removed_path = os.path.join(export_dir, "motifcompendium_atlascluster_removed.meme.txt")
+    meme_modelcluster_path = os.path.join(export_dir, "motifcompendium_modelcluster_all.meme.txt")
+    meme_modelcluster_filtered_path = os.path.join(export_dir, "motifcompendium_modelcluster_filtered.meme.txt")
+    meme_modelcluster_removed_path = os.path.join(export_dir, "motifcompendium_modelcluster_removed.meme.txt")
 
     ## Output: Metadata
     metadata_dir = os.path.join(args.output_dir, "metadata")
 
-    metadata_atlascluster_path = os.path.join(metadata_dir, "motifcompendium_atlascluster_all_metadata.tsv")
-    metadata_motif_index_path = os.path.join(metadata_dir, "motifcompendium_atlascluster_motif_index.tsv")
+    metadata_modelcluster_path = os.path.join(metadata_dir, "motifcompendium_modelcluster_all_metadata.tsv")
+    metadata_motif_index_path = os.path.join(metadata_dir, "motifcompendium_modelcluster_motif_index.tsv")
     args_json_path = os.path.join(metadata_dir, "args.json")
 
 
-    # ## Initial Meta-clusters
+    # ## Initial Contribclusters
 
     # #### Load MotifCompendium
     logging.info("Loading per-head (counts, profile) MotifCompendium objects...")
     # Load MotifCompendium
-    mc_metacluster_filtered_counts = MotifCompendium.load(mc_metacluster_filtered_counts_path, safe=args.safe)
-    mc_metacluster_filtered_profile = MotifCompendium.load(mc_metacluster_filtered_profile_path, safe=args.safe)
+    mc_contribcluster_filtered_counts = MotifCompendium.load(mc_contribcluster_filtered_counts_path, safe=args.safe)
+    mc_contribcluster_filtered_profile = MotifCompendium.load(mc_contribcluster_filtered_profile_path, safe=args.safe)
 
     # The per-head selection: once the ENCODE combine has written its final flags back, motifcompendium_*_filtered.mc
     # holds those instead, and this stage would combine an already-filtered selection
     for mc_input, mc_input_path in (
-        (mc_metacluster_filtered_counts, mc_metacluster_filtered_counts_path),
-        (mc_metacluster_filtered_profile, mc_metacluster_filtered_profile_path),
+        (mc_contribcluster_filtered_counts, mc_contribcluster_filtered_counts_path),
+        (mc_contribcluster_filtered_profile, mc_contribcluster_filtered_profile_path),
     ):
-        if VisualizeArgs.encodecluster_name_col in mc_input.columns():
+        if VisualizeArgs.crosscluster_name_col in mc_input.columns():
             raise ValueError(
-                f"{mc_input_path} holds the final flags of an ENCODE combine ({VisualizeArgs.encodecluster_name_col}), "
+                f"{mc_input_path} holds the final flags of an ENCODE combine ({VisualizeArgs.crosscluster_name_col}), "
                 "not the per-head selection: rerun the per-head stages (counts, profile) before this stage."
             )
 
@@ -3418,38 +3418,38 @@ def run_chrom_combine(args):
     mc_ref_qc[LabelCols.label_col] = mc_ref_qc[MetadataCols.name_col].map(mc_ref_qc_hr_dict)
 
 
-    # ### Combine: Meta-clusters
-    logging.info("Combining counts + profile meta-clusters...")
+    # ### Combine: Contribclusters
+    logging.info("Combining counts + profile contribclusters...")
 
     # #### Pairwise similarity
     # Combine MotifCompendium
-    mc_metacluster_combined = MotifCompendium.combine(
-        [mc_metacluster_filtered_counts, mc_metacluster_filtered_profile],
+    mc_contribcluster_combined = MotifCompendium.combine(
+        [mc_contribcluster_filtered_counts, mc_contribcluster_filtered_profile],
         safe=args.safe,
     )
 
 
     # #### Combine
     # Force-cluster
-    mc_metacluster_combined.cluster(
+    mc_contribcluster_combined.cluster(
         algorithm=ClusterArgs.cluster_algorithm_force,
         similarity_threshold=ClusterArgs.cluster_sim_threshold_force,
-        cluster_within=ClusterArgs.atlascluster_within,
-        save_name=atlascluster_cluster_col,
+        cluster_within=ClusterArgs.modelcluster_within,
+        save_name=modelcluster_cluster_col,
         largest_clusters_first=True,
         seed=ClusterArgs.seeds[0],
     )
     # Reassign: K-mean distance
-    mc_metacluster_combined.cluster(
+    mc_contribcluster_combined.cluster(
         algorithm=ClusterArgs.cluster_algorithm_kmeans,
-        cluster_within=ClusterArgs.atlascluster_within,
-        save_name=atlascluster_cluster_col,
+        cluster_within=ClusterArgs.modelcluster_within,
+        save_name=modelcluster_cluster_col,
         largest_clusters_first=True,
-        init_clustering_col=atlascluster_cluster_col,
+        init_clustering_col=modelcluster_cluster_col,
         weight_col=ClusterArgs.average_weight_col,
         assignment_threshold=ClusterArgs.cluster_sim_assignment_threshold_kmeans,
     )
-    membership_atlas = mc_metacluster_combined[atlascluster_cluster_col]
+    membership_atlas = mc_contribcluster_combined[modelcluster_cluster_col]
     logging.info(f"Unique clusters: {len(set(membership_atlas))}")
 
     # Cluster: Recursively
@@ -3457,29 +3457,29 @@ def run_chrom_combine(args):
         if args.verbose:
             logging.info(f"Recursively clustering: {i}")
         # Force-cluster
-        mc_metacluster_combined.cluster(
+        mc_contribcluster_combined.cluster(
             algorithm=ClusterArgs.cluster_algorithm_force,
             similarity_threshold=ClusterArgs.cluster_sim_threshold_force,
-            cluster_within_on=(ClusterArgs.atlascluster_within, atlascluster_cluster_col),
+            cluster_within_on=(ClusterArgs.modelcluster_within, modelcluster_cluster_col),
             cluster_on_weight=ClusterArgs.average_weight_col,
-            save_name=atlascluster_cluster_col,
+            save_name=modelcluster_cluster_col,
             largest_clusters_first=True,
             density=ClusterArgs.cluster_force_density,
             seed=ClusterArgs.seeds[0],
         )
         # Reassign: K-mean distance
-        mc_metacluster_combined.cluster(
+        mc_contribcluster_combined.cluster(
             algorithm=ClusterArgs.cluster_algorithm_kmeans,
-            cluster_within=ClusterArgs.atlascluster_within,
-            save_name=atlascluster_cluster_col,
+            cluster_within=ClusterArgs.modelcluster_within,
+            save_name=modelcluster_cluster_col,
             largest_clusters_first=True,
-            init_clustering_col=atlascluster_cluster_col,
+            init_clustering_col=modelcluster_cluster_col,
             weight_col=ClusterArgs.average_weight_col,
             assignment_threshold=ClusterArgs.cluster_sim_assignment_threshold_kmeans,
         )
 
         # Check convergence
-        new_membership_atlas = mc_metacluster_combined[atlascluster_cluster_col]
+        new_membership_atlas = mc_contribcluster_combined[modelcluster_cluster_col]
         if args.verbose:
             logging.info(f"  Unique clusters: {len(set(new_membership_atlas))}")
         if np.array_equal(membership_atlas, new_membership_atlas):
@@ -3488,23 +3488,23 @@ def run_chrom_combine(args):
         else:
             membership_atlas = new_membership_atlas
     # ## Cluster: Manual
-    logging.info("Merging meta-clusters 1:1 by pairwise similarity...")
+    logging.info("Merging contribclusters 1:1 by pairwise similarity...")
     # # Apply threshold
-    # sim_threshold = np.where(mc_metacluster_combined.similarity < cluster_sim_threshold_force, 0, mc_metacluster_combined.similarity)
+    # sim_threshold = np.where(mc_contribcluster_combined.similarity < cluster_sim_threshold_force, 0, mc_contribcluster_combined.similarity)
     # np.fill_diagonal(sim_threshold, 0) # Set diagonal to 0
     # sim_threshold_sparse = scipy.sparse.coo_matrix(sim_threshold) # Sparse matrix
     # # Sort by similarity score (descending), then by row index, then by column index
     # cluster_candidates = sorted([(sim_threshold_sparse.data[i], sim_threshold_sparse.row[i], sim_threshold_sparse.col[i]) for i in range(len(sim_threshold_sparse.data))], reverse=True)
 
     # # Create clusters
-    # clustered = [0] * len(mc_metacluster_combined)
+    # clustered = [0] * len(mc_contribcluster_combined)
     # cluster_num = 0
     # for cluster_candidate in cluster_candidates:
     #     sim, i, j = cluster_candidate
     #     if clustered[i] == 0 and clustered[j] == 0:
     #         # Create new cluster
-    #         mc_metacluster_combined.metadata.loc[i, atlascluster_cluster_col] = cluster_num
-    #         mc_metacluster_combined.metadata.loc[j, atlascluster_cluster_col] = cluster_num
+    #         mc_contribcluster_combined.metadata.loc[i, modelcluster_cluster_col] = cluster_num
+    #         mc_contribcluster_combined.metadata.loc[j, modelcluster_cluster_col] = cluster_num
     #         cluster_num += 1
         
     #         # Record clustered
@@ -3512,22 +3512,22 @@ def run_chrom_combine(args):
     #         clustered[j] += 1
 
     # # Assign singleton clusters to unclustered motifs
-    # mc_metacluster_combined.metadata.loc[mc_metacluster_combined.metadata[atlascluster_cluster_col].isna(), atlascluster_cluster_col] = range(cluster_num, cluster_num + mc_metacluster_combined.metadata[atlascluster_cluster_col].isna().sum())
+    # mc_contribcluster_combined.metadata.loc[mc_contribcluster_combined.metadata[modelcluster_cluster_col].isna(), modelcluster_cluster_col] = range(cluster_num, cluster_num + mc_contribcluster_combined.metadata[modelcluster_cluster_col].isna().sum())
 
     # # Average MotifCompendium
-    # mc_chromatlas = mc_metacluster_combined.cluster_averages(
-    #     clustering=atlascluster_cluster_col,
+    # mc_chromatlas = mc_contribcluster_combined.cluster_averages(
+    #     clustering=modelcluster_cluster_col,
     #     aggregations=aggregations,
     #     weight_col=average_weight_col,
     #     compute_quality_stats=False,
     # )
 
-    # min_len = mc_chromatlas[atlascluster_cluster_col].nunique()
+    # min_len = mc_chromatlas[modelcluster_cluster_col].nunique()
     # print(f"Unique clusters (Filtered): {min_len}")
     # ## Cluster: Manual (recursively)
     # for i in range(cluster_max_iter_force):
     #     # Apply threshold
-    #     sim_threshold = np.where(mc_metacluster_combined.similarity < cluster_sim_threshold_force, 0, mc_metacluster_combined.similarity)
+    #     sim_threshold = np.where(mc_contribcluster_combined.similarity < cluster_sim_threshold_force, 0, mc_contribcluster_combined.similarity)
     #     np.fill_diagonal(sim_threshold, 0) # Set diagonal to 0
     #     sim_threshold_sparse = scipy.sparse.coo_matrix(sim_threshold) # Sparse matrix
     
@@ -3535,14 +3535,14 @@ def run_chrom_combine(args):
     #     cluster_candidates = sorted([(sim_threshold_sparse.data[i], sim_threshold_sparse.row[i], sim_threshold_sparse.col[i]) for i in range(len(sim_threshold_sparse.data))], reverse=True)
 
     #     # Create clusters
-    #     clustered = [0] * len(mc_metacluster_combined)
+    #     clustered = [0] * len(mc_contribcluster_combined)
     #     cluster_num = 0
     #     for cluster_candidate in cluster_candidates:
     #         sim, i, j = cluster_candidate
     #         if clustered[i] == 0 and clustered[j] == 0:
     #             # Create new cluster
-    #             mc_metacluster_combined.metadata.loc[i, atlascluster_cluster_col] = cluster_num
-    #             mc_metacluster_combined.metadata.loc[j, atlascluster_cluster_col] = cluster_num
+    #             mc_contribcluster_combined.metadata.loc[i, modelcluster_cluster_col] = cluster_num
+    #             mc_contribcluster_combined.metadata.loc[j, modelcluster_cluster_col] = cluster_num
     #             cluster_num += 1
             
     #             # Record clustered
@@ -3550,17 +3550,17 @@ def run_chrom_combine(args):
     #             clustered[j] += 1
 
     #     # Assign singleton clusters to unclustered motifs
-    #     mc_metacluster_combined.metadata.loc[mc_metacluster_combined.metadata[atlascluster_cluster_col].isna(), atlascluster_cluster_col] = range(cluster_num, cluster_num + mc_metacluster_combined.metadata[atlascluster_cluster_col].isna().sum())
+    #     mc_contribcluster_combined.metadata.loc[mc_contribcluster_combined.metadata[modelcluster_cluster_col].isna(), modelcluster_cluster_col] = range(cluster_num, cluster_num + mc_contribcluster_combined.metadata[modelcluster_cluster_col].isna().sum())
 
     #     ## Average MotifCompendium
-    #     mc_chromatlas = mc_metacluster_combined.cluster_averages(
-    #         clustering=atlascluster_cluster_col,
+    #     mc_chromatlas = mc_contribcluster_combined.cluster_averages(
+    #         clustering=modelcluster_cluster_col,
     #         aggregations=aggregations,
     #         weight_col=average_weight_col,
     #         compute_quality_stats=False,
     #     )
 
-    #     new_min_len = mc_chromatlas[atlascluster_cluster_col].nunique()
+    #     new_min_len = mc_chromatlas[modelcluster_cluster_col].nunique()
     #     print(f"Unique clusters (Filtered): {new_min_len}")
     #     if min_len == new_min_len:
     #         break
@@ -3571,44 +3571,44 @@ def run_chrom_combine(args):
     # ## Final: Chromatin Atlas
 
     # #### Average
-    logging.info("Creating atlasclusters, by averaging...")
+    logging.info("Creating modelclusters, by averaging...")
     # Average MotifCompendium
-    aggregations_atlascluster = []
+    aggregations_modelcluster = []
     for (agg_col_in, agg, agg_col_out) in ClusterArgs.aggregations:
-        if agg_col_in in mc_metacluster_combined.columns():
-            aggregations_atlascluster.append((agg_col_in, agg, agg_col_out))
+        if agg_col_in in mc_contribcluster_combined.columns():
+            aggregations_modelcluster.append((agg_col_in, agg, agg_col_out))
 
-    mc_chromatlas = mc_metacluster_combined.cluster_averages(
-        clustering=atlascluster_cluster_col,
-        aggregations=aggregations_atlascluster,
+    mc_chromatlas = mc_contribcluster_combined.cluster_averages(
+        clustering=modelcluster_cluster_col,
+        aggregations=aggregations_modelcluster,
         weight_col=ClusterArgs.average_weight_col,
         compute_quality_stats=False,
     )
     # Weighted aggregations
-    weighted_aggregations_atlascluster = []
+    weighted_aggregations_modelcluster = []
     for (agg_col_in, agg, agg_col_out) in ClusterArgs.weighted_aggregations:
-        if agg_col_in in mc_metacluster_combined.columns():
-            weighted_aggregations_atlascluster.append((agg_col_in, agg, agg_col_out))
+        if agg_col_in in mc_contribcluster_combined.columns():
+            weighted_aggregations_modelcluster.append((agg_col_in, agg, agg_col_out))
 
-    for (agg_col_old, _, agg_col_new) in weighted_aggregations_atlascluster:
+    for (agg_col_old, _, agg_col_new) in weighted_aggregations_modelcluster:
         aggregate_weighted_avg(
-            mc=mc_metacluster_combined,
+            mc=mc_contribcluster_combined,
             mc_cluster=mc_chromatlas,
-            cluster_col=atlascluster_cluster_col,
+            cluster_col=modelcluster_cluster_col,
             agg_col=agg_col_old,
             new_col=agg_col_new,
             weight_col=ClusterArgs.average_weight_col,
         )
     # Merge aggregations
-    merge_aggregations_atlascluster = []
+    merge_aggregations_modelcluster = []
     for i, aggregate in enumerate(ClusterArgs.merge_aggregations):
         (agg_col_old, action, agg_col_new) = aggregate
         if agg_col_old in mc_chromatlas.columns():
-            merge_aggregations_atlascluster.append(aggregate)
+            merge_aggregations_modelcluster.append(aggregate)
         if agg_col_new not in mc_chromatlas.columns():
             mc_chromatlas.metadata[agg_col_new] = None
 
-    for (agg_col_old, _, agg_col_new) in merge_aggregations_atlascluster:
+    for (agg_col_old, _, agg_col_new) in merge_aggregations_modelcluster:
         mc_chromatlas.metadata[agg_col_new] = mc_chromatlas.metadata[[agg_col_old, agg_col_new]].apply(
             lambda row: ",".join(dict.fromkeys(
                 part
@@ -3697,15 +3697,15 @@ def run_chrom_combine(args):
 
 
     # #### Annotate
-    # ### Annotate: Meta-clusters
-    logging.info("Annotating atlasclusters against the reference...")
+    # ### Annotate: Contribclusters
+    logging.info("Annotating modelclusters against the reference...")
     # Initialize
     mc_chromatlas[LabelCols.label_col] = MetadataCols.name_unknown  # Initial readable name: Unknown
     mc_chromatlas[LabelCols.label_core_col] = None
     mc_chromatlas[LabelCols.label_core_readable_col] = None
     mc_chromatlas[LabelCols.label_flank_col] = None
     # mc_chromatlas[ref_readable_name_col] = None
-    ## [General] Label meta-clusters
+    ## [General] Label contribclusters
     utils_analysis.assign_label_from_other_compendium(
         assign_to_mc=mc_chromatlas,
         assign_from_mc=mc_ref_qc,
@@ -3725,35 +3725,35 @@ def run_chrom_combine(args):
         mc_chromatlas[ref_readable_name_col] = mc_chromatlas[f'{ReferenceMatchCols.ref_col}_name{i}'].map(mc_ref_qc_hr_dict)
 
     # Classification: Mask
-    mask_monomer_metacluster = (
+    mask_monomer_contribcluster = (
         (mc_chromatlas[f'{ReferenceMatchCols.ref_col}_score0'] > MotifMatchArgs.min_single_score)
         & ~(mc_chromatlas[f'{ReferenceMatchCols.ref_col}_score1'] > MotifMatchArgs.min_composite_score)
         & ~(mc_chromatlas[f'{ReferenceMatchCols.ref_col}_score2'] > MotifMatchArgs.min_composite_score)
     )
-    mask_dimer_metacluster = (
+    mask_dimer_contribcluster = (
         (mc_chromatlas[f'{ReferenceMatchCols.ref_col}_score0'] > MotifMatchArgs.min_composite_score)
         & (mc_chromatlas[f'{ReferenceMatchCols.ref_col}_score1'] > MotifMatchArgs.min_composite_score)
         & ~(mc_chromatlas[f'{ReferenceMatchCols.ref_col}_score2'] > MotifMatchArgs.min_composite_score)
     )
-    mask_trimer_metacluster = (
+    mask_trimer_contribcluster = (
         (mc_chromatlas[f'{ReferenceMatchCols.ref_col}_score0'] > MotifMatchArgs.min_composite_score)
         & (mc_chromatlas[f'{ReferenceMatchCols.ref_col}_score1'] > MotifMatchArgs.min_composite_score)
         & (mc_chromatlas[f'{ReferenceMatchCols.ref_col}_score2'] > MotifMatchArgs.min_composite_score)
     )
-    mask_multimer_metacluster = (
-        mask_dimer_metacluster | mask_trimer_metacluster
+    mask_multimer_contribcluster = (
+        mask_dimer_contribcluster | mask_trimer_contribcluster
     )
-    mask_matched_metacluster = (
-        mask_monomer_metacluster | mask_dimer_metacluster | mask_trimer_metacluster
+    mask_matched_contribcluster = (
+        mask_monomer_contribcluster | mask_dimer_contribcluster | mask_trimer_contribcluster
     )
 
     # Dimer-style notation
-    mc_chromatlas.metadata.loc[mask_matched_metacluster, LabelCols.label_core_col] = mc_chromatlas.metadata.loc[mask_matched_metacluster, ref_readable_name_cols[0]]
-    mc_chromatlas.metadata.loc[mask_matched_metacluster, LabelCols.label_core_readable_col] = mc_chromatlas.metadata.loc[mask_matched_metacluster, ref_readable_name_cols[0]]
-    mc_chromatlas.metadata.loc[mask_dimer_metacluster, LabelCols.label_flank_col] = mc_chromatlas.metadata.loc[mask_dimer_metacluster, ref_readable_name_cols[1]]
-    mc_chromatlas.metadata.loc[mask_trimer_metacluster, LabelCols.label_flank_col] = mc_chromatlas.metadata.loc[mask_trimer_metacluster, ref_readable_name_cols[1]] + "::" + mc_chromatlas.metadata.loc[mask_trimer_metacluster, ref_readable_name_cols[2]]
-    # mc_chromatlas.metadata.loc[mask_dimer_metacluster, num_subunit_col] = 2  # Composite: Determined with clusters
-    # mc_chromatlas.metadata.loc[mask_trimer_metacluster, num_subunit_col] = 3
+    mc_chromatlas.metadata.loc[mask_matched_contribcluster, LabelCols.label_core_col] = mc_chromatlas.metadata.loc[mask_matched_contribcluster, ref_readable_name_cols[0]]
+    mc_chromatlas.metadata.loc[mask_matched_contribcluster, LabelCols.label_core_readable_col] = mc_chromatlas.metadata.loc[mask_matched_contribcluster, ref_readable_name_cols[0]]
+    mc_chromatlas.metadata.loc[mask_dimer_contribcluster, LabelCols.label_flank_col] = mc_chromatlas.metadata.loc[mask_dimer_contribcluster, ref_readable_name_cols[1]]
+    mc_chromatlas.metadata.loc[mask_trimer_contribcluster, LabelCols.label_flank_col] = mc_chromatlas.metadata.loc[mask_trimer_contribcluster, ref_readable_name_cols[1]] + "::" + mc_chromatlas.metadata.loc[mask_trimer_contribcluster, ref_readable_name_cols[2]]
+    # mc_chromatlas.metadata.loc[mask_dimer_contribcluster, num_subunit_col] = 2  # Composite: Determined with clusters
+    # mc_chromatlas.metadata.loc[mask_trimer_contribcluster, num_subunit_col] = 3
     # mc_chromatlas.metadata[composite_col] = mc_chromatlas.metadata[num_subunit_col] > min_composite_subunit
 
     # # Trimer-style notation
@@ -3776,7 +3776,7 @@ def run_chrom_combine(args):
 
 
     # #### Filter
-    logging.info("Filtering atlasclusters...")
+    logging.info("Filtering modelclusters...")
     # Calculate filters
     mc_chromatlas[FilterArgs.filter_flag_col] = False
 
@@ -3800,7 +3800,7 @@ def run_chrom_combine(args):
 
     # #### Clustering (for sorting only)
     ## Cluster: For sorting only
-    logging.info("Clustering atlasclusters (for sorting only)...")
+    logging.info("Clustering modelclusters (for sorting only)...")
     # Cluster: Leiden CPM
     mc_chromatlas_filtered.cluster(
         algorithm=ClusterArgs.cluster_algorithm_main,
@@ -3900,41 +3900,41 @@ def run_chrom_combine(args):
 
     # #### Final name: Chromatin Atlas
     # Count occurrence: Core TF family
-    mc_metacluster_combined[LabelCols.label_core_readable_col_set] = mc_metacluster_combined[LabelCols.label_core_readable_col].apply(lambda x: set(re.split(r",|-", x)) if pd.notna(x) else x)
-    mc_metacluster_explode_readable_core = mc_metacluster_combined.metadata.explode(LabelCols.label_core_readable_col_set)
+    mc_contribcluster_combined[LabelCols.label_core_readable_col_set] = mc_contribcluster_combined[LabelCols.label_core_readable_col].apply(lambda x: set(re.split(r",|-", x)) if pd.notna(x) else x)
+    mc_contribcluster_explode_readable_core = mc_contribcluster_combined.metadata.explode(LabelCols.label_core_readable_col_set)
 
     # Count occurrence: Composite TF family
-    mc_metacluster_combined[LabelCols.label_flank_col_set] = mc_metacluster_combined[LabelCols.label_flank_col].apply(lambda x: set(re.split(r",|-", x)) if pd.notna(x) else x)
-    mc_metacluster_explode_readable_composite = mc_metacluster_combined.metadata.explode(LabelCols.label_flank_col_set)
+    mc_contribcluster_combined[LabelCols.label_flank_col_set] = mc_contribcluster_combined[LabelCols.label_flank_col].apply(lambda x: set(re.split(r",|-", x)) if pd.notna(x) else x)
+    mc_contribcluster_explode_readable_composite = mc_contribcluster_combined.metadata.explode(LabelCols.label_flank_col_set)
     ## Count occurrences: Create pivot table
     # Core: All
-    mc_metacluster_core_readable_pivot = pd.pivot_table(
-        mc_metacluster_explode_readable_core,
-        index=atlascluster_cluster_col,
+    mc_contribcluster_core_readable_pivot = pd.pivot_table(
+        mc_contribcluster_explode_readable_core,
+        index=modelcluster_cluster_col,
         columns=LabelCols.label_core_readable_col_set,
         values=MetadataCols.total_contrib_score_col,
         aggfunc='sum',
         fill_value=0
     )
-    mc_metacluster_core_readable_pivot = mc_metacluster_core_readable_pivot.div(
-        mc_metacluster_core_readable_pivot.sum(axis=1), axis=0)
+    mc_contribcluster_core_readable_pivot = mc_contribcluster_core_readable_pivot.div(
+        mc_contribcluster_core_readable_pivot.sum(axis=1), axis=0)
 
     # Composite
-    mc_metacluster_flank_pivot = pd.pivot_table(
-        mc_metacluster_explode_readable_composite,
-        index=atlascluster_cluster_col,
+    mc_contribcluster_flank_pivot = pd.pivot_table(
+        mc_contribcluster_explode_readable_composite,
+        index=modelcluster_cluster_col,
         columns=LabelCols.label_flank_col_set,
         values=MetadataCols.total_contrib_score_col,
         aggfunc='sum',
         fill_value=0
     )
-    mc_metacluster_flank_pivot = mc_metacluster_flank_pivot.div(
-        mc_metacluster_flank_pivot.sum(axis=1), axis=0)
+    mc_contribcluster_flank_pivot = mc_contribcluster_flank_pivot.div(
+        mc_contribcluster_flank_pivot.sum(axis=1), axis=0)
 
-    # Match order of metaclusters
-    mc_metacluster_core_readable_pivot = mc_metacluster_core_readable_pivot.reindex(
+    # Match order of contribclusters
+    mc_contribcluster_core_readable_pivot = mc_contribcluster_core_readable_pivot.reindex(
         mc_chromatlas_filtered[ClusterArgs.source_cluster_col]).fillna(0).drop([''], axis=1, errors='ignore')
-    mc_metacluster_flank_pivot = mc_metacluster_flank_pivot.reindex(
+    mc_contribcluster_flank_pivot = mc_contribcluster_flank_pivot.reindex(
         mc_chromatlas_filtered[ClusterArgs.source_cluster_col]).fillna(0).drop([''], axis=1, errors='ignore')
     def is_valid(x):
         """Pandas-safe validity check"""
@@ -3959,9 +3959,9 @@ def run_chrom_combine(args):
         if (
             pd.isna(label_core_readable)
             and pd.isna(label_core)
-            and (source_cluster in mc_metacluster_core_readable_pivot.index)
+            and (source_cluster in mc_contribcluster_core_readable_pivot.index)
         ):
-            label_core_readable_frac = mc_metacluster_core_readable_pivot.loc[source_cluster]
+            label_core_readable_frac = mc_contribcluster_core_readable_pivot.loc[source_cluster]
 
             if label_core_readable_frac.sum() > 0:
                 for major_family_frac in np.arange(VisualizeArgs.max_major_family_frac, VisualizeArgs.major_family_increment, VisualizeArgs.major_family_increment):
@@ -3995,9 +3995,9 @@ def run_chrom_combine(args):
         # 2: Combine composite TF families
         if (
             pd.isna(label_flank)
-            and (source_cluster in mc_metacluster_flank_pivot.index)
+            and (source_cluster in mc_contribcluster_flank_pivot.index)
         ):
-            composite_family_frac = mc_metacluster_flank_pivot.loc[source_cluster]
+            composite_family_frac = mc_contribcluster_flank_pivot.loc[source_cluster]
             if composite_family_frac.sum() > 0:
                 for major_family_frac in np.arange(VisualizeArgs.max_major_family_frac, VisualizeArgs.major_family_increment, VisualizeArgs.major_family_increment):
                     major_family_mask = composite_family_frac >= major_family_frac
@@ -4215,7 +4215,7 @@ def run_chrom_combine(args):
     #                 trim=False,
     #             )
 
-    # # Update original MotifCompendium: Metacluster
+    # # Update original MotifCompendium: Contribcluster
     # mc_chromatlas = MotifCompendium.combine(mc_chromatlases, safe=safe)
     # Readable label: Type
     mask_indirect = ~mc_chromatlas[LabelCols.label_col].isin(FilterArgs.filter_flag_types)
@@ -4226,48 +4226,48 @@ def run_chrom_combine(args):
     mc_chromatlas.metadata[MetadataCols.name_new_col] = mc_chromatlas.metadata[MetadataCols.prename_col] + "_" + mc_chromatlas.metadata[MetadataCols.counter_col].astype(str)
     mc_chromatlas.metadata[MetadataCols.name_col] = mc_chromatlas.metadata[MetadataCols.name_new_col]
     mc_chromatlas.metadata.drop(columns=[MetadataCols.name_new_col, MetadataCols.counter_col], axis=1, inplace=True)
-    ## Map: Metacluster to Atlas-cluster: Name, Simple name
-    metacluster2atlas_name_map = dict(zip(mc_chromatlas[ClusterArgs.source_cluster_col], mc_chromatlas[MetadataCols.name_col]))
-    metacluster2atlas_simple_map = dict(zip(mc_chromatlas[ClusterArgs.source_cluster_col], mc_chromatlas[MetadataCols.simple_name_col]))
+    ## Map: Contribcluster to Atlas-cluster: Name, Simple name
+    contribcluster2modelcluster_name_map = dict(zip(mc_chromatlas[ClusterArgs.source_cluster_col], mc_chromatlas[MetadataCols.name_col]))
+    contribcluster2modelcluster_simple_map = dict(zip(mc_chromatlas[ClusterArgs.source_cluster_col], mc_chromatlas[MetadataCols.simple_name_col]))
 
-    mc_metacluster_combined[VisualizeArgs.atlascluster_name_col] = mc_metacluster_combined[atlascluster_cluster_col].map(metacluster2atlas_name_map)
-    mc_metacluster_combined[MetadataCols.simple_name_col] = mc_metacluster_combined[atlascluster_cluster_col].map(metacluster2atlas_simple_map)
+    mc_contribcluster_combined[VisualizeArgs.modelcluster_name_col] = mc_contribcluster_combined[modelcluster_cluster_col].map(contribcluster2modelcluster_name_map)
+    mc_contribcluster_combined[MetadataCols.simple_name_col] = mc_contribcluster_combined[modelcluster_cluster_col].map(contribcluster2modelcluster_simple_map)
 
 
     # #### Visualize HTML
     ## Create HTML
     # HTML columns
-    html_columns_atlascluster = [html_col for html_col in VisualizeArgs.html_columns if html_col in (mc_chromatlas.columns() + mc_chromatlas.images())]
-    html_column_desc_dict_atlascluster = {col: html_column_desc_dict.get(col, col) for col in html_columns_atlascluster}
+    html_columns_modelcluster = [html_col for html_col in VisualizeArgs.html_columns if html_col in (mc_chromatlas.columns() + mc_chromatlas.images())]
+    html_column_desc_dict_modelcluster = {col: html_column_desc_dict.get(col, col) for col in html_columns_modelcluster}
 
-    os.makedirs(os.path.dirname(html_atlascluster_path), exist_ok=True)
+    os.makedirs(os.path.dirname(html_modelcluster_path), exist_ok=True)
     mc_chromatlas.summary_table_html(
-        html_out=html_atlascluster_path,
-        columns=[FilterArgs.filter_flag_col]+html_columns_atlascluster,
+        html_out=html_modelcluster_path,
+        columns=[FilterArgs.filter_flag_col]+html_columns_modelcluster,
         logo_trimming=VisualizeArgs.html_logo_trim,
         editable=True,
-        column_desc_dict=html_column_desc_dict_atlascluster,
+        column_desc_dict=html_column_desc_dict_modelcluster,
     )
 
-    os.makedirs(os.path.dirname(html_atlascluster_filtered_path), exist_ok=True)
+    os.makedirs(os.path.dirname(html_modelcluster_filtered_path), exist_ok=True)
     mc_chromatlas_filtered = mc_chromatlas[~(mc_chromatlas[FilterArgs.filter_flag_col])]
     mc_chromatlas_filtered.summary_table_html(
-        html_out=html_atlascluster_filtered_path,
-        columns=html_columns_atlascluster,
+        html_out=html_modelcluster_filtered_path,
+        columns=html_columns_modelcluster,
         logo_trimming=VisualizeArgs.html_logo_trim,
         editable=True,
-        column_desc_dict=html_column_desc_dict_atlascluster,
+        column_desc_dict=html_column_desc_dict_modelcluster,
     )
 
-    os.makedirs(os.path.dirname(html_atlascluster_path), exist_ok=True)
+    os.makedirs(os.path.dirname(html_modelcluster_path), exist_ok=True)
     mc_chromatlas_removed = mc_chromatlas[mc_chromatlas[FilterArgs.filter_flag_col]]
     if args.save_all:
         mc_chromatlas_removed.summary_table_html(
-            html_out=html_atlascluster_removed_path,
-            columns=[col for col in html_columns_atlascluster if col in mc_chromatlas_removed.columns()],
+            html_out=html_modelcluster_removed_path,
+            columns=[col for col in html_columns_modelcluster if col in mc_chromatlas_removed.columns()],
             logo_trimming=VisualizeArgs.html_logo_trim,
             editable=True,
-            column_desc_dict=html_column_desc_dict_atlascluster,
+            column_desc_dict=html_column_desc_dict_modelcluster,
         )
 
     # os.makedirs(os.path.dirname(html_chromatlas_monomer_path), exist_ok=True)
@@ -4293,15 +4293,15 @@ def run_chrom_combine(args):
 
     # #### Save MotifCompendium
     # Save MotifCompendium: Chromatlas Atlas
-    os.makedirs(os.path.dirname(mc_atlascluster_path), exist_ok=True)
-    mc_chromatlas.save(mc_atlascluster_path)
+    os.makedirs(os.path.dirname(mc_modelcluster_path), exist_ok=True)
+    mc_chromatlas.save(mc_modelcluster_path)
 
-    os.makedirs(os.path.dirname(mc_atlascluster_filtered_path), exist_ok=True)
-    mc_chromatlas_filtered.save(mc_atlascluster_filtered_path)
+    os.makedirs(os.path.dirname(mc_modelcluster_filtered_path), exist_ok=True)
+    mc_chromatlas_filtered.save(mc_modelcluster_filtered_path)
 
     if args.save_all:
-        os.makedirs(os.path.dirname(mc_atlascluster_removed_path), exist_ok=True)
-        mc_chromatlas_removed.save(mc_atlascluster_removed_path)
+        os.makedirs(os.path.dirname(mc_modelcluster_removed_path), exist_ok=True)
+        mc_chromatlas_removed.save(mc_modelcluster_removed_path)
 
     # os.makedirs(os.path.dirname(mc_chromatlas_monomer_path), exist_ok=True)
     # mc_chromatlas_monomer.save(mc_chromatlas_monomer_path)
@@ -4309,67 +4309,67 @@ def run_chrom_combine(args):
     # os.makedirs(os.path.dirname(mc_chromatlas_multimer_path), exist_ok=True)
     # mc_chromatlas_multimer.save(mc_chromatlas_multimer_path)
 
-    os.makedirs(os.path.dirname(mc_metacluster_combined_path), exist_ok=True)
-    mc_metacluster_combined.save(mc_metacluster_combined_path)
+    os.makedirs(os.path.dirname(mc_contribcluster_combined_path), exist_ok=True)
+    mc_contribcluster_combined.save(mc_contribcluster_combined_path)
 
 
     # ### Export
     # Export as MEME txt
-    os.makedirs(os.path.dirname(meme_atlascluster_path), exist_ok=True)
+    os.makedirs(os.path.dirname(meme_modelcluster_path), exist_ok=True)
     utils_analysis.export_compendium_meme(
         mc=mc_chromatlas,
         name_col=MetadataCols.name_col,
-        save_loc=meme_atlascluster_path,
+        save_loc=meme_modelcluster_path,
         trim_importance=(1/(2*mc_chromatlas.motifs.shape[1])),
     )
 
-    os.makedirs(os.path.dirname(meme_atlascluster_filtered_path), exist_ok=True)
+    os.makedirs(os.path.dirname(meme_modelcluster_filtered_path), exist_ok=True)
     utils_analysis.export_compendium_meme(
         mc=mc_chromatlas_filtered,
         name_col=MetadataCols.name_col,
-        save_loc=meme_atlascluster_filtered_path,
+        save_loc=meme_modelcluster_filtered_path,
         trim_importance=(1/(2*mc_chromatlas_filtered.motifs.shape[1])),
     )
 
     if args.save_all:
-        os.makedirs(os.path.dirname(meme_atlascluster_removed_path), exist_ok=True)
+        os.makedirs(os.path.dirname(meme_modelcluster_removed_path), exist_ok=True)
         utils_analysis.export_compendium_meme(
             mc=mc_chromatlas_removed,
             name_col=MetadataCols.name_col,
-            save_loc=meme_atlascluster_removed_path,
+            save_loc=meme_modelcluster_removed_path,
             trim_importance=(1/(2*mc_chromatlas_removed.motifs.shape[1])),
         )
 
     ## EXPORT: MoDISco HDF5
     if args.export_modisco:
         logging.info("Saving MoDISco HDF5 files...")
-        os.makedirs(os.path.dirname(modisco_atlascluster_path), exist_ok=True)
+        os.makedirs(os.path.dirname(modisco_modelcluster_path), exist_ok=True)
         utils_analysis.export_compendium_modisco(
             mc=mc_chromatlas,
             name_col=MetadataCols.name_col,
-            save_loc=modisco_atlascluster_path,
+            save_loc=modisco_modelcluster_path,
         )
         utils_analysis.export_compendium_modisco(
             mc=mc_chromatlas_filtered,
             name_col=MetadataCols.name_col,
-            save_loc=modisco_atlascluster_filtered_path,
+            save_loc=modisco_modelcluster_filtered_path,
         )
         if args.save_all:
             utils_analysis.export_compendium_modisco(
                 mc=mc_chromatlas_removed,
                 name_col=MetadataCols.name_col,
-                save_loc=modisco_atlascluster_removed_path,
+                save_loc=modisco_modelcluster_removed_path,
             )
     # Metadata TSV
     os.makedirs(metadata_dir, exist_ok=True)
-    mc_chromatlas.metadata.to_csv(metadata_atlascluster_path, sep="\t", index=False)
+    mc_chromatlas.metadata.to_csv(metadata_modelcluster_path, sep="\t", index=False)
 
 
-    # #### The levels below: each head's metaclusters, clusters and motifs (their atlascluster), the motif index
+    # #### The levels below: each head's contribclusters, clusters and motifs (their modelcluster), the motif index
     if args.update_constituents == "now":
-        update_constituents(args, mc_metacluster_combined, metacluster2atlas_name_map, metacluster2atlas_simple_map)
+        update_constituents(args, mc_contribcluster_combined, contribcluster2modelcluster_name_map, contribcluster2modelcluster_simple_map)
     else:
-        logging.info("The levels below the atlasclusters: not updated (--update-constituents defer; later: --update-constituents only)")
+        logging.info("The levels below the modelclusters: not updated (--update-constituents defer; later: --update-constituents only)")
     # Arguments JSON
     args_record = {
         # --- Full provenance (added 2026-09-10) ---------------------------------
@@ -4485,8 +4485,8 @@ def run_chrom_combine(args):
         "cluster_sim_threshold_force": ClusterArgs.cluster_sim_threshold_force,
         "cluster_force_density": ClusterArgs.cluster_force_density,
         "cluster_sim_assignment_threshold_kmeans": ClusterArgs.cluster_sim_assignment_threshold_kmeans,
-        "atlascluster_within": ClusterArgs.atlascluster_within,
-        "atlascluster_cluster_col": atlascluster_cluster_col,
+        "modelcluster_within": ClusterArgs.modelcluster_within,
+        "modelcluster_cluster_col": modelcluster_cluster_col,
         "cluster_max_iter_main": ClusterArgs.cluster_max_iter_main,
         "cluster_max_iter_force": ClusterArgs.cluster_max_iter_force,
         "average_weight_col": ClusterArgs.average_weight_col,
@@ -4507,8 +4507,8 @@ def run_chrom_combine(args):
 
         # Parameters: Hierarchy
         "cluster_name_col": VisualizeArgs.cluster_name_col,
-        "metacluster_name_col": VisualizeArgs.metacluster_name_col,
-        "atlascluster_name_col": VisualizeArgs.atlascluster_name_col,
+        "contribcluster_name_col": VisualizeArgs.contribcluster_name_col,
+        "modelcluster_name_col": VisualizeArgs.modelcluster_name_col,
         "sort_col": VisualizeArgs.sort_col,
         "max_major_family_frac": VisualizeArgs.max_major_family_frac,
         "major_family_increment": VisualizeArgs.major_family_increment,
@@ -4522,7 +4522,7 @@ def run_chrom_combine(args):
         "weighted_aggregations": ClusterArgs.weighted_aggregations,
 
         # Motif index
-        "motif_index_cols": VisualizeArgs.motif_index_cols_atlascluster,
+        "motif_index_cols": VisualizeArgs.motif_index_cols_modelcluster,
 
         # Run log
         "log_path": log_path,
@@ -4558,7 +4558,7 @@ if __name__ == "__main__":
     DIRS = stage_dirs(args.output_dir)
 
     if args.update_constituents == "only":
-        logging.info("ChromBPNet pipeline: the update of the levels below the atlasclusters only (--update-constituents only).")
+        logging.info("ChromBPNet pipeline: the update of the levels below the modelclusters only (--update-constituents only).")
         run_chrom_constituents(stage_args(args, output_dir=DIRS["combine"], counts_dir=DIRS["counts"], profile_dir=DIRS["profile"]))
         sys.exit(0)
 
@@ -4594,7 +4594,7 @@ if __name__ == "__main__":
             )
             run_chrom_sequential(sa)
 
-        # --- 3: combine the two heads into atlasclusters ----------------------
+        # --- 3: combine the two heads into modelclusters ----------------------
         else:
             sa = stage_args(
                 args,

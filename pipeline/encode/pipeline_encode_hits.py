@@ -1,17 +1,17 @@
 #!/usr/bin/env python
 # coding: utf-8
 """
-ENCODE MotifCompendium: index and annotate the FiNeMo hits with the final ENCODE clusters.
+ENCODE MotifCompendium: index and annotate the FiNeMo hits with the final crossclusters.
 
 Runs after the ENCODE compendium is final: pipeline_encode.py, then (with the composites merged)
 pipeline_encode_composite.py. From their outputs (--output-dir: the ENCODE stage's directory) and the
 atlas pipelines' per-head motif compendia (their FiNeMo and peaks paths, per experiment and head):
 
-  1. Index each experiment's FiNeMo hits with the ENCODE cluster of its motif (bgzip + tabix BEDs,
+  1. Index each experiment's FiNeMo hits with the crosscluster of its motif (bgzip + tabix BEDs,
      both heads collapsed): <output-dir>/export/hits_indexed
   2. Annotate each hit: peak type, nearest gene and TSS, GC/N content, distance to the peak summit
      (ArchR-style, from GENCODE and hg38): <output-dir>/export/hits_annotated
-  3. Summarize the hits per ENCODE cluster (counts per peak type, distances to the TSS and the peak
+  3. Summarize the hits per crosscluster (counts per peak type, distances to the TSS and the peak
      summit, figures) into the filtered and removed ENCODE compendia: .mc, HTML and metadata TSV.
 
 Moved from pipeline_encode.py, unchanged.
@@ -50,7 +50,7 @@ save_replace = pipeline_encode.save_replace
 #### ARGUMENTS ---------------------------------------------------------------
 def setup_parser():
     parser = argparse.ArgumentParser(
-        description="ENCODE MotifCompendium: index and annotate the FiNeMo hits with the final ENCODE clusters.",
+        description="ENCODE MotifCompendium: index and annotate the FiNeMo hits with the final crossclusters.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
@@ -63,13 +63,13 @@ def setup_parser():
                         help="Output root of the Chromatin atlas pipeline (pipeline/chrombpnet/pipeline_chrombpnet.py).")
     parser.add_argument("--procapatlas-dir", type=str, required=True,
                         help="Output root of the ProCap atlas pipeline (pipeline/procapnet/pipeline_procapnet.py).")
-    parser.add_argument("--level", type=str, default="singlemulticluster", choices=["singlemulticluster", "encode"],
-                        help="The clusters the hits are indexed and summarized by: the singlemulticluster level (C5, "
-                             "pipeline_encode_composite.py; outputs in --composite-dir) or the ENCODE clusters (C4; in "
+    parser.add_argument("--level", type=str, default="encodecluster", choices=["encodecluster", "crosscluster"],
+                        help="The clusters the hits are indexed and summarized by: the encodecluster level (C5, "
+                             "pipeline_encode_composite.py; outputs in --composite-dir) or the crossclusters (C4; in "
                              "--output-dir).")
     parser.add_argument("--composite-dir", type=str, default=None,
-                        help="Directory of the singlemulticluster level (pipeline_encode_composite.py --composite-dir; "
-                             "default: single_multi, next to --output-dir).")
+                        help="Directory of the encodecluster level (pipeline_encode_composite.py --composite-dir; "
+                             "default: encode, next to --output-dir).")
 
     # Input: annotation
     parser.add_argument("--hg38-fasta", type=str, required=True,
@@ -99,7 +99,7 @@ def set_default_configs():
 
 
 #### HITS INDEXING: WORKERS ---------------------------------------------------
-# Each FiNeMo hit with the ENCODE cluster of its motif, as an indexed BED (bgzip + tabix); counts and profile
+# Each FiNeMo hit with the crosscluster of its motif, as an indexed BED (bgzip + tabix); counts and profile
 # hits of an experiment are then collapsed into one BED. From sherlock/runs/encode/finemo/apply_mc/update_hits_bed.py.
 HITS_BED_COLS = ['chrom', 'start', 'end', 'name', 'score', 'strand', 'thickStart', 'thickEnd', 'itemRgb']
 HITS_INDEXED_COLS = HITS_BED_COLS + ['category', 'confidence', 'head', 'name_tfmodisco', 'hits_bed_cluster']
@@ -127,7 +127,7 @@ def _write_bed_tabix(bed_df, bed_gz_path):
 
 
 def _index_hits_bed(hits_bed_in, hits_bed_out, motif_lookup, head):
-    """FiNeMo hits of one experiment and head, each with the ENCODE cluster of its motif.
+    """FiNeMo hits of one experiment and head, each with the crosscluster of its motif.
 
     motif_lookup: pos/neg pattern key -> HITS_MOTIF_COLS values. Hits of a motif not in it are unvalidated,
     without a cluster (None), flagged and grey, as in update_hits_bed.py.
@@ -214,7 +214,7 @@ def _collapse_overlapping_hits(df, deduplicate_col):
 
 
 def _combine_hits_beds(hits_beds_in, hits_bed_out):
-    """Indexed hits of an experiment's heads, combined; overlapping hits of an ENCODE cluster collapsed."""
+    """Indexed hits of an experiment's heads, combined; overlapping hits of a crosscluster collapsed."""
     hits_df = pd.concat(
         [pd.read_csv(path, sep="\t", header=None, names=HITS_INDEXED_COLS, keep_default_na=False) for path in hits_beds_in],
         axis=0, ignore_index=True,
@@ -258,13 +258,13 @@ def _summarize_hits_file(hits_tsv_annotated):
 
 
 def run_encode_hits(args):
-    """ENCODE: index and annotate the FiNeMo hits with the final ENCODE clusters"""
+    """ENCODE: index and annotate the FiNeMo hits with the final crossclusters"""
 
     ### OPTIONS -----------------------------------------------------------------
-    # The level the hits are indexed and summarized by: the singlemulticluster level (C5; its compendia, motif index and
-    # these outputs in <composite-dir>) or the ENCODE clusters (C4, <output-dir>)
-    level = getattr(args, "level", None) or "singlemulticluster"
-    if level == "singlemulticluster":
+    # The level the hits are indexed and summarized by: the encodecluster level (C5; its compendia, motif index and
+    # these outputs in <composite-dir>) or the crossclusters (C4, <output-dir>)
+    level = getattr(args, "level", None) or "encodecluster"
+    if level == "encodecluster":
         cpaths = pipeline_encode.composite_paths(
             getattr(args, "composite_dir", None) or pipeline_encode.default_composite_dir(args.output_dir))
         level_dir = cpaths.composite_dir
@@ -291,8 +291,7 @@ def run_encode_hits(args):
 
     ### PATHS --------------------------------------------------------------------
     # The atlas pipelines' (FiNeMo and peaks paths); the level's compendia, motif index and outputs
-    paths = (pipeline_encode.singlemulticluster_level_paths(args, cpaths) if level == "singlemulticluster"
-             else pipeline_encode.encode_paths(args))
+    paths = pipeline_encode.hits_level_paths(args, cpaths if level == "encodecluster" else None, level)
     logging.info(f"Hits by the {level} level: {level_dir}")
 
     ## HTML column descriptions
@@ -300,7 +299,7 @@ def run_encode_hits(args):
     html_column_desc_dict = html_column_desc_df.set_index('column_name')['column_desc'].to_dict()
 
     ### INPUTS -------------------------------------------------------------------
-    # The level's compendia: its filtered and removed clusters (the singlemulticluster level: one compendium; an ENCODE
+    # The level's compendia: its filtered and removed clusters (the encodecluster level: one compendium; an ENCODE
     # level's removed ones: saved with --save-all only), and the motif index (every motif with its cluster, final filter
     # flag, confidence and category)
     logging.info("Loading the final ENCODE compendia and the motif index...")
@@ -308,10 +307,10 @@ def run_encode_hits(args):
         raise FileNotFoundError(
             f"{paths.metadata_motif_index_path}: no motif index of the {level} level yet: the levels below it are "
             "updated first (run_pipeline_encode_propagate.sh: each stage's --update-constituents only)")
-    mc_encode_filtered = MotifCompendium.load(paths.mc_encode_filtered_path, safe=args.safe)
-    mc_encode_removed = (MotifCompendium.load(paths.mc_encode_removed_path, safe=args.safe)
-                         if paths.mc_encode_removed_path and os.path.exists(paths.mc_encode_removed_path) else None)
-    level_mcs = [mc_level for mc_level in (mc_encode_filtered, mc_encode_removed) if mc_level is not None]
+    mc_level_filtered = MotifCompendium.load(paths.mc_level_filtered_path, safe=args.safe)
+    mc_level_removed = (MotifCompendium.load(paths.mc_level_removed_path, safe=args.safe)
+                        if paths.mc_level_removed_path and os.path.exists(paths.mc_level_removed_path) else None)
+    level_mcs = [mc_level for mc_level in (mc_level_filtered, mc_level_removed) if mc_level is not None]
     mc_motif_index = pd.read_csv(paths.metadata_motif_index_path, sep="\t", keep_default_na=False, na_values=[""])
 
     # FiNeMo and peaks paths, per experiment and head: the per-head motif compendia (metadata only), for the hits
@@ -364,15 +363,15 @@ def run_encode_hits(args):
     import multiprocessing
     from concurrent.futures import ProcessPoolExecutor, as_completed
 
-    # Index hits, per experiment: its FiNeMo hits (both heads), each with the ENCODE cluster of its motif, as
+    # Index hits, per experiment: its FiNeMo hits (both heads), each with the crosscluster of its motif, as
     # indexed BEDs (bgzip + tabix) in <export>/hits_indexed: {ID}.{head}.hits.indexed.bed.gz and, both heads
     # collapsed, {ID}.hits.indexed.combined.bed.gz (from sherlock/runs/encode/finemo/apply_mc/update_hits_bed.py).
     # FiNeMo paths: the motifs' finemo_path (from the atlas pipelines' --{head}-finemo-paths), read above.
-    logging.info("Indexing FiNeMo hits with their ENCODE clusters...")
+    logging.info("Indexing FiNeMo hits with their crossclusters...")
     hits_indexed_dir = os.path.join(paths.export_dir, "hits_indexed")
     hits_index_df = mc_motif_index.copy()
 
-    # Hits BED name and cluster of the level (ENCODE_name; the singlemulticluster level: singlemulticluster_name), per motif
+    # Hits BED name and cluster of the level (crosscluster_name; the encodecluster level: encodecluster_name), per motif
     flagged = hits_index_df[FilterArgs.filter_flag_col].fillna(True).astype(bool)
     simple_name = hits_index_df[MetadataCols.simple_name_col]
     level_name = hits_index_df[paths.level_name_col]
@@ -446,7 +445,7 @@ def run_encode_hits(args):
             except Exception as e:
                 logging.warning(f"Indexing hits failed for {encid} ({head}): {e}")
 
-    # Combine: both heads of an experiment, overlapping hits of an ENCODE cluster collapsed
+    # Combine: both heads of an experiment, overlapping hits of a crosscluster collapsed
     hits_combined_paths = {}
     with ProcessPoolExecutor(max_workers=n_workers_index, mp_context=multiprocessing.get_context("fork")) as executor:
         futures = {}
@@ -683,8 +682,8 @@ def run_encode_hits(args):
             if pd.isna(hits_tsv) or not os.path.exists(hits_tsv):
                 logging.warning("Skipping missing hits file for %s: %s", i, hits_tsv)
                 continue
-            # Indexed hits only (NARROWPEAKS_CUSTOM_COLS: each hit with its ENCODE cluster); a raw FiNeMo
-            # hits file has no ENCODE cluster to summarize hits by
+            # Indexed hits only (NARROWPEAKS_CUSTOM_COLS: each hit with its crosscluster); a raw FiNeMo
+            # hits file has no crosscluster to summarize hits by
             with (gzip.open(hits_tsv, "rt") if hits_tsv.endswith(".gz") else open(hits_tsv)) as hits_handle:
                 n_hits_cols = len(hits_handle.readline().rstrip("\n").split("\t"))
             if n_hits_cols != len(NARROWPEAKS_CUSTOM_COLS):
@@ -768,7 +767,7 @@ def run_encode_hits(args):
     if not hits_summarized:
         logging.warning(
             "No indexed hits were annotated: the hits summary and the region-type / distance-to-TSS "
-            "figures are skipped (the FiNeMo hits need their ENCODE clusters: NARROWPEAKS_CUSTOM_COLS)."
+            "figures are skipped (the FiNeMo hits need their crossclusters: NARROWPEAKS_CUSTOM_COLS)."
         )
     else:
         peak_type_counts_total = peak_type_counts_total.fillna(0).astype(int)
@@ -797,33 +796,33 @@ def run_encode_hits(args):
         logging.info(f"{len(hits_summary_df)} combined motif clusters summarized")
 
         # Recompile hits summary
-        def recompile_hits_summary(mc_encode_i, hits_summary_df):
+        def recompile_hits_summary(mc_level_i, hits_summary_df):
             summary_cols = [c for c in hits_summary_df.columns if c != 'hits_bed_cluster']
             hits_summary_lookup = hits_summary_df.set_index('hits_bed_cluster')
 
             # if these exist already, drop so we can overwrite
-            mc_encode_i.metadata = mc_encode_i.metadata.drop(
-                columns=[c for c in summary_cols if c in mc_encode_i.metadata.columns]
+            mc_level_i.metadata = mc_level_i.metadata.drop(
+                columns=[c for c in summary_cols if c in mc_level_i.metadata.columns]
             )
 
-            compiled = hits_summary_lookup.reindex(mc_encode_i.metadata[MetadataCols.name_col]).reset_index(drop=True)
-            compiled.index = mc_encode_i.metadata.index
+            compiled = hits_summary_lookup.reindex(mc_level_i.metadata[MetadataCols.name_col]).reset_index(drop=True)
+            compiled.index = mc_level_i.metadata.index
 
             # no hits found for this cluster -> 0 counts (not NaN); mean/median stay NaN
             count_cols = [c for c in summary_cols if c.startswith('n_hits_')]
             compiled[count_cols] = compiled[count_cols].fillna(0).astype(int)
 
-            mc_encode_i.metadata[summary_cols] = compiled
+            mc_level_i.metadata[summary_cols] = compiled
 
         # Recompile hits summary
-        for mc_encode_i in level_mcs:
-            recompile_hits_summary(mc_encode_i, hits_summary_df)
+        for mc_level_i in level_mcs:
+            recompile_hits_summary(mc_level_i, hits_summary_df)
 
             # Calculate fractions
-            mc_encode_i[HitsCols.hits_exonic_frac_col] = mc_encode_i[HitsCols.hits_exonic_col] / mc_encode_i[HitsCols.hits_total_col]
-            mc_encode_i[HitsCols.hits_intronic_frac_col] = mc_encode_i[HitsCols.hits_intronic_col] / mc_encode_i[HitsCols.hits_total_col]
-            mc_encode_i[HitsCols.hits_promoter_frac_col] = mc_encode_i[HitsCols.hits_promoter_col] / mc_encode_i[HitsCols.hits_total_col]
-            mc_encode_i[HitsCols.hits_distal_frac_col] = mc_encode_i[HitsCols.hits_distal_col] / mc_encode_i[HitsCols.hits_total_col]
+            mc_level_i[HitsCols.hits_exonic_frac_col] = mc_level_i[HitsCols.hits_exonic_col] / mc_level_i[HitsCols.hits_total_col]
+            mc_level_i[HitsCols.hits_intronic_frac_col] = mc_level_i[HitsCols.hits_intronic_col] / mc_level_i[HitsCols.hits_total_col]
+            mc_level_i[HitsCols.hits_promoter_frac_col] = mc_level_i[HitsCols.hits_promoter_col] / mc_level_i[HitsCols.hits_total_col]
+            mc_level_i[HitsCols.hits_distal_frac_col] = mc_level_i[HitsCols.hits_distal_col] / mc_level_i[HitsCols.hits_total_col]
 
         # Functions: Plot per-motif figures
         import matplotlib
@@ -888,7 +887,7 @@ def run_encode_hits(args):
             np.nanpercentile(
                 np.concatenate([
                     np.asarray(values, dtype=float)
-                    for values in mc_encode_filtered[HitsCols.distToTSS_values_col]
+                    for values in mc_level_filtered[HitsCols.distToTSS_values_col]
                     if isinstance(values, np.ndarray) and values.size > 0
                 ]),
                 90,
@@ -896,10 +895,10 @@ def run_encode_hits(args):
         )
 
         # Plot per-motif figures
-        for mc_encode_i in level_mcs:
+        for mc_level_i in level_mcs:
             region_type_images = []
             disttotss_images = []
-            for _, row in mc_encode_i.metadata.iterrows():
+            for _, row in mc_level_i.metadata.iterrows():
                 fracs = {
                     'Exonic': row.get(HitsCols.hits_exonic_frac_col),
                     'Promoter': row.get(HitsCols.hits_promoter_frac_col),
@@ -919,15 +918,15 @@ def run_encode_hits(args):
                     fig = plot_disttotss_boxplot(values, xlim=(0, disttotss_max))
                     disttotss_images.append(utils_plotting.encode_figure_as_utf8(fig))
 
-            mc_encode_i.set_images(HitsCols.region_type_barplot_col, region_type_images)
-            mc_encode_i.set_images(HitsCols.distToTSS_boxplot_col, disttotss_images)
+            mc_level_i.set_images(HitsCols.region_type_barplot_col, region_type_images)
+            mc_level_i.set_images(HitsCols.distToTSS_boxplot_col, disttotss_images)
 
         # Drop columns: distToTSS_values (full distribution, not needed for HTML)
-        for mc_encode_i in level_mcs:
-            mc_encode_i.metadata.drop(columns=[HitsCols.distToTSS_values_col], inplace=True)
+        for mc_level_i in level_mcs:
+            mc_level_i.metadata.drop(columns=[HitsCols.distToTSS_values_col], inplace=True)
 
     # Create HTML
-    html_columns_encodecluster = [html_col for html_col in VisualizeArgs.html_columns if html_col in (mc_encode_filtered.columns() + mc_encode_filtered.images())] + [
+    html_columns_level = [html_col for html_col in VisualizeArgs.html_columns if html_col in (mc_level_filtered.columns() + mc_level_filtered.images())] + [
         html_col for html_col in [
             MetadataCols.posneg_col,
             HitsCols.hits_total_col,
@@ -938,40 +937,40 @@ def run_encode_hits(args):
             HitsCols.region_type_barplot_col,
             HitsCols.distToTSS_boxplot_col,
         ]  # Add new figure columns here
-        if html_col in (mc_encode_filtered.columns() + mc_encode_filtered.images())
+        if html_col in (mc_level_filtered.columns() + mc_level_filtered.images())
     ]
-    html_column_desc_dict_encodecluster = {col: html_column_desc_dict.get(col, col) for col in html_columns_encodecluster}
+    html_column_desc_dict_level = {col: html_column_desc_dict.get(col, col) for col in html_columns_level}
 
-    os.makedirs(os.path.dirname(paths.html_encode_filtered_path), exist_ok=True)
-    mc_encode_filtered.summary_table_html(
-        html_out=paths.html_encode_filtered_path,
-        columns=html_columns_encodecluster,
+    os.makedirs(os.path.dirname(paths.html_level_filtered_path), exist_ok=True)
+    mc_level_filtered.summary_table_html(
+        html_out=paths.html_level_filtered_path,
+        columns=html_columns_level,
         logo_trimming=VisualizeArgs.html_logo_trim,
         editable=True,
-        column_desc_dict=html_column_desc_dict_encodecluster,
+        column_desc_dict=html_column_desc_dict_level,
     )
 
-    if mc_encode_removed is not None:
-        os.makedirs(os.path.dirname(paths.html_encode_removed_path), exist_ok=True)
-        mc_encode_removed.summary_table_html(
-            html_out=paths.html_encode_removed_path,
-            columns=html_columns_encodecluster,
+    if mc_level_removed is not None:
+        os.makedirs(os.path.dirname(paths.html_level_removed_path), exist_ok=True)
+        mc_level_removed.summary_table_html(
+            html_out=paths.html_level_removed_path,
+            columns=html_columns_level,
             logo_trimming=VisualizeArgs.html_logo_trim,
             editable=True,
-            column_desc_dict=html_column_desc_dict_encodecluster,
+            column_desc_dict=html_column_desc_dict_level,
         )
 
     # Metadata TSV
-    os.makedirs(os.path.dirname(paths.metadata_encode_path), exist_ok=True)
-    mc_encode_filtered.metadata.drop(columns=EncodeCombineArgs.remove_cols, errors='ignore').to_csv(paths.metadata_encode_filtered_path, sep="\t", index=False)
+    os.makedirs(os.path.dirname(paths.metadata_level_path), exist_ok=True)
+    mc_level_filtered.metadata.drop(columns=EncodeCombineArgs.remove_cols, errors='ignore').to_csv(paths.metadata_level_filtered_path, sep="\t", index=False)
 
-    if mc_encode_removed is not None:
-        mc_encode_removed.metadata.drop(columns=EncodeCombineArgs.remove_cols, errors='ignore').to_csv(paths.metadata_encode_removed_path, sep="\t", index=False)
+    if mc_level_removed is not None:
+        mc_level_removed.metadata.drop(columns=EncodeCombineArgs.remove_cols, errors='ignore').to_csv(paths.metadata_level_removed_path, sep="\t", index=False)
 
     # Save MotifCompendium: ENCODE, with the hits annotation (over the ones saved before it)
-    save_replace(mc_encode_filtered, paths.mc_encode_filtered_path)
-    if mc_encode_removed is not None:
-        save_replace(mc_encode_removed, paths.mc_encode_removed_path)
+    save_replace(mc_level_filtered, paths.mc_level_filtered_path)
+    if mc_level_removed is not None:
+        save_replace(mc_level_removed, paths.mc_level_removed_path)
 
     # Args JSON
     args_record = {

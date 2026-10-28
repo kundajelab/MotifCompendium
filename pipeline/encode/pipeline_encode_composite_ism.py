@@ -84,9 +84,9 @@ motif_string_col = configs.Encode_VisualizeArgs.motif_string_col
 def setup_parser():
     parser = argparse.ArgumentParser(description="Run in silico mutagenesis (ISM) for composite motifs in ENCODE GRAMMAR.")
 
-    parser.add_argument("--motif-metadata", type=str, required=True, help="Path to the motif metadata file, per motif: CSV, TSV format (pipeline_encode.py: <composite-dir>/export/ENCODE-motifcompendium_composite_metadata.tsv).")
+    parser.add_argument("--motif-metadata", type=str, required=True, help="Path to the motif metadata file, per motif: CSV, TSV format (pipeline_encode.py: <composite-dir>/export/motifcompendium_encode_composite_metadata.tsv).")
     parser.add_argument("--model-metadata", type=str, required=True, help="Path to the ENCID/model file metadata (model + background paths per fold), per ENCID: CSV, TSV format, e.g. the pipeline's raw/all_paths.tsv (composite/build_all_paths.py) or a v23-style raw/encid_metadata.tsv.")
-    parser.add_argument("--run-metadata", type=str, required=True, help="Path to the run metadata file, per model: one row per model (ID), with name_col holding a comma-separated aggregation of every motif name that model should run. CSV, TSV format (pipeline_encode.py: <composite-dir>/export/ENCODE-motifcompendium_composite_metadata_model.tsv).")
+    parser.add_argument("--run-metadata", type=str, required=True, help="Path to the run metadata file, per model: one row per model (ID), with name_col holding a comma-separated aggregation of every motif name that model should run. CSV, TSV format (pipeline_encode.py: <composite-dir>/export/motifcompendium_encode_composite_metadata_model.tsv).")
     parser.add_argument("--output-dir", type=str, required=True, help="Path to the output directory (<composite-dir>/ism).")
     parser.add_argument("--genome-fa", type=str, required=True, help="Genome FASTA (hg38) of the background sequences.")
     parser.add_argument("--model-idx", type=int, nargs="*", default=None, help="Index(es) of the model(s) to process (for all relevant motifs), rows of --run-metadata. Default: every model.")

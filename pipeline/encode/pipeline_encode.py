@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 """
-ENCODE MotifCompendium: combine the TF, Chromatin and ProCap atlasclusters into ENCODE clusters.
+ENCODE MotifCompendium: combine the TF, Chromatin and ProCap modelclusters into crossclusters.
 
 Inputs are the output roots of the three atlas pipelines, each <dir>/{counts,profile,combined}:
 
@@ -9,7 +9,7 @@ Inputs are the output roots of the three atlas pipelines, each <dir>/{counts,pro
   --chromatlas-dir   pipeline/chrombpnet/pipeline_chrombpnet.py  (Chromatin atlas)
   --procapatlas-dir  pipeline/procapnet/pipeline_procapnet.py    (ProCap atlas)
 
-The atlasclusters are force-clustered (DCC + k-means, recursively) into ENCODE clusters, which
+The modelclusters are force-clustered (DCC + k-means, recursively) into crossclusters, which
 are annotated, filtered, decomposed into reference monomers (composites) and exported; the
 results are written back into the atlas pipelines' directories. The composites and their
 subunits are written to --composite-dir, for the next stages:
@@ -17,7 +17,7 @@ subunits are written to --composite-dir, for the next stages:
   pipeline_encode_composite_ism.py  ISM cooperativity of each composite, per model
   pipeline_encode_composite.py      merge the composites by their cooperativity: the final
                                     ENCODE MotifCompendium, exported again to every level
-  pipeline_encode_hits.py           FiNeMo hits indexed and annotated with the final ENCODE clusters
+  pipeline_encode_hits.py           FiNeMo hits indexed and annotated with the final crossclusters
 
 pipeline_encode_full.py runs the atlas pipelines and these stages in one process.
 """
@@ -61,7 +61,7 @@ _configs_spec.loader.exec_module(configs)
 #### ARGUMENTS ---------------------------------------------------------------
 def setup_parser():
     parser = argparse.ArgumentParser(
-        description="ENCODE MotifCompendium: combine the TF, Chromatin and ProCap atlasclusters into ENCODE clusters.",
+        description="ENCODE MotifCompendium: combine the TF, Chromatin and ProCap modelclusters into crossclusters.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
@@ -70,7 +70,7 @@ def setup_parser():
                         help="Output directory of the ENCODE combine stage.")
     parser.add_argument("--mcid-version", type=str, default="V0", help="ENCODE MCID version.")
     parser.add_argument("--update-constituents", choices=["now", "defer", "only"], default="now",
-                        help="This stage's update of the levels below its own (every atlas level and the motif indexes: their ENCODE cluster, final flags and confidence). now: by this stage; defer: not (they stay as they were, e.g. until the last level is made: run_pipeline_encode_propagate.sh); only: that update alone, from this stage's saved outputs (nothing else is run).")
+                        help="This stage's update of the levels below its own (every atlas level and the motif indexes: their crosscluster, final flags and confidence). now: by this stage; defer: not (they stay as they were, e.g. until the last level is made: run_pipeline_encode_propagate.sh); only: that update alone, from this stage's saved outputs (nothing else is run).")
     parser.add_argument("--save-all", action="store_true",
                         help="Also save every level's removed clusters (motifcompendium_*_removed: .mc, HTML, MEME, metadata "
                              "TSV); the _all and _filtered ones are always saved.")
@@ -632,91 +632,91 @@ def apply_filter_clusters(
 
 
 #### PATHS --------------------------------------------------------------------
-def encode_paths(args):
+def crosscluster_paths(args):
     """Inputs (the atlas pipelines' compendia) and outputs (<output-dir>) of the ENCODE stages, by name."""
     ## Input: TF atlas
-    mc_atlascluster_filtered_tf_path = os.path.join(args.tf_combined_dir, "mc", "motifcompendium_atlascluster_filtered.mc")
-    mc_atlascluster_tf_path = os.path.join(args.tf_combined_dir, "mc", "motifcompendium_atlascluster_all.mc")
+    mc_modelcluster_filtered_tf_path = os.path.join(args.tf_combined_dir, "mc", "motifcompendium_modelcluster_filtered.mc")
+    mc_modelcluster_tf_path = os.path.join(args.tf_combined_dir, "mc", "motifcompendium_modelcluster_all.mc")
 
     mc_counts_tf_path = os.path.join(args.tf_counts_dir, "mc", "motifcompendium_motif_all.mc")
     mc_cluster_counts_tf_path = os.path.join(args.tf_counts_dir, "mc", "motifcompendium_cluster_all.mc")
-    mc_metacluster_counts_tf_path = os.path.join(args.tf_counts_dir, "mc", "motifcompendium_metacluster_all.mc")
+    mc_contribcluster_counts_tf_path = os.path.join(args.tf_counts_dir, "mc", "motifcompendium_contribcluster_all.mc")
 
     mc_profile_tf_path = os.path.join(args.tf_profile_dir, "mc", "motifcompendium_motif_all.mc")
     mc_cluster_profile_tf_path = os.path.join(args.tf_profile_dir, "mc", "motifcompendium_cluster_all.mc")
-    mc_metacluster_profile_tf_path = os.path.join(args.tf_profile_dir, "mc", "motifcompendium_metacluster_all.mc")
+    mc_contribcluster_profile_tf_path = os.path.join(args.tf_profile_dir, "mc", "motifcompendium_contribcluster_all.mc")
 
 
     ## Input: Chromatin atlas
-    mc_atlascluster_filtered_chrom_path = os.path.join(args.chrom_combined_dir, "mc", "motifcompendium_atlascluster_filtered.mc")
-    mc_atlascluster_chrom_path = os.path.join(args.chrom_combined_dir, "mc", "motifcompendium_atlascluster_all.mc")
+    mc_modelcluster_filtered_chrom_path = os.path.join(args.chrom_combined_dir, "mc", "motifcompendium_modelcluster_filtered.mc")
+    mc_modelcluster_chrom_path = os.path.join(args.chrom_combined_dir, "mc", "motifcompendium_modelcluster_all.mc")
 
     mc_counts_chrom_path = os.path.join(args.chrom_counts_dir, "mc", "motifcompendium_motif_all.mc")
     mc_cluster_counts_chrom_path = os.path.join(args.chrom_counts_dir, "mc", "motifcompendium_cluster_all.mc")
-    mc_metacluster_counts_chrom_path = os.path.join(args.chrom_counts_dir, "mc", "motifcompendium_metacluster_all.mc")
+    mc_contribcluster_counts_chrom_path = os.path.join(args.chrom_counts_dir, "mc", "motifcompendium_contribcluster_all.mc")
 
     mc_profile_chrom_path = os.path.join(args.chrom_profile_dir, "mc", "motifcompendium_motif_all.mc")
     mc_cluster_profile_chrom_path = os.path.join(args.chrom_profile_dir, "mc", "motifcompendium_cluster_all.mc")
-    mc_metacluster_profile_chrom_path = os.path.join(args.chrom_profile_dir, "mc", "motifcompendium_metacluster_all.mc")
+    mc_contribcluster_profile_chrom_path = os.path.join(args.chrom_profile_dir, "mc", "motifcompendium_contribcluster_all.mc")
 
 
     ## Input: ProCap atlas
-    mc_atlascluster_filtered_procap_path = os.path.join(args.procap_combined_dir, "mc", "motifcompendium_atlascluster_filtered.mc")
-    mc_atlascluster_procap_path = os.path.join(args.procap_combined_dir, "mc", "motifcompendium_atlascluster_all.mc")
+    mc_modelcluster_filtered_procap_path = os.path.join(args.procap_combined_dir, "mc", "motifcompendium_modelcluster_filtered.mc")
+    mc_modelcluster_procap_path = os.path.join(args.procap_combined_dir, "mc", "motifcompendium_modelcluster_all.mc")
 
     mc_counts_procap_path = os.path.join(args.procap_counts_dir, "mc", "motifcompendium_motif_all.mc")
     mc_cluster_counts_procap_path = os.path.join(args.procap_counts_dir, "mc", "motifcompendium_cluster_all.mc")
-    mc_metacluster_counts_procap_path = os.path.join(args.procap_counts_dir, "mc", "motifcompendium_metacluster_all.mc")
+    mc_contribcluster_counts_procap_path = os.path.join(args.procap_counts_dir, "mc", "motifcompendium_contribcluster_all.mc")
 
     mc_profile_procap_path = os.path.join(args.procap_profile_dir, "mc", "motifcompendium_motif_all.mc")
     mc_cluster_profile_procap_path = os.path.join(args.procap_profile_dir, "mc", "motifcompendium_cluster_all.mc")
-    mc_metacluster_profile_procap_path = os.path.join(args.procap_profile_dir, "mc", "motifcompendium_metacluster_all.mc")
+    mc_contribcluster_profile_procap_path = os.path.join(args.procap_profile_dir, "mc", "motifcompendium_contribcluster_all.mc")
 
 
     ## Output: MotifCompendium object
     mc_dir = os.path.join(args.output_dir, "mc")
 
-    mc_atlascluster_combined_path = os.path.join(mc_dir, "motifcompendium_atlascluster_combined.mc")
-    mc_encode_path = os.path.join(mc_dir, "motifcompendium_encode_all.mc")
-    mc_encode_filtered_path = os.path.join(mc_dir, "motifcompendium_encode_filtered.mc")
-    mc_encode_removed_path = os.path.join(mc_dir, "motifcompendium_encode_removed.mc")
+    mc_modelcluster_combined_path = os.path.join(mc_dir, "motifcompendium_modelcluster_combined.mc")
+    mc_crosscluster_path = os.path.join(mc_dir, "motifcompendium_crosscluster_all.mc")
+    mc_crosscluster_filtered_path = os.path.join(mc_dir, "motifcompendium_crosscluster_filtered.mc")
+    mc_crosscluster_removed_path = os.path.join(mc_dir, "motifcompendium_crosscluster_removed.mc")
 
     ## Output: HTML summary table
     html_dir = os.path.join(args.output_dir, "html")
 
-    html_encode_path = os.path.join(html_dir, "motifcompendium_encode_all.html")
-    html_encode_filtered_path = os.path.join(html_dir, "motifcompendium_encode_filtered.html")
-    html_encode_removed_path = os.path.join(html_dir, "motifcompendium_encode_removed.html")
-    html_encode_edited_path = os.path.join(html_dir, "motifcompendium_encode_all_edited.html")
-    html_encode_edited_filtered_path = os.path.join(html_dir, "motifcompendium_encode_filtered_edited.html")
-    html_encode_edited_removed_path = os.path.join(html_dir, "motifcompendium_encode_removed_edited.html")
+    html_crosscluster_path = os.path.join(html_dir, "motifcompendium_crosscluster_all.html")
+    html_crosscluster_filtered_path = os.path.join(html_dir, "motifcompendium_crosscluster_filtered.html")
+    html_crosscluster_removed_path = os.path.join(html_dir, "motifcompendium_crosscluster_removed.html")
+    html_crosscluster_edited_path = os.path.join(html_dir, "motifcompendium_crosscluster_all_edited.html")
+    html_crosscluster_edited_filtered_path = os.path.join(html_dir, "motifcompendium_crosscluster_filtered_edited.html")
+    html_crosscluster_edited_removed_path = os.path.join(html_dir, "motifcompendium_crosscluster_removed_edited.html")
 
     ## Output: Export - MoDISco HDF5, MEME
     export_dir = os.path.join(args.output_dir, "export")
 
-    modisco_encode_path = os.path.join(export_dir, "motifcompendium_encode_all.h5")
-    modisco_encode_filtered_path = os.path.join(export_dir, "motifcompendium_encode_filtered.h5")
-    modisco_encode_removed_path = os.path.join(export_dir, "motifcompendium_encode_removed.h5")
+    modisco_crosscluster_path = os.path.join(export_dir, "motifcompendium_crosscluster_all.h5")
+    modisco_crosscluster_filtered_path = os.path.join(export_dir, "motifcompendium_crosscluster_filtered.h5")
+    modisco_crosscluster_removed_path = os.path.join(export_dir, "motifcompendium_crosscluster_removed.h5")
 
-    meme_encode_path = os.path.join(export_dir, "motifcompendium_encode_all.meme.txt")
-    meme_encode_filtered_path = os.path.join(export_dir, "motifcompendium_encode_filtered.meme.txt")
-    meme_encode_removed_path = os.path.join(export_dir, "motifcompendium_encode_removed.meme.txt")
+    meme_crosscluster_path = os.path.join(export_dir, "motifcompendium_crosscluster_all.meme.txt")
+    meme_crosscluster_filtered_path = os.path.join(export_dir, "motifcompendium_crosscluster_filtered.meme.txt")
+    meme_crosscluster_removed_path = os.path.join(export_dir, "motifcompendium_crosscluster_removed.meme.txt")
 
     ## Output: Metadata
     metadata_dir = os.path.join(args.output_dir, "metadata")
 
-    metadata_atlascluster_combined_path = os.path.join(metadata_dir, "motifcompendium_atlascluster_combined_metadata.tsv")
-    metadata_encode_path = os.path.join(metadata_dir, "motifcompendium_encode_all_metadata.tsv")
-    metadata_encode_filtered_path = os.path.join(metadata_dir, "motifcompendium_encode_filtered_metadata.tsv")
-    metadata_encode_removed_path = os.path.join(metadata_dir, "motifcompendium_encode_removed_metadata.tsv")
-    metadata_motif_index_path = os.path.join(metadata_dir, "motifcompendium_encode_motif_index.tsv")
-    level_name_col = VisualizeArgs.encodecluster_name_col  # Each motif's cluster of the level, in its motif index (the hits')
-    metadata_motif_category_path = os.path.join(metadata_dir, "motifcompendium_encode_motif_category.tsv")
+    metadata_modelcluster_combined_path = os.path.join(metadata_dir, "motifcompendium_modelcluster_combined_metadata.tsv")
+    metadata_crosscluster_path = os.path.join(metadata_dir, "motifcompendium_crosscluster_all_metadata.tsv")
+    metadata_crosscluster_filtered_path = os.path.join(metadata_dir, "motifcompendium_crosscluster_filtered_metadata.tsv")
+    metadata_crosscluster_removed_path = os.path.join(metadata_dir, "motifcompendium_crosscluster_removed_metadata.tsv")
+    metadata_motif_index_path = os.path.join(metadata_dir, "motifcompendium_crosscluster_motif_index.tsv")
+    level_name_col = VisualizeArgs.crosscluster_name_col  # Each motif's cluster of the level, in its motif index (the hits')
+    metadata_motif_category_path = os.path.join(metadata_dir, "motifcompendium_crosscluster_motif_category.tsv")
 
     args_json_path = os.path.join(metadata_dir, "args.json")
 
     ## Output: Hits annotation
-    metadata_hits_path = os.path.join(metadata_dir, "motifcompendium_encode_metadata_hits.tsv")
+    metadata_hits_path = os.path.join(metadata_dir, "motifcompendium_crosscluster_metadata_hits.tsv")
     hits_annotated_dir = os.path.join(export_dir, "hits_annotated")
 
     ## Per-atlas lookup: upstream pipeline directory, by atlas / head
@@ -746,50 +746,55 @@ def composite_paths(composite_dir):
         composite_dir=composite_dir,
         ism_dir=os.path.join(composite_dir, "ism"),
         # Composites (pipeline_encode.py); the per-motif and per-model tables are the ISM stage's inputs
-        mc_composite_path=os.path.join(composite_dir, "mc", "ENCODE-motifcompendium_composite.mc"),
-        metadata_composite_path=os.path.join(composite_dir, "export", "ENCODE-motifcompendium_composite_metadata.tsv"),
-        metadata_composite_model_path=os.path.join(composite_dir, "export", "ENCODE-motifcompendium_composite_metadata_model.tsv"),
-        html_msw_path=os.path.join(composite_dir, "html", "ENCODE-motifcompendium_encode_msw.html"),
-        html_composite_path=os.path.join(composite_dir, "html", "ENCODE-motifcompendium_composite.html"),
+        mc_composite_path=os.path.join(composite_dir, "mc", "motifcompendium_encode_composite.mc"),
+        metadata_composite_path=os.path.join(composite_dir, "export", "motifcompendium_encode_composite_metadata.tsv"),
+        metadata_composite_model_path=os.path.join(composite_dir, "export", "motifcompendium_encode_composite_metadata_model.tsv"),
+        html_msw_path=os.path.join(composite_dir, "html", "motifcompendium_crosscluster_msw.html"),
+        html_composite_path=os.path.join(composite_dir, "html", "motifcompendium_encode_composite.html"),
         # ISM cooperativity (the ISM evidence and the classified composites: --save-all) and the merged composites
         # (pipeline_encode_composite.py)
-        mc_composite_ism_motifs_init_path=os.path.join(composite_dir, "mc", "ENCODE-motifcompendium_composite_ism_motifs_init.mc"),
-        mc_composite_ism_motifs_path=os.path.join(composite_dir, "mc", "ENCODE-motifcompendium_composite_ism_motifs.mc"),
-        mc_composite_ism_path=os.path.join(composite_dir, "mc", "ENCODE-motifcompendium_composite_ism.mc"),
-        mc_composite_ism_dedup_path=os.path.join(composite_dir, "mc", "ENCODE-motifcompendium_composite_ism_deduplicated.mc"),
-        metadata_composite_ism_motifs_path=os.path.join(composite_dir, "export", "ENCODE-motifcompendium_composite_ism_motifs_metadata.tsv"),
-        metadata_composite_ism_motifs_agg_path=os.path.join(composite_dir, "export", "ENCODE-motifcompendium_composite_ism_motifs_metadata_agg.tsv"),
-        html_composite_ism_path=os.path.join(composite_dir, "html", "ENCODE-motifcompendium_composite_ism.html"),
-        html_composite_ism_dedup_path=os.path.join(composite_dir, "html", "ENCODE-motifcompendium_composite_ism_deduplicated.html"),
-        # The singlemulticluster level (C5; pipeline_encode_composite.py): one compendium (nothing is removed at this
-        # level), the membership of the ENCODE clusters (C4), the motif index, the hits annotation (pipeline_encode_hits.py)
+        mc_composite_ism_motifs_init_path=os.path.join(composite_dir, "mc", "motifcompendium_encode_composite_ism_motifs_init.mc"),
+        mc_composite_ism_motifs_path=os.path.join(composite_dir, "mc", "motifcompendium_encode_composite_ism_motifs.mc"),
+        mc_composite_ism_path=os.path.join(composite_dir, "mc", "motifcompendium_encode_composite_ism.mc"),
+        mc_composite_ism_dedup_path=os.path.join(composite_dir, "mc", "motifcompendium_encode_composite_ism_deduplicated.mc"),
+        metadata_composite_ism_motifs_path=os.path.join(composite_dir, "export", "motifcompendium_encode_composite_ism_motifs_metadata.tsv"),
+        metadata_composite_ism_motifs_agg_path=os.path.join(composite_dir, "export", "motifcompendium_encode_composite_ism_motifs_metadata_agg.tsv"),
+        html_composite_ism_path=os.path.join(composite_dir, "html", "motifcompendium_encode_composite_ism.html"),
+        html_composite_ism_dedup_path=os.path.join(composite_dir, "html", "motifcompendium_encode_composite_ism_deduplicated.html"),
+        # The encodecluster level (C5; pipeline_encode_composite.py): one compendium (nothing is removed at this
+        # level), the membership of the crossclusters (C4), the motif index, the hits annotation (pipeline_encode_hits.py)
         metadata_dir=os.path.join(composite_dir, "metadata"),
         export_dir=os.path.join(composite_dir, "export"),
-        mc_singlemulticluster_path=os.path.join(composite_dir, "mc", "motifcompendium_singlemulticluster.mc"),
-        html_singlemulticluster_path=os.path.join(composite_dir, "html", "motifcompendium_singlemulticluster.html"),
-        metadata_singlemulticluster_path=os.path.join(composite_dir, "metadata", "motifcompendium_singlemulticluster_metadata.tsv"),
-        meme_singlemulticluster_path=os.path.join(composite_dir, "export", "motifcompendium_singlemulticluster.meme.txt"),
-        metadata_singlemulticluster_membership_path=os.path.join(composite_dir, "metadata", "motifcompendium_singlemulticluster_membership.tsv"),
-        metadata_singlemulticluster_motif_index_path=os.path.join(composite_dir, "metadata", "motifcompendium_singlemulticluster_motif_index.tsv"),
-        metadata_hits_path=os.path.join(composite_dir, "metadata", "motifcompendium_singlemulticluster_metadata_hits.tsv"),
+        mc_encodecluster_path=os.path.join(composite_dir, "mc", "motifcompendium_encode.mc"),
+        html_encodecluster_path=os.path.join(composite_dir, "html", "motifcompendium_encode.html"),
+        metadata_encodecluster_path=os.path.join(composite_dir, "metadata", "motifcompendium_encode_metadata.tsv"),
+        meme_encodecluster_path=os.path.join(composite_dir, "export", "motifcompendium_encode.meme.txt"),
+        metadata_encodecluster_membership_path=os.path.join(composite_dir, "metadata", "motifcompendium_encode_membership.tsv"),
+        metadata_encodecluster_motif_index_path=os.path.join(composite_dir, "metadata", "motifcompendium_encode_motif_index.tsv"),
+        metadata_hits_path=os.path.join(composite_dir, "metadata", "motifcompendium_encode_metadata_hits.tsv"),
         hits_annotated_dir=os.path.join(composite_dir, "export", "hits_annotated"),
     )
 
 
-def singlemulticluster_level_paths(args, cpaths):
-    """encode_paths(args), with the ENCODE level's compendia, motif index and hits outputs those of the singlemulticluster
-    level (cpaths: composite_paths()): for the hits annotation by singlemulticluster (pipeline_encode_hits.py). The level is
-    one compendium (its "filtered" one); it has no removed one (None)."""
-    paths = encode_paths(args)
+def hits_level_paths(args, cpaths, level):
+    """crosscluster_paths(args), with {mc,html,metadata,meme}_level{,_filtered,_removed}_path those of the level the hits
+    are indexed and summarized by (pipeline_encode_hits.py --level): the crossclusters' (C4) or, level "encodecluster",
+    the encodecluster level's (C5; cpaths: composite_paths()), whose motif index, name column and hits outputs then also
+    replace the crossclusters'. The encodecluster level is one compendium (its "filtered" one): no removed one (None)."""
+    paths = crosscluster_paths(args)
     for kind in ("mc", "html", "metadata", "meme"):
-        level_path = getattr(cpaths, f"{kind}_singlemulticluster_path")
-        setattr(paths, f"{kind}_encode_path", level_path)
-        setattr(paths, f"{kind}_encode_filtered_path", level_path)  # the level: one compendium, nothing removed
-        setattr(paths, f"{kind}_encode_removed_path", None)
-    paths.metadata_motif_index_path = cpaths.metadata_singlemulticluster_motif_index_path
-    paths.level_name_col = VisualizeArgs.singlemulticluster_name_col
-    for name in ("metadata_dir", "export_dir", "metadata_hits_path", "hits_annotated_dir"):
-        setattr(paths, name, getattr(cpaths, name))
+        if level == "encodecluster":
+            level_path = getattr(cpaths, f"{kind}_encodecluster_path")
+            level_paths = (level_path, level_path, None)
+        else:
+            level_paths = tuple(getattr(paths, f"{kind}_crosscluster{suffix}_path") for suffix in ("", "_filtered", "_removed"))
+        for suffix, level_path in zip(("", "_filtered", "_removed"), level_paths):
+            setattr(paths, f"{kind}_level{suffix}_path", level_path)
+    if level == "encodecluster":
+        paths.metadata_motif_index_path = cpaths.metadata_encodecluster_motif_index_path
+        paths.level_name_col = VisualizeArgs.encodecluster_name_col
+        for name in ("metadata_dir", "export_dir", "metadata_hits_path", "hits_annotated_dir"):
+            setattr(paths, name, getattr(cpaths, name))
     return paths
 
 
@@ -803,19 +808,19 @@ def atlas_stage_dir_args(tfatlas_dir, chromatlas_dir, procapatlas_dir):
             f"{atlas_key}_counts_dir": os.path.join(atlas_dir, "counts"),
             f"{atlas_key}_profile_dir": os.path.join(atlas_dir, "profile"),
         })
-        atlascluster_path = os.path.join(atlas_dir, "combined", "mc", "motifcompendium_atlascluster_filtered.mc")
-        if not os.path.exists(atlascluster_path):
-            raise FileNotFoundError(f"Atlas pipeline output not found (has it completed?): {atlascluster_path}")
+        modelcluster_path = os.path.join(atlas_dir, "combined", "mc", "motifcompendium_modelcluster_filtered.mc")
+        if not os.path.exists(modelcluster_path):
+            raise FileNotFoundError(f"Atlas pipeline output not found (has it completed?): {modelcluster_path}")
     return stage_dir_args
 
 
-def encodecluster_cluster_col_name():
-    """The ENCODE cluster of each atlascluster (mc_atlascluster_combined), as named by its clustering."""
-    return f"encode_rec_{ClusterArgs.cluster_algorithm_force}-{ClusterArgs.cluster_sim_threshold_force}_{ClusterArgs.cluster_algorithm_kmeans}-{ClusterArgs.cluster_sim_assignment_threshold_kmeans}"
+def crosscluster_cluster_col_name():
+    """The crosscluster of each modelcluster (mc_modelcluster_combined), as named by its clustering."""
+    return f"crosscluster_rec_{ClusterArgs.cluster_algorithm_force}-{ClusterArgs.cluster_sim_threshold_force}_{ClusterArgs.cluster_algorithm_kmeans}-{ClusterArgs.cluster_sim_assignment_threshold_kmeans}"
 
 
 def default_composite_dir(output_dir):
-    """<run>/single_multi, next to <run>/encode: the composites, their ISM runs and the singlemulticluster level (C5),
+    """<run>/encode, next to <run>/cross: the composites, their ISM runs and the encodecluster level (C5),
     kept out of the ENCODE output directory, which a rerun clears."""
     return os.path.join(os.path.dirname(os.path.normpath(output_dir)), CompositeArgs.composite_dir_name)
 
@@ -915,7 +920,7 @@ def prepare_composite_reference(mc_ref_direct, ref_clustered_hr_metadata_path, l
     return mc_ref_direct_monomer, mc_ref_qc_cluster_name_dict, mc_ref_qc_cluster_label_dict
 
 
-def assign_msw_composites(mc_encode, mc_ref_composite, ic_scale, verbose=False):
+def assign_msw_composites(mc_crosscluster, mc_ref_composite, ic_scale, verbose=False):
     """
     Modified Smith-Waterman (Bellman DP): decompose each motif into reference monomers (bellman_* columns and the
     aligned-reference logo). A motif that is not high or medium confidence becomes a composite (with its core and
@@ -923,28 +928,28 @@ def assign_msw_composites(mc_encode, mc_ref_composite, ic_scale, verbose=False):
     similarity of at least min_single_score, and stops being one otherwise.
     """
     # Motifs and their metadata rows are matched by position below
-    mc_encode.metadata.reset_index(drop=True, inplace=True)
+    mc_crosscluster.metadata.reset_index(drop=True, inplace=True)
 
     # Initialize columns
-    mc_encode.metadata[CompositeArgs.bellman_score_col] = 0.0
-    mc_encode.metadata[CompositeArgs.bellman_sim_col] = 0.0
-    mc_encode.metadata[CompositeArgs.bellman_orient_col] = None
-    mc_encode.metadata[CompositeArgs.bellman_align_col] = None
-    mc_encode.metadata[CompositeArgs.bellman_name_col] = None
-    mc_encode.metadata[CompositeArgs.bellman_label_col] = None
+    mc_crosscluster.metadata[CompositeArgs.bellman_score_col] = 0.0
+    mc_crosscluster.metadata[CompositeArgs.bellman_sim_col] = 0.0
+    mc_crosscluster.metadata[CompositeArgs.bellman_orient_col] = None
+    mc_crosscluster.metadata[CompositeArgs.bellman_align_col] = None
+    mc_crosscluster.metadata[CompositeArgs.bellman_name_col] = None
+    mc_crosscluster.metadata[CompositeArgs.bellman_label_col] = None
 
     mc_ref_composite_motifs = mc_ref_composite.motifs  # (F, M, 4)
     ref_len = mc_ref_composite_motifs.shape[1]  # M
     # Aligned reference motifs: 2*M + L - 2 columns, with the ENCODE motif starting at column M-1
-    aligned_motifs = np.zeros((mc_encode.motifs.shape[0], max(mc_encode.motifs.shape[1], ref_len) + 2 * ref_len - 2, mc_encode.motifs.shape[2]))
+    aligned_motifs = np.zeros((mc_crosscluster.motifs.shape[0], max(mc_crosscluster.motifs.shape[1], ref_len) + 2 * ref_len - 2, mc_crosscluster.motifs.shape[2]))
 
     ## Run dynamic programming: Per ENCODE MotifCompendium motif
-    for i, row_encode in mc_encode.metadata.iterrows():
-        name_i = row_encode[MetadataCols.name_col]
-        unique_id_i = row_encode[MetadataCols.unique_id_col]
-        composite_i = row_encode[MetadataCols.composite_col]
-        label_conf_i = row_encode[LabelCols.label_conf_col]
-        motif_i = mc_encode.motifs[i]
+    for i, row_crosscluster in mc_crosscluster.metadata.iterrows():
+        name_i = row_crosscluster[MetadataCols.name_col]
+        unique_id_i = row_crosscluster[MetadataCols.unique_id_col]
+        composite_i = row_crosscluster[MetadataCols.composite_col]
+        label_conf_i = row_crosscluster[LabelCols.label_conf_col]
+        motif_i = mc_crosscluster.motifs[i]
         motif_i_trimmed = utils_motif.trim_motif(motif_i , 0) # (L, 4), trim zeros
 
         # Pad to match length of reference motifs
@@ -975,8 +980,8 @@ def assign_msw_composites(mc_encode, mc_ref_composite, ic_scale, verbose=False):
             bellman_aligned_ref_collapse[np.newaxis, :, :], aligned_motifs.shape[1])
 
         # Record, in original MotifCompendium
-        org_idx = (mc_encode.metadata[MetadataCols.unique_id_col] == unique_id_i).idxmax()
-        if bellman_score > row_encode[CompositeArgs.bellman_score_col]:
+        org_idx = (mc_crosscluster.metadata[MetadataCols.unique_id_col] == unique_id_i).idxmax()
+        if bellman_score > row_crosscluster[CompositeArgs.bellman_score_col]:
             # Identify reference motifs used in alignment: One per match (a reference motif can match more than once)
             match_idx = np.where(bellman_aligned_ref_scale > 0)[0]
             match_idx_sort = match_idx[np.argsort(-bellman_aligned_ref_scale[match_idx], kind="stable")]  # Sort by descending scale factor
@@ -998,29 +1003,29 @@ def assign_msw_composites(mc_encode, mc_ref_composite, ic_scale, verbose=False):
             )
 
             # Update metadata: Bellman
-            mc_encode.metadata.loc[org_idx, CompositeArgs.bellman_score_col] = bellman_score
-            mc_encode.metadata.loc[org_idx, CompositeArgs.bellman_sim_col] = bellman_sim_score
-            mc_encode.metadata.loc[org_idx, CompositeArgs.bellman_orient_col] = ref_orient_combined
-            mc_encode.metadata.loc[org_idx, CompositeArgs.bellman_align_col] = ref_start_combined
-            mc_encode.metadata.loc[org_idx, CompositeArgs.bellman_name_col] = ref_names_combined
-            mc_encode.metadata.loc[org_idx, CompositeArgs.bellman_label_col] = ref_cluster_labels_combined
+            mc_crosscluster.metadata.loc[org_idx, CompositeArgs.bellman_score_col] = bellman_score
+            mc_crosscluster.metadata.loc[org_idx, CompositeArgs.bellman_sim_col] = bellman_sim_score
+            mc_crosscluster.metadata.loc[org_idx, CompositeArgs.bellman_orient_col] = ref_orient_combined
+            mc_crosscluster.metadata.loc[org_idx, CompositeArgs.bellman_align_col] = ref_start_combined
+            mc_crosscluster.metadata.loc[org_idx, CompositeArgs.bellman_name_col] = ref_names_combined
+            mc_crosscluster.metadata.loc[org_idx, CompositeArgs.bellman_label_col] = ref_cluster_labels_combined
 
             # Update metadata: Composite
             if label_conf_i not in LabelCols.label_confs[0:2]:  # Don't update high, medium
                 # Prior composites + flip only. `not`, never `~`: composite_i comes from iterrows() as a Python bool,
                 # for which ~True == -2 and ~False == -1 are both truthy (every Bellman composite was relabeled)
                 if (bellman_composite and not composite_i) or (not bellman_composite and composite_i):
-                    mc_encode.metadata.loc[org_idx, MetadataCols.composite_col] = bellman_composite
-                    mc_encode.metadata.loc[org_idx, MetadataCols.num_subunit_col] = ref_num
-                    mc_encode.metadata.loc[org_idx, LabelCols.label_core_col] = ref_cluster_labels[0] if ref_num > 0 else None  # If using mc_ref
-                    mc_encode.metadata.loc[org_idx, LabelCols.label_core_readable_col] = ref_cluster_labels[0] if ref_num > 0 else None
-                    mc_encode.metadata.loc[org_idx, LabelCols.label_flank_col] = "::".join(ref_cluster_labels[1:]) if bellman_composite else None
-                    mc_encode.metadata.loc[org_idx, LabelCols.label_col] = mc_encode.metadata.loc[org_idx, LabelCols.label_core_readable_col] + "::" + mc_encode.metadata.loc[org_idx, LabelCols.label_flank_col] if bellman_composite else mc_encode.metadata.loc[org_idx, LabelCols.label_core_readable_col]
+                    mc_crosscluster.metadata.loc[org_idx, MetadataCols.composite_col] = bellman_composite
+                    mc_crosscluster.metadata.loc[org_idx, MetadataCols.num_subunit_col] = ref_num
+                    mc_crosscluster.metadata.loc[org_idx, LabelCols.label_core_col] = ref_cluster_labels[0] if ref_num > 0 else None  # If using mc_ref
+                    mc_crosscluster.metadata.loc[org_idx, LabelCols.label_core_readable_col] = ref_cluster_labels[0] if ref_num > 0 else None
+                    mc_crosscluster.metadata.loc[org_idx, LabelCols.label_flank_col] = "::".join(ref_cluster_labels[1:]) if bellman_composite else None
+                    mc_crosscluster.metadata.loc[org_idx, LabelCols.label_col] = mc_crosscluster.metadata.loc[org_idx, LabelCols.label_core_readable_col] + "::" + mc_crosscluster.metadata.loc[org_idx, LabelCols.label_flank_col] if bellman_composite else mc_crosscluster.metadata.loc[org_idx, LabelCols.label_core_readable_col]
 
             aligned_motifs[org_idx] = bellman_aligned_ref_collapse # Save aligned motif
 
     # Visualize aligned motifs, in original MotifCompendium
-    mc_encode.add_logos(
+    mc_crosscluster.add_logos(
         motifs=aligned_motifs,
         image_name=CompositeArgs.bellman_logo_col,
         trim=0,
@@ -1057,9 +1062,9 @@ def annotate_family(metadata_df, tf_col, family_col):
     metadata_df.loc[metadata_df[tf_col].str.contains("MX"), family_col] = "MAX"
 
 
-def identify_composites(mc_encode, mc_ref_direct_monomer, mc_ref_qc_cluster_name_dict, mc_ref_direct_monomer_all):
+def identify_composites(mc_crosscluster, mc_ref_direct_monomer, mc_ref_qc_cluster_name_dict, mc_ref_direct_monomer_all):
     """
-    The composites of mc_encode (its filtered ENCODE clusters), each with its reference subunits: name, cluster,
+    The composites of mc_crosscluster (its filtered crossclusters), each with its reference subunits: name, cluster,
     score, alignment, start, end and motif string per subunit, and the spacing between the first two.
 
     The subunits of a core or flank label are found among its monomers of the composite reference
@@ -1068,7 +1073,7 @@ def identify_composites(mc_encode, mc_ref_direct_monomer, mc_ref_qc_cluster_name
     the same reference without the length filter.
     """
     # Identify composites
-    mc_encode_composite = mc_encode[(mc_encode[MetadataCols.composite_col] == True)]
+    mc_encode_composite = mc_crosscluster[(mc_crosscluster[MetadataCols.composite_col] == True)]
 
     # Drop: Errors, Filter flag names
     mc_encode_composite = mc_encode_composite[~((mc_encode_composite[LabelCols.label_core_col].str.startswith(CompositeArgs.composite_error_prefix)) | (mc_encode_composite[LabelCols.label_flank_col].str.startswith(CompositeArgs.composite_error_prefix)))]
@@ -1252,19 +1257,19 @@ def _subunit_reference_names(mc_ref_direct_monomer, mc_ref_direct_monomer_all, l
     return set()
 
 
-def export_composites(mc_encode, mc_encode_composite, composite_paths_ns, all_paths_tsv, html_column_desc_dict):
+def export_composites(mc_crosscluster, mc_encode_composite, composite_paths_ns, all_paths_tsv, html_column_desc_dict):
     """
     The inputs of the ISM cooperativity runs (pipeline_encode_composite_ism.py), in <composite-dir>: the composites'
-    metadata (per motif and per model), .mc and HTML, and the HTML of the decomposition of every motif (mc_encode).
+    metadata (per motif and per model), .mc and HTML, and the HTML of the decomposition of every motif (mc_crosscluster).
     """
     composite_ref_col = CompositeArgs.composite_ref_col
 
     # HTML: Modified Smith-Waterman
-    html_columns_encodecluster = [html_col for html_col in VisualizeArgs.html_columns if html_col in (mc_encode.columns() + mc_encode.images())]
-    html_column_desc_dict_encodecluster = {col: html_column_desc_dict.get(col, col) for col in html_columns_encodecluster}
+    html_columns_crosscluster = [html_col for html_col in VisualizeArgs.html_columns if html_col in (mc_crosscluster.columns() + mc_crosscluster.images())]
+    html_column_desc_dict_crosscluster = {col: html_column_desc_dict.get(col, col) for col in html_columns_crosscluster}
 
     os.makedirs(os.path.dirname(composite_paths_ns.html_msw_path), exist_ok=True)
-    mc_encode.summary_table_html(
+    mc_crosscluster.summary_table_html(
         html_out=composite_paths_ns.html_msw_path,
         columns=[
             MetadataCols.name_col, MetadataCols.composite_col, MetadataCols.num_subunit_col,
@@ -1274,7 +1279,7 @@ def export_composites(mc_encode, mc_encode_composite, composite_paths_ns, all_pa
         ],
         logo_trimming=VisualizeArgs.html_logo_trim,
         editable=True,
-        column_desc_dict=html_column_desc_dict_encodecluster,
+        column_desc_dict=html_column_desc_dict_crosscluster,
     )
 
     # Save metadata
@@ -1305,7 +1310,7 @@ def export_composites(mc_encode, mc_encode_composite, composite_paths_ns, all_pa
     mc_encode_composite_metadata_model.to_csv(composite_paths_ns.metadata_composite_model_path, sep="\t", index=False)
 
     # Save summary table HTML
-    html_columns_encodecluster = [
+    html_columns_crosscluster = [
             col
             for i in range(CompositeArgs.max_submotifs_composite)
             for col in [
@@ -1326,7 +1331,7 @@ def export_composites(mc_encode, mc_encode_composite, composite_paths_ns, all_pa
     os.makedirs(os.path.dirname(composite_paths_ns.html_composite_path), exist_ok=True)
     mc_encode_composite.summary_table_html(
         html_out=composite_paths_ns.html_composite_path,
-        columns=html_columns_encodecluster,
+        columns=html_columns_crosscluster,
         logo_trimming=VisualizeArgs.html_logo_trim,
         editable=True,
         column_desc_dict=html_column_desc_dict,
@@ -1335,7 +1340,7 @@ def export_composites(mc_encode, mc_encode_composite, composite_paths_ns, all_pa
     # Save MotifCompendium: ENCODE composites
     os.makedirs(os.path.dirname(composite_paths_ns.mc_composite_path), exist_ok=True)
     save_replace(mc_encode_composite, composite_paths_ns.mc_composite_path)
-    logging.info(f"Composites: {len(mc_encode_composite)} of {len(mc_encode)} filtered ENCODE clusters, in "
+    logging.info(f"Composites: {len(mc_encode_composite)} of {len(mc_crosscluster)} filtered crossclusters, in "
                  f"{len(mc_encode_composite_metadata_model)} models: {composite_paths_ns.composite_dir}")
 
 
@@ -1343,7 +1348,7 @@ def export_composites(mc_encode, mc_encode_composite, composite_paths_ns, all_pa
 def motif_category_types(motif_index_df, name_col, flag_col, filtered_names):
     """Each motif's category (DirectTypeArgs.category_types): from its atlas, direct type, filter flag (flag_col) and
     cluster of the level (name_col; filtered_names: those of the level's filtered clusters). The motif index's
-    category (export_encode_constituents(): the ENCODE clusters), or the singlemulticluster level's."""
+    category (export_crosscluster_constituents(): the crossclusters), or the encodecluster level's."""
     return np.select(
         [
             # TF Atlas: Direct
@@ -1409,13 +1414,13 @@ def motif_category_types(motif_index_df, name_col, flag_col, filtered_names):
     )
 
 
-def export_encode_level(args, mc_encode, mc_atlascluster_combined, html_column_desc_dict):
+def export_crosscluster_level(args, mc_crosscluster, mc_modelcluster_combined, html_column_desc_dict):
     """
-    Write the ENCODE compendium out: mc_encode is the whole compendium (filtered and removed, by filter_flag_col). In
+    Write the ENCODE compendium out: mc_crosscluster is the whole compendium (filtered and removed, by filter_flag_col). In
     <output-dir>: the ENCODE compendia (all, filtered, removed: .mc, HTML, MEME, metadata TSV) and the combined
-    atlasclusters. The levels below: export_encode_constituents().
+    modelclusters. The levels below: export_crosscluster_constituents().
     """
-    paths = encode_paths(args)
+    paths = crosscluster_paths(args)
 
     #### Aggregate: Metadata ----------------------------------
     logging.info("Recompiling metadata from the atlases' initial metadata...")
@@ -1437,7 +1442,7 @@ def export_encode_level(args, mc_encode, mc_atlascluster_combined, html_column_d
         metadata_df[VisualizeArgs.atlas_col] = atlas_name
         return metadata_df
 
-    encode_metadata_df = pd.concat(
+    crosscluster_metadata_df = pd.concat(
         (
             read_initial_metadata(args.tf_init_metadata, EncodeCombineArgs.tfatlas_id),
             read_initial_metadata(args.chrom_init_metadata, EncodeCombineArgs.chromatlas_id),
@@ -1459,7 +1464,7 @@ def export_encode_level(args, mc_encode, mc_atlascluster_combined, html_column_d
     ]
     required_metadata_cols = [MetadataCols.id_col, *metadata_recompile_cols]
     missing_metadata_cols = [
-        col for col in required_metadata_cols if col not in encode_metadata_df.columns
+        col for col in required_metadata_cols if col not in crosscluster_metadata_df.columns
     ]
     if missing_metadata_cols:
         raise ValueError(
@@ -1468,8 +1473,8 @@ def export_encode_level(args, mc_encode, mc_atlascluster_combined, html_column_d
         )
 
     # Clean up metadata
-    encode_metadata_df[metadata_recompile_cols] = (
-        encode_metadata_df[metadata_recompile_cols]
+    crosscluster_metadata_df[metadata_recompile_cols] = (
+        crosscluster_metadata_df[metadata_recompile_cols]
         .astype("string")
         .apply(lambda s: (
             s.str.replace(r"[ '\t]+", "-", regex=True)
@@ -1483,16 +1488,16 @@ def export_encode_level(args, mc_encode, mc_atlascluster_combined, html_column_d
         values = values.dropna().astype(str)
         return ",".join(sorted(set(values)))
 
-    def recompile_metadata(mc_encode_i, encode_metadata_df, recompile_cols):
+    def recompile_metadata(mc_crosscluster_i, crosscluster_metadata_df, recompile_cols):
         rows_to_ids = (
-            mc_encode_i.metadata[[MetadataCols.id_col]]
-            .assign(_row=mc_encode_i.metadata.index)
+            mc_crosscluster_i.metadata[[MetadataCols.id_col]]
+            .assign(_row=mc_crosscluster_i.metadata.index)
             .assign(_encid=lambda d: d[MetadataCols.id_col].astype(str).str.split(","))
             .explode("_encid")
         )
 
         merged = rows_to_ids.merge(
-            encode_metadata_df,
+            crosscluster_metadata_df,
             left_on="_encid",
             right_on=MetadataCols.id_col,
             how="left",
@@ -1502,388 +1507,388 @@ def export_encode_level(args, mc_encode, mc_atlascluster_combined, html_column_d
         compiled = (
             merged.groupby("_row")[recompile_cols]
             .agg(join_unique)
-            .reindex(mc_encode_i.metadata.index)
+            .reindex(mc_crosscluster_i.metadata.index)
             .fillna("")
         )
 
-        mc_encode_i.metadata.loc[:, recompile_cols] = compiled
+        mc_crosscluster_i.metadata.loc[:, recompile_cols] = compiled
 
-    # Recompile metadata: the whole compendium, before its filtered and removed ENCODE clusters are exported
-    recompile_metadata(mc_encode, encode_metadata_df, metadata_recompile_cols)
+    # Recompile metadata: the whole compendium, before its filtered and removed crossclusters are exported
+    recompile_metadata(mc_crosscluster, crosscluster_metadata_df, metadata_recompile_cols)
 
     # #### Visualize HTML
     # # Add: Notes
-    # mc_encode.metadata[notes_col] = None
-    # mc_encode.metadata[checked_col] = None
+    # mc_crosscluster.metadata[notes_col] = None
+    # mc_crosscluster.metadata[checked_col] = None
 
     # Create HTML
-    html_columns_encodecluster = [html_col for html_col in VisualizeArgs.html_columns if html_col in (mc_encode.columns() + mc_encode.images())]
-    html_column_desc_dict_encodecluster = {col: html_column_desc_dict.get(col, col) for col in html_columns_encodecluster}
+    html_columns_crosscluster = [html_col for html_col in VisualizeArgs.html_columns if html_col in (mc_crosscluster.columns() + mc_crosscluster.images())]
+    html_column_desc_dict_crosscluster = {col: html_column_desc_dict.get(col, col) for col in html_columns_crosscluster}
 
-    os.makedirs(os.path.dirname(paths.html_encode_path), exist_ok=True)
-    mc_encode.summary_table_html(
-        html_out=paths.html_encode_path,
-        columns=html_columns_encodecluster,
+    os.makedirs(os.path.dirname(paths.html_crosscluster_path), exist_ok=True)
+    mc_crosscluster.summary_table_html(
+        html_out=paths.html_crosscluster_path,
+        columns=html_columns_crosscluster,
         logo_trimming=VisualizeArgs.html_logo_trim,
         editable=True,
-        column_desc_dict=html_column_desc_dict_encodecluster,
+        column_desc_dict=html_column_desc_dict_crosscluster,
     )
 
-    os.makedirs(os.path.dirname(paths.html_encode_filtered_path), exist_ok=True)
-    mc_encode_filtered = mc_encode[~mc_encode[FilterArgs.filter_flag_col]]
-    mc_encode_filtered.summary_table_html(
-        html_out=paths.html_encode_filtered_path,
-        columns=html_columns_encodecluster,
+    os.makedirs(os.path.dirname(paths.html_crosscluster_filtered_path), exist_ok=True)
+    mc_crosscluster_filtered = mc_crosscluster[~mc_crosscluster[FilterArgs.filter_flag_col]]
+    mc_crosscluster_filtered.summary_table_html(
+        html_out=paths.html_crosscluster_filtered_path,
+        columns=html_columns_crosscluster,
         logo_trimming=VisualizeArgs.html_logo_trim,
         editable=True,
-        column_desc_dict=html_column_desc_dict_encodecluster,
+        column_desc_dict=html_column_desc_dict_crosscluster,
     )
 
-    mc_encode_removed = mc_encode[mc_encode[FilterArgs.filter_flag_col]]
+    mc_crosscluster_removed = mc_crosscluster[mc_crosscluster[FilterArgs.filter_flag_col]]
     if getattr(args, "save_all", False):
-        os.makedirs(os.path.dirname(paths.html_encode_removed_path), exist_ok=True)
-        mc_encode_removed.summary_table_html(
-            html_out=paths.html_encode_removed_path,
-            columns=html_columns_encodecluster,
+        os.makedirs(os.path.dirname(paths.html_crosscluster_removed_path), exist_ok=True)
+        mc_crosscluster_removed.summary_table_html(
+            html_out=paths.html_crosscluster_removed_path,
+            columns=html_columns_crosscluster,
             logo_trimming=VisualizeArgs.html_logo_trim,
             editable=True,
-            column_desc_dict=html_column_desc_dict_encodecluster,
+            column_desc_dict=html_column_desc_dict_crosscluster,
         )
 
     # # Create HTML: Edited
-    # html_columns_encodecluster = [html_col for html_col in html_columns if html_col in (mc_encode.columns() + mc_encode.images())]
-    # html_column_desc_dict_encodecluster = {col: html_column_desc_dict.get(col, col) for col in html_columns_encodecluster}
+    # html_columns_crosscluster = [html_col for html_col in html_columns if html_col in (mc_crosscluster.columns() + mc_crosscluster.images())]
+    # html_column_desc_dict_crosscluster = {col: html_column_desc_dict.get(col, col) for col in html_columns_crosscluster}
 
-    # os.makedirs(os.path.dirname(paths.html_encode_edited_path), exist_ok=True)
-    # mc_encode.summary_table_html(
-    #     html_out=paths.html_encode_edited_path,
-    #     columns=html_columns_encodecluster,
+    # os.makedirs(os.path.dirname(paths.html_crosscluster_edited_path), exist_ok=True)
+    # mc_crosscluster.summary_table_html(
+    #     html_out=paths.html_crosscluster_edited_path,
+    #     columns=html_columns_crosscluster,
     #     logo_trimming=html_logo_trim,
     #     editable=True,
-    #     column_desc_dict=html_column_desc_dict_encodecluster,
+    #     column_desc_dict=html_column_desc_dict_crosscluster,
     # )
 
-    # os.makedirs(os.path.dirname(paths.html_encode_edited_filtered_path), exist_ok=True)
-    # mc_encode_filtered = mc_encode[~mc_encode[filter_flag_col]]
-    # mc_encode_filtered.summary_table_html(
-    #     html_out=paths.html_encode_edited_filtered_path,
-    #     columns=html_columns_encodecluster+['checked', f'{qc_col}_name0', f'{qc_col}_score0'],
+    # os.makedirs(os.path.dirname(paths.html_crosscluster_edited_filtered_path), exist_ok=True)
+    # mc_crosscluster_filtered = mc_crosscluster[~mc_crosscluster[filter_flag_col]]
+    # mc_crosscluster_filtered.summary_table_html(
+    #     html_out=paths.html_crosscluster_edited_filtered_path,
+    #     columns=html_columns_crosscluster+['checked', f'{qc_col}_name0', f'{qc_col}_score0'],
     #     logo_trimming=html_logo_trim,
     #     editable=True,
-    #     column_desc_dict=html_column_desc_dict_encodecluster,
+    #     column_desc_dict=html_column_desc_dict_crosscluster,
     # )
 
-    # os.makedirs(os.path.dirname(paths.html_encode_edited_removed_path), exist_ok=True)
-    # mc_encode_removed = mc_encode[mc_encode[filter_flag_col]]
-    # mc_encode_removed.summary_table_html(
-    #     html_out=paths.html_encode_edited_removed_path,
-    #     columns=html_columns_encodecluster + [filter_flag_col, filter_flag_type_col, f'{qc_col}_score0'],
+    # os.makedirs(os.path.dirname(paths.html_crosscluster_edited_removed_path), exist_ok=True)
+    # mc_crosscluster_removed = mc_crosscluster[mc_crosscluster[filter_flag_col]]
+    # mc_crosscluster_removed.summary_table_html(
+    #     html_out=paths.html_crosscluster_edited_removed_path,
+    #     columns=html_columns_crosscluster + [filter_flag_col, filter_flag_type_col, f'{qc_col}_score0'],
     #     logo_trimming=html_logo_trim,
     #     editable=True,
-    #     column_desc_dict=html_column_desc_dict_encodecluster,
+    #     column_desc_dict=html_column_desc_dict_crosscluster,
     # )
 
     # Clean up
-    mc_encode.metadata = mc_encode.metadata.drop(columns=EncodeCombineArgs.remove_cols, errors='ignore')
-    mc_encode_filtered.metadata = mc_encode_filtered.metadata.drop(columns=EncodeCombineArgs.remove_cols, errors='ignore')
-    mc_encode_removed.metadata = mc_encode_removed.metadata.drop(columns=EncodeCombineArgs.remove_cols, errors='ignore')
-    mc_atlascluster_combined.metadata = mc_atlascluster_combined.metadata.drop(columns=EncodeCombineArgs.remove_cols, errors='ignore')
+    mc_crosscluster.metadata = mc_crosscluster.metadata.drop(columns=EncodeCombineArgs.remove_cols, errors='ignore')
+    mc_crosscluster_filtered.metadata = mc_crosscluster_filtered.metadata.drop(columns=EncodeCombineArgs.remove_cols, errors='ignore')
+    mc_crosscluster_removed.metadata = mc_crosscluster_removed.metadata.drop(columns=EncodeCombineArgs.remove_cols, errors='ignore')
+    mc_modelcluster_combined.metadata = mc_modelcluster_combined.metadata.drop(columns=EncodeCombineArgs.remove_cols, errors='ignore')
 
     # Save MotifCompendium: ENCODE
-    os.makedirs(os.path.dirname(paths.mc_encode_path), exist_ok=True)
-    mc_encode.save(paths.mc_encode_path)
+    os.makedirs(os.path.dirname(paths.mc_crosscluster_path), exist_ok=True)
+    mc_crosscluster.save(paths.mc_crosscluster_path)
 
-    os.makedirs(os.path.dirname(paths.mc_encode_filtered_path), exist_ok=True)
-    mc_encode_filtered.save(paths.mc_encode_filtered_path)
+    os.makedirs(os.path.dirname(paths.mc_crosscluster_filtered_path), exist_ok=True)
+    mc_crosscluster_filtered.save(paths.mc_crosscluster_filtered_path)
 
     if getattr(args, "save_all", False):
-        os.makedirs(os.path.dirname(paths.mc_encode_removed_path), exist_ok=True)
-        mc_encode_removed.save(paths.mc_encode_removed_path)
+        os.makedirs(os.path.dirname(paths.mc_crosscluster_removed_path), exist_ok=True)
+        mc_crosscluster_removed.save(paths.mc_crosscluster_removed_path)
 
-    os.makedirs(os.path.dirname(paths.mc_atlascluster_combined_path), exist_ok=True)
-    mc_atlascluster_combined.save(paths.mc_atlascluster_combined_path)
+    os.makedirs(os.path.dirname(paths.mc_modelcluster_combined_path), exist_ok=True)
+    mc_modelcluster_combined.save(paths.mc_modelcluster_combined_path)
 
     # Load MotifCompendium: ENCODE
-    # mc_atlascluster_combined = MotifCompendium.load(paths.mc_atlascluster_combined_path, safe=safe)
+    # mc_modelcluster_combined = MotifCompendium.load(paths.mc_modelcluster_combined_path, safe=safe)
 
 
     # ### Export
     # Export as MEME txt
-    os.makedirs(os.path.dirname(paths.meme_encode_path), exist_ok=True)
+    os.makedirs(os.path.dirname(paths.meme_crosscluster_path), exist_ok=True)
     utils_analysis.export_compendium_meme(
-        mc=mc_encode,
+        mc=mc_crosscluster,
         name_col=MetadataCols.name_col,
-        save_loc=paths.meme_encode_path,
-        trim_importance=(1/(2*mc_encode.motifs.shape[1])),
+        save_loc=paths.meme_crosscluster_path,
+        trim_importance=(1/(2*mc_crosscluster.motifs.shape[1])),
     )
 
-    os.makedirs(os.path.dirname(paths.meme_encode_filtered_path), exist_ok=True)
+    os.makedirs(os.path.dirname(paths.meme_crosscluster_filtered_path), exist_ok=True)
     utils_analysis.export_compendium_meme(
-        mc=mc_encode_filtered,
+        mc=mc_crosscluster_filtered,
         name_col=MetadataCols.name_col,
-        save_loc=paths.meme_encode_filtered_path,
-        trim_importance=(1/(2*mc_encode_filtered.motifs.shape[1])),
+        save_loc=paths.meme_crosscluster_filtered_path,
+        trim_importance=(1/(2*mc_crosscluster_filtered.motifs.shape[1])),
     )
 
     if getattr(args, "save_all", False):
-        os.makedirs(os.path.dirname(paths.meme_encode_removed_path), exist_ok=True)
+        os.makedirs(os.path.dirname(paths.meme_crosscluster_removed_path), exist_ok=True)
         utils_analysis.export_compendium_meme(
-            mc=mc_encode_removed,
+            mc=mc_crosscluster_removed,
             name_col=MetadataCols.name_col,
-            save_loc=paths.meme_encode_removed_path,
-            trim_importance=(1/(2*mc_encode_removed.motifs.shape[1])),
+            save_loc=paths.meme_crosscluster_removed_path,
+            trim_importance=(1/(2*mc_crosscluster_removed.motifs.shape[1])),
         )
 
     # Metadata TSV
-    os.makedirs(os.path.dirname(paths.metadata_atlascluster_combined_path), exist_ok=True)
-    mc_atlascluster_combined.metadata.drop(columns=EncodeCombineArgs.remove_cols, errors='ignore').to_csv(paths.metadata_atlascluster_combined_path, sep="\t", index=False)
+    os.makedirs(os.path.dirname(paths.metadata_modelcluster_combined_path), exist_ok=True)
+    mc_modelcluster_combined.metadata.drop(columns=EncodeCombineArgs.remove_cols, errors='ignore').to_csv(paths.metadata_modelcluster_combined_path, sep="\t", index=False)
 
-    os.makedirs(os.path.dirname(paths.metadata_encode_path), exist_ok=True)
-    mc_encode.metadata.drop(columns=EncodeCombineArgs.remove_cols, errors='ignore').to_csv(paths.metadata_encode_path, sep="\t", index=False)
+    os.makedirs(os.path.dirname(paths.metadata_crosscluster_path), exist_ok=True)
+    mc_crosscluster.metadata.drop(columns=EncodeCombineArgs.remove_cols, errors='ignore').to_csv(paths.metadata_crosscluster_path, sep="\t", index=False)
 
-    os.makedirs(os.path.dirname(paths.metadata_encode_path), exist_ok=True)
-    mc_encode_filtered.metadata.drop(columns=EncodeCombineArgs.remove_cols, errors='ignore').to_csv(paths.metadata_encode_filtered_path, sep="\t", index=False)
+    os.makedirs(os.path.dirname(paths.metadata_crosscluster_path), exist_ok=True)
+    mc_crosscluster_filtered.metadata.drop(columns=EncodeCombineArgs.remove_cols, errors='ignore').to_csv(paths.metadata_crosscluster_filtered_path, sep="\t", index=False)
 
-    os.makedirs(os.path.dirname(paths.metadata_encode_path), exist_ok=True)
+    os.makedirs(os.path.dirname(paths.metadata_crosscluster_path), exist_ok=True)
     if getattr(args, "save_all", False):
-        mc_encode_removed.metadata.drop(columns=EncodeCombineArgs.remove_cols, errors='ignore').to_csv(paths.metadata_encode_removed_path, sep="\t", index=False)
+        mc_crosscluster_removed.metadata.drop(columns=EncodeCombineArgs.remove_cols, errors='ignore').to_csv(paths.metadata_crosscluster_removed_path, sep="\t", index=False)
 
 
 
-def export_encode_constituents(args, mc_encode, mc_atlascluster_combined, atlascluster2encode_name_map,
-                            atlascluster2encode_simple_map, encodecluster_cluster_col, html_column_desc_dict):
+def export_crosscluster_constituents(args, mc_crosscluster, mc_modelcluster_combined, modelcluster2crosscluster_name_map,
+                            modelcluster2crosscluster_simple_map, crosscluster_cluster_col, html_column_desc_dict):
     """
-    The ENCODE clusters, propagated to every level below (after export_encode_level(); --update-constituents only: on their own,
-    from the combine's saved outputs, run_encode_constituents()). atlascluster2encode_*_map map each ENCODE cluster of
-    mc_atlascluster_combined (encodecluster_cluster_col) to its name and simple name in mc_encode. In the atlas
+    The crossclusters, propagated to every level below (after export_crosscluster_level(); --update-constituents only: on their own,
+    from the combine's saved outputs, run_crosscluster_constituents()). modelcluster2crosscluster_*_map map each crosscluster of
+    mc_modelcluster_combined (crosscluster_cluster_col) to its name and simple name in mc_crosscluster. In the atlas
     pipelines' directories: every level's compendia (all, filtered, removed: .mc, metadata TSV, MEME, HTML but at the
-    motif level) and the motif indexes, with their ENCODE cluster, final filter flags and confidence, over the atlas
-    pipelines' own files (each level's atlascluster: the atlas pipelines' update of their levels); in <output-dir>, the
+    motif level) and the motif indexes, with their crosscluster, final filter flags and confidence, over the atlas
+    pipelines' own files (each level's modelcluster: the atlas pipelines' update of their levels); in <output-dir>, the
     ENCODE motif index. The FiNeMo hits are annotated by pipeline_encode_hits.py, from these outputs.
     """
-    paths = encode_paths(args)
-    mc_encode_filtered = mc_encode[~mc_encode[FilterArgs.filter_flag_col].astype(bool).to_numpy()]
-    # The levels' HTML column descriptions: the ENCODE level's (export_encode_level())
-    html_columns_encodecluster = [html_col for html_col in VisualizeArgs.html_columns if html_col in (mc_encode.columns() + mc_encode.images())]
-    html_column_desc_dict_encodecluster = {col: html_column_desc_dict.get(col, col) for col in html_columns_encodecluster}
+    paths = crosscluster_paths(args)
+    mc_crosscluster_filtered = mc_crosscluster[~mc_crosscluster[FilterArgs.filter_flag_col].astype(bool).to_numpy()]
+    # The levels' HTML column descriptions: the crosscluster level's (export_crosscluster_level())
+    html_columns_crosscluster = [html_col for html_col in VisualizeArgs.html_columns if html_col in (mc_crosscluster.columns() + mc_crosscluster.images())]
+    html_column_desc_dict_crosscluster = {col: html_column_desc_dict.get(col, col) for col in html_columns_crosscluster}
 
     # ### Motif index
     # Load MotifCompendium
     mc_counts_tf = MotifCompendium.load(paths.mc_counts_tf_path, safe=args.safe)
     mc_cluster_counts_tf = MotifCompendium.load(paths.mc_cluster_counts_tf_path, safe=args.safe)
-    mc_metacluster_counts_tf = MotifCompendium.load(paths.mc_metacluster_counts_tf_path, safe=args.safe)
+    mc_contribcluster_counts_tf = MotifCompendium.load(paths.mc_contribcluster_counts_tf_path, safe=args.safe)
 
     mc_profile_tf = MotifCompendium.load(paths.mc_profile_tf_path, safe=args.safe)
     mc_cluster_profile_tf = MotifCompendium.load(paths.mc_cluster_profile_tf_path, safe=args.safe)
-    mc_metacluster_profile_tf = MotifCompendium.load(paths.mc_metacluster_profile_tf_path, safe=args.safe)
+    mc_contribcluster_profile_tf = MotifCompendium.load(paths.mc_contribcluster_profile_tf_path, safe=args.safe)
 
-    mc_atlascluster_tf = MotifCompendium.load(paths.mc_atlascluster_tf_path, safe=args.safe)
+    mc_modelcluster_tf = MotifCompendium.load(paths.mc_modelcluster_tf_path, safe=args.safe)
 
 
     mc_counts_chrom = MotifCompendium.load(paths.mc_counts_chrom_path, safe=args.safe)
     mc_cluster_counts_chrom = MotifCompendium.load(paths.mc_cluster_counts_chrom_path, safe=args.safe)
-    mc_metacluster_counts_chrom = MotifCompendium.load(paths.mc_metacluster_counts_chrom_path, safe=args.safe)
+    mc_contribcluster_counts_chrom = MotifCompendium.load(paths.mc_contribcluster_counts_chrom_path, safe=args.safe)
 
     mc_profile_chrom = MotifCompendium.load(paths.mc_profile_chrom_path, safe=args.safe)
     mc_cluster_profile_chrom = MotifCompendium.load(paths.mc_cluster_profile_chrom_path, safe=args.safe)
-    mc_metacluster_profile_chrom = MotifCompendium.load(paths.mc_metacluster_profile_chrom_path, safe=args.safe)
+    mc_contribcluster_profile_chrom = MotifCompendium.load(paths.mc_contribcluster_profile_chrom_path, safe=args.safe)
 
-    mc_atlascluster_chrom = MotifCompendium.load(paths.mc_atlascluster_chrom_path, safe=args.safe)
+    mc_modelcluster_chrom = MotifCompendium.load(paths.mc_modelcluster_chrom_path, safe=args.safe)
     mc_counts_procap = MotifCompendium.load(paths.mc_counts_procap_path, safe=args.safe)
     mc_cluster_counts_procap = MotifCompendium.load(paths.mc_cluster_counts_procap_path, safe=args.safe)
-    mc_metacluster_counts_procap = MotifCompendium.load(paths.mc_metacluster_counts_procap_path, safe=args.safe)
+    mc_contribcluster_counts_procap = MotifCompendium.load(paths.mc_contribcluster_counts_procap_path, safe=args.safe)
 
     mc_profile_procap = MotifCompendium.load(paths.mc_profile_procap_path, safe=args.safe)
     mc_cluster_profile_procap = MotifCompendium.load(paths.mc_cluster_profile_procap_path, safe=args.safe)
-    mc_metacluster_profile_procap = MotifCompendium.load(paths.mc_metacluster_profile_procap_path, safe=args.safe)
+    mc_contribcluster_profile_procap = MotifCompendium.load(paths.mc_contribcluster_profile_procap_path, safe=args.safe)
 
-    mc_atlascluster_procap = MotifCompendium.load(paths.mc_atlascluster_procap_path, safe=args.safe)
+    mc_modelcluster_procap = MotifCompendium.load(paths.mc_modelcluster_procap_path, safe=args.safe)
 
-    # The legacy Chrom profile indexed compendium predates the atlascluster
+    # The legacy Chrom profile indexed compendium predates the modelcluster
     # annotation that the corresponding TF profile already carries. Its
-    # motifs still retain their metacluster assignment, so restore the
-    # derived atlascluster name before applying the shared ENCODE mapping.
-    if VisualizeArgs.atlascluster_name_col not in mc_profile_chrom.columns():
-        metacluster_to_atlascluster = dict(zip(
-            mc_metacluster_profile_chrom[MetadataCols.name_col],
-            mc_metacluster_profile_chrom[VisualizeArgs.atlascluster_name_col],
+    # motifs still retain their contribcluster assignment, so restore the
+    # derived modelcluster name before applying the shared ENCODE mapping.
+    if VisualizeArgs.modelcluster_name_col not in mc_profile_chrom.columns():
+        contribcluster_to_modelcluster = dict(zip(
+            mc_contribcluster_profile_chrom[MetadataCols.name_col],
+            mc_contribcluster_profile_chrom[VisualizeArgs.modelcluster_name_col],
         ))
-        mc_profile_chrom[VisualizeArgs.atlascluster_name_col] = mc_profile_chrom[
-            VisualizeArgs.metacluster_name_col
-        ].map(metacluster_to_atlascluster)
-        if mc_profile_chrom[VisualizeArgs.atlascluster_name_col].notna().sum() == 0:
+        mc_profile_chrom[VisualizeArgs.modelcluster_name_col] = mc_profile_chrom[
+            VisualizeArgs.contribcluster_name_col
+        ].map(contribcluster_to_modelcluster)
+        if mc_profile_chrom[VisualizeArgs.modelcluster_name_col].notna().sum() == 0:
             raise ValueError(
-                "Could not recover atlascluster_name for the legacy Chrom "
-                "profile compendium from its metacluster assignments."
+                "Could not recover modelcluster_name for the legacy Chrom "
+                "profile compendium from its contribcluster assignments."
             )
 
-    # Update Atlasclusters
-    for mc_atlascluster_i in [mc_atlascluster_tf, mc_atlascluster_chrom, mc_atlascluster_procap]:
-        for metadata_col in mc_atlascluster_combined.columns():
-            if metadata_col not in mc_atlascluster_i.columns():
-                mc_atlascluster_i.metadata[metadata_col] = None
-        mc_atlascluster_i.metadata.set_index(MetadataCols.unique_id_col, inplace=True)
-        mc_atlascluster_i.metadata.update(mc_atlascluster_combined.metadata.set_index(MetadataCols.unique_id_col))
-        mc_atlascluster_i.metadata.reset_index(inplace=True)
+    # Update Modelclusters
+    for mc_modelcluster_i in [mc_modelcluster_tf, mc_modelcluster_chrom, mc_modelcluster_procap]:
+        for metadata_col in mc_modelcluster_combined.columns():
+            if metadata_col not in mc_modelcluster_i.columns():
+                mc_modelcluster_i.metadata[metadata_col] = None
+        mc_modelcluster_i.metadata.set_index(MetadataCols.unique_id_col, inplace=True)
+        mc_modelcluster_i.metadata.update(mc_modelcluster_combined.metadata.set_index(MetadataCols.unique_id_col))
+        mc_modelcluster_i.metadata.reset_index(inplace=True)
 
-    ## Map: Atlascluster to ENCODE cluster: Name, Simple name
-    mc_atlascluster_tf[VisualizeArgs.encodecluster_name_col] = mc_atlascluster_tf[encodecluster_cluster_col].map(atlascluster2encode_name_map)
-    mc_atlascluster_tf[MetadataCols.simple_name_col] = mc_atlascluster_tf[encodecluster_cluster_col].map(atlascluster2encode_simple_map).fillna(mc_atlascluster_tf[MetadataCols.simple_name_col]).fillna(MetadataCols.name_unknown)
+    ## Map: Modelcluster to crosscluster: Name, Simple name
+    mc_modelcluster_tf[VisualizeArgs.crosscluster_name_col] = mc_modelcluster_tf[crosscluster_cluster_col].map(modelcluster2crosscluster_name_map)
+    mc_modelcluster_tf[MetadataCols.simple_name_col] = mc_modelcluster_tf[crosscluster_cluster_col].map(modelcluster2crosscluster_simple_map).fillna(mc_modelcluster_tf[MetadataCols.simple_name_col]).fillna(MetadataCols.name_unknown)
 
-    mc_atlascluster_chrom[VisualizeArgs.encodecluster_name_col] = mc_atlascluster_chrom[encodecluster_cluster_col].map(atlascluster2encode_name_map)
-    mc_atlascluster_chrom[MetadataCols.simple_name_col] = mc_atlascluster_chrom[encodecluster_cluster_col].map(atlascluster2encode_simple_map).fillna(mc_atlascluster_chrom[MetadataCols.simple_name_col]).fillna(MetadataCols.name_unknown)
-    mc_atlascluster_procap[VisualizeArgs.encodecluster_name_col] = mc_atlascluster_procap[encodecluster_cluster_col].map(atlascluster2encode_name_map)
-    mc_atlascluster_procap[MetadataCols.simple_name_col] = mc_atlascluster_procap[encodecluster_cluster_col].map(atlascluster2encode_simple_map).fillna(mc_atlascluster_procap[MetadataCols.simple_name_col]).fillna(MetadataCols.name_unknown)
+    mc_modelcluster_chrom[VisualizeArgs.crosscluster_name_col] = mc_modelcluster_chrom[crosscluster_cluster_col].map(modelcluster2crosscluster_name_map)
+    mc_modelcluster_chrom[MetadataCols.simple_name_col] = mc_modelcluster_chrom[crosscluster_cluster_col].map(modelcluster2crosscluster_simple_map).fillna(mc_modelcluster_chrom[MetadataCols.simple_name_col]).fillna(MetadataCols.name_unknown)
+    mc_modelcluster_procap[VisualizeArgs.crosscluster_name_col] = mc_modelcluster_procap[crosscluster_cluster_col].map(modelcluster2crosscluster_name_map)
+    mc_modelcluster_procap[MetadataCols.simple_name_col] = mc_modelcluster_procap[crosscluster_cluster_col].map(modelcluster2crosscluster_simple_map).fillna(mc_modelcluster_procap[MetadataCols.simple_name_col]).fillna(MetadataCols.name_unknown)
 
-    ## Map: Motif, Cluster, Metacluster to ENCODE cluster: Name, Simple name
-    metacluster2atlascluster_encode_map = dict(zip(mc_atlascluster_combined[MetadataCols.name_col], mc_atlascluster_combined[VisualizeArgs.encodecluster_name_col]))
-    metacluster2atlascluster_simple_map = dict(zip(mc_atlascluster_combined[MetadataCols.name_col], mc_atlascluster_combined[MetadataCols.simple_name_col]))
+    ## Map: Motif, Cluster, Contribcluster to crosscluster: Name, Simple name
+    contribcluster2modelcluster_crosscluster_map = dict(zip(mc_modelcluster_combined[MetadataCols.name_col], mc_modelcluster_combined[VisualizeArgs.crosscluster_name_col]))
+    contribcluster2modelcluster_simple_map = dict(zip(mc_modelcluster_combined[MetadataCols.name_col], mc_modelcluster_combined[MetadataCols.simple_name_col]))
 
-    ##  Apply map: Motif, Cluster, Metacluster to ENCODE cluster: Name, Simple name
-    mc_metacluster_counts_tf[VisualizeArgs.encodecluster_name_col] = mc_metacluster_counts_tf[VisualizeArgs.atlascluster_name_col].map(metacluster2atlascluster_encode_map)
-    mc_metacluster_counts_tf[MetadataCols.simple_name_col] = mc_metacluster_counts_tf[VisualizeArgs.atlascluster_name_col].map(metacluster2atlascluster_simple_map).fillna(mc_metacluster_counts_tf[FilterArgs.filter_flag_type_col]).fillna(MetadataCols.name_unknown)
-    mc_metacluster_counts_tf[VisualizeArgs.atlas_col] = EncodeCombineArgs.tfatlas_id
-    mc_metacluster_counts_tf.metadata.drop(columns=EncodeCombineArgs.remove_cols, inplace=True, errors='ignore')
-    mc_cluster_counts_tf[VisualizeArgs.encodecluster_name_col] = mc_cluster_counts_tf[VisualizeArgs.atlascluster_name_col].map(metacluster2atlascluster_encode_map)
-    mc_cluster_counts_tf[MetadataCols.simple_name_col] = mc_cluster_counts_tf[VisualizeArgs.atlascluster_name_col].map(metacluster2atlascluster_simple_map).fillna(mc_cluster_counts_tf[FilterArgs.filter_flag_type_col]).fillna(MetadataCols.name_unknown)
+    ##  Apply map: Motif, Cluster, Contribcluster to crosscluster: Name, Simple name
+    mc_contribcluster_counts_tf[VisualizeArgs.crosscluster_name_col] = mc_contribcluster_counts_tf[VisualizeArgs.modelcluster_name_col].map(contribcluster2modelcluster_crosscluster_map)
+    mc_contribcluster_counts_tf[MetadataCols.simple_name_col] = mc_contribcluster_counts_tf[VisualizeArgs.modelcluster_name_col].map(contribcluster2modelcluster_simple_map).fillna(mc_contribcluster_counts_tf[FilterArgs.filter_flag_type_col]).fillna(MetadataCols.name_unknown)
+    mc_contribcluster_counts_tf[VisualizeArgs.atlas_col] = EncodeCombineArgs.tfatlas_id
+    mc_contribcluster_counts_tf.metadata.drop(columns=EncodeCombineArgs.remove_cols, inplace=True, errors='ignore')
+    mc_cluster_counts_tf[VisualizeArgs.crosscluster_name_col] = mc_cluster_counts_tf[VisualizeArgs.modelcluster_name_col].map(contribcluster2modelcluster_crosscluster_map)
+    mc_cluster_counts_tf[MetadataCols.simple_name_col] = mc_cluster_counts_tf[VisualizeArgs.modelcluster_name_col].map(contribcluster2modelcluster_simple_map).fillna(mc_cluster_counts_tf[FilterArgs.filter_flag_type_col]).fillna(MetadataCols.name_unknown)
     mc_cluster_counts_tf[VisualizeArgs.atlas_col] = EncodeCombineArgs.tfatlas_id
     mc_cluster_counts_tf.metadata.drop(columns=EncodeCombineArgs.remove_cols, inplace=True, errors='ignore')
-    mc_counts_tf[VisualizeArgs.encodecluster_name_col] = mc_counts_tf[VisualizeArgs.atlascluster_name_col].map(metacluster2atlascluster_encode_map)
-    mc_counts_tf[MetadataCols.simple_name_col] = mc_counts_tf[VisualizeArgs.atlascluster_name_col].map(metacluster2atlascluster_simple_map).fillna(mc_counts_tf[FilterArgs.filter_flag_type_col]).fillna(MetadataCols.name_unknown)
+    mc_counts_tf[VisualizeArgs.crosscluster_name_col] = mc_counts_tf[VisualizeArgs.modelcluster_name_col].map(contribcluster2modelcluster_crosscluster_map)
+    mc_counts_tf[MetadataCols.simple_name_col] = mc_counts_tf[VisualizeArgs.modelcluster_name_col].map(contribcluster2modelcluster_simple_map).fillna(mc_counts_tf[FilterArgs.filter_flag_type_col]).fillna(MetadataCols.name_unknown)
     mc_counts_tf[VisualizeArgs.atlas_col] = EncodeCombineArgs.tfatlas_id
     mc_counts_tf.metadata.drop(columns=EncodeCombineArgs.remove_cols, inplace=True, errors='ignore')
 
-    mc_metacluster_profile_tf[VisualizeArgs.encodecluster_name_col] = mc_metacluster_profile_tf[VisualizeArgs.atlascluster_name_col].map(metacluster2atlascluster_encode_map)
-    mc_metacluster_profile_tf[MetadataCols.simple_name_col] = mc_metacluster_profile_tf[VisualizeArgs.atlascluster_name_col].map(metacluster2atlascluster_simple_map).fillna(mc_metacluster_profile_tf[FilterArgs.filter_flag_type_col]).fillna(MetadataCols.name_unknown)
-    mc_metacluster_profile_tf[VisualizeArgs.atlas_col] = EncodeCombineArgs.tfatlas_id
-    mc_metacluster_profile_tf.metadata.drop(columns=EncodeCombineArgs.remove_cols, inplace=True, errors='ignore')
-    mc_cluster_profile_tf[VisualizeArgs.encodecluster_name_col] = mc_cluster_profile_tf[VisualizeArgs.atlascluster_name_col].map(metacluster2atlascluster_encode_map)
-    mc_cluster_profile_tf[MetadataCols.simple_name_col] = mc_cluster_profile_tf[VisualizeArgs.atlascluster_name_col].map(metacluster2atlascluster_simple_map).fillna(mc_cluster_profile_tf[FilterArgs.filter_flag_type_col]).fillna(MetadataCols.name_unknown)
+    mc_contribcluster_profile_tf[VisualizeArgs.crosscluster_name_col] = mc_contribcluster_profile_tf[VisualizeArgs.modelcluster_name_col].map(contribcluster2modelcluster_crosscluster_map)
+    mc_contribcluster_profile_tf[MetadataCols.simple_name_col] = mc_contribcluster_profile_tf[VisualizeArgs.modelcluster_name_col].map(contribcluster2modelcluster_simple_map).fillna(mc_contribcluster_profile_tf[FilterArgs.filter_flag_type_col]).fillna(MetadataCols.name_unknown)
+    mc_contribcluster_profile_tf[VisualizeArgs.atlas_col] = EncodeCombineArgs.tfatlas_id
+    mc_contribcluster_profile_tf.metadata.drop(columns=EncodeCombineArgs.remove_cols, inplace=True, errors='ignore')
+    mc_cluster_profile_tf[VisualizeArgs.crosscluster_name_col] = mc_cluster_profile_tf[VisualizeArgs.modelcluster_name_col].map(contribcluster2modelcluster_crosscluster_map)
+    mc_cluster_profile_tf[MetadataCols.simple_name_col] = mc_cluster_profile_tf[VisualizeArgs.modelcluster_name_col].map(contribcluster2modelcluster_simple_map).fillna(mc_cluster_profile_tf[FilterArgs.filter_flag_type_col]).fillna(MetadataCols.name_unknown)
     mc_cluster_profile_tf[VisualizeArgs.atlas_col] = EncodeCombineArgs.tfatlas_id
     mc_cluster_profile_tf.metadata.drop(columns=EncodeCombineArgs.remove_cols, inplace=True, errors='ignore')
-    mc_profile_tf[VisualizeArgs.encodecluster_name_col] = mc_profile_tf[VisualizeArgs.atlascluster_name_col].map(metacluster2atlascluster_encode_map)
-    mc_profile_tf[MetadataCols.simple_name_col] = mc_profile_tf[VisualizeArgs.atlascluster_name_col].map(metacluster2atlascluster_simple_map).fillna(mc_profile_tf[FilterArgs.filter_flag_type_col]).fillna(MetadataCols.name_unknown)
+    mc_profile_tf[VisualizeArgs.crosscluster_name_col] = mc_profile_tf[VisualizeArgs.modelcluster_name_col].map(contribcluster2modelcluster_crosscluster_map)
+    mc_profile_tf[MetadataCols.simple_name_col] = mc_profile_tf[VisualizeArgs.modelcluster_name_col].map(contribcluster2modelcluster_simple_map).fillna(mc_profile_tf[FilterArgs.filter_flag_type_col]).fillna(MetadataCols.name_unknown)
     mc_profile_tf[VisualizeArgs.atlas_col] = EncodeCombineArgs.tfatlas_id
     mc_profile_tf.metadata.drop(columns=EncodeCombineArgs.remove_cols, inplace=True, errors='ignore')
 
 
-    mc_metacluster_counts_chrom[VisualizeArgs.encodecluster_name_col] = mc_metacluster_counts_chrom[VisualizeArgs.atlascluster_name_col].map(metacluster2atlascluster_encode_map)
-    mc_metacluster_counts_chrom[MetadataCols.simple_name_col] = mc_metacluster_counts_chrom[VisualizeArgs.atlascluster_name_col].map(metacluster2atlascluster_simple_map).fillna(mc_metacluster_counts_chrom[FilterArgs.filter_flag_type_col]).fillna(MetadataCols.name_unknown)
-    mc_metacluster_counts_chrom[VisualizeArgs.atlas_col] = EncodeCombineArgs.chromatlas_id
-    mc_metacluster_counts_chrom.metadata.drop(columns=EncodeCombineArgs.remove_cols, inplace=True, errors='ignore')
-    mc_cluster_counts_chrom[VisualizeArgs.encodecluster_name_col] = mc_cluster_counts_chrom[VisualizeArgs.atlascluster_name_col].map(metacluster2atlascluster_encode_map)
-    mc_cluster_counts_chrom[MetadataCols.simple_name_col] = mc_cluster_counts_chrom[VisualizeArgs.atlascluster_name_col].map(metacluster2atlascluster_simple_map).fillna(mc_cluster_counts_chrom[FilterArgs.filter_flag_type_col]).fillna(MetadataCols.name_unknown)
+    mc_contribcluster_counts_chrom[VisualizeArgs.crosscluster_name_col] = mc_contribcluster_counts_chrom[VisualizeArgs.modelcluster_name_col].map(contribcluster2modelcluster_crosscluster_map)
+    mc_contribcluster_counts_chrom[MetadataCols.simple_name_col] = mc_contribcluster_counts_chrom[VisualizeArgs.modelcluster_name_col].map(contribcluster2modelcluster_simple_map).fillna(mc_contribcluster_counts_chrom[FilterArgs.filter_flag_type_col]).fillna(MetadataCols.name_unknown)
+    mc_contribcluster_counts_chrom[VisualizeArgs.atlas_col] = EncodeCombineArgs.chromatlas_id
+    mc_contribcluster_counts_chrom.metadata.drop(columns=EncodeCombineArgs.remove_cols, inplace=True, errors='ignore')
+    mc_cluster_counts_chrom[VisualizeArgs.crosscluster_name_col] = mc_cluster_counts_chrom[VisualizeArgs.modelcluster_name_col].map(contribcluster2modelcluster_crosscluster_map)
+    mc_cluster_counts_chrom[MetadataCols.simple_name_col] = mc_cluster_counts_chrom[VisualizeArgs.modelcluster_name_col].map(contribcluster2modelcluster_simple_map).fillna(mc_cluster_counts_chrom[FilterArgs.filter_flag_type_col]).fillna(MetadataCols.name_unknown)
     mc_cluster_counts_chrom[VisualizeArgs.atlas_col] = EncodeCombineArgs.chromatlas_id
     mc_cluster_counts_chrom.metadata.drop(columns=EncodeCombineArgs.remove_cols, inplace=True, errors='ignore')
-    mc_counts_chrom[VisualizeArgs.encodecluster_name_col] = mc_counts_chrom[VisualizeArgs.atlascluster_name_col].map(metacluster2atlascluster_encode_map)
-    mc_counts_chrom[MetadataCols.simple_name_col] = mc_counts_chrom[VisualizeArgs.atlascluster_name_col].map(metacluster2atlascluster_simple_map).fillna(mc_counts_chrom[FilterArgs.filter_flag_type_col]).fillna(MetadataCols.name_unknown)
+    mc_counts_chrom[VisualizeArgs.crosscluster_name_col] = mc_counts_chrom[VisualizeArgs.modelcluster_name_col].map(contribcluster2modelcluster_crosscluster_map)
+    mc_counts_chrom[MetadataCols.simple_name_col] = mc_counts_chrom[VisualizeArgs.modelcluster_name_col].map(contribcluster2modelcluster_simple_map).fillna(mc_counts_chrom[FilterArgs.filter_flag_type_col]).fillna(MetadataCols.name_unknown)
     mc_counts_chrom[VisualizeArgs.atlas_col] = EncodeCombineArgs.chromatlas_id
     mc_counts_chrom.metadata.drop(columns=EncodeCombineArgs.remove_cols, inplace=True, errors='ignore')
 
-    mc_metacluster_profile_chrom[VisualizeArgs.encodecluster_name_col] = mc_metacluster_profile_chrom[VisualizeArgs.atlascluster_name_col].map(metacluster2atlascluster_encode_map)
-    mc_metacluster_profile_chrom[MetadataCols.simple_name_col] = mc_metacluster_profile_chrom[VisualizeArgs.atlascluster_name_col].map(metacluster2atlascluster_simple_map).fillna(mc_metacluster_profile_chrom[FilterArgs.filter_flag_type_col]).fillna(MetadataCols.name_unknown)
-    mc_metacluster_profile_chrom[VisualizeArgs.atlas_col] = EncodeCombineArgs.chromatlas_id
-    mc_metacluster_profile_chrom.metadata.drop(columns=EncodeCombineArgs.remove_cols, inplace=True, errors='ignore')
-    mc_cluster_profile_chrom[VisualizeArgs.encodecluster_name_col] = mc_cluster_profile_chrom[VisualizeArgs.atlascluster_name_col].map(metacluster2atlascluster_encode_map)
-    mc_cluster_profile_chrom[MetadataCols.simple_name_col] = mc_cluster_profile_chrom[VisualizeArgs.atlascluster_name_col].map(metacluster2atlascluster_simple_map).fillna(mc_cluster_profile_chrom[FilterArgs.filter_flag_type_col]).fillna(MetadataCols.name_unknown)
+    mc_contribcluster_profile_chrom[VisualizeArgs.crosscluster_name_col] = mc_contribcluster_profile_chrom[VisualizeArgs.modelcluster_name_col].map(contribcluster2modelcluster_crosscluster_map)
+    mc_contribcluster_profile_chrom[MetadataCols.simple_name_col] = mc_contribcluster_profile_chrom[VisualizeArgs.modelcluster_name_col].map(contribcluster2modelcluster_simple_map).fillna(mc_contribcluster_profile_chrom[FilterArgs.filter_flag_type_col]).fillna(MetadataCols.name_unknown)
+    mc_contribcluster_profile_chrom[VisualizeArgs.atlas_col] = EncodeCombineArgs.chromatlas_id
+    mc_contribcluster_profile_chrom.metadata.drop(columns=EncodeCombineArgs.remove_cols, inplace=True, errors='ignore')
+    mc_cluster_profile_chrom[VisualizeArgs.crosscluster_name_col] = mc_cluster_profile_chrom[VisualizeArgs.modelcluster_name_col].map(contribcluster2modelcluster_crosscluster_map)
+    mc_cluster_profile_chrom[MetadataCols.simple_name_col] = mc_cluster_profile_chrom[VisualizeArgs.modelcluster_name_col].map(contribcluster2modelcluster_simple_map).fillna(mc_cluster_profile_chrom[FilterArgs.filter_flag_type_col]).fillna(MetadataCols.name_unknown)
     mc_cluster_profile_chrom[VisualizeArgs.atlas_col] = EncodeCombineArgs.chromatlas_id
     mc_cluster_profile_chrom.metadata.drop(columns=EncodeCombineArgs.remove_cols, inplace=True, errors='ignore')
-    mc_profile_chrom[VisualizeArgs.encodecluster_name_col] = mc_profile_chrom[VisualizeArgs.atlascluster_name_col].map(metacluster2atlascluster_encode_map)
-    mc_profile_chrom[MetadataCols.simple_name_col] = mc_profile_chrom[VisualizeArgs.atlascluster_name_col].map(metacluster2atlascluster_simple_map).fillna(mc_profile_chrom[FilterArgs.filter_flag_type_col]).fillna(MetadataCols.name_unknown)
+    mc_profile_chrom[VisualizeArgs.crosscluster_name_col] = mc_profile_chrom[VisualizeArgs.modelcluster_name_col].map(contribcluster2modelcluster_crosscluster_map)
+    mc_profile_chrom[MetadataCols.simple_name_col] = mc_profile_chrom[VisualizeArgs.modelcluster_name_col].map(contribcluster2modelcluster_simple_map).fillna(mc_profile_chrom[FilterArgs.filter_flag_type_col]).fillna(MetadataCols.name_unknown)
     mc_profile_chrom[VisualizeArgs.atlas_col] = EncodeCombineArgs.chromatlas_id
     mc_profile_chrom.metadata.drop(columns=EncodeCombineArgs.remove_cols, inplace=True, errors='ignore')
 
-    mc_metacluster_counts_procap[VisualizeArgs.encodecluster_name_col] = mc_metacluster_counts_procap[VisualizeArgs.atlascluster_name_col].map(metacluster2atlascluster_encode_map)
-    mc_metacluster_counts_procap[MetadataCols.simple_name_col] = mc_metacluster_counts_procap[VisualizeArgs.atlascluster_name_col].map(metacluster2atlascluster_simple_map).fillna(mc_metacluster_counts_procap[FilterArgs.filter_flag_type_col]).fillna(MetadataCols.name_unknown)
-    mc_metacluster_counts_procap[VisualizeArgs.atlas_col] = EncodeCombineArgs.procapatlas_id
-    mc_metacluster_counts_procap.metadata.drop(columns=EncodeCombineArgs.remove_cols, inplace=True, errors='ignore')
-    mc_cluster_counts_procap[VisualizeArgs.encodecluster_name_col] = mc_cluster_counts_procap[VisualizeArgs.atlascluster_name_col].map(metacluster2atlascluster_encode_map)
-    mc_cluster_counts_procap[MetadataCols.simple_name_col] = mc_cluster_counts_procap[VisualizeArgs.atlascluster_name_col].map(metacluster2atlascluster_simple_map).fillna(mc_cluster_counts_procap[FilterArgs.filter_flag_type_col]).fillna(MetadataCols.name_unknown)
+    mc_contribcluster_counts_procap[VisualizeArgs.crosscluster_name_col] = mc_contribcluster_counts_procap[VisualizeArgs.modelcluster_name_col].map(contribcluster2modelcluster_crosscluster_map)
+    mc_contribcluster_counts_procap[MetadataCols.simple_name_col] = mc_contribcluster_counts_procap[VisualizeArgs.modelcluster_name_col].map(contribcluster2modelcluster_simple_map).fillna(mc_contribcluster_counts_procap[FilterArgs.filter_flag_type_col]).fillna(MetadataCols.name_unknown)
+    mc_contribcluster_counts_procap[VisualizeArgs.atlas_col] = EncodeCombineArgs.procapatlas_id
+    mc_contribcluster_counts_procap.metadata.drop(columns=EncodeCombineArgs.remove_cols, inplace=True, errors='ignore')
+    mc_cluster_counts_procap[VisualizeArgs.crosscluster_name_col] = mc_cluster_counts_procap[VisualizeArgs.modelcluster_name_col].map(contribcluster2modelcluster_crosscluster_map)
+    mc_cluster_counts_procap[MetadataCols.simple_name_col] = mc_cluster_counts_procap[VisualizeArgs.modelcluster_name_col].map(contribcluster2modelcluster_simple_map).fillna(mc_cluster_counts_procap[FilterArgs.filter_flag_type_col]).fillna(MetadataCols.name_unknown)
     mc_cluster_counts_procap[VisualizeArgs.atlas_col] = EncodeCombineArgs.procapatlas_id
     mc_cluster_counts_procap.metadata.drop(columns=EncodeCombineArgs.remove_cols, inplace=True, errors='ignore')
-    mc_counts_procap[VisualizeArgs.encodecluster_name_col] = mc_counts_procap[VisualizeArgs.atlascluster_name_col].map(metacluster2atlascluster_encode_map)
-    mc_counts_procap[MetadataCols.simple_name_col] = mc_counts_procap[VisualizeArgs.atlascluster_name_col].map(metacluster2atlascluster_simple_map).fillna(mc_counts_procap[FilterArgs.filter_flag_type_col]).fillna(MetadataCols.name_unknown)
+    mc_counts_procap[VisualizeArgs.crosscluster_name_col] = mc_counts_procap[VisualizeArgs.modelcluster_name_col].map(contribcluster2modelcluster_crosscluster_map)
+    mc_counts_procap[MetadataCols.simple_name_col] = mc_counts_procap[VisualizeArgs.modelcluster_name_col].map(contribcluster2modelcluster_simple_map).fillna(mc_counts_procap[FilterArgs.filter_flag_type_col]).fillna(MetadataCols.name_unknown)
     mc_counts_procap[VisualizeArgs.atlas_col] = EncodeCombineArgs.procapatlas_id
     mc_counts_procap.metadata.drop(columns=EncodeCombineArgs.remove_cols, inplace=True, errors='ignore')
 
-    mc_metacluster_profile_procap[VisualizeArgs.encodecluster_name_col] = mc_metacluster_profile_procap[VisualizeArgs.atlascluster_name_col].map(metacluster2atlascluster_encode_map)
-    mc_metacluster_profile_procap[MetadataCols.simple_name_col] = mc_metacluster_profile_procap[VisualizeArgs.atlascluster_name_col].map(metacluster2atlascluster_simple_map).fillna(mc_metacluster_profile_procap[FilterArgs.filter_flag_type_col]).fillna(MetadataCols.name_unknown)
-    mc_metacluster_profile_procap[VisualizeArgs.atlas_col] = EncodeCombineArgs.procapatlas_id
-    mc_metacluster_profile_procap.metadata.drop(columns=EncodeCombineArgs.remove_cols, inplace=True, errors='ignore')
-    mc_cluster_profile_procap[VisualizeArgs.encodecluster_name_col] = mc_cluster_profile_procap[VisualizeArgs.atlascluster_name_col].map(metacluster2atlascluster_encode_map)
-    mc_cluster_profile_procap[MetadataCols.simple_name_col] = mc_cluster_profile_procap[VisualizeArgs.atlascluster_name_col].map(metacluster2atlascluster_simple_map).fillna(mc_cluster_profile_procap[FilterArgs.filter_flag_type_col]).fillna(MetadataCols.name_unknown)
+    mc_contribcluster_profile_procap[VisualizeArgs.crosscluster_name_col] = mc_contribcluster_profile_procap[VisualizeArgs.modelcluster_name_col].map(contribcluster2modelcluster_crosscluster_map)
+    mc_contribcluster_profile_procap[MetadataCols.simple_name_col] = mc_contribcluster_profile_procap[VisualizeArgs.modelcluster_name_col].map(contribcluster2modelcluster_simple_map).fillna(mc_contribcluster_profile_procap[FilterArgs.filter_flag_type_col]).fillna(MetadataCols.name_unknown)
+    mc_contribcluster_profile_procap[VisualizeArgs.atlas_col] = EncodeCombineArgs.procapatlas_id
+    mc_contribcluster_profile_procap.metadata.drop(columns=EncodeCombineArgs.remove_cols, inplace=True, errors='ignore')
+    mc_cluster_profile_procap[VisualizeArgs.crosscluster_name_col] = mc_cluster_profile_procap[VisualizeArgs.modelcluster_name_col].map(contribcluster2modelcluster_crosscluster_map)
+    mc_cluster_profile_procap[MetadataCols.simple_name_col] = mc_cluster_profile_procap[VisualizeArgs.modelcluster_name_col].map(contribcluster2modelcluster_simple_map).fillna(mc_cluster_profile_procap[FilterArgs.filter_flag_type_col]).fillna(MetadataCols.name_unknown)
     mc_cluster_profile_procap[VisualizeArgs.atlas_col] = EncodeCombineArgs.procapatlas_id
     mc_cluster_profile_procap.metadata.drop(columns=EncodeCombineArgs.remove_cols, inplace=True, errors='ignore')
-    mc_profile_procap[VisualizeArgs.encodecluster_name_col] = mc_profile_procap[VisualizeArgs.atlascluster_name_col].map(metacluster2atlascluster_encode_map)
-    mc_profile_procap[MetadataCols.simple_name_col] = mc_profile_procap[VisualizeArgs.atlascluster_name_col].map(metacluster2atlascluster_simple_map).fillna(mc_profile_procap[FilterArgs.filter_flag_type_col]).fillna(MetadataCols.name_unknown)
+    mc_profile_procap[VisualizeArgs.crosscluster_name_col] = mc_profile_procap[VisualizeArgs.modelcluster_name_col].map(contribcluster2modelcluster_crosscluster_map)
+    mc_profile_procap[MetadataCols.simple_name_col] = mc_profile_procap[VisualizeArgs.modelcluster_name_col].map(contribcluster2modelcluster_simple_map).fillna(mc_profile_procap[FilterArgs.filter_flag_type_col]).fillna(MetadataCols.name_unknown)
     mc_profile_procap[VisualizeArgs.atlas_col] = EncodeCombineArgs.procapatlas_id
     mc_profile_procap.metadata.drop(columns=EncodeCombineArgs.remove_cols, inplace=True, errors='ignore')
 
-    ## Filter flag: If no encodecluster_name_col, then True
-    mc_counts_tf[FilterArgs.filter_flag_col] = ~mc_counts_tf[VisualizeArgs.encodecluster_name_col].isin(mc_encode_filtered[MetadataCols.name_col])
-    mc_cluster_counts_tf[FilterArgs.filter_flag_col] = ~mc_cluster_counts_tf[VisualizeArgs.encodecluster_name_col].isin(mc_encode_filtered[MetadataCols.name_col])
-    mc_metacluster_counts_tf[FilterArgs.filter_flag_col] = ~mc_metacluster_counts_tf[VisualizeArgs.encodecluster_name_col].isin(mc_encode_filtered[MetadataCols.name_col])
+    ## Filter flag: If no crosscluster_name_col, then True
+    mc_counts_tf[FilterArgs.filter_flag_col] = ~mc_counts_tf[VisualizeArgs.crosscluster_name_col].isin(mc_crosscluster_filtered[MetadataCols.name_col])
+    mc_cluster_counts_tf[FilterArgs.filter_flag_col] = ~mc_cluster_counts_tf[VisualizeArgs.crosscluster_name_col].isin(mc_crosscluster_filtered[MetadataCols.name_col])
+    mc_contribcluster_counts_tf[FilterArgs.filter_flag_col] = ~mc_contribcluster_counts_tf[VisualizeArgs.crosscluster_name_col].isin(mc_crosscluster_filtered[MetadataCols.name_col])
 
-    mc_profile_tf[FilterArgs.filter_flag_col] = ~mc_profile_tf[VisualizeArgs.encodecluster_name_col].isin(mc_encode_filtered[MetadataCols.name_col])
-    mc_cluster_profile_tf[FilterArgs.filter_flag_col] = ~mc_cluster_profile_tf[VisualizeArgs.encodecluster_name_col].isin(mc_encode_filtered[MetadataCols.name_col])
-    mc_metacluster_profile_tf[FilterArgs.filter_flag_col] = ~mc_metacluster_profile_tf[VisualizeArgs.encodecluster_name_col].isin(mc_encode_filtered[MetadataCols.name_col])
+    mc_profile_tf[FilterArgs.filter_flag_col] = ~mc_profile_tf[VisualizeArgs.crosscluster_name_col].isin(mc_crosscluster_filtered[MetadataCols.name_col])
+    mc_cluster_profile_tf[FilterArgs.filter_flag_col] = ~mc_cluster_profile_tf[VisualizeArgs.crosscluster_name_col].isin(mc_crosscluster_filtered[MetadataCols.name_col])
+    mc_contribcluster_profile_tf[FilterArgs.filter_flag_col] = ~mc_contribcluster_profile_tf[VisualizeArgs.crosscluster_name_col].isin(mc_crosscluster_filtered[MetadataCols.name_col])
 
-    mc_atlascluster_tf[FilterArgs.filter_flag_col] = ~mc_atlascluster_tf[VisualizeArgs.encodecluster_name_col].isin(mc_encode_filtered[MetadataCols.name_col])
-
-
-    mc_counts_chrom[FilterArgs.filter_flag_col] = ~mc_counts_chrom[VisualizeArgs.encodecluster_name_col].isin(mc_encode_filtered[MetadataCols.name_col])
-    mc_cluster_counts_chrom[FilterArgs.filter_flag_col] = ~mc_cluster_counts_chrom[VisualizeArgs.encodecluster_name_col].isin(mc_encode_filtered[MetadataCols.name_col])
-    mc_metacluster_counts_chrom[FilterArgs.filter_flag_col] = ~mc_metacluster_counts_chrom[VisualizeArgs.encodecluster_name_col].isin(mc_encode_filtered[MetadataCols.name_col])
-
-    mc_profile_chrom[FilterArgs.filter_flag_col] = ~mc_profile_chrom[VisualizeArgs.encodecluster_name_col].isin(mc_encode_filtered[MetadataCols.name_col])
-    mc_cluster_profile_chrom[FilterArgs.filter_flag_col] = ~mc_cluster_profile_chrom[VisualizeArgs.encodecluster_name_col].isin(mc_encode_filtered[MetadataCols.name_col])
-    mc_metacluster_profile_chrom[FilterArgs.filter_flag_col] = ~mc_metacluster_profile_chrom[VisualizeArgs.encodecluster_name_col].isin(mc_encode_filtered[MetadataCols.name_col])
-
-    mc_atlascluster_chrom[FilterArgs.filter_flag_col] = ~mc_atlascluster_chrom[VisualizeArgs.encodecluster_name_col].isin(mc_encode_filtered[MetadataCols.name_col])
-
-    mc_counts_procap[FilterArgs.filter_flag_col] = ~mc_counts_procap[VisualizeArgs.encodecluster_name_col].isin(mc_encode_filtered[MetadataCols.name_col])
-    mc_cluster_counts_procap[FilterArgs.filter_flag_col] = ~mc_cluster_counts_procap[VisualizeArgs.encodecluster_name_col].isin(mc_encode_filtered[MetadataCols.name_col])
-    mc_metacluster_counts_procap[FilterArgs.filter_flag_col] = ~mc_metacluster_counts_procap[VisualizeArgs.encodecluster_name_col].isin(mc_encode_filtered[MetadataCols.name_col])
-
-    mc_profile_procap[FilterArgs.filter_flag_col] = ~mc_profile_procap[VisualizeArgs.encodecluster_name_col].isin(mc_encode_filtered[MetadataCols.name_col])
-    mc_cluster_profile_procap[FilterArgs.filter_flag_col] = ~mc_cluster_profile_procap[VisualizeArgs.encodecluster_name_col].isin(mc_encode_filtered[MetadataCols.name_col])
-    mc_metacluster_profile_procap[FilterArgs.filter_flag_col] = ~mc_metacluster_profile_procap[VisualizeArgs.encodecluster_name_col].isin(mc_encode_filtered[MetadataCols.name_col])
-
-    mc_atlascluster_procap[FilterArgs.filter_flag_col] = ~mc_atlascluster_procap[VisualizeArgs.encodecluster_name_col].isin(mc_encode_filtered[MetadataCols.name_col])
-
-    ## Confidence: If no encodecluster_name_col, then Flag
-    mc_encode_filtered_metadata = mc_encode_filtered.metadata.set_index(MetadataCols.name_col)
-
-    mc_counts_tf.metadata[LabelCols.label_conf_col] = mc_counts_tf.metadata[VisualizeArgs.encodecluster_name_col].map(mc_encode_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
-    mc_cluster_counts_tf.metadata[LabelCols.label_conf_col] = mc_cluster_counts_tf.metadata[VisualizeArgs.encodecluster_name_col].map(mc_encode_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
-    mc_metacluster_counts_tf.metadata[LabelCols.label_conf_col] = mc_metacluster_counts_tf.metadata[VisualizeArgs.encodecluster_name_col].map(mc_encode_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
-
-    mc_profile_tf.metadata[LabelCols.label_conf_col] = mc_profile_tf.metadata[VisualizeArgs.encodecluster_name_col].map(mc_encode_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
-    mc_cluster_profile_tf.metadata[LabelCols.label_conf_col] = mc_cluster_profile_tf.metadata[VisualizeArgs.encodecluster_name_col].map(mc_encode_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
-    mc_metacluster_profile_tf.metadata[LabelCols.label_conf_col] = mc_metacluster_profile_tf.metadata[VisualizeArgs.encodecluster_name_col].map(mc_encode_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
-
-    mc_atlascluster_tf.metadata[LabelCols.label_conf_col] = mc_atlascluster_tf.metadata[VisualizeArgs.encodecluster_name_col].map(mc_encode_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
+    mc_modelcluster_tf[FilterArgs.filter_flag_col] = ~mc_modelcluster_tf[VisualizeArgs.crosscluster_name_col].isin(mc_crosscluster_filtered[MetadataCols.name_col])
 
 
-    mc_counts_chrom.metadata[LabelCols.label_conf_col] = mc_counts_chrom.metadata[VisualizeArgs.encodecluster_name_col].map(mc_encode_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
-    mc_cluster_counts_chrom.metadata[LabelCols.label_conf_col] = mc_cluster_counts_chrom.metadata[VisualizeArgs.encodecluster_name_col].map(mc_encode_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
-    mc_metacluster_counts_chrom.metadata[LabelCols.label_conf_col] = mc_metacluster_counts_chrom.metadata[VisualizeArgs.encodecluster_name_col].map(mc_encode_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
+    mc_counts_chrom[FilterArgs.filter_flag_col] = ~mc_counts_chrom[VisualizeArgs.crosscluster_name_col].isin(mc_crosscluster_filtered[MetadataCols.name_col])
+    mc_cluster_counts_chrom[FilterArgs.filter_flag_col] = ~mc_cluster_counts_chrom[VisualizeArgs.crosscluster_name_col].isin(mc_crosscluster_filtered[MetadataCols.name_col])
+    mc_contribcluster_counts_chrom[FilterArgs.filter_flag_col] = ~mc_contribcluster_counts_chrom[VisualizeArgs.crosscluster_name_col].isin(mc_crosscluster_filtered[MetadataCols.name_col])
 
-    mc_profile_chrom.metadata[LabelCols.label_conf_col] = mc_profile_chrom.metadata[VisualizeArgs.encodecluster_name_col].map(mc_encode_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
-    mc_cluster_profile_chrom.metadata[LabelCols.label_conf_col] = mc_cluster_profile_chrom.metadata[VisualizeArgs.encodecluster_name_col].map(mc_encode_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
-    mc_metacluster_profile_chrom.metadata[LabelCols.label_conf_col] = mc_metacluster_profile_chrom.metadata[VisualizeArgs.encodecluster_name_col].map(mc_encode_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
+    mc_profile_chrom[FilterArgs.filter_flag_col] = ~mc_profile_chrom[VisualizeArgs.crosscluster_name_col].isin(mc_crosscluster_filtered[MetadataCols.name_col])
+    mc_cluster_profile_chrom[FilterArgs.filter_flag_col] = ~mc_cluster_profile_chrom[VisualizeArgs.crosscluster_name_col].isin(mc_crosscluster_filtered[MetadataCols.name_col])
+    mc_contribcluster_profile_chrom[FilterArgs.filter_flag_col] = ~mc_contribcluster_profile_chrom[VisualizeArgs.crosscluster_name_col].isin(mc_crosscluster_filtered[MetadataCols.name_col])
 
-    mc_atlascluster_chrom.metadata[LabelCols.label_conf_col] = mc_atlascluster_chrom.metadata[VisualizeArgs.encodecluster_name_col].map(mc_encode_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
+    mc_modelcluster_chrom[FilterArgs.filter_flag_col] = ~mc_modelcluster_chrom[VisualizeArgs.crosscluster_name_col].isin(mc_crosscluster_filtered[MetadataCols.name_col])
 
-    mc_counts_procap.metadata[LabelCols.label_conf_col] = mc_counts_procap.metadata[VisualizeArgs.encodecluster_name_col].map(mc_encode_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
-    mc_cluster_counts_procap.metadata[LabelCols.label_conf_col] = mc_cluster_counts_procap.metadata[VisualizeArgs.encodecluster_name_col].map(mc_encode_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
-    mc_metacluster_counts_procap.metadata[LabelCols.label_conf_col] = mc_metacluster_counts_procap.metadata[VisualizeArgs.encodecluster_name_col].map(mc_encode_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
+    mc_counts_procap[FilterArgs.filter_flag_col] = ~mc_counts_procap[VisualizeArgs.crosscluster_name_col].isin(mc_crosscluster_filtered[MetadataCols.name_col])
+    mc_cluster_counts_procap[FilterArgs.filter_flag_col] = ~mc_cluster_counts_procap[VisualizeArgs.crosscluster_name_col].isin(mc_crosscluster_filtered[MetadataCols.name_col])
+    mc_contribcluster_counts_procap[FilterArgs.filter_flag_col] = ~mc_contribcluster_counts_procap[VisualizeArgs.crosscluster_name_col].isin(mc_crosscluster_filtered[MetadataCols.name_col])
 
-    mc_profile_procap.metadata[LabelCols.label_conf_col] = mc_profile_procap.metadata[VisualizeArgs.encodecluster_name_col].map(mc_encode_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
-    mc_cluster_profile_procap.metadata[LabelCols.label_conf_col] = mc_cluster_profile_procap.metadata[VisualizeArgs.encodecluster_name_col].map(mc_encode_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
-    mc_metacluster_profile_procap.metadata[LabelCols.label_conf_col] = mc_metacluster_profile_procap.metadata[VisualizeArgs.encodecluster_name_col].map(mc_encode_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
+    mc_profile_procap[FilterArgs.filter_flag_col] = ~mc_profile_procap[VisualizeArgs.crosscluster_name_col].isin(mc_crosscluster_filtered[MetadataCols.name_col])
+    mc_cluster_profile_procap[FilterArgs.filter_flag_col] = ~mc_cluster_profile_procap[VisualizeArgs.crosscluster_name_col].isin(mc_crosscluster_filtered[MetadataCols.name_col])
+    mc_contribcluster_profile_procap[FilterArgs.filter_flag_col] = ~mc_contribcluster_profile_procap[VisualizeArgs.crosscluster_name_col].isin(mc_crosscluster_filtered[MetadataCols.name_col])
 
-    mc_atlascluster_procap.metadata[LabelCols.label_conf_col] = mc_atlascluster_procap.metadata[VisualizeArgs.encodecluster_name_col].map(mc_encode_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
+    mc_modelcluster_procap[FilterArgs.filter_flag_col] = ~mc_modelcluster_procap[VisualizeArgs.crosscluster_name_col].isin(mc_crosscluster_filtered[MetadataCols.name_col])
+
+    ## Confidence: If no crosscluster_name_col, then Flag
+    mc_crosscluster_filtered_metadata = mc_crosscluster_filtered.metadata.set_index(MetadataCols.name_col)
+
+    mc_counts_tf.metadata[LabelCols.label_conf_col] = mc_counts_tf.metadata[VisualizeArgs.crosscluster_name_col].map(mc_crosscluster_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
+    mc_cluster_counts_tf.metadata[LabelCols.label_conf_col] = mc_cluster_counts_tf.metadata[VisualizeArgs.crosscluster_name_col].map(mc_crosscluster_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
+    mc_contribcluster_counts_tf.metadata[LabelCols.label_conf_col] = mc_contribcluster_counts_tf.metadata[VisualizeArgs.crosscluster_name_col].map(mc_crosscluster_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
+
+    mc_profile_tf.metadata[LabelCols.label_conf_col] = mc_profile_tf.metadata[VisualizeArgs.crosscluster_name_col].map(mc_crosscluster_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
+    mc_cluster_profile_tf.metadata[LabelCols.label_conf_col] = mc_cluster_profile_tf.metadata[VisualizeArgs.crosscluster_name_col].map(mc_crosscluster_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
+    mc_contribcluster_profile_tf.metadata[LabelCols.label_conf_col] = mc_contribcluster_profile_tf.metadata[VisualizeArgs.crosscluster_name_col].map(mc_crosscluster_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
+
+    mc_modelcluster_tf.metadata[LabelCols.label_conf_col] = mc_modelcluster_tf.metadata[VisualizeArgs.crosscluster_name_col].map(mc_crosscluster_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
+
+
+    mc_counts_chrom.metadata[LabelCols.label_conf_col] = mc_counts_chrom.metadata[VisualizeArgs.crosscluster_name_col].map(mc_crosscluster_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
+    mc_cluster_counts_chrom.metadata[LabelCols.label_conf_col] = mc_cluster_counts_chrom.metadata[VisualizeArgs.crosscluster_name_col].map(mc_crosscluster_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
+    mc_contribcluster_counts_chrom.metadata[LabelCols.label_conf_col] = mc_contribcluster_counts_chrom.metadata[VisualizeArgs.crosscluster_name_col].map(mc_crosscluster_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
+
+    mc_profile_chrom.metadata[LabelCols.label_conf_col] = mc_profile_chrom.metadata[VisualizeArgs.crosscluster_name_col].map(mc_crosscluster_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
+    mc_cluster_profile_chrom.metadata[LabelCols.label_conf_col] = mc_cluster_profile_chrom.metadata[VisualizeArgs.crosscluster_name_col].map(mc_crosscluster_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
+    mc_contribcluster_profile_chrom.metadata[LabelCols.label_conf_col] = mc_contribcluster_profile_chrom.metadata[VisualizeArgs.crosscluster_name_col].map(mc_crosscluster_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
+
+    mc_modelcluster_chrom.metadata[LabelCols.label_conf_col] = mc_modelcluster_chrom.metadata[VisualizeArgs.crosscluster_name_col].map(mc_crosscluster_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
+
+    mc_counts_procap.metadata[LabelCols.label_conf_col] = mc_counts_procap.metadata[VisualizeArgs.crosscluster_name_col].map(mc_crosscluster_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
+    mc_cluster_counts_procap.metadata[LabelCols.label_conf_col] = mc_cluster_counts_procap.metadata[VisualizeArgs.crosscluster_name_col].map(mc_crosscluster_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
+    mc_contribcluster_counts_procap.metadata[LabelCols.label_conf_col] = mc_contribcluster_counts_procap.metadata[VisualizeArgs.crosscluster_name_col].map(mc_crosscluster_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
+
+    mc_profile_procap.metadata[LabelCols.label_conf_col] = mc_profile_procap.metadata[VisualizeArgs.crosscluster_name_col].map(mc_crosscluster_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
+    mc_cluster_profile_procap.metadata[LabelCols.label_conf_col] = mc_cluster_profile_procap.metadata[VisualizeArgs.crosscluster_name_col].map(mc_crosscluster_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
+    mc_contribcluster_profile_procap.metadata[LabelCols.label_conf_col] = mc_contribcluster_profile_procap.metadata[VisualizeArgs.crosscluster_name_col].map(mc_crosscluster_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
+
+    mc_modelcluster_procap.metadata[LabelCols.label_conf_col] = mc_modelcluster_procap.metadata[VisualizeArgs.crosscluster_name_col].map(mc_crosscluster_filtered_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
 
     # Motif index: every atlas's motifs, per head
     motif_index_parts = [
@@ -1898,15 +1903,15 @@ def export_encode_constituents(args, mc_encode, mc_atlascluster_combined, atlasc
 
     # Add motif category type: "direct-tf", "indirect-tf", "tf", "non-canonical"
     mc_motif_index[DirectTypeArgs.category_type_col] = motif_category_types(
-        mc_motif_index, VisualizeArgs.encodecluster_name_col, FilterArgs.filter_flag_col, mc_encode_filtered[MetadataCols.name_col])
+        mc_motif_index, VisualizeArgs.crosscluster_name_col, FilterArgs.filter_flag_col, mc_crosscluster_filtered[MetadataCols.name_col])
 
     # Export: Motif index
     mc_motif_index[VisualizeArgs.motif_index_cols].to_csv(paths.metadata_motif_index_path, sep="\t", index=False)
     # mc_motif_index[motif_cateogory_cols].to_csv(mc_motif_cateogory_tsv, sep="\t", index=False)
 
     # Export: the atlas pipelines' motif indexes (each head's motifs: <head>/metadata/motifcompendium_motif_index.tsv;
-    # both heads': <combined>/metadata/motifcompendium_atlascluster_motif_index.tsv), over their files: their own
-    # columns, then the ENCODE motif index's they lack (category, confidence, filter flag, ENCODE cluster)
+    # both heads': <combined>/metadata/motifcompendium_modelcluster_motif_index.tsv), over their files: their own
+    # columns, then the ENCODE motif index's they lack (category, confidence, filter flag, crosscluster)
     def export_atlas_motif_index(motif_index_df, path):
         own_cols = list(pd.read_csv(path, sep="\t", nrows=0).columns) if os.path.exists(path) else []
         missing_cols = [col for col in own_cols if col not in motif_index_df.columns]
@@ -1928,46 +1933,46 @@ def export_encode_constituents(args, mc_encode, mc_atlascluster_combined, atlasc
     for atlas, motif_index_heads in motif_index_atlas.items():
         export_atlas_motif_index(
             pd.concat(motif_index_heads, axis=0).reset_index(drop=True),
-            os.path.join(paths.mc_dirs[atlas]['combined'], "metadata", "motifcompendium_atlascluster_motif_index.tsv"),
+            os.path.join(paths.mc_dirs[atlas]['combined'], "metadata", "motifcompendium_modelcluster_motif_index.tsv"),
         )
 
     # MotifCompendium objects
     mc_alls = {
         'TF': {
-            'combined': mc_atlascluster_tf,
+            'combined': mc_modelcluster_tf,
             'counts': {
-                'metacluster': mc_metacluster_counts_tf,
+                'contribcluster': mc_contribcluster_counts_tf,
                 'cluster': mc_cluster_counts_tf,
                 'motif': mc_counts_tf,
             },
             'profile': {
-                'metacluster': mc_metacluster_profile_tf,
+                'contribcluster': mc_contribcluster_profile_tf,
                 'cluster': mc_cluster_profile_tf,
                 'motif': mc_profile_tf,
             },
         },
         'Chrom': {
-            'combined': mc_atlascluster_chrom,
+            'combined': mc_modelcluster_chrom,
             'counts': {
-                'metacluster': mc_metacluster_counts_chrom,
+                'contribcluster': mc_contribcluster_counts_chrom,
                 'cluster': mc_cluster_counts_chrom,
                 'motif': mc_counts_chrom,
             },
             'profile': {
-                'metacluster': mc_metacluster_profile_chrom,
+                'contribcluster': mc_contribcluster_profile_chrom,
                 'cluster': mc_cluster_profile_chrom,
                 'motif': mc_profile_chrom,
             },
         },
         'ProCap': {
-            'combined': mc_atlascluster_procap,
+            'combined': mc_modelcluster_procap,
             'counts': {
-                'metacluster': mc_metacluster_counts_procap,
+                'contribcluster': mc_contribcluster_counts_procap,
                 'cluster': mc_cluster_counts_procap,
                 'motif': mc_counts_procap,
             },
             'profile': {
-                'metacluster': mc_metacluster_profile_procap,
+                'contribcluster': mc_contribcluster_profile_procap,
                 'cluster': mc_cluster_profile_procap,
                 'motif': mc_profile_procap,
             },
@@ -1975,12 +1980,12 @@ def export_encode_constituents(args, mc_encode, mc_atlascluster_combined, atlasc
     }
 
     level_suffixs = {
-        'metacluster': EncodeCombineArgs.suffix_metacluster,
+        'contribcluster': EncodeCombineArgs.suffix_contribcluster,
         'cluster': EncodeCombineArgs.suffix_cluster,
         'motif': EncodeCombineArgs.suffix_motif,
     }
     mc_suffixs = {
-        atlas: {'combined': EncodeCombineArgs.suffix_atlascluster, 'counts': level_suffixs, 'profile': level_suffixs}
+        atlas: {'combined': EncodeCombineArgs.suffix_modelcluster, 'counts': level_suffixs, 'profile': level_suffixs}
         for atlas in mc_alls
     }
 
@@ -2056,7 +2061,7 @@ def export_encode_constituents(args, mc_encode, mc_atlascluster_combined, atlasc
                 columns=html_columns_level,
                 logo_trimming=VisualizeArgs.html_logo_trim,
                 editable=True,
-                column_desc_dict=html_column_desc_dict_encodecluster,
+                column_desc_dict=html_column_desc_dict_crosscluster,
             )
             if args.verbose:
                 logging.info(f'Saved at: {path}')
@@ -2069,7 +2074,7 @@ def export_encode_constituents(args, mc_encode, mc_atlascluster_combined, atlasc
 
 
     for atlas, atlas_dict in mc_alls.items():
-        # Combined (atlascluster) level
+        # Combined (modelcluster) level
         level = 'combined'
         mc_level = atlas_dict[level]
         for suffix_flag, flag_bool in EncodeCombineArgs.flags:
@@ -2098,129 +2103,129 @@ def export_encode_constituents(args, mc_encode, mc_atlascluster_combined, atlasc
                     )
 
 
-def export_singlemulticluster_level(args, cpaths, mc_singlemulticluster, membership, html_column_desc_dict):
+def export_encodecluster_level(args, cpaths, mc_encodecluster, membership, html_column_desc_dict):
     """
-    The singlemulticluster level (C5: pipeline_encode_composite.py's singles and merged composites) as an ENCODE level, in
-    <composite-dir> (cpaths): motifcompendium_singlemulticluster (.mc, HTML, metadata TSV, MEME; nothing is removed at
-    this level: the ENCODE clusters not in it are the combine's, C4), and the membership of the ENCODE clusters (one row
-    per C4 ENCODE cluster: its singlemulticluster, or why it has none). The levels below:
-    export_singlemulticluster_constituents().
+    The encodecluster level (C5: pipeline_encode_composite.py's singles and merged composites) as an crosscluster level, in
+    <composite-dir> (cpaths): motifcompendium_encode (.mc, HTML, metadata TSV, MEME; nothing is removed at
+    this level: the crossclusters not in it are the combine's, C4), and the membership of the crossclusters (one row
+    per C4 crosscluster: its encodecluster, or why it has none). The levels below:
+    export_encodecluster_constituents().
     """
     name_col, flag_col = MetadataCols.name_col, FilterArgs.filter_flag_col
-    mc_singlemulticluster[flag_col] = mc_singlemulticluster[flag_col].astype(bool)
+    mc_encodecluster[flag_col] = mc_encodecluster[flag_col].astype(bool)
 
     # Logos of the rows without one (singles and composites combined with and without them): summary_table_html() draws
     # them only for a compendium without the image column
     for image_name, reverse in (("logo (fwd)", False), ("logo (rev)", True)):
-        if image_name not in mc_singlemulticluster.images():
+        if image_name not in mc_encodecluster.images():
             continue
-        images = list(mc_singlemulticluster.get_images(image_name))
+        images = list(mc_encodecluster.get_images(image_name))
         missing = [i for i, image in enumerate(images) if image is None]
         if missing:
-            mc_missing = mc_singlemulticluster[missing]
+            mc_missing = mc_encodecluster[missing]
             mc_missing.delete_images(image_name)
             motifs = mc_missing.get_standard_motif_stack()
             mc_missing.add_logos(utils_motif.reverse_complement(motifs) if reverse else motifs, image_name, VisualizeArgs.html_logo_trim)
             for i, image in zip(missing, mc_missing.get_images(image_name)):
                 images[i] = image
-            mc_singlemulticluster.set_images(image_name, images)
-            logging.info(f"{image_name}: drawn for the {len(missing)} singlemulticlusters without one")
+            mc_encodecluster.set_images(image_name, images)
+            logging.info(f"{image_name}: drawn for the {len(missing)} encodeclusters without one")
 
-    #### The singlemulticluster level --------------------------------------------------------------------
-    logging.info(f"Singlemulticluster level: {len(mc_singlemulticluster)} singlemulticlusters -> {cpaths.composite_dir}")
-    html_columns_level = [col for col in VisualizeArgs.html_columns if col in (mc_singlemulticluster.columns() + mc_singlemulticluster.images())]
+    #### The encodecluster level --------------------------------------------------------------------
+    logging.info(f"Encodecluster level: {len(mc_encodecluster)} encodeclusters -> {cpaths.composite_dir}")
+    html_columns_level = [col for col in VisualizeArgs.html_columns if col in (mc_encodecluster.columns() + mc_encodecluster.images())]
     html_column_desc_dict_level = {col: html_column_desc_dict.get(col, col) for col in html_columns_level}
-    for path in (cpaths.mc_singlemulticluster_path, cpaths.html_singlemulticluster_path,
-                 cpaths.metadata_singlemulticluster_path, cpaths.meme_singlemulticluster_path):
+    for path in (cpaths.mc_encodecluster_path, cpaths.html_encodecluster_path,
+                 cpaths.metadata_encodecluster_path, cpaths.meme_encodecluster_path):
         os.makedirs(os.path.dirname(path), exist_ok=True)
-    mc_singlemulticluster.summary_table_html(
-        html_out=cpaths.html_singlemulticluster_path,
+    mc_encodecluster.summary_table_html(
+        html_out=cpaths.html_encodecluster_path,
         columns=html_columns_level,
         logo_trimming=VisualizeArgs.html_logo_trim,
         editable=True,
         column_desc_dict=html_column_desc_dict_level,
     )
     utils_analysis.export_compendium_meme(
-        mc=mc_singlemulticluster,
+        mc=mc_encodecluster,
         name_col=name_col,
-        save_loc=cpaths.meme_singlemulticluster_path,
-        trim_importance=(1/(2*mc_singlemulticluster.motifs.shape[1])),
+        save_loc=cpaths.meme_encodecluster_path,
+        trim_importance=(1/(2*mc_encodecluster.motifs.shape[1])),
     )
-    mc_singlemulticluster.metadata.drop(columns=EncodeCombineArgs.remove_cols, errors='ignore').to_csv(
-        cpaths.metadata_singlemulticluster_path, sep="\t", index=False)
-    save_replace(mc_singlemulticluster, cpaths.mc_singlemulticluster_path)
+    mc_encodecluster.metadata.drop(columns=EncodeCombineArgs.remove_cols, errors='ignore').to_csv(
+        cpaths.metadata_encodecluster_path, sep="\t", index=False)
+    save_replace(mc_encodecluster, cpaths.mc_encodecluster_path)
 
-    # Membership: each ENCODE cluster (C4), with its singlemulticluster (or why it has none)
-    os.makedirs(os.path.dirname(cpaths.metadata_singlemulticluster_membership_path), exist_ok=True)
-    membership.to_csv(cpaths.metadata_singlemulticluster_membership_path, sep="\t", index=False)
+    # Membership: each crosscluster (C4), with its encodecluster (or why it has none)
+    os.makedirs(os.path.dirname(cpaths.metadata_encodecluster_membership_path), exist_ok=True)
+    membership.to_csv(cpaths.metadata_encodecluster_membership_path, sep="\t", index=False)
 
 
-def export_singlemulticluster_constituents(args, cpaths, mc_singlemulticluster, membership):
+def export_encodecluster_constituents(args, cpaths, mc_encodecluster, membership):
     """
-    The singlemulticluster level (export_singlemulticluster_level()) added to every level below, as
-    export_encode_constituents() adds the ENCODE clusters, but keeping theirs (--update-constituents only: on its own,
-    from the level's saved outputs, run_singlemulticluster_constituents()): the ENCODE clusters (C4, <output-dir>) get the
-    number, name and filter flag (True when in no singlemulticluster) of their singlemulticluster
-    (VisualizeArgs.singlemulticluster_{cluster,name,flag}_col); every atlas level (by its ENCODE cluster) and the motif
-    indexes its name and filter flag (each level's ENCODE cluster: export_encode_constituents()). Their names, MCIDs,
+    The encodecluster level (export_encodecluster_level()) added to every level below, as
+    export_crosscluster_constituents() adds the crossclusters, but keeping theirs (--update-constituents only: on its own,
+    from the level's saved outputs, run_encodecluster_constituents()): the crossclusters (C4, <output-dir>) get the
+    number, name and filter flag (True when in no encodecluster) of their encodecluster
+    (VisualizeArgs.encodecluster_{cluster,name,flag}_col); every atlas level (by its crosscluster) and the motif
+    indexes its name and filter flag (each level's crosscluster: export_crosscluster_constituents()). Their names, MCIDs,
     flags and confidence are those of the ENCODE stage; .mc and metadata TSV rewritten (their HTML and MEME do not show
-    the new columns). Then the motif index of the singlemulticluster level (the hits annotation's).
-    membership: one row per ENCODE cluster (its MCID and name; export_singlemulticluster_level()).
+    the new columns). Then the motif index of the encodecluster level (the hits annotation's).
+    membership: one row per crosscluster (its MCID and name; export_encodecluster_level()).
     """
-    paths = encode_paths(args)
+    paths = crosscluster_paths(args)
     name_col, id_col, flag_col = MetadataCols.name_col, MetadataCols.unique_id_col, FilterArgs.filter_flag_col
     flag_type_col = FilterArgs.filter_flag_type_col
-    singlemulticluster_name_col = VisualizeArgs.singlemulticluster_name_col
-    singlemulticluster_flag_col = VisualizeArgs.singlemulticluster_flag_col
-    singlemulticluster_cluster_col = VisualizeArgs.singlemulticluster_cluster_col
-    singlemulticluster_flag_type_col = VisualizeArgs.singlemulticluster_flag_type_col
-    in_singlemulticluster = membership[singlemulticluster_cluster_col].notna()
+    encodecluster_name_col = VisualizeArgs.encodecluster_name_col
+    encodecluster_flag_col = VisualizeArgs.encodecluster_flag_col
+    encodecluster_cluster_col = VisualizeArgs.encodecluster_cluster_col
+    encodecluster_flag_type_col = VisualizeArgs.encodecluster_flag_type_col
+    in_encodecluster = membership[encodecluster_cluster_col].notna()
     membership_by_id = membership.set_index(id_col)
-    singlemulticluster_name_by_encode_name = dict(zip(membership.loc[in_singlemulticluster, name_col],
-                                                      membership.loc[in_singlemulticluster, singlemulticluster_name_col]))
-    # Why an ENCODE cluster of the combine is in no singlemulticluster, when the combine kept it (left out of C5)
-    left_out = ~in_singlemulticluster & membership[singlemulticluster_flag_type_col].isin(
+    encodecluster_name_by_crosscluster_name = dict(zip(membership.loc[in_encodecluster, name_col],
+                                                      membership.loc[in_encodecluster, encodecluster_name_col]))
+    # Why a crosscluster of the combine is in no encodecluster, when the combine kept it (left out of C5)
+    left_out = ~in_encodecluster & membership[encodecluster_flag_type_col].isin(
         [CompositeArgs.flag_type_no_synergy, CompositeArgs.flag_type_unannotated])
-    left_out_type_by_encode_name = dict(zip(membership.loc[left_out, name_col],
-                                            membership.loc[left_out, singlemulticluster_flag_type_col]))
+    left_out_type_by_crosscluster_name = dict(zip(membership.loc[left_out, name_col],
+                                            membership.loc[left_out, encodecluster_flag_type_col]))
 
-    def add_singlemulticluster_cols(metadata_df, by_encode_name_col):
-        """Its singlemulticluster's name and filter flag (True: none), by its ENCODE cluster's name."""
-        metadata_df[singlemulticluster_name_col] = metadata_df[by_encode_name_col].map(singlemulticluster_name_by_encode_name)
-        metadata_df[singlemulticluster_flag_col] = metadata_df[singlemulticluster_name_col].isna()
+    def add_encodecluster_cols(metadata_df, by_crosscluster_name_col):
+        """Its encodecluster's name and filter flag (True: none), by its crosscluster's name."""
+        metadata_df[encodecluster_name_col] = metadata_df[by_crosscluster_name_col].map(encodecluster_name_by_crosscluster_name)
+        metadata_df[encodecluster_flag_col] = metadata_df[encodecluster_name_col].isna()
         return metadata_df
 
-    #### The ENCODE clusters (C4): the number, name and flag of their singlemulticluster -------
-    logging.info(f"ENCODE clusters (C4), with their singlemulticluster: {args.output_dir}")
-    for mc_path, metadata_path in ((paths.mc_encode_path, paths.metadata_encode_path),
-                                   (paths.mc_encode_filtered_path, paths.metadata_encode_filtered_path),
-                                   (paths.mc_encode_removed_path, paths.metadata_encode_removed_path)):
+    #### The crossclusters (C4): the number, name and flag of their encodecluster -------
+    logging.info(f"crossclusters (C4), with their encodecluster: {args.output_dir}")
+    for mc_path, metadata_path in ((paths.mc_crosscluster_path, paths.metadata_crosscluster_path),
+                                   (paths.mc_crosscluster_filtered_path, paths.metadata_crosscluster_filtered_path),
+                                   (paths.mc_crosscluster_removed_path, paths.metadata_crosscluster_removed_path)):
         if not os.path.exists(mc_path):  # the removed ones: --save-all
             continue
         mc_level = MotifCompendium.load(mc_path, safe=args.safe)
-        encode_ids = mc_level[id_col].astype(str)
-        if not encode_ids.isin(membership_by_id.index).all():
-            raise ValueError(f"{mc_path}: ENCODE clusters not in the membership, e.g. "
-                             f"{encode_ids[~encode_ids.isin(membership_by_id.index)].tolist()[:3]}")
-        numbers = encode_ids.map(membership_by_id[singlemulticluster_cluster_col])
-        mc_level[singlemulticluster_cluster_col] = np.array([None if pd.isna(n) else int(n) for n in numbers], dtype=object)
-        mc_level[singlemulticluster_name_col] = encode_ids.map(membership_by_id[singlemulticluster_name_col]).to_numpy()
-        mc_level[singlemulticluster_flag_col] = numbers.isna().to_numpy()
+        crosscluster_ids = mc_level[id_col].astype(str)
+        if not crosscluster_ids.isin(membership_by_id.index).all():
+            raise ValueError(f"{mc_path}: crossclusters not in the membership, e.g. "
+                             f"{crosscluster_ids[~crosscluster_ids.isin(membership_by_id.index)].tolist()[:3]}")
+        numbers = crosscluster_ids.map(membership_by_id[encodecluster_cluster_col])
+        mc_level[encodecluster_cluster_col] = np.array([None if pd.isna(n) else int(n) for n in numbers], dtype=object)
+        mc_level[encodecluster_name_col] = crosscluster_ids.map(membership_by_id[encodecluster_name_col]).to_numpy()
+        mc_level[encodecluster_flag_col] = numbers.isna().to_numpy()
         mc_level.metadata.drop(columns=EncodeCombineArgs.remove_cols, errors='ignore').to_csv(metadata_path, sep="\t", index=False)
         save_replace(mc_level, mc_path)
-    # The atlasclusters the ENCODE clusters were combined from
-    mc_level = MotifCompendium.load(paths.mc_atlascluster_combined_path, safe=args.safe)
-    add_singlemulticluster_cols(mc_level.metadata, VisualizeArgs.encodecluster_name_col)
-    mc_level.metadata.drop(columns=EncodeCombineArgs.remove_cols, errors='ignore').to_csv(paths.metadata_atlascluster_combined_path, sep="\t", index=False)
-    save_replace(mc_level, paths.mc_atlascluster_combined_path)
+    # The modelclusters the crossclusters were combined from
+    mc_level = MotifCompendium.load(paths.mc_modelcluster_combined_path, safe=args.safe)
+    add_encodecluster_cols(mc_level.metadata, VisualizeArgs.crosscluster_name_col)
+    mc_level.metadata.drop(columns=EncodeCombineArgs.remove_cols, errors='ignore').to_csv(paths.metadata_modelcluster_combined_path, sep="\t", index=False)
+    save_replace(mc_level, paths.mc_modelcluster_combined_path)
 
-    #### Every atlas level, by its ENCODE cluster: the name and flag of its singlemulticluster -
-    #   File names as export_encode_constituents(): {file_general}{level_suffix}{flag_suffix}{suffix}{filetype}
-    logging.info("Atlas levels, with their singlemulticluster...")
-    level_suffixs = {'metacluster': EncodeCombineArgs.suffix_metacluster, 'cluster': EncodeCombineArgs.suffix_cluster,
+    #### Every atlas level, by its crosscluster: the name and flag of its encodecluster -
+    #   File names as export_crosscluster_constituents(): {file_general}{level_suffix}{flag_suffix}{suffix}{filetype}
+    logging.info("Atlas levels, with their encodecluster...")
+    level_suffixs = {'contribcluster': EncodeCombineArgs.suffix_contribcluster, 'cluster': EncodeCombineArgs.suffix_cluster,
                      'motif': EncodeCombineArgs.suffix_motif}
     for atlas, atlas_dirs in paths.mc_dirs.items():
-        levels = [(atlas_dirs['combined'], EncodeCombineArgs.suffix_atlascluster)] + [
+        levels = [(atlas_dirs['combined'], EncodeCombineArgs.suffix_modelcluster)] + [
             (atlas_dirs[head], level_suffix) for head in ('counts', 'profile') for level_suffix in level_suffixs.values()]
         for level_dir, level_suffix in levels:
             for suffix_flag, flag_bool in EncodeCombineArgs.flags:
@@ -2232,49 +2237,49 @@ def export_singlemulticluster_constituents(args, cpaths, mc_singlemulticluster, 
                         logging.warning(f"Not found (skipped): {mc_path}")
                     continue
                 mc_level = MotifCompendium.load(mc_path, safe=args.safe)
-                add_singlemulticluster_cols(mc_level.metadata, VisualizeArgs.encodecluster_name_col)
+                add_encodecluster_cols(mc_level.metadata, VisualizeArgs.crosscluster_name_col)
                 os.makedirs(os.path.dirname(metadata_path), exist_ok=True)
                 mc_level.metadata.to_csv(metadata_path, sep="\t", index=False)
                 save_replace(mc_level, mc_path)
                 if args.verbose:
                     logging.info(f'Saved at: {mc_path}')
 
-    #### Motif indexes: the ENCODE one and the atlas pipelines', with their singlemulticluster --
+    #### Motif indexes: the ENCODE one and the atlas pipelines', with their encodecluster --
     motif_index_df = pd.read_csv(paths.metadata_motif_index_path, sep="\t", keep_default_na=False, na_values=[""], low_memory=False)
-    add_singlemulticluster_cols(motif_index_df, VisualizeArgs.encodecluster_name_col).to_csv(paths.metadata_motif_index_path, sep="\t", index=False)
+    add_encodecluster_cols(motif_index_df, VisualizeArgs.crosscluster_name_col).to_csv(paths.metadata_motif_index_path, sep="\t", index=False)
     for atlas, atlas_dirs in paths.mc_dirs.items():
         for atlas_index_path in [os.path.join(atlas_dirs[head], "metadata", "motifcompendium_motif_index.tsv") for head in ('counts', 'profile')] + [
-                os.path.join(atlas_dirs['combined'], "metadata", "motifcompendium_atlascluster_motif_index.tsv")]:
+                os.path.join(atlas_dirs['combined'], "metadata", "motifcompendium_modelcluster_motif_index.tsv")]:
             if os.path.exists(atlas_index_path):
                 atlas_index_df = pd.read_csv(atlas_index_path, sep="\t", keep_default_na=False, na_values=[""], low_memory=False)
-                add_singlemulticluster_cols(atlas_index_df, VisualizeArgs.encodecluster_name_col).to_csv(atlas_index_path, sep="\t", index=False)
+                add_encodecluster_cols(atlas_index_df, VisualizeArgs.crosscluster_name_col).to_csv(atlas_index_path, sep="\t", index=False)
 
-    # The singlemulticluster level's motif index: each motif with its singlemulticluster (singlemulticluster_name; by
-    # it the hits annotation, pipeline_encode_hits.py) and the singlemulticluster's filter flag, confidence, simple name,
-    # flag type and category in the motif index's columns (ENCODE_name: its ENCODE cluster, as in the ENCODE motif
-    # index). A motif in no singlemulticluster keeps its ENCODE cluster's simple name and flag type (the combine's
-    # removed ones), or gets why its ENCODE cluster was left out (no-synergy, composite-unannotated): its hits' name
-    singlemulticluster_metadata = mc_singlemulticluster.metadata.set_index(name_col)
-    singlemulticluster_names = motif_index_df[singlemulticluster_name_col]
-    motif_index_singlemulticluster_df = motif_index_df.copy()
-    motif_index_singlemulticluster_df[flag_col] = motif_index_df[singlemulticluster_flag_col]
-    motif_index_singlemulticluster_df[LabelCols.label_conf_col] = singlemulticluster_names.map(
-        singlemulticluster_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
-    left_out_type = motif_index_df[VisualizeArgs.encodecluster_name_col].map(left_out_type_by_encode_name)
-    motif_index_singlemulticluster_df[MetadataCols.simple_name_col] = singlemulticluster_names.map(
-        singlemulticluster_metadata[MetadataCols.simple_name_col]).fillna(left_out_type).fillna(motif_index_df[MetadataCols.simple_name_col])
-    motif_index_singlemulticluster_df[flag_type_col] = left_out_type.fillna(motif_index_df[flag_type_col])
-    motif_index_singlemulticluster_df[DirectTypeArgs.category_type_col] = motif_category_types(
-        motif_index_singlemulticluster_df, singlemulticluster_name_col, flag_col, mc_singlemulticluster[name_col])
+    # The encodecluster level's motif index: each motif with its encodecluster (encodecluster_name; by
+    # it the hits annotation, pipeline_encode_hits.py) and the encodecluster's filter flag, confidence, simple name,
+    # flag type and category in the motif index's columns (crosscluster_name: its crosscluster, as in the ENCODE motif
+    # index). A motif in no encodecluster keeps its crosscluster's simple name and flag type (the combine's
+    # removed ones), or gets why its crosscluster was left out (no-synergy, composite-unannotated): its hits' name
+    encodecluster_metadata = mc_encodecluster.metadata.set_index(name_col)
+    encodecluster_names = motif_index_df[encodecluster_name_col]
+    motif_index_encodecluster_df = motif_index_df.copy()
+    motif_index_encodecluster_df[flag_col] = motif_index_df[encodecluster_flag_col]
+    motif_index_encodecluster_df[LabelCols.label_conf_col] = encodecluster_names.map(
+        encodecluster_metadata[LabelCols.label_conf_col]).fillna(LabelCols.label_confs[-1])
+    left_out_type = motif_index_df[VisualizeArgs.crosscluster_name_col].map(left_out_type_by_crosscluster_name)
+    motif_index_encodecluster_df[MetadataCols.simple_name_col] = encodecluster_names.map(
+        encodecluster_metadata[MetadataCols.simple_name_col]).fillna(left_out_type).fillna(motif_index_df[MetadataCols.simple_name_col])
+    motif_index_encodecluster_df[flag_type_col] = left_out_type.fillna(motif_index_df[flag_type_col])
+    motif_index_encodecluster_df[DirectTypeArgs.category_type_col] = motif_category_types(
+        motif_index_encodecluster_df, encodecluster_name_col, flag_col, mc_encodecluster[name_col])
     index_cols = list(VisualizeArgs.motif_index_cols)
-    index_cols.insert(index_cols.index(VisualizeArgs.encodecluster_name_col) + 1, singlemulticluster_name_col)
-    motif_index_singlemulticluster_df[index_cols].to_csv(cpaths.metadata_singlemulticluster_motif_index_path, sep="\t", index=False)
-    logging.info(f"Motif index (singlemulticluster): {cpaths.metadata_singlemulticluster_motif_index_path}")
+    index_cols.insert(index_cols.index(VisualizeArgs.crosscluster_name_col) + 1, encodecluster_name_col)
+    motif_index_encodecluster_df[index_cols].to_csv(cpaths.metadata_encodecluster_motif_index_path, sep="\t", index=False)
+    logging.info(f"Motif index (encodecluster): {cpaths.metadata_encodecluster_motif_index_path}")
 
 
-def run_encode_constituents(args):
-    """--update-constituents only: the ENCODE clusters propagated to every level below (export_encode_constituents()), from the
-    combine's saved outputs (<output-dir>/mc: motifcompendium_encode_all.mc, motifcompendium_atlascluster_combined.mc)."""
+def run_crosscluster_constituents(args):
+    """--update-constituents only: the crossclusters propagated to every level below (export_crosscluster_constituents()), from the
+    combine's saved outputs (<output-dir>/mc: motifcompendium_crosscluster_all.mc, motifcompendium_modelcluster_combined.mc)."""
     log_dir = os.path.join(args.output_dir, "logs")
     os.makedirs(log_dir, exist_ok=True)
     log_path = os.path.join(
@@ -2288,7 +2293,7 @@ def run_encode_constituents(args):
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=[logging.StreamHandler(sys.stdout), logging.FileHandler(log_path)]
     )
-    logging.info(f"Run started (the levels below the ENCODE clusters only): {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
+    logging.info(f"Run started (the levels below the crossclusters only): {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
     logging.info(f"Writing run log to: {log_path}")
     MotifCompendium.set_compute_options(
         max_chunk=args.max_chunk,
@@ -2297,32 +2302,32 @@ def run_encode_constituents(args):
         ic_scale=args.ic,
         fast_plotting=args.fast_plot,
     )
-    paths = encode_paths(args)
-    mc_encode = MotifCompendium.load(paths.mc_encode_path, safe=args.safe)
-    mc_encode[FilterArgs.filter_flag_col] = mc_encode[FilterArgs.filter_flag_col].astype(bool)
-    mc_atlascluster_combined = MotifCompendium.load(paths.mc_atlascluster_combined_path, safe=args.safe)
+    paths = crosscluster_paths(args)
+    mc_crosscluster = MotifCompendium.load(paths.mc_crosscluster_path, safe=args.safe)
+    mc_crosscluster[FilterArgs.filter_flag_col] = mc_crosscluster[FilterArgs.filter_flag_col].astype(bool)
+    mc_modelcluster_combined = MotifCompendium.load(paths.mc_modelcluster_combined_path, safe=args.safe)
     html_column_desc_dict = pd.read_csv(args.column_desc_tsv, sep="\t", header=0).set_index('column_name')['column_desc'].to_dict()
-    export_encode_constituents(
+    export_crosscluster_constituents(
         args,
-        mc_encode,
-        mc_atlascluster_combined,
-        dict(zip(mc_encode[ClusterArgs.source_cluster_col], mc_encode[MetadataCols.name_col])),
-        dict(zip(mc_encode[ClusterArgs.source_cluster_col], mc_encode[MetadataCols.simple_name_col])),
-        encodecluster_cluster_col_name(),
+        mc_crosscluster,
+        mc_modelcluster_combined,
+        dict(zip(mc_crosscluster[ClusterArgs.source_cluster_col], mc_crosscluster[MetadataCols.name_col])),
+        dict(zip(mc_crosscluster[ClusterArgs.source_cluster_col], mc_crosscluster[MetadataCols.simple_name_col])),
+        crosscluster_cluster_col_name(),
         html_column_desc_dict,
     )
     logging.info(f"Completed run: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
 
 
-def run_singlemulticluster_constituents(args):
-    """--update-constituents only (pipeline_encode_composite.py): the singlemulticluster level added to every level below
-    (export_singlemulticluster_constituents()), from its saved outputs (<composite-dir>: the level's .mc and the
-    membership of the ENCODE clusters)."""
+def run_encodecluster_constituents(args):
+    """--update-constituents only (pipeline_encode_composite.py): the encodecluster level added to every level below
+    (export_encodecluster_constituents()), from its saved outputs (<composite-dir>: the level's .mc and the
+    membership of the crossclusters)."""
     log_dir = os.path.join(args.output_dir, "logs")
     os.makedirs(log_dir, exist_ok=True)
     log_path = os.path.join(
         log_dir,
-        f"log_pipeline_singlemulticluster_constituents_{os.path.basename(os.path.normpath(args.output_dir))}"
+        f"log_pipeline_encodecluster_constituents_{os.path.basename(os.path.normpath(args.output_dir))}"
         f"_{time.strftime('%Y-%m-%d_%H-%M-%S', time.localtime())}.out",
     )
     logging.basicConfig(
@@ -2331,7 +2336,7 @@ def run_singlemulticluster_constituents(args):
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=[logging.StreamHandler(sys.stdout), logging.FileHandler(log_path)]
     )
-    logging.info(f"Run started (the levels below the singlemulticlusters only): {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
+    logging.info(f"Run started (the levels below the encodeclusters only): {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
     logging.info(f"Writing run log to: {log_path}")
     MotifCompendium.set_compute_options(
         max_chunk=args.max_chunk,
@@ -2341,14 +2346,14 @@ def run_singlemulticluster_constituents(args):
         fast_plotting=args.fast_plot,
     )
     cpaths = composite_paths(getattr(args, "composite_dir", None) or default_composite_dir(args.output_dir))
-    mc_singlemulticluster = MotifCompendium.load(cpaths.mc_singlemulticluster_path, safe=args.safe)
-    membership = pd.read_csv(cpaths.metadata_singlemulticluster_membership_path, sep="\t", keep_default_na=False, na_values=[""])
-    export_singlemulticluster_constituents(args, cpaths, mc_singlemulticluster, membership)
+    mc_encodecluster = MotifCompendium.load(cpaths.mc_encodecluster_path, safe=args.safe)
+    membership = pd.read_csv(cpaths.metadata_encodecluster_membership_path, sep="\t", keep_default_na=False, na_values=[""])
+    export_encodecluster_constituents(args, cpaths, mc_encodecluster, membership)
     logging.info(f"Completed run: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())}")
 
 
 def run_encode_combine(args):
-    """ENCODE: combine the TF, Chromatin and ProCap atlasclusters into ENCODE clusters"""
+    """ENCODE: combine the TF, Chromatin and ProCap modelclusters into crossclusters"""
 
 
     ### OPTIONS -----------------------------------------------------------------
@@ -2400,65 +2405,65 @@ def run_encode_combine(args):
     unique_id_initial = f'{MetadataCols.unique_id_col}.{args.mcid_version}'
 
     ## Derived clustering column names
-    encodecluster_cluster_col = encodecluster_cluster_col_name()
+    crosscluster_cluster_col = crosscluster_cluster_col_name()
 
     ## HTML column descriptions
     html_column_desc_df = pd.read_csv(args.column_desc_tsv, sep="\t", header=0)
     html_column_desc_dict = html_column_desc_df.set_index('column_name')['column_desc'].to_dict()
 
 
-    ## Inputs and outputs (encode_paths())
-    paths = encode_paths(args)
-    mc_atlascluster_filtered_tf_path = paths.mc_atlascluster_filtered_tf_path
-    mc_atlascluster_filtered_chrom_path = paths.mc_atlascluster_filtered_chrom_path
-    mc_atlascluster_filtered_procap_path = paths.mc_atlascluster_filtered_procap_path
+    ## Inputs and outputs (crosscluster_paths())
+    paths = crosscluster_paths(args)
+    mc_modelcluster_filtered_tf_path = paths.mc_modelcluster_filtered_tf_path
+    mc_modelcluster_filtered_chrom_path = paths.mc_modelcluster_filtered_chrom_path
+    mc_modelcluster_filtered_procap_path = paths.mc_modelcluster_filtered_procap_path
     args_json_path = paths.args_json_path
 
-    # ## Combine atlascluster
-    logging.info("Loading TF, Chromatin and ProCap atlascluster compendia...")
+    # ## Combine modelcluster
+    logging.info("Loading TF, Chromatin and ProCap modelcluster compendia...")
 
     # ### Load MotifCompendium
     # Load MotifCompendium
-    mc_atlascluster_filtered_tf = MotifCompendium.load(mc_atlascluster_filtered_tf_path, safe=args.safe)
-    mc_atlascluster_filtered_chrom = MotifCompendium.load(mc_atlascluster_filtered_chrom_path, safe=args.safe)
-    mc_atlascluster_filtered_procap = MotifCompendium.load(mc_atlascluster_filtered_procap_path, safe=args.safe)
+    mc_modelcluster_filtered_tf = MotifCompendium.load(mc_modelcluster_filtered_tf_path, safe=args.safe)
+    mc_modelcluster_filtered_chrom = MotifCompendium.load(mc_modelcluster_filtered_chrom_path, safe=args.safe)
+    mc_modelcluster_filtered_procap = MotifCompendium.load(mc_modelcluster_filtered_procap_path, safe=args.safe)
 
     # The atlases' own selection: once an ENCODE combine has written its final flags back,
-    # motifcompendium_atlascluster_filtered.mc holds those instead, and this stage would recluster an already-filtered selection
+    # motifcompendium_modelcluster_filtered.mc holds those instead, and this stage would recluster an already-filtered selection
     for mc_input, mc_input_path in (
-        (mc_atlascluster_filtered_tf, mc_atlascluster_filtered_tf_path),
-        (mc_atlascluster_filtered_chrom, mc_atlascluster_filtered_chrom_path),
-        (mc_atlascluster_filtered_procap, mc_atlascluster_filtered_procap_path),
+        (mc_modelcluster_filtered_tf, mc_modelcluster_filtered_tf_path),
+        (mc_modelcluster_filtered_chrom, mc_modelcluster_filtered_chrom_path),
+        (mc_modelcluster_filtered_procap, mc_modelcluster_filtered_procap_path),
     ):
-        if VisualizeArgs.encodecluster_name_col in mc_input.columns():
+        if VisualizeArgs.crosscluster_name_col in mc_input.columns():
             raise ValueError(
-                f"{mc_input_path} holds the final flags of an earlier ENCODE combine ({VisualizeArgs.encodecluster_name_col}), "
+                f"{mc_input_path} holds the final flags of an earlier ENCODE combine ({VisualizeArgs.crosscluster_name_col}), "
                 "not its atlas's own selection: rerun that atlas (its per-head and combine stages) before this stage."
             )
 
     # Add TF, Chrom, ProCap to source, names, constituents
-    mc_atlascluster_filtered_tf[VisualizeArgs.atlas_col] = EncodeCombineArgs.tfatlas_id
-    mc_atlascluster_filtered_chrom[VisualizeArgs.atlas_col] = EncodeCombineArgs.chromatlas_id
-    mc_atlascluster_filtered_procap[VisualizeArgs.atlas_col] = EncodeCombineArgs.procapatlas_id
+    mc_modelcluster_filtered_tf[VisualizeArgs.atlas_col] = EncodeCombineArgs.tfatlas_id
+    mc_modelcluster_filtered_chrom[VisualizeArgs.atlas_col] = EncodeCombineArgs.chromatlas_id
+    mc_modelcluster_filtered_procap[VisualizeArgs.atlas_col] = EncodeCombineArgs.procapatlas_id
 
     # Preserve all columns, None if not specified
-    all_metadata_cols = set(mc_atlascluster_filtered_tf.columns()) | set(mc_atlascluster_filtered_chrom.columns()) | set(mc_atlascluster_filtered_procap.columns())
+    all_metadata_cols = set(mc_modelcluster_filtered_tf.columns()) | set(mc_modelcluster_filtered_chrom.columns()) | set(mc_modelcluster_filtered_procap.columns())
 
-    for mc in [mc_atlascluster_filtered_tf, mc_atlascluster_filtered_chrom, mc_atlascluster_filtered_procap]:
+    for mc in [mc_modelcluster_filtered_tf, mc_modelcluster_filtered_chrom, mc_modelcluster_filtered_procap]:
         for col in sorted(all_metadata_cols):
             if col not in mc.columns():
                 mc[col] = None
 
     # Number of FiNeMo hits: NaN, not None, for an atlas without FiNeMo paths (e.g. ProCap), so that the
-    # ENCODE cluster sums stay numeric (see the ENCODE cluster num_hits below).
+    # crosscluster sums stay numeric (see the crosscluster num_hits below).
     if MetadataCols.num_hits_col in all_metadata_cols:
-        for mc in [mc_atlascluster_filtered_tf, mc_atlascluster_filtered_chrom, mc_atlascluster_filtered_procap]:
+        for mc in [mc_modelcluster_filtered_tf, mc_modelcluster_filtered_chrom, mc_modelcluster_filtered_procap]:
             mc[MetadataCols.num_hits_col] = pd.to_numeric(mc[MetadataCols.num_hits_col], errors="coerce")
 
     # Delete all images, except logos
     keep_images = ['logo (fwd)', 'logo (rev)']
 
-    for mc in [mc_atlascluster_filtered_tf, mc_atlascluster_filtered_chrom, mc_atlascluster_filtered_procap]:
+    for mc in [mc_modelcluster_filtered_tf, mc_modelcluster_filtered_chrom, mc_modelcluster_filtered_procap]:
         remove_images = set(mc.images()) - set(keep_images)
         mc.delete_images(list(remove_images))
 
@@ -2533,123 +2538,123 @@ def run_encode_combine(args):
 
     # #### Pairwise similarity
     # Combine MotifCompendium
-    mc_atlascluster_combined = MotifCompendium.combine(
-        [mc_atlascluster_filtered_tf, mc_atlascluster_filtered_chrom, mc_atlascluster_filtered_procap],
+    mc_modelcluster_combined = MotifCompendium.combine(
+        [mc_modelcluster_filtered_tf, mc_modelcluster_filtered_chrom, mc_modelcluster_filtered_procap],
         safe=args.safe,
     )
 
 
-    # #### Cluster: ENCODE clusters
-    logging.info("Force-clustering TF, Chromatin and ProCap atlasclusters into ENCODE clusters...")
+    # #### Cluster: crossclusters
+    logging.info("Force-clustering TF, Chromatin and ProCap modelclusters into crossclusters...")
     # Force-cluster
-    mc_atlascluster_combined.cluster(
+    mc_modelcluster_combined.cluster(
         algorithm=ClusterArgs.cluster_algorithm_force,
         similarity_threshold=ClusterArgs.cluster_sim_threshold_force,
-        save_name=encodecluster_cluster_col,
+        save_name=crosscluster_cluster_col,
         largest_clusters_first=True,
         density=ClusterArgs.cluster_force_density,
         seed=ClusterArgs.seeds[0],
     )
     # Reassign: K-means
-    mc_atlascluster_combined.cluster(
+    mc_modelcluster_combined.cluster(
         algorithm=ClusterArgs.cluster_algorithm_kmeans,
-        save_name=encodecluster_cluster_col,
+        save_name=crosscluster_cluster_col,
         largest_clusters_first=True,
-        init_clustering_col=encodecluster_cluster_col,
+        init_clustering_col=crosscluster_cluster_col,
         weight_col=ClusterArgs.average_weight_col,
         assignment_threshold=ClusterArgs.cluster_sim_assignment_threshold_kmeans,
         n_iterations=ClusterArgs.n_iterations,
     )
-    membership_encode = mc_atlascluster_combined[encodecluster_cluster_col]
-    logging.info(f"Unique clusters: {len(set(membership_encode))}")
+    membership_crosscluster = mc_modelcluster_combined[crosscluster_cluster_col]
+    logging.info(f"Unique clusters: {len(set(membership_crosscluster))}")
 
     # Cluster: Recursively
     for i in range(ClusterArgs.cluster_max_iter_force):
         if args.verbose:
             logging.info(f"Recursively clustering: {i}")
         # Force-cluster: DCC
-        mc_atlascluster_combined.cluster(
+        mc_modelcluster_combined.cluster(
             algorithm=ClusterArgs.cluster_algorithm_force,
             similarity_threshold=ClusterArgs.cluster_sim_threshold_force,
-            cluster_on=encodecluster_cluster_col,
+            cluster_on=crosscluster_cluster_col,
             cluster_on_weight=ClusterArgs.average_weight_col,
-            save_name=encodecluster_cluster_col,
+            save_name=crosscluster_cluster_col,
             largest_clusters_first=True,
             density=ClusterArgs.cluster_force_density,
             seed=ClusterArgs.seeds[0],
         )
         # Reassign: K-means
-        mc_atlascluster_combined.cluster(
+        mc_modelcluster_combined.cluster(
             algorithm=ClusterArgs.cluster_algorithm_kmeans,
-            save_name=encodecluster_cluster_col,
+            save_name=crosscluster_cluster_col,
             largest_clusters_first=True,
-            init_clustering_col=encodecluster_cluster_col,
+            init_clustering_col=crosscluster_cluster_col,
             weight_col=ClusterArgs.average_weight_col,
             assignment_threshold=ClusterArgs.cluster_sim_assignment_threshold_kmeans,
             n_iterations=ClusterArgs.n_iterations,
         )
 
         # Check convergence
-        new_membership_encode = mc_atlascluster_combined[encodecluster_cluster_col]
+        new_membership_crosscluster = mc_modelcluster_combined[crosscluster_cluster_col]
         if args.verbose:
-            logging.info(f"  Unique clusters: {len(set(new_membership_encode))}")
-        if np.array_equal(membership_encode, new_membership_encode):
-            logging.info(f"Final unique clusters: {len(set(new_membership_encode))}")
+            logging.info(f"  Unique clusters: {len(set(new_membership_crosscluster))}")
+        if np.array_equal(membership_crosscluster, new_membership_crosscluster):
+            logging.info(f"Final unique clusters: {len(set(new_membership_crosscluster))}")
             break
         else:
-            membership_encode = new_membership_encode
+            membership_crosscluster = new_membership_crosscluster
 
 
     # # ENCODE Atlas
 
     # #### Average
     # Average MotifCompendium
-    aggregations_encodecluster = []
+    aggregations_crosscluster = []
     for (agg_col_in, agg, agg_col_out) in ClusterArgs.aggregations:
-        if agg_col_in in mc_atlascluster_combined.columns():
-            aggregations_encodecluster.append((agg_col_in, agg, agg_col_out))
+        if agg_col_in in mc_modelcluster_combined.columns():
+            aggregations_crosscluster.append((agg_col_in, agg, agg_col_out))
 
-    mc_encode = mc_atlascluster_combined.cluster_averages(
-        clustering=encodecluster_cluster_col,
-        aggregations=aggregations_encodecluster,
+    mc_crosscluster = mc_modelcluster_combined.cluster_averages(
+        clustering=crosscluster_cluster_col,
+        aggregations=aggregations_crosscluster,
         weight_col=ClusterArgs.average_weight_col,
         compute_quality_stats=False,
     )
 
-    # Number of FiNeMo hits: NaN, not 0, for an ENCODE cluster without hits information (only atlasclusters of
+    # Number of FiNeMo hits: NaN, not 0, for a crosscluster without hits information (only modelclusters of
     # an atlas without FiNeMo paths, e.g. ProCap; cluster_averages() sums the non-NaN values, so 0), so that
-    # 1_minhits does not flag it. A mixed cluster sums the hits of its atlasclusters that have them.
-    if MetadataCols.num_hits_col in mc_encode.columns():
-        num_hits_encode = mc_atlascluster_combined.metadata.groupby(encodecluster_cluster_col)[MetadataCols.num_hits_col].sum(min_count=1)
-        mc_encode[MetadataCols.num_hits_col] = mc_encode[ClusterArgs.source_cluster_col].map(num_hits_encode)
+    # 1_minhits does not flag it. A mixed cluster sums the hits of its modelclusters that have them.
+    if MetadataCols.num_hits_col in mc_crosscluster.columns():
+        num_hits_crosscluster = mc_modelcluster_combined.metadata.groupby(crosscluster_cluster_col)[MetadataCols.num_hits_col].sum(min_count=1)
+        mc_crosscluster[MetadataCols.num_hits_col] = mc_crosscluster[ClusterArgs.source_cluster_col].map(num_hits_crosscluster)
 
     # Weighted aggregations
-    weighted_aggregations_encodecluster = []
+    weighted_aggregations_crosscluster = []
     for (agg_col_in, agg, agg_col_out) in ClusterArgs.weighted_aggregations:
-        if agg_col_in in mc_atlascluster_combined.columns():
-            weighted_aggregations_encodecluster.append((agg_col_in, agg, agg_col_out))
+        if agg_col_in in mc_modelcluster_combined.columns():
+            weighted_aggregations_crosscluster.append((agg_col_in, agg, agg_col_out))
 
-    for (agg_col_old, _, agg_col_new) in weighted_aggregations_encodecluster:
+    for (agg_col_old, _, agg_col_new) in weighted_aggregations_crosscluster:
         aggregate_weighted_avg(
-            mc=mc_atlascluster_combined,
-            mc_cluster=mc_encode,
-            cluster_col=encodecluster_cluster_col,
+            mc=mc_modelcluster_combined,
+            mc_cluster=mc_crosscluster,
+            cluster_col=crosscluster_cluster_col,
             agg_col=agg_col_old,
             new_col=agg_col_new,
             weight_col=ClusterArgs.average_weight_col,
         )
 
     # Merge aggregations
-    merge_aggregations_encodecluster = []
+    merge_aggregations_crosscluster = []
     for i, aggregate in enumerate(ClusterArgs.merge_aggregations):
         (agg_col_old, action, agg_col_new) = aggregate
-        if agg_col_old in mc_encode.columns():
-            merge_aggregations_encodecluster.append(aggregate)
-        if agg_col_new not in mc_encode.columns():
-            mc_encode.metadata[agg_col_new] = None
+        if agg_col_old in mc_crosscluster.columns():
+            merge_aggregations_crosscluster.append(aggregate)
+        if agg_col_new not in mc_crosscluster.columns():
+            mc_crosscluster.metadata[agg_col_new] = None
 
-    for (agg_col_old, _, agg_col_new) in merge_aggregations_encodecluster:
-        mc_encode.metadata[agg_col_new] = mc_encode.metadata[[agg_col_old, agg_col_new]].apply(
+    for (agg_col_old, _, agg_col_new) in merge_aggregations_crosscluster:
+        mc_crosscluster.metadata[agg_col_new] = mc_crosscluster.metadata[[agg_col_old, agg_col_new]].apply(
             lambda row: ",".join(dict.fromkeys(
                 part
                 for agg in row
@@ -2663,29 +2668,29 @@ def run_encode_combine(args):
 
     # #### Calculations
     ## Calculations
-    mc_encode[MetadataCols.total_contrib_score_ratio_col] = mc_encode[MetadataCols.total_contrib_score_col] / mc_encode[MetadataCols.group_total_contrib_score_col]  # Contribution score
-    mc_encode[MetadataCols.posneg_col] = utils_motif.motif_posneg_sum(mc_encode.get_standard_motif_stack())  # Positive / negative
-    mc_encode[MetadataCols.composite_col] = mc_encode[MetadataCols.composite_col].astype(bool)
+    mc_crosscluster[MetadataCols.total_contrib_score_ratio_col] = mc_crosscluster[MetadataCols.total_contrib_score_col] / mc_crosscluster[MetadataCols.group_total_contrib_score_col]  # Contribution score
+    mc_crosscluster[MetadataCols.posneg_col] = utils_motif.motif_posneg_sum(mc_crosscluster.get_standard_motif_stack())  # Positive / negative
+    mc_crosscluster[MetadataCols.composite_col] = mc_crosscluster[MetadataCols.composite_col].astype(bool)
 
-    mc_encode.sort(by=[MetadataCols.posneg_col, MetadataCols.num_seqlet_col], ascending=False, inplace=True)  # Sort by pos/neg, num_seqlets
-    # mc_encode.sort(by=[direct_type_col, composite_col], ascending=True, inplace=True)  # Sort by direct type, composite
-    mc_encode.add_motif_strings(
+    mc_crosscluster.sort(by=[MetadataCols.posneg_col, MetadataCols.num_seqlet_col], ascending=False, inplace=True)  # Sort by pos/neg, num_seqlets
+    # mc_crosscluster.sort(by=[direct_type_col, composite_col], ascending=True, inplace=True)  # Sort by direct type, composite
+    mc_crosscluster.add_motif_strings(
         name=VisualizeArgs.motif_string_col,
         importance=VisualizeArgs.motif_string_importance,
         specificity=VisualizeArgs.motif_string_specificity
     )  # Add strings
 
     ## Add: Unique ID
-    mc_encode[MetadataCols.unique_id_col] = unique_id_initial + f".C4.TF_Chrom_ProCap.counts_profile." + mc_encode.metadata.index.map('{:08d}'.format)
+    mc_crosscluster[MetadataCols.unique_id_col] = unique_id_initial + f".C4.TF_Chrom_ProCap.counts_profile." + mc_crosscluster.metadata.index.map('{:08d}'.format)
 
     ### Aggregate: Annotations
     mc_tfatlas_metadata_updates = []
-    mc_tfatlas_images_updated = pd.DataFrame(index=mc_encode[MetadataCols.unique_id_col])
-    mc_tfatlas_images_existing = set(mc_encode.images())
+    mc_tfatlas_images_updated = pd.DataFrame(index=mc_crosscluster[MetadataCols.unique_id_col])
+    mc_tfatlas_images_existing = set(mc_crosscluster.images())
 
-    for i, row in mc_encode.metadata.iterrows():
+    for i, row in mc_crosscluster.metadata.iterrows():
         # MotifCompendium: Subset
-        mc_tfatlas_i = mc_encode[[i]]
+        mc_tfatlas_i = mc_crosscluster[[i]]
         ref_name_constituents_i = row[ReferenceMatchCols.ref_name_constit_all_col].split(",") if pd.notna(row[ReferenceMatchCols.ref_name_constit_all_col]) else []
         direct_ref_name_constituents_i = row[ReferenceMatchCols.direct_ref_name_constit_all_col].split(",") if pd.notna(row[ReferenceMatchCols.direct_ref_name_constit_all_col]) else []
         tf_i = row[DirectTypeArgs.tf_direct_col].split(",") if pd.notna(row[DirectTypeArgs.tf_direct_col]) else []
@@ -2752,14 +2757,14 @@ def run_encode_combine(args):
 
     # Apply updates: Metadata, Images
     mc_tfatlas_metadata_updates_df = pd.concat(mc_tfatlas_metadata_updates)
-    mc_encode.metadata.set_index(MetadataCols.unique_id_col, inplace=True)
-    mc_encode.metadata = mc_encode.metadata.combine_first(mc_tfatlas_metadata_updates_df)
-    mc_encode.metadata.update(mc_tfatlas_metadata_updates_df)
-    mc_encode.metadata.reset_index(inplace=True)
+    mc_crosscluster.metadata.set_index(MetadataCols.unique_id_col, inplace=True)
+    mc_crosscluster.metadata = mc_crosscluster.metadata.combine_first(mc_tfatlas_metadata_updates_df)
+    mc_crosscluster.metadata.update(mc_tfatlas_metadata_updates_df)
+    mc_crosscluster.metadata.reset_index(inplace=True)
     del mc_tfatlas_metadata_updates, mc_tfatlas_metadata_updates_df
 
     for image_col in mc_tfatlas_images_updated.columns:
-        mc_encode.set_images(
+        mc_crosscluster.set_images(
             image_name=image_col,
             images=mc_tfatlas_images_updated[image_col].where(
                 pd.notna(mc_tfatlas_images_updated[image_col]), None).to_list()
@@ -2768,19 +2773,19 @@ def run_encode_combine(args):
 
 
     # #### Annotate
-    # ### Annotate: Meta-clusters
+    # ### Annotate: Contribclusters
     # Initialize
     # Experiment: Determined by motif; Composite: Determined by cluster
-    mc_encode[LabelCols.label_col] = MetadataCols.name_unknown  # Initial readable name: Unknown
-    # mc_encode[direct_label_col] = None  # Inherit TF Atlas
-    mc_encode[LabelCols.label_core_col] = None
-    mc_encode[LabelCols.direct_label_core_col] = None
-    mc_encode[LabelCols.label_flank_col] = None
-    # mc_encode[ref_readable_name_col] = None
+    mc_crosscluster[LabelCols.label_col] = MetadataCols.name_unknown  # Initial readable name: Unknown
+    # mc_crosscluster[direct_label_col] = None  # Inherit TF Atlas
+    mc_crosscluster[LabelCols.label_core_col] = None
+    mc_crosscluster[LabelCols.direct_label_core_col] = None
+    mc_crosscluster[LabelCols.label_flank_col] = None
+    # mc_crosscluster[ref_readable_name_col] = None
 
-    ## [General] Label meta-clusters
+    ## [General] Label contribclusters
     utils_analysis.assign_label_from_other_compendium(
-        assign_to_mc=mc_encode,
+        assign_to_mc=mc_crosscluster,
         assign_from_mc=mc_ref_qc,
         from_label_col=MetadataCols.name_col,
         save_col_prefix=ReferenceMatchCols.ref_col,
@@ -2796,47 +2801,47 @@ def run_encode_combine(args):
     ref_readable_name_cols = [f'{ReferenceMatchCols.ref_readable_col}_name{i}' for i in range(MotifMatchArgs.max_submotifs)]
     ref_score_cols = [f'{ReferenceMatchCols.ref_col}_score{i}' for i in range(MotifMatchArgs.max_submotifs)]
     for i, (ref_readable_name_col, ref_score_col) in enumerate(zip(ref_readable_name_cols, ref_score_cols)):    
-        mc_encode[ref_readable_name_col] = mc_encode[f'{ReferenceMatchCols.ref_col}_name{i}'].map(mc_ref_qc_hr_dict)
+        mc_crosscluster[ref_readable_name_col] = mc_crosscluster[f'{ReferenceMatchCols.ref_col}_name{i}'].map(mc_ref_qc_hr_dict)
 
     # cateogory: Mask
-    mask_direct_encodecluster = mc_encode[DirectTypeArgs.direct_type_col].str.contains("|".join(DirectTypeArgs.direct_types[:4]), na=False)
-    mask_nondirect_encodecluster = ~mask_direct_encodecluster
-    mask_monomer_encodecluster_nondirect = (
-        mask_nondirect_encodecluster
-        & (mc_encode[f'{ReferenceMatchCols.ref_col}_score0'] > MotifMatchArgs.min_single_score)
-        & ~(mc_encode[f'{ReferenceMatchCols.ref_col}_score1'] > MotifMatchArgs.min_composite_score)
-        & ~(mc_encode[f'{ReferenceMatchCols.ref_col}_score2'] > MotifMatchArgs.min_composite_score)
+    mask_direct_crosscluster = mc_crosscluster[DirectTypeArgs.direct_type_col].str.contains("|".join(DirectTypeArgs.direct_types[:4]), na=False)
+    mask_nondirect_crosscluster = ~mask_direct_crosscluster
+    mask_monomer_crosscluster_nondirect = (
+        mask_nondirect_crosscluster
+        & (mc_crosscluster[f'{ReferenceMatchCols.ref_col}_score0'] > MotifMatchArgs.min_single_score)
+        & ~(mc_crosscluster[f'{ReferenceMatchCols.ref_col}_score1'] > MotifMatchArgs.min_composite_score)
+        & ~(mc_crosscluster[f'{ReferenceMatchCols.ref_col}_score2'] > MotifMatchArgs.min_composite_score)
     )
-    mask_dimer_encodecluster_nondirect = (
-        mask_nondirect_encodecluster
-        & (mc_encode[f'{ReferenceMatchCols.ref_col}_score0'] > MotifMatchArgs.min_composite_score)
-        & (mc_encode[f'{ReferenceMatchCols.ref_col}_score1'] > MotifMatchArgs.min_composite_score)
-        & ~(mc_encode[f'{ReferenceMatchCols.ref_col}_score2'] > MotifMatchArgs.min_composite_score)
+    mask_dimer_crosscluster_nondirect = (
+        mask_nondirect_crosscluster
+        & (mc_crosscluster[f'{ReferenceMatchCols.ref_col}_score0'] > MotifMatchArgs.min_composite_score)
+        & (mc_crosscluster[f'{ReferenceMatchCols.ref_col}_score1'] > MotifMatchArgs.min_composite_score)
+        & ~(mc_crosscluster[f'{ReferenceMatchCols.ref_col}_score2'] > MotifMatchArgs.min_composite_score)
     )
-    mask_trimer_encodecluster_nondirect = (
-        mask_nondirect_encodecluster
-        & (mc_encode[f'{ReferenceMatchCols.ref_col}_score0'] > MotifMatchArgs.min_composite_score)
-        & (mc_encode[f'{ReferenceMatchCols.ref_col}_score1'] > MotifMatchArgs.min_composite_score)
-        & (mc_encode[f'{ReferenceMatchCols.ref_col}_score2'] > MotifMatchArgs.min_composite_score)
+    mask_trimer_crosscluster_nondirect = (
+        mask_nondirect_crosscluster
+        & (mc_crosscluster[f'{ReferenceMatchCols.ref_col}_score0'] > MotifMatchArgs.min_composite_score)
+        & (mc_crosscluster[f'{ReferenceMatchCols.ref_col}_score1'] > MotifMatchArgs.min_composite_score)
+        & (mc_crosscluster[f'{ReferenceMatchCols.ref_col}_score2'] > MotifMatchArgs.min_composite_score)
     )
-    mask_multimer_encodecluster_nondirect = (
-        mask_dimer_encodecluster_nondirect | mask_trimer_encodecluster_nondirect
+    mask_multimer_crosscluster_nondirect = (
+        mask_dimer_crosscluster_nondirect | mask_trimer_crosscluster_nondirect
     )
-    mask_matched_atlascluster_nondirect = (
-        mask_monomer_encodecluster_nondirect | mask_dimer_encodecluster_nondirect | mask_trimer_encodecluster_nondirect
+    mask_matched_modelcluster_nondirect = (
+        mask_monomer_crosscluster_nondirect | mask_dimer_crosscluster_nondirect | mask_trimer_crosscluster_nondirect
     )
 
     # Dimer-style notation
-    mc_encode.metadata.loc[mask_matched_atlascluster_nondirect, LabelCols.label_core_col] = mc_encode.metadata.loc[mask_matched_atlascluster_nondirect, ref_readable_name_cols[0]]
-    mc_encode.metadata.loc[mask_matched_atlascluster_nondirect, LabelCols.label_core_readable_col] = mc_encode.metadata.loc[mask_matched_atlascluster_nondirect, ref_readable_name_cols[0]]
-    mc_encode.metadata.loc[mask_dimer_encodecluster_nondirect, LabelCols.label_flank_col] = mc_encode.metadata.loc[mask_dimer_encodecluster_nondirect, ref_readable_name_cols[1]]
-    mc_encode.metadata.loc[mask_trimer_encodecluster_nondirect, LabelCols.label_flank_col] = mc_encode.metadata.loc[mask_trimer_encodecluster_nondirect, ref_readable_name_cols[1]] + "::" + mc_encode.metadata.loc[mask_trimer_encodecluster_nondirect, ref_readable_name_cols[2]]
-    # mc_encode.metadata.loc[mask_dimer_encodecluster_nondirect, num_subunit_col] = 2  # Composite: Determined with clusters
-    # mc_encode.metadata.loc[mask_trimer_encodecluster_nondirect, num_subunit_col] = 3
-    # mc_encode.metadata[composite_col] = mc_encode.metadata[num_subunit_col] > min_composite_subunit
+    mc_crosscluster.metadata.loc[mask_matched_modelcluster_nondirect, LabelCols.label_core_col] = mc_crosscluster.metadata.loc[mask_matched_modelcluster_nondirect, ref_readable_name_cols[0]]
+    mc_crosscluster.metadata.loc[mask_matched_modelcluster_nondirect, LabelCols.label_core_readable_col] = mc_crosscluster.metadata.loc[mask_matched_modelcluster_nondirect, ref_readable_name_cols[0]]
+    mc_crosscluster.metadata.loc[mask_dimer_crosscluster_nondirect, LabelCols.label_flank_col] = mc_crosscluster.metadata.loc[mask_dimer_crosscluster_nondirect, ref_readable_name_cols[1]]
+    mc_crosscluster.metadata.loc[mask_trimer_crosscluster_nondirect, LabelCols.label_flank_col] = mc_crosscluster.metadata.loc[mask_trimer_crosscluster_nondirect, ref_readable_name_cols[1]] + "::" + mc_crosscluster.metadata.loc[mask_trimer_crosscluster_nondirect, ref_readable_name_cols[2]]
+    # mc_crosscluster.metadata.loc[mask_dimer_crosscluster_nondirect, num_subunit_col] = 2  # Composite: Determined with clusters
+    # mc_crosscluster.metadata.loc[mask_trimer_crosscluster_nondirect, num_subunit_col] = 3
+    # mc_crosscluster.metadata[composite_col] = mc_crosscluster.metadata[num_subunit_col] > min_composite_subunit
 
     # # Trimer-style notation
-    # mc_encode[ref_readable_name_col] = mc_encode.metadata[
+    # mc_crosscluster[ref_readable_name_col] = mc_crosscluster.metadata[
     #     [
     #         f'{ref_readable_col}_name{submotif_i}' 
     #         for submotif_i in range(max_submotifs)
@@ -2846,7 +2851,7 @@ def run_encode_combine(args):
     # )
 
     # Concatenate all unique annotations
-    mc_encode[ReferenceMatchCols.ref_name_col] = mc_encode.metadata[
+    mc_crosscluster[ReferenceMatchCols.ref_name_col] = mc_crosscluster.metadata[
         [f'{ReferenceMatchCols.ref_col}_name{submotif_i}' for submotif_i in range(MotifMatchArgs.max_submotifs)]
     ].agg(
         lambda x: ",".join(pd.unique(x.dropna().astype(str))),
@@ -2856,9 +2861,9 @@ def run_encode_combine(args):
 
     # #### Filter
     # Calculate filters
-    mc_encode[FilterArgs.filter_flag_col] = False
+    mc_crosscluster[FilterArgs.filter_flag_col] = False
     utils_analysis.calculate_filters(
-        mc=mc_encode,
+        mc=mc_crosscluster,
         metric_list=MotifFilterArgs.motif_metrics,
         trim_importance=FilterArgs.filter_trim_importance,
         trim_length=FilterArgs.filter_trim_length,
@@ -2866,20 +2871,20 @@ def run_encode_combine(args):
 
     # Apply filters
     apply_filter_clusters(
-        mc=mc_encode,
+        mc=mc_crosscluster,
         motif_filter_args=MotifFilterArgs,
         filter_flag_col=FilterArgs.filter_flag_col,
         filter_flag_type_col=FilterArgs.filter_flag_type_col,
     )
 
     # ENCODE filter: Unvalidated, Indirect, from only one experiment with under 250 seqlets
-    encode_filter_mask = (
-        (mc_encode[LabelCols.label_col] == MetadataCols.name_unknown)  # Unvalidated
-        & ~(mc_encode[DirectTypeArgs.direct_type_col].str.contains("|".join(DirectTypeArgs.direct_types[:2]), na=False))  # Keep all Direct TFs A, B-NZ, regardless of QC score
-        & ~(mc_encode[MetadataCols.model_col].str.contains(","))  # 
-        & (mc_encode[MetadataCols.num_seqlet_col] < 250)
+    crosscluster_filter_mask = (
+        (mc_crosscluster[LabelCols.label_col] == MetadataCols.name_unknown)  # Unvalidated
+        & ~(mc_crosscluster[DirectTypeArgs.direct_type_col].str.contains("|".join(DirectTypeArgs.direct_types[:2]), na=False))  # Keep all Direct TFs A, B-NZ, regardless of QC score
+        & ~(mc_crosscluster[MetadataCols.model_col].str.contains(","))  # 
+        & (mc_crosscluster[MetadataCols.num_seqlet_col] < 250)
     )
-    mc_encode.metadata.loc[encode_filter_mask, FilterArgs.filter_flag_col] = True
+    mc_crosscluster.metadata.loc[crosscluster_filter_mask, FilterArgs.filter_flag_col] = True
 
 
     # #### Filter: QC - Remove
@@ -2899,7 +2904,7 @@ def run_encode_combine(args):
 
         # Assign label: From QC Removed
         utils_analysis.assign_label_from_other_compendium(
-            assign_to_mc=mc_encode,
+            assign_to_mc=mc_crosscluster,
             assign_from_mc=mc_qc_removed[~(
                 (mc_qc_removed[LabelCols.label_readable_col] == FilterArgs.filter_flag_types[-1])
                 & (mc_qc_removed[MetadataCols.num_seqlet_col] < 250)
@@ -2923,37 +2928,37 @@ def run_encode_combine(args):
         )
 
         # Assign QC name: simple name, readable label, filter type
-        mask_qc = (mc_encode[f'{MetadataCols.qc_col}_score0'] > FilterArgs.qc_min_score_removed)
-        mc_encode.metadata.loc[mask_qc, LabelCols.label_readable_col] = mc_encode.metadata.loc[mask_qc, f'{MetadataCols.qc_col}_name0']
-        mc_encode.metadata.loc[mask_qc, LabelCols.label_col] = mc_encode.metadata.loc[mask_qc, f'{MetadataCols.qc_col}_name0']
-        mc_encode.metadata.loc[mask_qc, FilterArgs.filter_flag_type_col] = mc_encode.metadata.loc[mask_qc, f'{MetadataCols.qc_col}_name0']
-        mc_encode.metadata.loc[mask_qc, MetadataCols.checked_col] = True
+        mask_qc = (mc_crosscluster[f'{MetadataCols.qc_col}_score0'] > FilterArgs.qc_min_score_removed)
+        mc_crosscluster.metadata.loc[mask_qc, LabelCols.label_readable_col] = mc_crosscluster.metadata.loc[mask_qc, f'{MetadataCols.qc_col}_name0']
+        mc_crosscluster.metadata.loc[mask_qc, LabelCols.label_col] = mc_crosscluster.metadata.loc[mask_qc, f'{MetadataCols.qc_col}_name0']
+        mc_crosscluster.metadata.loc[mask_qc, FilterArgs.filter_flag_type_col] = mc_crosscluster.metadata.loc[mask_qc, f'{MetadataCols.qc_col}_name0']
+        mc_crosscluster.metadata.loc[mask_qc, MetadataCols.checked_col] = True
 
         # Filter:
         mask_filter = (
-            mc_encode[FilterArgs.filter_flag_col] | 
-            ((mc_encode[f'{MetadataCols.qc_col}_score0'] > FilterArgs.qc_min_score_removed) &  # Flag if matches to removed motifs
-            ~(mc_encode[DirectTypeArgs.direct_type_col].str.contains("|".join(DirectTypeArgs.direct_types[:2]), na=False)))  # Keep all Direct TFs A, B-NZ, regardless of QC score
+            mc_crosscluster[FilterArgs.filter_flag_col] | 
+            ((mc_crosscluster[f'{MetadataCols.qc_col}_score0'] > FilterArgs.qc_min_score_removed) &  # Flag if matches to removed motifs
+            ~(mc_crosscluster[DirectTypeArgs.direct_type_col].str.contains("|".join(DirectTypeArgs.direct_types[:2]), na=False)))  # Keep all Direct TFs A, B-NZ, regardless of QC score
         )
-        mc_encode.metadata.loc[mask_filter, FilterArgs.filter_flag_col] = True
+        mc_crosscluster.metadata.loc[mask_filter, FilterArgs.filter_flag_col] = True
 
         # Update: Filter type, Core (Direct), Core, Flank, Label confidence
-        mc_encode.metadata.loc[mask_filter, FilterArgs.filter_flag_type_col] = mc_encode.metadata.loc[mask_filter, LabelCols.label_col]
-        mc_encode.metadata.loc[mask_filter, LabelCols.direct_label_core_col] = None
-        mc_encode.metadata.loc[mask_filter, LabelCols.label_core_col] = None
-        mc_encode.metadata.loc[mask_filter, LabelCols.label_flank_col] = None
-        mc_encode.metadata.loc[mask_filter, LabelCols.label_conf_col] = LabelCols.label_confs[-1]
+        mc_crosscluster.metadata.loc[mask_filter, FilterArgs.filter_flag_type_col] = mc_crosscluster.metadata.loc[mask_filter, LabelCols.label_col]
+        mc_crosscluster.metadata.loc[mask_filter, LabelCols.direct_label_core_col] = None
+        mc_crosscluster.metadata.loc[mask_filter, LabelCols.label_core_col] = None
+        mc_crosscluster.metadata.loc[mask_filter, LabelCols.label_flank_col] = None
+        mc_crosscluster.metadata.loc[mask_filter, LabelCols.label_conf_col] = LabelCols.label_confs[-1]
 
     # Remove flagged clusters
-    mc_encode_filtered = mc_encode[~mc_encode[FilterArgs.filter_flag_col]]
-    mc_encode_removed = mc_encode[mc_encode[FilterArgs.filter_flag_col]]
+    mc_crosscluster_filtered = mc_crosscluster[~mc_crosscluster[FilterArgs.filter_flag_col]]
+    mc_crosscluster_removed = mc_crosscluster[mc_crosscluster[FilterArgs.filter_flag_col]]
 
 
     # #### Clustering (for sorting only)
     ## Cluster: For sorting only
     # Cluster: Leiden CPM
-    logging.info("Clustering ENCODE clusters (for sorting only)...")
-    mc_encode_filtered.cluster(
+    logging.info("Clustering crossclusters (for sorting only)...")
+    mc_crosscluster_filtered.cluster(
         algorithm=ClusterArgs.cluster_algorithm_main,
         similarity_threshold=ClusterArgs.cluster_sim_threshold,
         save_name=VisualizeArgs.sort_col,
@@ -2963,7 +2968,7 @@ def run_encode_combine(args):
     )
 
     # Reassign: K-means
-    mc_encode_filtered.cluster(
+    mc_crosscluster_filtered.cluster(
         algorithm=ClusterArgs.cluster_algorithm_kmeans,
         save_name=VisualizeArgs.sort_col,
         largest_clusters_first=True,
@@ -2972,7 +2977,7 @@ def run_encode_combine(args):
         assignment_threshold=ClusterArgs.cluster_sim_assignment_threshold_kmeans,
         n_iterations=ClusterArgs.n_iterations,
     )
-    membership_cluster = mc_encode_filtered[VisualizeArgs.sort_col]
+    membership_cluster = mc_crosscluster_filtered[VisualizeArgs.sort_col]
     logging.info(f"Unique clusters: {len(set(membership_cluster))}")
 
 
@@ -2981,7 +2986,7 @@ def run_encode_combine(args):
         if args.verbose:
             logging.info(f"Recursively clustering: {i}")
         # Cluster: Leiden CPM
-        mc_encode_filtered.cluster(
+        mc_crosscluster_filtered.cluster(
             algorithm=ClusterArgs.cluster_algorithm_main,
             similarity_threshold=ClusterArgs.cluster_sim_threshold,
             cluster_on=VisualizeArgs.sort_col,
@@ -2992,7 +2997,7 @@ def run_encode_combine(args):
             seeds=ClusterArgs.seeds,
         )
         # Reassign: K-means
-        mc_encode_filtered.cluster(
+        mc_crosscluster_filtered.cluster(
             algorithm=ClusterArgs.cluster_algorithm_kmeans,
             save_name=VisualizeArgs.sort_col,
             largest_clusters_first=True,
@@ -3003,7 +3008,7 @@ def run_encode_combine(args):
         )
 
         # Check convergence
-        new_membership_cluster = mc_encode_filtered[VisualizeArgs.sort_col]
+        new_membership_cluster = mc_crosscluster_filtered[VisualizeArgs.sort_col]
         if args.verbose:
             logging.info(f"Unique clusters: {len(set(new_membership_cluster))}")
         if np.array_equal(membership_cluster, new_membership_cluster):
@@ -3017,7 +3022,7 @@ def run_encode_combine(args):
         if args.verbose:
             logging.info(f"Recursively clustering: {i}")
         # Cluster: DCC
-        mc_encode_filtered.cluster(
+        mc_crosscluster_filtered.cluster(
             algorithm=ClusterArgs.cluster_algorithm_force,
             similarity_threshold=ClusterArgs.cluster_sim_threshold_force,
             cluster_on=VisualizeArgs.sort_col,
@@ -3028,7 +3033,7 @@ def run_encode_combine(args):
             seed=ClusterArgs.seeds[0],
         )
         # Reassign: K-means
-        mc_encode_filtered.cluster(
+        mc_crosscluster_filtered.cluster(
             algorithm=ClusterArgs.cluster_algorithm_kmeans,
             save_name=VisualizeArgs.sort_col,
             largest_clusters_first=True,
@@ -3039,7 +3044,7 @@ def run_encode_combine(args):
         )
     
         # Check convergence
-        new_membership_cluster = mc_encode_filtered[VisualizeArgs.sort_col]
+        new_membership_cluster = mc_crosscluster_filtered[VisualizeArgs.sort_col]
         if args.verbose:
             logging.info(f"Unique clusters: {len(set(new_membership_cluster))}")
         if np.array_equal(membership_cluster, new_membership_cluster):
@@ -3050,65 +3055,65 @@ def run_encode_combine(args):
 
     # #### Final name: ENCODE Atlas
     # Count occurrence: Core TF family (Direct)
-    mc_atlascluster_combined[LabelCols.direct_label_core_readable_col_set] = mc_atlascluster_combined[LabelCols.direct_label_core_readable_col].apply(lambda x: set(re.split(r",|-", x)) if pd.notna(x) else x)
-    mc_atlascluster_explode_core_readable_direct = mc_atlascluster_combined.metadata.explode(LabelCols.direct_label_core_readable_col_set)
+    mc_modelcluster_combined[LabelCols.direct_label_core_readable_col_set] = mc_modelcluster_combined[LabelCols.direct_label_core_readable_col].apply(lambda x: set(re.split(r",|-", x)) if pd.notna(x) else x)
+    mc_modelcluster_explode_core_readable_direct = mc_modelcluster_combined.metadata.explode(LabelCols.direct_label_core_readable_col_set)
 
     # Count occurrence: Core TF family
-    mc_atlascluster_combined[LabelCols.label_core_readable_col_set] = mc_atlascluster_combined[LabelCols.label_core_readable_col].apply(lambda x: set(re.split(r",|-", x)) if pd.notna(x) else x)
-    mc_atlascluster_explode_core_readable = mc_atlascluster_combined.metadata.explode(LabelCols.label_core_readable_col_set)
+    mc_modelcluster_combined[LabelCols.label_core_readable_col_set] = mc_modelcluster_combined[LabelCols.label_core_readable_col].apply(lambda x: set(re.split(r",|-", x)) if pd.notna(x) else x)
+    mc_modelcluster_explode_core_readable = mc_modelcluster_combined.metadata.explode(LabelCols.label_core_readable_col_set)
 
     # Count occurrence: Composite TF family
-    mc_atlascluster_combined[LabelCols.label_flank_col_set] = mc_atlascluster_combined[LabelCols.label_flank_col].apply(lambda x: set(re.split(r",|-", x)) if pd.notna(x) else x)
-    mc_atlascluster_explode_flank = mc_atlascluster_combined.metadata.explode(LabelCols.label_flank_col_set)
+    mc_modelcluster_combined[LabelCols.label_flank_col_set] = mc_modelcluster_combined[LabelCols.label_flank_col].apply(lambda x: set(re.split(r",|-", x)) if pd.notna(x) else x)
+    mc_modelcluster_explode_flank = mc_modelcluster_combined.metadata.explode(LabelCols.label_flank_col_set)
 
     ## Count occurrences: Create pivot table
     # Core: Direct: Monomer
-    mc_atlascluster_core_readable_direct_monomer_pivot = pd.pivot_table(
-        mc_atlascluster_explode_core_readable_direct.loc[~mc_atlascluster_explode_core_readable_direct[MetadataCols.composite_col]],
-        index=encodecluster_cluster_col,
+    mc_modelcluster_core_readable_direct_monomer_pivot = pd.pivot_table(
+        mc_modelcluster_explode_core_readable_direct.loc[~mc_modelcluster_explode_core_readable_direct[MetadataCols.composite_col]],
+        index=crosscluster_cluster_col,
         columns=LabelCols.direct_label_core_readable_col_set,
         values=MetadataCols.total_contrib_score_col,
         aggfunc='sum',
         fill_value=0
     )
-    mc_atlascluster_core_readable_direct_monomer_pivot = mc_atlascluster_core_readable_direct_monomer_pivot.div(
-        mc_atlascluster_core_readable_direct_monomer_pivot.sum(axis=1), axis=0)
+    mc_modelcluster_core_readable_direct_monomer_pivot = mc_modelcluster_core_readable_direct_monomer_pivot.div(
+        mc_modelcluster_core_readable_direct_monomer_pivot.sum(axis=1), axis=0)
 
     # Core: Direct: All
-    mc_atlascluster_core_readable_direct_pivot = pd.pivot_table(
-        mc_atlascluster_explode_core_readable_direct,
-        index=encodecluster_cluster_col,
+    mc_modelcluster_core_readable_direct_pivot = pd.pivot_table(
+        mc_modelcluster_explode_core_readable_direct,
+        index=crosscluster_cluster_col,
         columns=LabelCols.direct_label_core_readable_col_set,
         values=MetadataCols.total_contrib_score_col,
         aggfunc='sum',
         fill_value=0
     )
-    mc_atlascluster_core_readable_direct_pivot = mc_atlascluster_core_readable_direct_pivot.div(
-        mc_atlascluster_core_readable_direct_pivot.sum(axis=1), axis=0)
+    mc_modelcluster_core_readable_direct_pivot = mc_modelcluster_core_readable_direct_pivot.div(
+        mc_modelcluster_core_readable_direct_pivot.sum(axis=1), axis=0)
 
     # Core: All
-    mc_atlascluster_core_readable_pivot = pd.pivot_table(
-        mc_atlascluster_explode_core_readable,
-        index=encodecluster_cluster_col,
+    mc_modelcluster_core_readable_pivot = pd.pivot_table(
+        mc_modelcluster_explode_core_readable,
+        index=crosscluster_cluster_col,
         columns=LabelCols.label_core_readable_col_set,
         values=MetadataCols.total_contrib_score_col,
         aggfunc='sum',
         fill_value=0
     )
-    mc_atlascluster_core_readable_pivot = mc_atlascluster_core_readable_pivot.div(
-        mc_atlascluster_core_readable_pivot.sum(axis=1), axis=0)
+    mc_modelcluster_core_readable_pivot = mc_modelcluster_core_readable_pivot.div(
+        mc_modelcluster_core_readable_pivot.sum(axis=1), axis=0)
 
     # Composite
-    mc_atlascluster_flank_pivot = pd.pivot_table(
-        mc_atlascluster_explode_flank,
-        index=encodecluster_cluster_col,
+    mc_modelcluster_flank_pivot = pd.pivot_table(
+        mc_modelcluster_explode_flank,
+        index=crosscluster_cluster_col,
         columns=LabelCols.label_flank_col_set,
         values=MetadataCols.total_contrib_score_col,
         aggfunc='sum',
         fill_value=0
     )
-    mc_atlascluster_flank_pivot = mc_atlascluster_flank_pivot.div(
-        mc_atlascluster_flank_pivot.sum(axis=1), axis=0)
+    mc_modelcluster_flank_pivot = mc_modelcluster_flank_pivot.div(
+        mc_modelcluster_flank_pivot.sum(axis=1), axis=0)
 
     def is_valid(x):
         """Pandas-safe validity check"""
@@ -3148,9 +3153,9 @@ def run_encode_combine(args):
         if (
             pd.isna(direct_label_core_readable)
             and pd.isna(direct_label_core)
-            and (source_cluster in mc_atlascluster_core_readable_direct_monomer_pivot.index)
+            and (source_cluster in mc_modelcluster_core_readable_direct_monomer_pivot.index)
         ):
-            core_readable_direct_monomer_frac = mc_atlascluster_core_readable_direct_monomer_pivot.loc[source_cluster]
+            core_readable_direct_monomer_frac = mc_modelcluster_core_readable_direct_monomer_pivot.loc[source_cluster]
 
             if core_readable_direct_monomer_frac.sum() > 0:
                 for major_family_frac in np.arange(VisualizeArgs.max_major_family_frac, VisualizeArgs.major_family_increment, VisualizeArgs.major_family_increment):
@@ -3168,9 +3173,9 @@ def run_encode_combine(args):
         if (
             pd.isna(direct_label_core_readable)
             and pd.isna(direct_label_core)
-            and (source_cluster in mc_atlascluster_core_readable_direct_pivot.index)
+            and (source_cluster in mc_modelcluster_core_readable_direct_pivot.index)
         ):
-            core_readable_direct_frac = mc_atlascluster_core_readable_direct_pivot.loc[source_cluster]
+            core_readable_direct_frac = mc_modelcluster_core_readable_direct_pivot.loc[source_cluster]
 
             if core_readable_direct_frac.sum() > 0:
                 for major_family_frac in np.arange(VisualizeArgs.max_major_family_frac, VisualizeArgs.major_family_increment, VisualizeArgs.major_family_increment):
@@ -3206,9 +3211,9 @@ def run_encode_combine(args):
         if (
             pd.isna(label_core_readable)
             and pd.isna(label_core)
-            and (source_cluster in mc_atlascluster_core_readable_pivot.index)
+            and (source_cluster in mc_modelcluster_core_readable_pivot.index)
         ):
-            label_core_readable_frac = mc_atlascluster_core_readable_pivot.loc[source_cluster]
+            label_core_readable_frac = mc_modelcluster_core_readable_pivot.loc[source_cluster]
             if label_core_readable_frac.sum() > 0:
                 for major_family_frac in np.arange(VisualizeArgs.max_major_family_frac, VisualizeArgs.major_family_increment, VisualizeArgs.major_family_increment):
                     major_family_mask = label_core_readable_frac >= major_family_frac
@@ -3240,9 +3245,9 @@ def run_encode_combine(args):
         # 2: Combine composite TF families
         if (
             pd.isna(label_flank)
-            and (source_cluster in mc_atlascluster_flank_pivot.index)
+            and (source_cluster in mc_modelcluster_flank_pivot.index)
         ):
-            composite_family_frac = mc_atlascluster_flank_pivot.loc[source_cluster]
+            composite_family_frac = mc_modelcluster_flank_pivot.loc[source_cluster]
             if composite_family_frac.sum() > 0:
                 for major_family_frac in np.arange(VisualizeArgs.max_major_family_frac, VisualizeArgs.major_family_increment, VisualizeArgs.major_family_increment):
                     major_family_mask = composite_family_frac >= major_family_frac
@@ -3334,19 +3339,19 @@ def run_encode_combine(args):
         LabelCols.direct_label_core_col, LabelCols.direct_label_core_readable_col, LabelCols.direct_label_col,
         LabelCols.label_core_col, LabelCols.label_core_readable_col, LabelCols.label_flank_col, LabelCols.label_col,
     ]
-    mc_encode_filtered.metadata[label_cols] = pd.DataFrame(
-        mc_encode_filtered.metadata.apply(assign_labels, axis=1).tolist(),
-        index=mc_encode_filtered.metadata.index,
+    mc_crosscluster_filtered.metadata[label_cols] = pd.DataFrame(
+        mc_crosscluster_filtered.metadata.apply(assign_labels, axis=1).tolist(),
+        index=mc_crosscluster_filtered.metadata.index,
         columns=label_cols,
     )
-    # Name: Metacluster - Removed
-    mc_encode_removed[LabelCols.label_col] = mc_encode_removed[FilterArgs.filter_flag_type_col]
+    # Name: Contribcluster - Removed
+    mc_crosscluster_removed[LabelCols.label_col] = mc_crosscluster_removed[FilterArgs.filter_flag_type_col]
 
 
     # #### Name
     ## Label readable
-    mc_encode_filtered[LabelCols.label_readable_col] = mc_encode_filtered[LabelCols.label_col]
-    mc_encode_removed[LabelCols.label_readable_col] = mc_encode_removed[LabelCols.label_col]
+    mc_crosscluster_filtered[LabelCols.label_readable_col] = mc_crosscluster_filtered[LabelCols.label_col]
+    mc_crosscluster_removed[LabelCols.label_readable_col] = mc_crosscluster_removed[LabelCols.label_col]
 
 
     # #### Apply: QC - Passed
@@ -3366,7 +3371,7 @@ def run_encode_combine(args):
 
         # Assign label: From QC Filtered
         utils_analysis.assign_label_from_other_compendium(
-            assign_to_mc=mc_encode_filtered,
+            assign_to_mc=mc_crosscluster_filtered,
             assign_from_mc=mc_qc_passed,
             from_label_col=LabelCols.label_readable_col,  # After v21: Change to label_readable_col
             save_col_prefix=MetadataCols.qc_col,
@@ -3387,16 +3392,16 @@ def run_encode_combine(args):
         )
 
         # Update label
-        mask_qc = mc_encode_filtered[f'{MetadataCols.qc_col}_score0'] > FilterArgs.qc_min_score_filtered
-        mc_encode_filtered.metadata.loc[mask_qc, LabelCols.label_readable_col] = mc_encode_filtered.metadata.loc[mask_qc, f'{MetadataCols.qc_col}_name0']
-        mc_encode_filtered.metadata.loc[mask_qc, LabelCols.label_col] = mc_encode_filtered.metadata.loc[mask_qc, f'{MetadataCols.qc_col}_name0']
-        mc_encode_filtered[LabelCols.label_col] = mc_encode_filtered[LabelCols.label_col].str.replace("-like", "", regex=True)
+        mask_qc = mc_crosscluster_filtered[f'{MetadataCols.qc_col}_score0'] > FilterArgs.qc_min_score_filtered
+        mc_crosscluster_filtered.metadata.loc[mask_qc, LabelCols.label_readable_col] = mc_crosscluster_filtered.metadata.loc[mask_qc, f'{MetadataCols.qc_col}_name0']
+        mc_crosscluster_filtered.metadata.loc[mask_qc, LabelCols.label_col] = mc_crosscluster_filtered.metadata.loc[mask_qc, f'{MetadataCols.qc_col}_name0']
+        mc_crosscluster_filtered[LabelCols.label_col] = mc_crosscluster_filtered[LabelCols.label_col].str.replace("-like", "", regex=True)
 
-        mc_encode_filtered.metadata.loc[mask_qc, MetadataCols.composite_col] = mc_encode_filtered.metadata.loc[mask_qc, f'{MetadataCols.qc_col}_name0'].str.contains("::")
-        mask_qc_composite = (mask_qc) & (mc_encode_filtered[MetadataCols.composite_col])
-        mc_encode_filtered.metadata.loc[mask_qc_composite, MetadataCols.num_subunit_col] = 2
+        mc_crosscluster_filtered.metadata.loc[mask_qc, MetadataCols.composite_col] = mc_crosscluster_filtered.metadata.loc[mask_qc, f'{MetadataCols.qc_col}_name0'].str.contains("::")
+        mask_qc_composite = (mask_qc) & (mc_crosscluster_filtered[MetadataCols.composite_col])
+        mc_crosscluster_filtered.metadata.loc[mask_qc_composite, MetadataCols.num_subunit_col] = 2
 
-        mc_encode_filtered.metadata.loc[mask_qc, MetadataCols.checked_col] = True
+        mc_crosscluster_filtered.metadata.loc[mask_qc, MetadataCols.checked_col] = True
 
 
     # #### Final Update: Manual
@@ -3410,16 +3415,16 @@ def run_encode_combine(args):
     # - Composite
     if args.metadata_edited:
         # Load edited metadata
-        mc_encode_metadata_edited = pd.read_csv(args.metadata_edited, index_col=0)
+        mc_crosscluster_metadata_edited = pd.read_csv(args.metadata_edited, index_col=0)
 
         # ``label`` is the canonical editable QC field.  Accept
         # ``label_readable`` only for legacy curated metadata exports, such
         # as the v23 sheet used for this run.
-        if LabelCols.label_col in mc_encode_metadata_edited.columns:
+        if LabelCols.label_col in mc_crosscluster_metadata_edited.columns:
             edited_label_col = LabelCols.label_col
-        elif LabelCols.label_readable_col in mc_encode_metadata_edited.columns:
+        elif LabelCols.label_readable_col in mc_crosscluster_metadata_edited.columns:
             edited_label_col = LabelCols.label_readable_col
-            mc_encode_metadata_edited[LabelCols.label_col] = mc_encode_metadata_edited[edited_label_col]
+            mc_crosscluster_metadata_edited[LabelCols.label_col] = mc_crosscluster_metadata_edited[edited_label_col]
         else:
             raise ValueError(
                 "Edited metadata must contain the canonical "
@@ -3427,134 +3432,134 @@ def run_encode_combine(args):
             )
 
         # Apply Filter: Removed
-        mc_encode_metadata_edited[FilterArgs.filter_flag_col] = mc_encode_metadata_edited[edited_label_col].isin(FilterArgs.filter_flag_types[:-1])
+        mc_crosscluster_metadata_edited[FilterArgs.filter_flag_col] = mc_crosscluster_metadata_edited[edited_label_col].isin(FilterArgs.filter_flag_types[:-1])
 
         ## Update metadata: From flag_remove, label
         # Filtered: Filter type, Core, Flank, Composite, num_subunit
-        mask_filtered = ~mc_encode_metadata_edited[FilterArgs.filter_flag_col]
-        mc_encode_metadata_edited.loc[mask_filtered, FilterArgs.filter_flag_type_col] = None
-        mc_encode_metadata_edited.loc[mask_filtered, LabelCols.label_core_col] = mc_encode_metadata_edited.loc[mask_filtered, LabelCols.label_col].str.split("::").str[0]
+        mask_filtered = ~mc_crosscluster_metadata_edited[FilterArgs.filter_flag_col]
+        mc_crosscluster_metadata_edited.loc[mask_filtered, FilterArgs.filter_flag_type_col] = None
+        mc_crosscluster_metadata_edited.loc[mask_filtered, LabelCols.label_core_col] = mc_crosscluster_metadata_edited.loc[mask_filtered, LabelCols.label_col].str.split("::").str[0]
 
         # Composite
-        mc_encode_metadata_edited[MetadataCols.num_subunit_col] = mc_encode_metadata_edited[LabelCols.label_col].str.split("::").str.len()
-        mc_encode_metadata_edited[MetadataCols.composite_col] = (mc_encode_metadata_edited[MetadataCols.num_subunit_col] > 1)
-        masK_composite = mc_encode_metadata_edited[MetadataCols.composite_col] & mask_filtered
-        mc_encode_metadata_edited.loc[masK_composite, LabelCols.label_flank_col] = mc_encode_metadata_edited.loc[masK_composite, LabelCols.label_col].str.split("::").str[1]
+        mc_crosscluster_metadata_edited[MetadataCols.num_subunit_col] = mc_crosscluster_metadata_edited[LabelCols.label_col].str.split("::").str.len()
+        mc_crosscluster_metadata_edited[MetadataCols.composite_col] = (mc_crosscluster_metadata_edited[MetadataCols.num_subunit_col] > 1)
+        masK_composite = mc_crosscluster_metadata_edited[MetadataCols.composite_col] & mask_filtered
+        mc_crosscluster_metadata_edited.loc[masK_composite, LabelCols.label_flank_col] = mc_crosscluster_metadata_edited.loc[masK_composite, LabelCols.label_col].str.split("::").str[1]
 
         # Removed: Filter type, Core (Direct), Core, Flank, Label confidence
-        mask_removed = mc_encode_metadata_edited[FilterArgs.filter_flag_col]
-        mc_encode_metadata_edited.loc[mask_removed, FilterArgs.filter_flag_type_col] = mc_encode_metadata_edited.loc[mask_removed, LabelCols.label_col]
-        mc_encode_metadata_edited.loc[mask_removed, LabelCols.direct_label_core_col] = None
-        mc_encode_metadata_edited.loc[mask_removed, LabelCols.label_core_col] = None
-        mc_encode_metadata_edited.loc[mask_removed, LabelCols.label_flank_col] = None
-        mc_encode_metadata_edited.loc[mask_removed, LabelCols.label_conf_col] = LabelCols.label_confs[-1]
+        mask_removed = mc_crosscluster_metadata_edited[FilterArgs.filter_flag_col]
+        mc_crosscluster_metadata_edited.loc[mask_removed, FilterArgs.filter_flag_type_col] = mc_crosscluster_metadata_edited.loc[mask_removed, LabelCols.label_col]
+        mc_crosscluster_metadata_edited.loc[mask_removed, LabelCols.direct_label_core_col] = None
+        mc_crosscluster_metadata_edited.loc[mask_removed, LabelCols.label_core_col] = None
+        mc_crosscluster_metadata_edited.loc[mask_removed, LabelCols.label_flank_col] = None
+        mc_crosscluster_metadata_edited.loc[mask_removed, LabelCols.label_conf_col] = LabelCols.label_confs[-1]
 
         # Keep a legacy display column synchronized when it exists; ``label``
         # remains the canonical field for all QC updates.
-        if LabelCols.label_readable_col in mc_encode_metadata_edited.columns:
-            mc_encode_metadata_edited[LabelCols.label_readable_col] = mc_encode_metadata_edited[LabelCols.label_col]
+        if LabelCols.label_readable_col in mc_crosscluster_metadata_edited.columns:
+            mc_crosscluster_metadata_edited[LabelCols.label_readable_col] = mc_crosscluster_metadata_edited[LabelCols.label_col]
 
         # Update MotifCompendium metadata
-        mc_encode_filtered.metadata.set_index(MetadataCols.unique_id_col, inplace=True)
-        mc_encode_metadata_edited.set_index(MetadataCols.unique_id_col, inplace=True)
+        mc_crosscluster_filtered.metadata.set_index(MetadataCols.unique_id_col, inplace=True)
+        mc_crosscluster_metadata_edited.set_index(MetadataCols.unique_id_col, inplace=True)
 
-        mc_encode_filtered.metadata.update(mc_encode_metadata_edited)
+        mc_crosscluster_filtered.metadata.update(mc_crosscluster_metadata_edited)
 
-        mc_encode_filtered.metadata.reset_index(inplace=True)
-        mc_encode_metadata_edited.reset_index(inplace=True)
+        mc_crosscluster_filtered.metadata.reset_index(inplace=True)
+        mc_crosscluster_metadata_edited.reset_index(inplace=True)
 
 
     # #### Manual: Rules
     ## Manage: Prename, simple name, label readable
     # Swap "high-GC/AT", "ETV-NFAT"
-    mc_encode_filtered[LabelCols.label_readable_col] = mc_encode_filtered[LabelCols.label_readable_col].str.replace("GC/AT-bias", "high-GC/AT", regex=True)
-    mc_encode_filtered[LabelCols.label_readable_col] = mc_encode_filtered[LabelCols.label_readable_col].str.replace("ETV-NFAT", "ETV-ETS", regex=True)
+    mc_crosscluster_filtered[LabelCols.label_readable_col] = mc_crosscluster_filtered[LabelCols.label_readable_col].str.replace("GC/AT-bias", "high-GC/AT", regex=True)
+    mc_crosscluster_filtered[LabelCols.label_readable_col] = mc_crosscluster_filtered[LabelCols.label_readable_col].str.replace("ETV-NFAT", "ETV-ETS", regex=True)
 
     ## Label: TF names only
     # Remove "{TF}-like" from readable label
-    mc_encode_filtered[LabelCols.label_col] = mc_encode_filtered[LabelCols.label_col].str.replace("-like", "", regex=True)
+    mc_crosscluster_filtered[LabelCols.label_col] = mc_crosscluster_filtered[LabelCols.label_col].str.replace("-like", "", regex=True)
     # Substitute: AP1 to JUN-FOS
-    mc_encode_filtered[LabelCols.label_col] = mc_encode_filtered[LabelCols.label_col].str.replace("AP1", "JUN-FOS", regex=True)
+    mc_crosscluster_filtered[LabelCols.label_col] = mc_crosscluster_filtered[LabelCols.label_col].str.replace("AP1", "JUN-FOS", regex=True)
     # Remove: HD/
-    mc_encode_filtered[LabelCols.label_col] = mc_encode_filtered[LabelCols.label_col].str.replace("HD/", "", regex=True)
+    mc_crosscluster_filtered[LabelCols.label_col] = mc_crosscluster_filtered[LabelCols.label_col].str.replace("HD/", "", regex=True)
     # Remove: Non-canonical
     for filter_flag_type in FilterArgs.filter_flag_types:
-        mc_encode_filtered[LabelCols.label_col] = mc_encode_filtered[LabelCols.label_col].str.replace(filter_flag_type, "", regex=True)
+        mc_crosscluster_filtered[LabelCols.label_col] = mc_crosscluster_filtered[LabelCols.label_col].str.replace(filter_flag_type, "", regex=True)
 
     # Remove: Delimiters
-    mc_encode_filtered[LabelCols.label_col] = mc_encode_filtered[LabelCols.label_col].str.replace(r'(::|/|-|_)$', '', regex=True)
+    mc_crosscluster_filtered[LabelCols.label_col] = mc_crosscluster_filtered[LabelCols.label_col].str.replace(r'(::|/|-|_)$', '', regex=True)
 
     # CpG
-    mask_cpg = mc_encode_filtered[LabelCols.label_readable_col].str.contains("/CpG", na=False)
-    mc_encode_filtered.metadata.loc[mask_cpg, LabelCols.label_readable_col] = np.where(
-        mc_encode_filtered.metadata.loc[mask_cpg, LabelCols.direct_label_col].notna()
-        & (mc_encode_filtered.metadata.loc[mask_cpg, LabelCols.direct_label_col] != ""),
-        mc_encode_filtered.metadata.loc[mask_cpg, LabelCols.direct_label_col] + "/CpG",
+    mask_cpg = mc_crosscluster_filtered[LabelCols.label_readable_col].str.contains("/CpG", na=False)
+    mc_crosscluster_filtered.metadata.loc[mask_cpg, LabelCols.label_readable_col] = np.where(
+        mc_crosscluster_filtered.metadata.loc[mask_cpg, LabelCols.direct_label_col].notna()
+        & (mc_crosscluster_filtered.metadata.loc[mask_cpg, LabelCols.direct_label_col] != ""),
+        mc_crosscluster_filtered.metadata.loc[mask_cpg, LabelCols.direct_label_col] + "/CpG",
         "CpG"
     )
 
-    mc_encode_filtered.metadata.loc[mask_cpg, LabelCols.label_col] = np.where(
-        mc_encode_filtered.metadata.loc[mask_cpg, LabelCols.direct_label_col].notna()
-        & (mc_encode_filtered.metadata.loc[mask_cpg, LabelCols.direct_label_col] != ""),
-        mc_encode_filtered.metadata.loc[mask_cpg, LabelCols.direct_label_col],
+    mc_crosscluster_filtered.metadata.loc[mask_cpg, LabelCols.label_col] = np.where(
+        mc_crosscluster_filtered.metadata.loc[mask_cpg, LabelCols.direct_label_col].notna()
+        & (mc_crosscluster_filtered.metadata.loc[mask_cpg, LabelCols.direct_label_col] != ""),
+        mc_crosscluster_filtered.metadata.loc[mask_cpg, LabelCols.direct_label_col],
         "CpG"
     )
 
     # Filter:
     mask_filter = (
-        mc_encode_filtered[FilterArgs.filter_flag_col] | 
-        # mc_encode_filtered[direct_type_col].isin(filter_flag_types[:-1]) |
-        mc_encode_filtered[LabelCols.label_readable_col].isin(FilterArgs.filter_flag_types[:-1])
+        mc_crosscluster_filtered[FilterArgs.filter_flag_col] | 
+        # mc_crosscluster_filtered[direct_type_col].isin(filter_flag_types[:-1]) |
+        mc_crosscluster_filtered[LabelCols.label_readable_col].isin(FilterArgs.filter_flag_types[:-1])
     )
-    mc_encode_filtered.metadata.loc[mask_filter, FilterArgs.filter_flag_col] = True
-    mc_encode_filtered.metadata.loc[mask_filter, FilterArgs.filter_flag_type_col] = mc_encode_filtered.metadata.loc[mask_filter, LabelCols.label_readable_col]
+    mc_crosscluster_filtered.metadata.loc[mask_filter, FilterArgs.filter_flag_col] = True
+    mc_crosscluster_filtered.metadata.loc[mask_filter, FilterArgs.filter_flag_type_col] = mc_crosscluster_filtered.metadata.loc[mask_filter, LabelCols.label_readable_col]
 
     # Remove flagged clusters
-    mc_encode_filtered_removed = mc_encode_filtered[mc_encode_filtered[FilterArgs.filter_flag_col]]
-    mc_encode_filtered = mc_encode_filtered[~mc_encode_filtered[FilterArgs.filter_flag_col]]
+    mc_crosscluster_filtered_removed = mc_crosscluster_filtered[mc_crosscluster_filtered[FilterArgs.filter_flag_col]]
+    mc_crosscluster_filtered = mc_crosscluster_filtered[~mc_crosscluster_filtered[FilterArgs.filter_flag_col]]
 
-    mc_encode_filtered_removed.metadata = mc_encode_filtered_removed.metadata[mc_encode_removed.columns()]
-    for img in mc_encode_filtered_removed.images():
-        if img not in mc_encode_removed.images():
-            mc_encode_filtered_removed.delete_images(img)
+    mc_crosscluster_filtered_removed.metadata = mc_crosscluster_filtered_removed.metadata[mc_crosscluster_removed.columns()]
+    for img in mc_crosscluster_filtered_removed.images():
+        if img not in mc_crosscluster_removed.images():
+            mc_crosscluster_filtered_removed.delete_images(img)
 
     # Removed: Combine
-    mc_encode_removed = MotifCompendium.combine(
-        [mc_encode_removed, mc_encode_filtered_removed],
+    mc_crosscluster_removed = MotifCompendium.combine(
+        [mc_crosscluster_removed, mc_crosscluster_filtered_removed],
         safe=args.safe,
     )
 
 
     # #### Annotate: Best label
     ### Annotate: Best label
-    mc_encode_filtered_metadata_updated = mc_encode_filtered.metadata.set_index(MetadataCols.unique_id_col)
-    mc_encode_filtered_images_updated = pd.DataFrame(index=mc_encode_filtered_metadata_updated.index)
-    mc_encode_filtered_images_existing = set(mc_encode_filtered.images())
+    mc_crosscluster_filtered_metadata_updated = mc_crosscluster_filtered.metadata.set_index(MetadataCols.unique_id_col)
+    mc_crosscluster_filtered_images_updated = pd.DataFrame(index=mc_crosscluster_filtered_metadata_updated.index)
+    mc_crosscluster_filtered_images_existing = set(mc_crosscluster_filtered.images())
 
     # Update Core, Core (Direct), Flank
-    mc_encode_filtered[LabelCols.label_core_col] = np.where(
-        mc_encode_filtered[LabelCols.label_col].str.contains("::", na=False),
-        mc_encode_filtered[LabelCols.label_col].str.split("::").str[0],
-        mc_encode_filtered[LabelCols.label_col]
+    mc_crosscluster_filtered[LabelCols.label_core_col] = np.where(
+        mc_crosscluster_filtered[LabelCols.label_col].str.contains("::", na=False),
+        mc_crosscluster_filtered[LabelCols.label_col].str.split("::").str[0],
+        mc_crosscluster_filtered[LabelCols.label_col]
     )
-    mc_encode_filtered[LabelCols.direct_label_core_col] = np.where(
-        mc_encode_filtered[DirectTypeArgs.direct_type_col].str.contains("|".join(DirectTypeArgs.direct_types[:4]), na=False),
+    mc_crosscluster_filtered[LabelCols.direct_label_core_col] = np.where(
+        mc_crosscluster_filtered[DirectTypeArgs.direct_type_col].str.contains("|".join(DirectTypeArgs.direct_types[:4]), na=False),
         np.where(
-            mc_encode_filtered[LabelCols.label_col].str.contains("::", na=False),
-            mc_encode_filtered[LabelCols.label_col].str.split("::").str[0],
-            mc_encode_filtered[LabelCols.label_col]
+            mc_crosscluster_filtered[LabelCols.label_col].str.contains("::", na=False),
+            mc_crosscluster_filtered[LabelCols.label_col].str.split("::").str[0],
+            mc_crosscluster_filtered[LabelCols.label_col]
         ),
         None
     )
-    mc_encode_filtered[LabelCols.label_flank_col] = np.where(
-        mc_encode_filtered[LabelCols.label_col].str.contains("::", na=False),
-        mc_encode_filtered[LabelCols.label_col].str.split("::").str[1],
+    mc_crosscluster_filtered[LabelCols.label_flank_col] = np.where(
+        mc_crosscluster_filtered[LabelCols.label_col].str.contains("::", na=False),
+        mc_crosscluster_filtered[LabelCols.label_col].str.split("::").str[1],
         None
     )
 
-    for i, row in mc_encode_filtered.metadata.iterrows():
+    for i, row in mc_crosscluster_filtered.metadata.iterrows():
         # MotifCompendium: Subset
-        mc_encode_filtered_i = mc_encode_filtered[[i]]
+        mc_crosscluster_filtered_i = mc_crosscluster_filtered[[i]]
         label_core_i = re.split(r'[-/]', row[LabelCols.label_core_col]) if pd.notna(row[LabelCols.label_core_col]) else []
         direct_label_core_i = re.split(r'[-/]', row[LabelCols.direct_label_core_col]) if pd.notna(row[LabelCols.direct_label_core_col]) else []
         label_flank_i = re.split(r'[-/]', row[LabelCols.label_flank_col]) if pd.notna(row[LabelCols.label_flank_col]) else []
@@ -3582,7 +3587,7 @@ def run_encode_combine(args):
         # Annotate with name references
         if len(mc_ref_core_i) > 0:
             assign_direct_composite(
-                target_mc=mc_encode_filtered_i,
+                target_mc=mc_crosscluster_filtered_i,
                 direct_reference_mc=mc_ref_core_i,
                 indirect_reference_mc=mc_ref_composite_i,
                 save_col_prefix=LabelCols.best_label_ref_col,
@@ -3594,50 +3599,50 @@ def run_encode_combine(args):
             )
     
         ## Update: Metadata, Images
-        mc_encode_filtered_metadata_updated = mc_encode_filtered_metadata_updated.combine_first(mc_encode_filtered_i.metadata.set_index(MetadataCols.unique_id_col))
-        mc_encode_filtered_metadata_updated.update(mc_encode_filtered_i.metadata.set_index(MetadataCols.unique_id_col))
-        new_image_cols = [image_col for image_col in mc_encode_filtered_i.images() if image_col.startswith(LabelCols.best_label_ref_col)]
-        mc_encode_filtered_i_new_images = pd.DataFrame({
+        mc_crosscluster_filtered_metadata_updated = mc_crosscluster_filtered_metadata_updated.combine_first(mc_crosscluster_filtered_i.metadata.set_index(MetadataCols.unique_id_col))
+        mc_crosscluster_filtered_metadata_updated.update(mc_crosscluster_filtered_i.metadata.set_index(MetadataCols.unique_id_col))
+        new_image_cols = [image_col for image_col in mc_crosscluster_filtered_i.images() if image_col.startswith(LabelCols.best_label_ref_col)]
+        mc_crosscluster_filtered_i_new_images = pd.DataFrame({
             image_col: pd.Series(
-                mc_encode_filtered_i.get_images(image_col),
-                index=mc_encode_filtered_i.metadata.set_index(MetadataCols.unique_id_col).index,
+                mc_crosscluster_filtered_i.get_images(image_col),
+                index=mc_crosscluster_filtered_i.metadata.set_index(MetadataCols.unique_id_col).index,
             )
             for image_col in new_image_cols
         })
-        mc_encode_filtered_images_updated = mc_encode_filtered_images_updated.combine_first(mc_encode_filtered_i_new_images)
-        mc_encode_filtered_images_updated.update(mc_encode_filtered_i_new_images)
+        mc_crosscluster_filtered_images_updated = mc_crosscluster_filtered_images_updated.combine_first(mc_crosscluster_filtered_i_new_images)
+        mc_crosscluster_filtered_images_updated.update(mc_crosscluster_filtered_i_new_images)
 
     # Apply updates: Metadata, Images
-    mc_encode_filtered.metadata = mc_encode_filtered_metadata_updated.reset_index()
-    for image_col in mc_encode_filtered_images_updated.columns:
-        mc_encode_filtered.set_images(
+    mc_crosscluster_filtered.metadata = mc_crosscluster_filtered_metadata_updated.reset_index()
+    for image_col in mc_crosscluster_filtered_images_updated.columns:
+        mc_crosscluster_filtered.set_images(
             image_name=image_col,
             images=[x if pd.notna(x) else None 
-                for x in mc_encode_filtered_images_updated[image_col]],
+                for x in mc_crosscluster_filtered_images_updated[image_col]],
         )
-    del mc_encode_filtered_metadata_updated, mc_encode_filtered_images_updated, mc_encode_filtered_images_existing
+    del mc_crosscluster_filtered_metadata_updated, mc_crosscluster_filtered_images_updated, mc_crosscluster_filtered_images_existing
 
 
     # #### Label confidence
     # Final rules
-    mc_encode_filtered[MetadataCols.composite_col] = mc_encode_filtered[LabelCols.label_readable_col].str.contains("::")
+    mc_crosscluster_filtered[MetadataCols.composite_col] = mc_crosscluster_filtered[LabelCols.label_readable_col].str.contains("::")
 
     ## Set label readable type
     # Filtered
     label_conf_conditions = [
-        mc_encode_filtered[DirectTypeArgs.direct_type_col].str.contains(DirectTypeArgs.direct_types[0], na=False),  # High: A
-        mc_encode_filtered[DirectTypeArgs.direct_type_col].str.contains("|".join(DirectTypeArgs.direct_types[1:3]), na=False),  # Medium: B-NZ, B-Z
-        ~mc_encode_filtered[FilterArgs.filter_flag_col], # Low: Not flagged
-        mc_encode_filtered[FilterArgs.filter_flag_col],   # Flagged: Flagged
+        mc_crosscluster_filtered[DirectTypeArgs.direct_type_col].str.contains(DirectTypeArgs.direct_types[0], na=False),  # High: A
+        mc_crosscluster_filtered[DirectTypeArgs.direct_type_col].str.contains("|".join(DirectTypeArgs.direct_types[1:3]), na=False),  # Medium: B-NZ, B-Z
+        ~mc_crosscluster_filtered[FilterArgs.filter_flag_col], # Low: Not flagged
+        mc_crosscluster_filtered[FilterArgs.filter_flag_col],   # Flagged: Flagged
     ]
-    mc_encode_filtered[LabelCols.label_conf_col] = np.select(
+    mc_crosscluster_filtered[LabelCols.label_conf_col] = np.select(
         label_conf_conditions,  # High, Medium, low, Flagged
         LabelCols.label_confs, # High, Medium, low, Flagged
         default=LabelCols.label_confs[-1]  # Remaining: Flagged
     )
 
     # Removed
-    mc_encode_removed[LabelCols.label_conf_col] = LabelCols.label_confs[-1]
+    mc_crosscluster_removed[LabelCols.label_conf_col] = LabelCols.label_confs[-1]
 
 
     # #### Apply: QC - Low quality
@@ -3657,7 +3662,7 @@ def run_encode_combine(args):
 
         # Assign label: From QC Filtered
         utils_analysis.assign_label_from_other_compendium(
-            assign_to_mc=mc_encode_filtered,
+            assign_to_mc=mc_crosscluster_filtered,
             assign_from_mc=mc_qc_lowq,
             from_label_col=LabelCols.label_readable_col,  # After v21: Change to prename_col to label_readable_col,
             save_col_prefix=MetadataCols.qc_col,
@@ -3678,129 +3683,129 @@ def run_encode_combine(args):
         )
 
         # Update label
-        mask_qc = mc_encode_filtered[f'{MetadataCols.qc_col}_score0'] > FilterArgs.qc_min_score_filtered
-        mc_encode_filtered.metadata.loc[mask_qc, MetadataCols.checked_col] = True
-        mc_encode_filtered.metadata.loc[mask_qc, LabelCols.label_conf_col] = LabelCols.label_confs[2]
+        mask_qc = mc_crosscluster_filtered[f'{MetadataCols.qc_col}_score0'] > FilterArgs.qc_min_score_filtered
+        mc_crosscluster_filtered.metadata.loc[mask_qc, MetadataCols.checked_col] = True
+        mc_crosscluster_filtered.metadata.loc[mask_qc, LabelCols.label_conf_col] = LabelCols.label_confs[2]
 
 
 
     # #### Naming
     ## Simple name: ({+_-})_{prename}_{H_M_L}
-    sign = np.where(mc_encode_filtered[MetadataCols.posneg_col] == "pos", "pos", "neg")
+    sign = np.where(mc_crosscluster_filtered[MetadataCols.posneg_col] == "pos", "pos", "neg")
     conf = np.select([
-        mc_encode_filtered[LabelCols.label_conf_col] == LabelCols.label_confs[0],
-        mc_encode_filtered[LabelCols.label_conf_col] == LabelCols.label_confs[1],
-        mc_encode_filtered[LabelCols.label_conf_col] == LabelCols.label_confs[2],
+        mc_crosscluster_filtered[LabelCols.label_conf_col] == LabelCols.label_confs[0],
+        mc_crosscluster_filtered[LabelCols.label_conf_col] == LabelCols.label_confs[1],
+        mc_crosscluster_filtered[LabelCols.label_conf_col] == LabelCols.label_confs[2],
         ],
         LabelCols.label_confs_simple[:-1],
         default=LabelCols.label_confs_simple[2],
     )
 
-    mc_encode_filtered[MetadataCols.prename_col] = np.where(
-        ~mc_encode_filtered[LabelCols.label_readable_col].isin(FilterArgs.filter_flag_types),
-        (mc_encode_filtered[LabelCols.label_readable_col]
+    mc_crosscluster_filtered[MetadataCols.prename_col] = np.where(
+        ~mc_crosscluster_filtered[LabelCols.label_readable_col].isin(FilterArgs.filter_flag_types),
+        (mc_crosscluster_filtered[LabelCols.label_readable_col]
             + "_" + sign
             + "_" + conf),
-        mc_encode_filtered[LabelCols.label_readable_col],
+        mc_crosscluster_filtered[LabelCols.label_readable_col],
     )
 
-    mc_encode_removed[LabelCols.label_readable_col] = mc_encode_removed[FilterArgs.filter_flag_type_col]
-    mc_encode_removed[MetadataCols.prename_col] = mc_encode_removed[FilterArgs.filter_flag_type_col]
+    mc_crosscluster_removed[LabelCols.label_readable_col] = mc_crosscluster_removed[FilterArgs.filter_flag_type_col]
+    mc_crosscluster_removed[MetadataCols.prename_col] = mc_crosscluster_removed[FilterArgs.filter_flag_type_col]
 
     #### Update original MotifCompendium
-    logging.info("Propagating ENCODE cluster labels to all levels...")
-    ### (5) ENCODE cluster:
+    logging.info("Propagating crosscluster labels to all levels...")
+    ### (5) crosscluster:
     # Combine: Update columns
-    mc_encodees = [mc_encode_filtered, mc_encode_removed]
+    mc_crossclusters = [mc_crosscluster_filtered, mc_crosscluster_removed]
 
-    mc_encode.metadata.set_index(MetadataCols.unique_id_col, inplace=True)
-    mc_encode_images_updated = pd.DataFrame(index=mc_encode.metadata.index)
-    mc_encode_images_existing = set(mc_encode.images())
+    mc_crosscluster.metadata.set_index(MetadataCols.unique_id_col, inplace=True)
+    mc_crosscluster_images_updated = pd.DataFrame(index=mc_crosscluster.metadata.index)
+    mc_crosscluster_images_existing = set(mc_crosscluster.images())
 
     # Build updates: Metadata, Images
-    for mc_encode_i in mc_encodees:
+    for mc_crosscluster_i in mc_crossclusters:
         # Metadata
-        mc_encode.metadata = mc_encode.metadata.combine_first(mc_encode_i.metadata.set_index(MetadataCols.unique_id_col))
-        mc_encode.metadata.update(mc_encode_i.metadata.set_index(MetadataCols.unique_id_col))
+        mc_crosscluster.metadata = mc_crosscluster.metadata.combine_first(mc_crosscluster_i.metadata.set_index(MetadataCols.unique_id_col))
+        mc_crosscluster.metadata.update(mc_crosscluster_i.metadata.set_index(MetadataCols.unique_id_col))
         # Images
-        new_image_cols = [image_col for image_col in mc_encode_i.images() if image_col not in mc_encode_images_existing]
-        mc_encode_i_new_images = pd.DataFrame({
+        new_image_cols = [image_col for image_col in mc_crosscluster_i.images() if image_col not in mc_crosscluster_images_existing]
+        mc_crosscluster_i_new_images = pd.DataFrame({
             image_col: pd.Series(
-                mc_encode_i.get_images(image_col),
-                index=mc_encode_i[MetadataCols.unique_id_col],
+                mc_crosscluster_i.get_images(image_col),
+                index=mc_crosscluster_i[MetadataCols.unique_id_col],
             )
             for image_col in new_image_cols
         })
-        mc_encode_images_updated = mc_encode_images_updated.combine_first(mc_encode_i_new_images)
-        mc_encode_images_updated.update(mc_encode_i_new_images)
+        mc_crosscluster_images_updated = mc_crosscluster_images_updated.combine_first(mc_crosscluster_i_new_images)
+        mc_crosscluster_images_updated.update(mc_crosscluster_i_new_images)
 
     # Apply updates: Metadata, Images
-    mc_encode.metadata.reset_index(inplace=True)
-    for image_col in mc_encode_images_updated.columns:
-        mc_encode.set_images(
+    mc_crosscluster.metadata.reset_index(inplace=True)
+    for image_col in mc_crosscluster_images_updated.columns:
+        mc_crosscluster.set_images(
             image_name=image_col,
             images=[x if pd.notna(x) else None 
-                for x in mc_encode_images_updated[image_col]],
+                for x in mc_crosscluster_images_updated[image_col]],
         )
-    del mc_encode_images_updated, mc_encode_images_existing
+    del mc_crosscluster_images_updated, mc_crosscluster_images_existing
 
     # # Share columns
     # metadata_cols = []
     # image_cols = []
-    # for mc_encode_i in mc_encodees:
-    #     metadata_cols = list(set(metadata_cols + mc_encode_i.columns()))
-    #     image_cols = list(set(image_cols + mc_encode_i.images()))
-    # for mc_encode_i in mc_encodees:
+    # for mc_crosscluster_i in mc_crossclusters:
+    #     metadata_cols = list(set(metadata_cols + mc_crosscluster_i.columns()))
+    #     image_cols = list(set(image_cols + mc_crosscluster_i.images()))
+    # for mc_crosscluster_i in mc_crossclusters:
     #     for metadata_col in metadata_cols:
-    #         if metadata_col not in mc_encode_i.columns():
-    #             mc_encode_i.metadata[metadata_col] = None
+    #         if metadata_col not in mc_crosscluster_i.columns():
+    #             mc_crosscluster_i.metadata[metadata_col] = None
     #     for logo_i in ['logo (fwd)', 'logo (rev)']:
-    #         mc_encode_i.add_logos(
-    #             motifs=mc_encode_i.motifs,
+    #         mc_crosscluster_i.add_logos(
+    #             motifs=mc_crosscluster_i.motifs,
     #             image_name=logo_i,
     #             trim=0,
     #         )
     #     for image_col in image_cols:
-    #         if image_col not in mc_encode_i.images():
-    #             mc_encode_i.add_logos(
-    #                 motifs=np.zeros_like(mc_encode_i.get_standard_motif_stack()),
+    #         if image_col not in mc_crosscluster_i.images():
+    #             mc_crosscluster_i.add_logos(
+    #                 motifs=np.zeros_like(mc_crosscluster_i.get_standard_motif_stack()),
     #                 image_name=image_col,
     #                 trim=False,
     #             )
 
-    # # Update original MotifCompendium: Metacluster
-    # mc_encode = MotifCompendium.combine(mc_encodees, safe=safe)
+    # # Update original MotifCompendium: Contribcluster
+    # mc_crosscluster = MotifCompendium.combine(mc_crossclusters, safe=safe)
 
 
     # #### Assign name
     ## Rename: {prename_col}_{counter}
-    mc_encode.metadata[MetadataCols.counter_col] = mc_encode.metadata.dropna(subset=[MetadataCols.prename_col]).groupby(MetadataCols.prename_col).cumcount().fillna(0).astype(int)
-    mc_encode.metadata[MetadataCols.name_new_col] = mc_encode.metadata[MetadataCols.prename_col] + "_" + mc_encode.metadata[MetadataCols.counter_col].astype(str)
-    mc_encode.metadata[MetadataCols.name_col] = mc_encode.metadata[MetadataCols.name_new_col]
-    mc_encode.metadata.drop(columns=[MetadataCols.name_new_col, MetadataCols.counter_col], axis=1, inplace=True)
+    mc_crosscluster.metadata[MetadataCols.counter_col] = mc_crosscluster.metadata.dropna(subset=[MetadataCols.prename_col]).groupby(MetadataCols.prename_col).cumcount().fillna(0).astype(int)
+    mc_crosscluster.metadata[MetadataCols.name_new_col] = mc_crosscluster.metadata[MetadataCols.prename_col] + "_" + mc_crosscluster.metadata[MetadataCols.counter_col].astype(str)
+    mc_crosscluster.metadata[MetadataCols.name_col] = mc_crosscluster.metadata[MetadataCols.name_new_col]
+    mc_crosscluster.metadata.drop(columns=[MetadataCols.name_new_col, MetadataCols.counter_col], axis=1, inplace=True)
 
     # Simple name = Prename
-    mc_encode[MetadataCols.simple_name_col] = mc_encode[MetadataCols.prename_col]
+    mc_crosscluster[MetadataCols.simple_name_col] = mc_crosscluster[MetadataCols.prename_col]
 
-    # Map: Atlascluster to ENCODE cluster
-    atlascluster2encode_name_map = dict(zip(mc_encode[ClusterArgs.source_cluster_col], mc_encode[MetadataCols.name_col]))
-    atlascluster2encode_simple_map = dict(zip(mc_encode[ClusterArgs.source_cluster_col], mc_encode[MetadataCols.simple_name_col]))
+    # Map: Modelcluster to crosscluster
+    modelcluster2crosscluster_name_map = dict(zip(mc_crosscluster[ClusterArgs.source_cluster_col], mc_crosscluster[MetadataCols.name_col]))
+    modelcluster2crosscluster_simple_map = dict(zip(mc_crosscluster[ClusterArgs.source_cluster_col], mc_crosscluster[MetadataCols.simple_name_col]))
 
-    mc_atlascluster_combined[VisualizeArgs.encodecluster_name_col] = mc_atlascluster_combined[encodecluster_cluster_col].map(atlascluster2encode_name_map)
-    mc_atlascluster_combined[MetadataCols.simple_name_col] = mc_atlascluster_combined[encodecluster_cluster_col].map(atlascluster2encode_simple_map).fillna(mc_atlascluster_combined[MetadataCols.simple_name_col]).fillna(MetadataCols.name_unknown)
+    mc_modelcluster_combined[VisualizeArgs.crosscluster_name_col] = mc_modelcluster_combined[crosscluster_cluster_col].map(modelcluster2crosscluster_name_map)
+    mc_modelcluster_combined[MetadataCols.simple_name_col] = mc_modelcluster_combined[crosscluster_cluster_col].map(modelcluster2crosscluster_simple_map).fillna(mc_modelcluster_combined[MetadataCols.simple_name_col]).fillna(MetadataCols.name_unknown)
 
 
     # #### Composites: Modified Smith-Waterman
-    # The last step of the filtered ENCODE clusters, before they are exported to every level below: decompose each into
+    # The last step of the filtered crossclusters, before they are exported to every level below: decompose each into
     # direct reference monomers. Below medium confidence, the decomposition decides whether it is a composite, with
-    # its core and flank labels (composite/identify_composite_motifs.ipynb). Written back into mc_encode as is.
-    logging.info("Composites: decomposing the filtered ENCODE clusters into reference monomers (modified Smith-Waterman)...")
+    # its core and flank labels (composite/identify_composite_motifs.ipynb). Written back into mc_crosscluster as is.
+    logging.info("Composites: decomposing the filtered crossclusters into reference monomers (modified Smith-Waterman)...")
     mc_ref_composite, mc_ref_qc_cluster_name_dict, _ = prepare_composite_reference(mc_ref_direct, args.ref_clustered_hr_metadata)
-    filtered_rows = np.flatnonzero(~mc_encode[FilterArgs.filter_flag_col].to_numpy(dtype=bool))
-    mc_encode_filtered = mc_encode[filtered_rows.tolist()]
-    assign_msw_composites(mc_encode_filtered, mc_ref_composite, ic_scale=args.ic, verbose=args.verbose)
+    filtered_rows = np.flatnonzero(~mc_crosscluster[FilterArgs.filter_flag_col].to_numpy(dtype=bool))
+    mc_crosscluster_filtered = mc_crosscluster[filtered_rows.tolist()]
+    assign_msw_composites(mc_crosscluster_filtered, mc_ref_composite, ic_scale=args.ic, verbose=args.verbose)
     write_back_rows(
-        mc_encode, mc_encode_filtered, filtered_rows,
+        mc_crosscluster, mc_crosscluster_filtered, filtered_rows,
         columns=[
             CompositeArgs.bellman_score_col, CompositeArgs.bellman_sim_col, CompositeArgs.bellman_orient_col,
             CompositeArgs.bellman_align_col, CompositeArgs.bellman_name_col, CompositeArgs.bellman_label_col,
@@ -3811,32 +3816,32 @@ def run_encode_combine(args):
     )
 
     # #### Composites: Identify
-    # The composites of the filtered ENCODE clusters, with their reference subunits: the inputs of the ISM
+    # The composites of the filtered crossclusters, with their reference subunits: the inputs of the ISM
     # cooperativity runs (pipeline_encode_composite_ism.py), in --composite-dir. A core or flank label without a short
     # enough monomer in the composite reference takes its long ones (mc_ref_composite_all)
-    logging.info("Composites: identifying the composite ENCODE clusters and their reference subunits...")
+    logging.info("Composites: identifying the composite crossclusters and their reference subunits...")
     composite_paths_ns = composite_paths(getattr(args, "composite_dir", None) or default_composite_dir(args.output_dir))
     mc_ref_composite_all, _, _ = prepare_composite_reference(mc_ref_direct, args.ref_clustered_hr_metadata, length_filter=False)
-    mc_encode_composite = identify_composites(mc_encode_filtered, mc_ref_composite, mc_ref_qc_cluster_name_dict, mc_ref_composite_all)
+    mc_encode_composite = identify_composites(mc_crosscluster_filtered, mc_ref_composite, mc_ref_qc_cluster_name_dict, mc_ref_composite_all)
     del mc_ref_composite_all
-    export_composites(mc_encode_filtered, mc_encode_composite, composite_paths_ns, getattr(args, "all_paths_tsv", None), html_column_desc_dict)
+    export_composites(mc_crosscluster_filtered, mc_encode_composite, composite_paths_ns, getattr(args, "all_paths_tsv", None), html_column_desc_dict)
     del mc_encode_composite
 
 
     # #### Export: the ENCODE compendia; every level below and the motif indexes (--update-constituents now)
-    export_encode_level(args, mc_encode, mc_atlascluster_combined, html_column_desc_dict)
+    export_crosscluster_level(args, mc_crosscluster, mc_modelcluster_combined, html_column_desc_dict)
     if args.update_constituents == "now":
-        export_encode_constituents(
+        export_crosscluster_constituents(
             args,
-            mc_encode,
-            mc_atlascluster_combined,
-            atlascluster2encode_name_map,
-            atlascluster2encode_simple_map,
-            encodecluster_cluster_col,
+            mc_crosscluster,
+            mc_modelcluster_combined,
+            modelcluster2crosscluster_name_map,
+            modelcluster2crosscluster_simple_map,
+            crosscluster_cluster_col,
             html_column_desc_dict,
         )
     else:
-        logging.info("The levels below the ENCODE clusters: not updated (--update-constituents defer; later: --update-constituents only)")
+        logging.info("The levels below the crossclusters: not updated (--update-constituents defer; later: --update-constituents only)")
 
     # Args JSON
     args_record = {
@@ -4000,7 +4005,7 @@ def run_encode_combine(args):
         "cluster_sim_assignment_threshold_kmeans": ClusterArgs.cluster_sim_assignment_threshold_kmeans,
         "cluster_max_iter_main": ClusterArgs.cluster_max_iter_main,
         "cluster_max_iter_force": ClusterArgs.cluster_max_iter_force,
-        "encodecluster_cluster_col": encodecluster_cluster_col,
+        "crosscluster_cluster_col": crosscluster_cluster_col,
         "average_weight_col": ClusterArgs.average_weight_col,
         "source_cluster_col": ClusterArgs.source_cluster_col,
         "n_iterations": ClusterArgs.n_iterations,
@@ -4014,9 +4019,9 @@ def run_encode_combine(args):
 
         # Cluster names
         "cluster_name_col": VisualizeArgs.cluster_name_col,
-        "metacluster_name_col": VisualizeArgs.metacluster_name_col,
-        "atlascluster_name_col": VisualizeArgs.atlascluster_name_col,
-        "encodecluster_name_col": VisualizeArgs.encodecluster_name_col,
+        "contribcluster_name_col": VisualizeArgs.contribcluster_name_col,
+        "modelcluster_name_col": VisualizeArgs.modelcluster_name_col,
+        "crosscluster_name_col": VisualizeArgs.crosscluster_name_col,
         "atlas_col": VisualizeArgs.atlas_col,
         "sort_col": VisualizeArgs.sort_col,
         "max_major_family_frac": VisualizeArgs.max_major_family_frac,
@@ -4066,7 +4071,7 @@ if __name__ == "__main__":
     if args.time:
         start_time = time.time()
     if args.update_constituents == "only":
-        run_encode_constituents(stage_args(args, **stage_dir_args))
+        run_crosscluster_constituents(stage_args(args, **stage_dir_args))
     else:
         run_encode_combine(stage_args(args, **stage_dir_args))
     if args.time:

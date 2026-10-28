@@ -138,12 +138,12 @@ class Encode_ReferenceMatchCols:
 ## LABELS ------------------------------------------------------------------------------------------------------------
 @dataclass
 class Encode_LabelCols:
-    label_col: str = 'label'  # Metacluster: Readable TF family label: {TF_family0}-{TF_family1}-...
+    label_col: str = 'label'  # Contribcluster: Readable TF family label: {TF_family0}-{TF_family1}-...
     label_readable_col: str = 'label_readable'
     label_constit_1_col: str = 'label_constit_prev'
     label_constit_all_col: str = 'label_constit_all'
 
-    direct_label_col: str = 'direct_label'  # Metacluster: Readable TF family label (direct only)
+    direct_label_col: str = 'direct_label'  # Contribcluster: Readable TF family label (direct only)
     direct_label_constit_1_col: str = 'direct_label_constit_prev'
     direct_label_constit_all_col: str = 'direct_label_constit_all'
 
@@ -813,19 +813,19 @@ class Encode_VisualizeArgs:
     motif_string_importance: float = 1 / 50
     motif_string_specificity: float = 0.55
 
-    # Hierarchy: motif -> cluster -> metacluster -> atlascluster -> ENCODE cluster
+    # Hierarchy: motif -> cluster -> contribcluster -> modelcluster -> crosscluster
     cluster_name_col: str = 'cluster_name'
-    metacluster_name_col: str = 'metacluster_name'
-    atlascluster_name_col: str = 'atlascluster_name'
-    encodecluster_name_col: str = 'ENCODE_name'
-    # Its singlemulticluster (C5; pipeline_encode_composite.py): name and filter flag (True: in none) at every level below,
-    # number at the ENCODE clusters (C4); MCID, simple name and why it has none in the membership of the ENCODE clusters
-    singlemulticluster_name_col: str = 'singlemulticluster_name'
-    singlemulticluster_flag_col: str = 'singlemulticluster_flag_remove'
-    singlemulticluster_cluster_col: str = 'singlemulticluster_cluster'
-    singlemulticluster_mcid_col: str = 'singlemulticluster_MCID'
-    singlemulticluster_simple_name_col: str = 'singlemulticluster_simple_name'
-    singlemulticluster_flag_type_col: str = 'singlemulticluster_flag_type'
+    contribcluster_name_col: str = 'contribcluster_name'
+    modelcluster_name_col: str = 'modelcluster_name'
+    crosscluster_name_col: str = 'crosscluster_name'
+    # Its encodecluster (C5; pipeline_encode_composite.py): name and filter flag (True: in none) at every level below,
+    # number at the crossclusters (C4); MCID, simple name and why it has none in the membership of the crossclusters
+    encodecluster_name_col: str = 'encodecluster_name'
+    encodecluster_flag_col: str = 'encodecluster_flag_remove'
+    encodecluster_cluster_col: str = 'encodecluster_cluster'
+    encodecluster_mcid_col: str = 'encodecluster_MCID'
+    encodecluster_simple_name_col: str = 'encodecluster_simple_name'
+    encodecluster_flag_type_col: str = 'encodecluster_flag_type'
     atlas_col: str = 'atlas'
     sort_col: str = 'sort'
 
@@ -887,9 +887,9 @@ class Encode_VisualizeArgs:
         Encode_FilterArgs.filter_flag_col,
         Encode_FilterArgs.filter_flag_type_col,
         Encode_VisualizeArgs.cluster_name_col,
-        Encode_VisualizeArgs.metacluster_name_col,
-        Encode_VisualizeArgs.atlascluster_name_col,
-        Encode_VisualizeArgs.encodecluster_name_col,
+        Encode_VisualizeArgs.contribcluster_name_col,
+        Encode_VisualizeArgs.modelcluster_name_col,
+        Encode_VisualizeArgs.crosscluster_name_col,
         Encode_MetadataCols.simple_name_col,
     ])
 
@@ -1032,10 +1032,10 @@ class EncodeCombineArgs:
         ('_all', None),
     ])
 
-    # Level suffixes: combined (atlasclusters), and per head
-    suffix_atlascluster: str = '_atlascluster'
-    suffix_singlemulticluster: str = '_singlemulticluster'  # The singlemulticluster level (C5), in <run>/single_multi
-    suffix_metacluster: str = '_metacluster'
+    # Level suffixes: combined (modelclusters), and per head
+    suffix_modelcluster: str = '_modelcluster'
+    suffix_encodecluster: str = '_encodecluster'  # The encodecluster level (C5), in <run>/encode
+    suffix_contribcluster: str = '_contribcluster'
     suffix_cluster: str = '_cluster'
     suffix_motif: str = '_motif'
 
@@ -1051,7 +1051,7 @@ class EncodeCombineArgs:
     ])
 
 ## COMPOSITE MOTIFS ------------------------------------------------------------------------------------------
-# Composite motifs of the ENCODE clusters (composite/identify_composite_motifs.ipynb): the modified Smith-Waterman
+# Composite motifs of the crossclusters (composite/identify_composite_motifs.ipynb): the modified Smith-Waterman
 # decomposition into reference monomers (pipeline_encode.py), ISM cooperativity (pipeline_encode_composite_ism.py),
 # and the merge of duplicate and soft / no-synergy composites into the final ENCODE MotifCompendium
 # (pipeline_encode_composite.py).
@@ -1185,13 +1185,13 @@ class Encode_CompositeArgs:
     soft_nosynergy_merge_cluster_col: str = 'soft_nosynergy_merge_cluster'
     soft_nosynergy_num_members_col: str = 'num_soft_nosynergy_members'
 
-    # Final ENCODE MotifCompendium (C5): the singles and the merged composites. ENCODE clusters left out of it
+    # Final ENCODE MotifCompendium (C5): the singles and the merged composites. Crossclusters left out of it
     # are removed, with these flag types: the no-synergy composites, and the composites without subunits.
-    mcid_level: str = "C5.single_multi.TF_Chrom_ProCap.counts_profile"
-    # The singlemulticluster level (C5), in <run>/<composite_dir_name>: as a clustering, each singlemulticluster has a
-    # number (its source_cluster: 0, 1, ...), each ENCODE cluster (C4) the number of its singlemulticluster; every level
-    # below its singlemulticluster's name and filter flag (VisualizeArgs.singlemulticluster_*_col)
-    composite_dir_name: str = "single_multi"
+    mcid_level: str = "C5.encode.TF_Chrom_ProCap.counts_profile"
+    # The encodecluster level (C5), in <run>/<composite_dir_name>: as a clustering, each encodecluster has a
+    # number (its source_cluster: 0, 1, ...), each crosscluster (C4) the number of its encodecluster; every level
+    # below its encodecluster's name and filter flag (VisualizeArgs.encodecluster_*_col)
+    composite_dir_name: str = "encode"
     flag_type_no_synergy: str = 'no-synergy'
     flag_type_unannotated: str = 'composite-unannotated'
 

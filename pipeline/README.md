@@ -72,7 +72,7 @@ memory pressure, but it does not repair malformed inputs.
 The basic pipeline is the recommended entry point for a new motif collection.
 It builds or loads a MotifCompendium, optionally merges metadata and reference
 labels, filters motifs, clusters them, computes cluster averages, optionally
-creates meta-clusters and sub-clusters, and exports metadata.
+creates contribclusters and sub-clusters, and exports metadata.
 
 ### Minimal examples
 
@@ -171,7 +171,7 @@ python pipeline/basic/pipeline.py \
   --quality
 ```
 
-- `--sim-threshold-meta` groups primary clusters into broader meta-clusters.
+- `--sim-threshold-meta` groups primary clusters into broader contribclusters.
 - `--sim-threshold-sub` subdivides motifs within each primary cluster.
 - `--sim-threshold-force` repeatedly applies dense connected-components
   clustering to enforce the requested separation.
@@ -211,12 +211,12 @@ The `.mc` objects are saved in `mc/`, for example:
 - `mc/motifcompendium_filtered.mc` and `mc/motifcompendium_removed.mc`: retained
   and rejected motifs, when filtering is enabled.
 - `mc/motifcompendium_cluster_filtered.mc`: retained cluster averages.
-- `mc/motifcompendium_metacluster_filtered.mc` and
+- `mc/motifcompendium_contribcluster_filtered.mc` and
   `mc/motifcompendium_subcluster_filtered.mc`: optional hierarchy levels.
 - `mc/motifcompendium_clustered.mc` (`--save-clustered`): motifs with final
   cluster assignments. Not saved by default; the assignments are also in
   `export/motifcompendium_metadata.tsv`.
-- `mc/motifcompendium_labeled.mc`, `mc/motifcompendium_{cluster,metacluster,subcluster}_labeled.mc`
+- `mc/motifcompendium_labeled.mc`, `mc/motifcompendium_{cluster,contribcluster,subcluster}_labeled.mc`
   (`--save-labeled`): reference matches before filtering, when a reference is
   given. Not saved by default.
 - `html/`: requested interactive tables and motif collections.
@@ -293,7 +293,7 @@ The main products are
 `mc/motifcompendium_motif_invitro.mc`, and
 `mc/motifcompendium_cluster_invitro.mc`, with matching HDF5, MEME, and metadata
 exports. Pass `--save-all` to retain additional non-in-vitro, removed,
-all-cluster, and meta-cluster intermediate objects and exports.
+all-cluster, and contribcluster intermediate objects and exports.
 
 ## 3. ENCODE pipeline
 
@@ -306,8 +306,8 @@ TF counts ─┐
            ├─ TF atlas ─────────┐
 TF profile ┘                    │
 Chromatin counts ─┐             ├─ ENCODE combine ─ composite ISM ─ composite ─────── propagate ─ hits
-                  ├─ Chromatin ─┤   (+ composites)    (per model)    (singlemulti-   (the levels  (by single-
-Chromatin profile ┘   atlas     │                                    cluster, C5)    below C5)    multicluster)
+                  ├─ Chromatin ─┤   (+ composites)    (per model)    (encode-        (the levels  (by encode-
+Chromatin profile ┘   atlas     │                                    cluster, C5)    below C5)    cluster)
 ProCap counts ─┐                │
                ├─ ProCap atlas ─┘
 ProCap profile ┘
@@ -351,9 +351,9 @@ OUTPUT/
 │   ├── counts/
 │   ├── profile/
 │   └── combined/
-├── encode/       (ENCODE clusters, C4: compendium, motif index)
-└── single_multi/ (composites, their ISM runs in ism/, the merged composites; the
-                   singlemulticluster level, C5, its motif index and the hits)
+├── cross/        (crossclusters, C4: compendium, motif index)
+└── encode/       (composites, their ISM runs in ism/, the merged composites; the
+                   encodecluster level, C5, its motif index and the hits)
 ```
 
 The combine stages load their upstream products from these exact locations.
@@ -363,11 +363,11 @@ must already exist under the same output root.
 
 Each clustering stage also updates the levels below it (its constituents), over the
 files there: an atlas combine stage adds its atlas-cluster names to the per-head
-`motifcompendium_*_all.mc` (and writes the atlascluster motif index); the ENCODE
-combine its ENCODE-cluster names, final filter flags and confidence to every atlas
+`motifcompendium_*_all.mc` (and writes the modelcluster motif index); the ENCODE
+combine its crosscluster names, final filter flags and confidence to every atlas
 level (`motifcompendium_{level}_{filtered,removed,all}.mc`, with their MEME, HTML
-and metadata TSV) and the motif indexes; the composite stage its singlemulticlusters
-to the ENCODE clusters, every atlas level and the motif indexes. Each script's
+and metadata TSV) and the motif indexes; the composite stage its encodeclusters
+to the crossclusters, every atlas level and the motif indexes. Each script's
 `--update-constituents` sets when: `now` (default, the stage itself), `defer` (not: the
 levels below stay as they were made) or `only` (that update alone, from the stage's
 saved outputs, nothing else run). The ENCODE pipeline defers them all (C3 and C4
@@ -378,25 +378,25 @@ with the last one's. After that, the atlas's own selection is gone, so the combi
 stages refuse to rerun on it: rerun the atlas first.
 
 Each level saves only `mc/motifcompendium_{level}_{all,filtered}.mc`
-(`{level}`: `motif`, `cluster`, `metacluster`, `atlascluster`, `encode`), plus
-`motifcompendium_metacluster_combined.mc` (atlas combine),
-`motifcompendium_atlascluster_combined.mc` (ENCODE combine) and
+(`{level}`: `motif`, `cluster`, `contribcluster`, `modelcluster`, `crosscluster`), plus
+`motifcompendium_contribcluster_combined.mc` (atlas combine),
+`motifcompendium_modelcluster_combined.mc` (ENCODE combine) and
 `motifcompendium_motif_init.mc` (head stages). Its removed clusters
 (`motifcompendium_{level}_removed`: `.mc`, HTML, MEME, metadata TSV, MoDISco H5)
 are saved only with `--save-all` (every script of the ENCODE pipeline has it; the
 encode/src launchers pass it); the later stages read the `_all` and `_filtered`
-ones. The singlemulticluster level (C5) is one compendium,
-`single_multi/mc/motifcompendium_singlemulticluster.mc`: nothing is removed there.
+ones. The encodecluster level (C5) is one compendium,
+`encode/mc/motifcompendium_encode.mc`: nothing is removed there.
 
 Each stage writes some combination of `mc/`, `html/`, `export/`, `metadata/`,
 and `logs/`. Every stage records arguments/configuration in
 `metadata/args.json`. Principal hierarchy files include:
 
 - Head stages: `mc/motifcompendium_motif_all.mc`,
-  `motifcompendium_cluster_all.mc`, and `motifcompendium_metacluster_all.mc`.
-- Atlas combine stages: `mc/motifcompendium_atlascluster_all.mc` and filtered
+  `motifcompendium_cluster_all.mc`, and `motifcompendium_contribcluster_all.mc`.
+- Atlas combine stages: `mc/motifcompendium_modelcluster_all.mc` and filtered
   and removed variants.
-- ENCODE combine: `mc/motifcompendium_encode_all.mc` and filtered and removed
+- ENCODE combine: `mc/motifcompendium_crosscluster_all.mc` and filtered and removed
   variants.
 
 ### Shared references
@@ -477,19 +477,19 @@ namespace.
 
 Each is also a script of its own, with the atlases' output roots as
 `--tfatlas-dir`, `--chromatlas-dir`, `--procapatlas-dir`, the ENCODE stage's
-directory as `--output-dir` and the composites' and singlemulticluster
-level's as `--composite-dir` (default: `single_multi/`, next to `--output-dir`):
+directory as `--output-dir` and the composites' and encodecluster
+level's as `--composite-dir` (default: `encode/`, next to `--output-dir`):
 
-10. `encode-combine` (`pipeline_encode.py`): force-clusters the atlasclusters
-    into ENCODE clusters, annotates and filters them, and decomposes the filtered
+10. `encode-combine` (`pipeline_encode.py`): force-clusters the modelclusters
+    into crossclusters, annotates and filters them, and decomposes the filtered
     ones into reference monomers (modified Smith-Waterman), before exporting
     them (and, at `encode-propagate`, to every level below). The composites and their subunits are written to
-    `single_multi/` (`export/ENCODE-motifcompendium_composite_metadata{,_model}.tsv`,
-    `mc/ENCODE-motifcompendium_composite.mc`). `--all-paths-tsv` (optional)
+    `encode/` (`export/motifcompendium_encode_composite_metadata{,_model}.tsv`,
+    `mc/motifcompendium_encode_composite.mc`). `--all-paths-tsv` (optional)
     adds each model's model, assay and atlas to the per-model table. Its
     update of every level below writes, over the atlas pipelines' files, each
     level's compendia (all, filtered, removed: `.mc`, metadata TSV, MEME, HTML)
-    and the motif indexes, with their ENCODE clusters.
+    and the motif indexes, with their crossclusters.
 11. `encode-composite-ism` (`pipeline_encode_composite_ism.py`): ISM
     cooperativity of every composite in every model it was found in. It needs
     torch, bpnetlite and tangermeme, so `pipeline_encode_full.py` runs it as a
@@ -501,32 +501,32 @@ level's as `--composite-dir` (default: `single_multi/`, next to `--output-dir`):
     composites by cooperativity (hard, soft, no synergy), merges the duplicate
     ones and the soft and no-synergy ones of the same reference clusters,
     removes the no-synergy ones, and combines the rest with the singles: the
-    singlemulticluster level (C5), written like an ENCODE level to
-    `single_multi/` (`motifcompendium_singlemulticluster`: `.mc`, HTML, metadata
-    TSV, MEME; nothing is removed at this level: the ENCODE clusters in no
-    singlemulticluster are the combine's removed ones and the composites left
-    out). As a clustering, each singlemulticluster has a number
-    (`source_cluster`) and a C5 MCID, and each ENCODE cluster of
-    `encode-combine` its singlemulticluster, or why it has none
-    (`single_multi/metadata/motifcompendium_singlemulticluster_membership.tsv`:
-    the ENCODE cluster's `MCID`, `name`, `source_cluster`, its
-    singlemulticluster's `singlemulticluster_{cluster,MCID,name,simple_name}`,
-    `singlemulticluster_flag_remove` and `singlemulticluster_flag_type`);
+    encodecluster level (C5), written like a crosscluster level to
+    `encode/` (`motifcompendium_encode`: `.mc`, HTML, metadata
+    TSV, MEME; nothing is removed at this level: the crossclusters in no
+    encodecluster are the combine's removed ones and the composites left
+    out). As a clustering, each encodecluster has a number
+    (`source_cluster`) and a C5 MCID, and each crosscluster of
+    `encode-combine` its encodecluster, or why it has none
+    (`encode/metadata/motifcompendium_encode_membership.tsv`:
+    the crosscluster's `MCID`, `name`, `source_cluster`, its
+    encodecluster's `encodecluster_{cluster,MCID,name,simple_name}`,
+    `encodecluster_flag_remove` and `encodecluster_flag_type`);
     they are named as `encode-combine` names its own (`{prename}_{counter}`).
     As at the other levels, a column about another level is named after it
-    (`atlascluster_name`, `ENCODE_name`, `singlemulticluster_*`).
-    Its HTML reports (`single_multi/html/ENCODE-motifcompendium_composite_ism*.html`)
+    (`modelcluster_name`, `crosscluster_name`, `encodecluster_*`).
+    Its HTML reports (`encode/html/motifcompendium_encode_composite_ism*.html`)
     are always written; the ISM evidence
-    (`mc/ENCODE-motifcompendium_composite_ism_motifs{_init,}.mc`, its metadata
-    TSVs) and the classified composites (`mc/ENCODE-motifcompendium_composite_ism.mc`)
+    (`mc/motifcompendium_encode_composite_ism_motifs{_init,}.mc`, its metadata
+    TSVs) and the classified composites (`mc/motifcompendium_encode_composite_ism.mc`)
     only with `--save-all`.
     Its update of the levels below keeps their names, MCIDs and flags and adds
-    columns: the ENCODE clusters `singlemulticluster_cluster`,
-    `singlemulticluster_name` and `singlemulticluster_flag_remove`; every atlas
-    level and the motif indexes `singlemulticluster_name` and
-    `singlemulticluster_flag_remove`; then the level's motif index (the hits':
-    each motif's `singlemulticluster_name`, with its ENCODE cluster's
-    `ENCODE_name`, and the singlemulticluster's flag, confidence, simple name
+    columns: the crossclusters `encodecluster_cluster`,
+    `encodecluster_name` and `encodecluster_flag_remove`; every atlas
+    level and the motif indexes `encodecluster_name` and
+    `encodecluster_flag_remove`; then the level's motif index (the hits':
+    each motif's `encodecluster_name`, with its crosscluster's
+    `crosscluster_name`, and the encodecluster's flag, confidence, simple name
     and category).
     It can be rerun on the same `encode-combine` outputs.
 13. `encode-propagate`: the levels below C5, once it is checked (`--stages ...
@@ -534,9 +534,9 @@ level's as `--composite-dir` (default: `single_multi/`, next to `--output-dir`):
     pipeline's, `pipeline_encode.py`'s and `pipeline_encode_composite.py`'s
     `--update-constituents only`, in that order.
 14. `encode-hits` (`pipeline_encode_hits.py`): indexes each experiment's FiNeMo
-    hits with the singlemulticlusters (`--level singlemulticluster`, the
-    default; `--level encode`: the ENCODE clusters) and annotates them, in
-    `single_multi/export/` (needs an indexed hg38 FASTA, `--hg38-fasta`, and a
+    hits with the encodeclusters (`--level encodecluster`, the
+    default; `--level crosscluster`: the crossclusters) and annotates them, in
+    `encode/export/` (needs an indexed hg38 FASTA, `--hg38-fasta`, and a
     GENCODE GTF, `--gencode-gtf`).
 
 ## Reproducibility and troubleshooting

@@ -9,25 +9,25 @@ composite/validate_composite_motifs.ipynb (after the ISM runs):
 
   1. ISM: each composite's ISM contributions and results, per model, compared with the composite (similarity,
      spacing); each (composite, model) classified as hard, soft, hard & soft or no synergy, and each composite by its
-     strongest evidence across models. <composite-dir>/html/ENCODE-motifcompendium_composite_ism*.html; with
-     --save-all also the ISM evidence (mc/ENCODE-motifcompendium_composite_ism_motifs{_init,}.mc, its metadata TSVs in
-     export/) and the classified composites (mc/ENCODE-motifcompendium_composite_ism.mc)
+     strongest evidence across models. <composite-dir>/html/motifcompendium_encode_composite_ism*.html; with
+     --save-all also the ISM evidence (mc/motifcompendium_encode_composite_ism_motifs{_init,}.mc, its metadata TSVs in
+     export/) and the classified composites (mc/motifcompendium_encode_composite_ism.mc)
   2. Merge: duplicate composites (centroids, until no pair is similar enough), then the soft and no-synergy composites
      of the same reference clusters; the merged ones reannotated; the no-synergy composites removed.
-  3. The singlemulticluster level (C5): the singles and the merged composites. Nothing is removed at this level: the
-     ENCODE clusters of pipeline_encode.py (C4) in no singlemulticluster are its removed ones and the composites left
-     out (no synergy; no subunits). As a clustering, each singlemulticluster has a number (source_cluster) and a C5
-     MCID, and each C4 ENCODE cluster its singlemulticluster's number, or why it has none
-     (<composite-dir>/metadata/motifcompendium_singlemulticluster_membership.tsv); the singlemulticlusters are named as
-     pipeline_encode.py names its ENCODE clusters ({prename}_{counter}).
-  4. Exported as an ENCODE level, in <composite-dir> (motifcompendium_singlemulticluster: .mc, HTML, metadata TSV, MEME;
+  3. The encodecluster level (C5): the singles and the merged composites. Nothing is removed at this level: the
+     crossclusters of pipeline_encode.py (C4) in no encodecluster are its removed ones and the composites left
+     out (no synergy; no subunits). As a clustering, each encodecluster has a number (source_cluster) and a C5
+     MCID, and each C4 crosscluster its encodecluster's number, or why it has none
+     (<composite-dir>/metadata/motifcompendium_encode_membership.tsv); the encodeclusters are named as
+     pipeline_encode.py names its crossclusters ({prename}_{counter}).
+  4. Exported as a crosscluster level, in <composite-dir> (motifcompendium_encode: .mc, HTML, metadata TSV, MEME;
      the membership), and (--update-constituents now; defer: later, --update-constituents only) added to the levels
-     below, which keep their own names and flags: the ENCODE clusters (C4) get their singlemulticluster's number, name
+     below, which keep their own names and flags: the crossclusters (C4) get their encodecluster's number, name
      and filter flag; every atlas level and the motif indexes its name and filter flag; then the motif index of the
-     level. Then pipeline_encode_hits.py --level singlemulticluster.
+     level. Then pipeline_encode_hits.py --level encodecluster.
 
 This stage does not change the ENCODE stage's (pipeline_encode.py) names, MCIDs or flags: it can be rerun on its outputs
-(the singlemulticluster columns it added are replaced).
+(the encodecluster columns it added are replaced).
 """
 import os
 import sys
@@ -79,10 +79,10 @@ def setup_parser():
                         help="Directory of the composites and their ISM runs (default: 'composite', next to --output-dir).")
     parser.add_argument("--mcid-version", type=str, default="V0", help="ENCODE MCID version.")
     parser.add_argument("--update-constituents", choices=["now", "defer", "only"], default="now",
-                        help="This stage's update of the levels below its own (the ENCODE clusters, every atlas level and the motif indexes: their singlemulticluster; the level's motif index). now: by this stage; defer: not (they stay as they were, e.g. until the last level is made: run_pipeline_encode_propagate.sh); only: that update alone, from this stage's saved outputs (nothing else is run).")
+                        help="This stage's update of the levels below its own (the crossclusters, every atlas level and the motif indexes: their encodecluster; the level's motif index). now: by this stage; defer: not (they stay as they were, e.g. until the last level is made: run_pipeline_encode_propagate.sh); only: that update alone, from this stage's saved outputs (nothing else is run).")
     parser.add_argument("--save-all", action="store_true",
-                        help="Also save the ISM evidence (ENCODE-motifcompendium_composite_ism_motifs{_init,}.mc, its "
-                             "metadata TSVs) and the classified composites (ENCODE-motifcompendium_composite_ism.mc).")
+                        help="Also save the ISM evidence (motifcompendium_encode_composite_ism_motifs{_init,}.mc, its "
+                             "metadata TSVs) and the classified composites (motifcompendium_encode_composite_ism.mc).")
     parser.add_argument("--tfatlas-dir", type=str, required=True,
                         help="Output root of the TF atlas pipeline (pipeline/bpnet/pipeline_bpnet.py).")
     parser.add_argument("--chromatlas-dir", type=str, required=True,
@@ -156,113 +156,113 @@ def align_columns(mcs):
                 mc.set_images(image_name=image_col, images=[None] * len(mc))
 
 
-def final_encode_compendium(mc_encode, mc_encode_c4_filtered, mc_encode_c4_removed, mc_encode_composite_nosynergy,
+def final_encode_compendium(mc_encode, mc_crosscluster_filtered, mc_crosscluster_removed, mc_encode_composite_nosynergy,
                             mcid_prefix, safe):
     """
-    The singlemulticluster level (C5): the C5 clusters of mc_encode (the singles and the merged composites), numbered as
+    The encodecluster level (C5): the C5 clusters of mc_encode (the singles and the merged composites), numbered as
     a clustering (source_cluster 0..N-1, in mc_encode's order), with C5 MCIDs (mcid_prefix + number), named as the
-    combine names its ENCODE clusters ({prename}_{counter}; simple name: prename). Nothing is removed at this level: the
-    ENCODE clusters of the combine (C4) in no singlemulticluster are its removed ones (mc_encode_c4_removed) and its
+    combine names its crossclusters ({prename}_{counter}; simple name: prename). Nothing is removed at this level: the
+    crossclusters of the combine (C4) in no encodecluster are its removed ones (mc_crosscluster_removed) and its
     filtered ones left out of C5 (the no-synergy composites, else the composites without subunits). A C5 composite
     holds the C4 composites merged into it (their MCIDs: CompositeArgs.duplicate_members_col); a C5 single is its own
-    C4 one. The singlemulticluster columns of an earlier run on the C4 compendia are dropped first.
+    C4 one. The encodecluster columns of an earlier run on the C4 compendia are dropped first.
 
     Returns:
-        (mc_singlemulticluster (mc_encode, numbered and named), membership (one row per C4 ENCODE cluster: its MCID,
-         name and source_cluster, and its singlemulticluster's (VisualizeArgs.singlemulticluster_*_col) number, MCID,
+        (mc_encodecluster (mc_encode, numbered and named), membership (one row per C4 crosscluster: its MCID,
+         name and source_cluster, and its encodecluster's (VisualizeArgs.encodecluster_*_col) number, MCID,
          name and simple name, or none: flag True, flag type the combine's for its removed ones, no-synergy or
-         composite-unannotated for those left out), ENCODE clusters left out of C5, by flag type)
+         composite-unannotated for those left out), crossclusters left out of C5, by flag type)
     """
     id_col, name_col = MetadataCols.unique_id_col, MetadataCols.name_col
     flag_col, flag_type_col = FilterArgs.filter_flag_col, FilterArgs.filter_flag_type_col
     members_col = CompositeArgs.duplicate_members_col
-    singlemulticluster_cluster_col = VisualizeArgs.singlemulticluster_cluster_col
-    for mc_i in (mc_encode, mc_encode_c4_filtered, mc_encode_c4_removed):
-        mc_i.metadata.drop(columns=[singlemulticluster_cluster_col, VisualizeArgs.singlemulticluster_name_col,
-                                    VisualizeArgs.singlemulticluster_flag_col], errors="ignore", inplace=True)
+    encodecluster_cluster_col = VisualizeArgs.encodecluster_cluster_col
+    for mc_i in (mc_encode, mc_crosscluster_filtered, mc_crosscluster_removed):
+        mc_i.metadata.drop(columns=[encodecluster_cluster_col, VisualizeArgs.encodecluster_name_col,
+                                    VisualizeArgs.encodecluster_flag_col], errors="ignore", inplace=True)
 
-    # C4 ENCODE clusters of each C5 one: a composite's are its members' MCIDs; a single is its own C4 ENCODE cluster,
+    # C4 crossclusters of each C5 one: a composite's are its members' MCIDs; a single is its own C4 crosscluster,
     # found by its name (its MCID is the C5 one by now)
-    encode_filtered_ids = mc_encode_c4_filtered[id_col].astype(str)
-    encode_id_by_name = dict(zip(mc_encode_c4_filtered[name_col].astype(str), encode_filtered_ids))
+    crosscluster_filtered_ids = mc_crosscluster_filtered[id_col].astype(str)
+    crosscluster_id_by_name = dict(zip(mc_crosscluster_filtered[name_col].astype(str), crosscluster_filtered_ids))
     members_values = mc_encode[members_col] if members_col in mc_encode.columns() else pd.Series([None] * len(mc_encode))
-    singlemulticluster_row_by_encode_id = {}
-    in_two = []  # (C4 ENCODE cluster, its first C5 row, its second)
+    encodecluster_row_by_crosscluster_id = {}
+    in_two = []  # (C4 crosscluster, its first C5 row, its second)
     for row, (name, members) in enumerate(zip(mc_encode[name_col].astype(str), members_values)):
         if pd.notna(members) and str(members).strip():
-            encode_ids = [encode_id.strip() for encode_id in str(members).split(",") if encode_id.strip()]
-        elif name in encode_id_by_name:
-            encode_ids = [encode_id_by_name[name]]
+            crosscluster_ids = [crosscluster_id.strip() for crosscluster_id in str(members).split(",") if crosscluster_id.strip()]
+        elif name in crosscluster_id_by_name:
+            crosscluster_ids = [crosscluster_id_by_name[name]]
         else:
-            raise ValueError(f"C5 single {name} (row {row}) is not a filtered ENCODE cluster of the combine")
-        for encode_id in encode_ids:
-            if encode_id in singlemulticluster_row_by_encode_id:
-                in_two.append((encode_id, singlemulticluster_row_by_encode_id[encode_id], row))
-            singlemulticluster_row_by_encode_id[encode_id] = row
+            raise ValueError(f"C5 single {name} (row {row}) is not a filtered crosscluster of the combine")
+        for crosscluster_id in crosscluster_ids:
+            if crosscluster_id in encodecluster_row_by_crosscluster_id:
+                in_two.append((crosscluster_id, encodecluster_row_by_crosscluster_id[crosscluster_id], row))
+            encodecluster_row_by_crosscluster_id[crosscluster_id] = row
     if in_two:
-        encode_id, row_a, row_b = in_two[0]
-        singlemulticluster_names = mc_encode[name_col].astype(str).to_numpy()
+        crosscluster_id, row_a, row_b = in_two[0]
+        encodecluster_names = mc_encode[name_col].astype(str).to_numpy()
         raise ValueError(
-            f"{len(in_two)} ENCODE clusters of the combine are in two C5 ENCODE clusters, e.g. {encode_id}: rows {row_a} "
-            f"({singlemulticluster_names[row_a]}) and {row_b} ({singlemulticluster_names[row_b]}). The C5 singles and "
-            "composites must come from the same composites (the singles: the filtered ENCODE clusters outside the "
+            f"{len(in_two)} crossclusters of the combine are in two C5 crossclusters, e.g. {crosscluster_id}: rows {row_a} "
+            f"({encodecluster_names[row_a]}) and {row_b} ({encodecluster_names[row_b]}). The C5 singles and "
+            "composites must come from the same composites (the singles: the filtered crossclusters outside the "
             "composites of the ISM analysis)."
         )
-    not_filtered = set(singlemulticluster_row_by_encode_id) - set(encode_filtered_ids)
+    not_filtered = set(encodecluster_row_by_crosscluster_id) - set(crosscluster_filtered_ids)
     if not_filtered:
-        raise ValueError(f"C5 members that are not filtered ENCODE clusters of the combine: {sorted(not_filtered)[:5]}")
+        raise ValueError(f"C5 members that are not filtered crossclusters of the combine: {sorted(not_filtered)[:5]}")
 
     # Left out of C5: the no-synergy composites, else the composites without subunits
-    nosynergy_encode_ids = {
-        encode_id.strip()
+    nosynergy_crosscluster_ids = {
+        crosscluster_id.strip()
         for members in mc_encode_composite_nosynergy[members_col].dropna().astype(str)
-        for encode_id in members.split(",") if encode_id.strip()
+        for crosscluster_id in members.split(",") if crosscluster_id.strip()
     } if members_col in mc_encode_composite_nosynergy.columns() else set()
-    left_out_ids = encode_filtered_ids[~encode_filtered_ids.isin(singlemulticluster_row_by_encode_id)]
+    left_out_ids = crosscluster_filtered_ids[~crosscluster_filtered_ids.isin(encodecluster_row_by_crosscluster_id)]
     left_out_type = dict(zip(left_out_ids, np.where(
-        left_out_ids.isin(nosynergy_encode_ids), CompositeArgs.flag_type_no_synergy, CompositeArgs.flag_type_unannotated)))
+        left_out_ids.isin(nosynergy_crosscluster_ids), CompositeArgs.flag_type_no_synergy, CompositeArgs.flag_type_unannotated)))
     num_left_out = {str(k): int(n) for k, n in pd.Series(list(left_out_type.values()), dtype=object).value_counts().items()}
     logging.info(f"Left out of C5: {num_left_out}")
 
-    # As a clustering: the singlemulticlusters' numbers (source_cluster) and C5 MCIDs
+    # As a clustering: the encodeclusters' numbers (source_cluster) and C5 MCIDs
     mc_encode[flag_col] = False
     numbers = np.arange(len(mc_encode))
     mc_encode[ClusterArgs.source_cluster_col] = numbers
     mc_encode[id_col] = [f"{mcid_prefix}{number:08d}" for number in numbers]
 
-    # Names: as the combine names its ENCODE clusters (pipeline_encode.py, "Rename: {prename_col}_{counter}")
+    # Names: as the combine names its crossclusters (pipeline_encode.py, "Rename: {prename_col}_{counter}")
     mc_encode.metadata[MetadataCols.counter_col] = mc_encode.metadata.dropna(subset=[MetadataCols.prename_col]).groupby(MetadataCols.prename_col).cumcount().fillna(0).astype(int)
     mc_encode.metadata[MetadataCols.name_new_col] = mc_encode.metadata[MetadataCols.prename_col] + "_" + mc_encode.metadata[MetadataCols.counter_col].astype(str)
     mc_encode.metadata[name_col] = mc_encode.metadata[MetadataCols.name_new_col]
     mc_encode.metadata.drop(columns=[MetadataCols.name_new_col, MetadataCols.counter_col], axis=1, inplace=True)
     mc_encode[MetadataCols.simple_name_col] = mc_encode[MetadataCols.prename_col]
     if mc_encode[name_col].isna().any() or not mc_encode[name_col].is_unique:
-        raise ValueError("Singlemulticluster names are missing or not unique (prename)")
-    logging.info(f"Singlemulticluster level: {len(mc_encode)} singlemulticlusters")
+        raise ValueError("Encodecluster names are missing or not unique (prename)")
+    logging.info(f"Encodecluster level: {len(mc_encode)} encodeclusters")
 
-    # Membership table: each C4 ENCODE cluster (its MCID, name, source_cluster), with its singlemulticluster
-    # (singlemulticluster_*), or why it has none
-    encode_all = pd.concat([
-        mc_encode_c4_filtered.metadata[[id_col, name_col, ClusterArgs.source_cluster_col]].assign(**{flag_type_col: None}),
-        mc_encode_c4_removed.metadata[[id_col, name_col, ClusterArgs.source_cluster_col, flag_type_col]],
+    # Membership table: each C4 crosscluster (its MCID, name, source_cluster), with its encodecluster
+    # (encodecluster_*), or why it has none
+    crosscluster_all = pd.concat([
+        mc_crosscluster_filtered.metadata[[id_col, name_col, ClusterArgs.source_cluster_col]].assign(**{flag_type_col: None}),
+        mc_crosscluster_removed.metadata[[id_col, name_col, ClusterArgs.source_cluster_col, flag_type_col]],
     ], ignore_index=True)
-    encode_ids = encode_all[id_col].astype(str)
-    singlemulticluster_numbers = pd.array([singlemulticluster_row_by_encode_id.get(encode_id) for encode_id in encode_ids], dtype="Int64")
-    in_singlemulticluster = ~pd.isna(singlemulticluster_numbers)
-    singlemulticluster_md = mc_encode.metadata
-    take = lambda col: [singlemulticluster_md[col].iloc[int(n)] if pd.notna(n) else None for n in singlemulticluster_numbers]
+    crosscluster_ids = crosscluster_all[id_col].astype(str)
+    encodecluster_numbers = pd.array([encodecluster_row_by_crosscluster_id.get(crosscluster_id) for crosscluster_id in crosscluster_ids], dtype="Int64")
+    in_encodecluster = ~pd.isna(encodecluster_numbers)
+    encodecluster_md = mc_encode.metadata
+    take = lambda col: [encodecluster_md[col].iloc[int(n)] if pd.notna(n) else None for n in encodecluster_numbers]
     membership = pd.DataFrame({
-        id_col: encode_ids.to_numpy(),
-        name_col: encode_all[name_col].to_numpy(),
-        ClusterArgs.source_cluster_col: encode_all[ClusterArgs.source_cluster_col].to_numpy(),
-        singlemulticluster_cluster_col: singlemulticluster_numbers,
-        VisualizeArgs.singlemulticluster_mcid_col: take(id_col),
-        VisualizeArgs.singlemulticluster_name_col: take(name_col),
-        VisualizeArgs.singlemulticluster_simple_name_col: take(MetadataCols.simple_name_col),
-        VisualizeArgs.singlemulticluster_flag_col: ~in_singlemulticluster,
-        VisualizeArgs.singlemulticluster_flag_type_col: [
-            None if in_level else left_out_type.get(encode_id, flag_type)
-            for in_level, encode_id, flag_type in zip(in_singlemulticluster, encode_ids, encode_all[flag_type_col])],
+        id_col: crosscluster_ids.to_numpy(),
+        name_col: crosscluster_all[name_col].to_numpy(),
+        ClusterArgs.source_cluster_col: crosscluster_all[ClusterArgs.source_cluster_col].to_numpy(),
+        encodecluster_cluster_col: encodecluster_numbers,
+        VisualizeArgs.encodecluster_mcid_col: take(id_col),
+        VisualizeArgs.encodecluster_name_col: take(name_col),
+        VisualizeArgs.encodecluster_simple_name_col: take(MetadataCols.simple_name_col),
+        VisualizeArgs.encodecluster_flag_col: ~in_encodecluster,
+        VisualizeArgs.encodecluster_flag_type_col: [
+            None if in_level else left_out_type.get(crosscluster_id, flag_type)
+            for in_level, crosscluster_id, flag_type in zip(in_encodecluster, crosscluster_ids, crosscluster_all[flag_type_col])],
     })
     return mc_encode, membership, num_left_out
 
@@ -298,13 +298,13 @@ def run_encode_composite(args):
     )
 
     ### PATHS --------------------------------------------------------------------
-    paths = pipeline_encode.encode_paths(args)
+    paths = pipeline_encode.crosscluster_paths(args)
     cpaths = pipeline_encode.composite_paths(getattr(args, "composite_dir", None) or pipeline_encode.default_composite_dir(args.output_dir))
     logging.info(f"Composites: {cpaths.composite_dir}")
 
     ## Derived identifiers
     unique_id_initial = f'{MetadataCols.unique_id_col}.{args.mcid_version}'
-    encodecluster_cluster_col = pipeline_encode.encodecluster_cluster_col_name()
+    crosscluster_cluster_col = pipeline_encode.crosscluster_cluster_col_name()
 
     ## HTML column descriptions
     html_column_desc_df = pd.read_csv(args.column_desc_tsv, sep="\t", header=0)
@@ -312,19 +312,18 @@ def run_encode_composite(args):
 
     ### INPUTS -------------------------------------------------------------------
     # The ENCODE stage's compendium (C4): filtered (the singles and the composites, with their decomposition) and
-    # removed ENCODE clusters (from its _all compendium: the _removed one is saved with --save-all only)
+    # removed crossclusters (from its _all compendium: the _removed one is saved with --save-all only)
     logging.info("Loading the ENCODE compendia (pipeline_encode.py)...")
-    mc_encode = MotifCompendium.load(paths.mc_encode_filtered_path, safe=args.safe)
-    mc_encode_all = MotifCompendium.load(paths.mc_encode_path, safe=args.safe)
-    mc_encode_removed = mc_encode_all[mc_encode_all[FilterArgs.filter_flag_col].astype(bool).to_numpy()]
-    del mc_encode_all
-    if CompositeArgs.ism_class_col in mc_encode.columns():
+    mc_crosscluster = MotifCompendium.load(paths.mc_crosscluster_filtered_path, safe=args.safe)
+    mc_crosscluster_all = MotifCompendium.load(paths.mc_crosscluster_path, safe=args.safe)
+    mc_crosscluster_removed = mc_crosscluster_all[mc_crosscluster_all[FilterArgs.filter_flag_col].astype(bool).to_numpy()]
+    del mc_crosscluster_all
+    if CompositeArgs.ism_class_col in mc_crosscluster.columns():
         raise ValueError(
-            f"{paths.mc_encode_filtered_path} is already the final compendium of an earlier run of this stage "
+            f"{paths.mc_crosscluster_filtered_path} is already the final compendium of an earlier run of this stage "
             f"({CompositeArgs.ism_class_col}), not the ENCODE stage's: rerun pipeline_encode.py before this stage."
         )
-    mc_encode_c4_filtered = mc_encode
-    mc_encode_c4_removed = mc_encode_removed
+    mc_crosscluster_filtered = mc_crosscluster
 
     # References: without multimers, IC-scaled, with their reference cluster and its label
     logging.info("Loading reference motif databases...")
@@ -938,7 +937,7 @@ def run_encode_composite(args):
     mc_encode_composite[LabelCols.label_col] = MetadataCols.name_unknown
     # Preserve the inherited flank for direct-label rules; indirect labels are reassigned below.
 
-    ## [General] Label meta-clusters
+    ## [General] Label contribclusters
     utils_analysis.assign_label_from_other_compendium(
         assign_to_mc=mc_encode_composite,
         assign_from_mc=mc_ref_qc,
@@ -978,41 +977,41 @@ def run_encode_composite(args):
         mc_encode_composite[ref_readable_name_col] = mc_encode_composite[f'{ReferenceMatchCols.ref_col}_name{i}'].map(reference_name_map)
 
     # cateogory: Mask
-    mask_direct_encodecluster = mc_encode_composite[DirectTypeArgs.direct_type_col].str.contains("|".join(DirectTypeArgs.direct_types[:4]), na=False)
-    mask_nondirect_encodecluster = ~mask_direct_encodecluster
-    mask_monomer_encodecluster_nondirect = (
-        mask_nondirect_encodecluster
+    mask_direct_crosscluster = mc_encode_composite[DirectTypeArgs.direct_type_col].str.contains("|".join(DirectTypeArgs.direct_types[:4]), na=False)
+    mask_nondirect_crosscluster = ~mask_direct_crosscluster
+    mask_monomer_crosscluster_nondirect = (
+        mask_nondirect_crosscluster
         & (mc_encode_composite[f'{ReferenceMatchCols.ref_col}_score0'] > MotifMatchArgs.min_single_score)
         & ~(mc_encode_composite[f'{ReferenceMatchCols.ref_col}_score1'] > MotifMatchArgs.min_composite_score)
         & ~(mc_encode_composite[f'{ReferenceMatchCols.ref_col}_score2'] > MotifMatchArgs.min_composite_score)
     )
-    mask_dimer_encodecluster_nondirect = (
-        mask_nondirect_encodecluster
+    mask_dimer_crosscluster_nondirect = (
+        mask_nondirect_crosscluster
         & (mc_encode_composite[f'{ReferenceMatchCols.ref_col}_score0'] > MotifMatchArgs.min_composite_score)
         & (mc_encode_composite[f'{ReferenceMatchCols.ref_col}_score1'] > MotifMatchArgs.min_composite_score)
         & ~(mc_encode_composite[f'{ReferenceMatchCols.ref_col}_score2'] > MotifMatchArgs.min_composite_score)
     )
-    mask_trimer_encodecluster_nondirect = (
-        mask_nondirect_encodecluster
+    mask_trimer_crosscluster_nondirect = (
+        mask_nondirect_crosscluster
         & (mc_encode_composite[f'{ReferenceMatchCols.ref_col}_score0'] > MotifMatchArgs.min_composite_score)
         & (mc_encode_composite[f'{ReferenceMatchCols.ref_col}_score1'] > MotifMatchArgs.min_composite_score)
         & (mc_encode_composite[f'{ReferenceMatchCols.ref_col}_score2'] > MotifMatchArgs.min_composite_score)
     )
-    mask_multimer_encodecluster_nondirect = (
-        mask_dimer_encodecluster_nondirect | mask_trimer_encodecluster_nondirect
+    mask_multimer_crosscluster_nondirect = (
+        mask_dimer_crosscluster_nondirect | mask_trimer_crosscluster_nondirect
     )
-    mask_matched_atlascluster_nondirect = (
-        mask_monomer_encodecluster_nondirect | mask_dimer_encodecluster_nondirect | mask_trimer_encodecluster_nondirect
+    mask_matched_modelcluster_nondirect = (
+        mask_monomer_crosscluster_nondirect | mask_dimer_crosscluster_nondirect | mask_trimer_crosscluster_nondirect
     )
 
     # Dimer-style notation
-    mc_encode_composite.metadata.loc[mask_matched_atlascluster_nondirect, LabelCols.label_core_col] = mc_encode_composite.metadata.loc[mask_matched_atlascluster_nondirect, ref_readable_name_cols[0]]
-    mc_encode_composite.metadata.loc[mask_matched_atlascluster_nondirect, LabelCols.label_core_readable_col] = mc_encode_composite.metadata.loc[mask_matched_atlascluster_nondirect, ref_readable_name_cols[0]]
-    mc_encode_composite.metadata.loc[mask_dimer_encodecluster_nondirect, LabelCols.label_flank_col] = mc_encode_composite.metadata.loc[mask_dimer_encodecluster_nondirect, ref_readable_name_cols[1]]
-    if mask_trimer_encodecluster_nondirect.any():
-        mc_encode_composite.metadata.loc[mask_trimer_encodecluster_nondirect, LabelCols.label_flank_col] = mc_encode_composite.metadata.loc[mask_trimer_encodecluster_nondirect, ref_readable_name_cols[1]] + "::" + mc_encode_composite.metadata.loc[mask_trimer_encodecluster_nondirect, ref_readable_name_cols[2]]
-    # mc_encode_composite.metadata.loc[mask_dimer_encodecluster_nondirect, num_subunit_col] = 2
-    # mc_encode_composite.metadata.loc[mask_trimer_encodecluster_nondirect, num_subunit_col] = 3
+    mc_encode_composite.metadata.loc[mask_matched_modelcluster_nondirect, LabelCols.label_core_col] = mc_encode_composite.metadata.loc[mask_matched_modelcluster_nondirect, ref_readable_name_cols[0]]
+    mc_encode_composite.metadata.loc[mask_matched_modelcluster_nondirect, LabelCols.label_core_readable_col] = mc_encode_composite.metadata.loc[mask_matched_modelcluster_nondirect, ref_readable_name_cols[0]]
+    mc_encode_composite.metadata.loc[mask_dimer_crosscluster_nondirect, LabelCols.label_flank_col] = mc_encode_composite.metadata.loc[mask_dimer_crosscluster_nondirect, ref_readable_name_cols[1]]
+    if mask_trimer_crosscluster_nondirect.any():
+        mc_encode_composite.metadata.loc[mask_trimer_crosscluster_nondirect, LabelCols.label_flank_col] = mc_encode_composite.metadata.loc[mask_trimer_crosscluster_nondirect, ref_readable_name_cols[1]] + "::" + mc_encode_composite.metadata.loc[mask_trimer_crosscluster_nondirect, ref_readable_name_cols[2]]
+    # mc_encode_composite.metadata.loc[mask_dimer_crosscluster_nondirect, num_subunit_col] = 2
+    # mc_encode_composite.metadata.loc[mask_trimer_crosscluster_nondirect, num_subunit_col] = 3
     # mc_encode_composite.metadata[MetadataCols.composite_col] = mc_encode_composite.metadata[num_subunit_col] > min_composite_subunit
 
     # # Trimer-style notation
@@ -1630,28 +1629,28 @@ def run_encode_composite(args):
 
     # ### Re-combine all: ENCODE MotifCompendium (C5)
 
-    # mc_encode must be the ENCODE combine's filtered compendium (C4): once the final export has run, mc_encode_filtered_path
-    # holds the final one, which a new kernel loads as mc_encode (and C5 would be built from C5)
-    if CompositeArgs.ism_class_col in mc_encode.columns():
-        raise ValueError(f"mc_encode is already a final compendium (it has {CompositeArgs.ism_class_col}): rerun the ENCODE combine first.")
+    # mc_crosscluster must be the ENCODE combine's filtered compendium (C4): once the final export has run, mc_crosscluster_filtered_path
+    # holds the final one, which a new kernel loads as mc_crosscluster (and C5 would be built from C5)
+    if CompositeArgs.ism_class_col in mc_crosscluster.columns():
+        raise ValueError(f"mc_crosscluster is already a final compendium (it has {CompositeArgs.ism_class_col}): rerun the ENCODE combine first.")
 
-    # ENCODE: Single: the filtered ENCODE clusters outside the composites of the ISM analysis (cpaths.mc_composite_path, as
-    # loaded under "ISM Cooperativity"), whatever mc_encode's composite flags say: resumed after the ISM runs, mc_encode may
+    # ENCODE: Single: the filtered crossclusters outside the composites of the ISM analysis (cpaths.mc_composite_path, as
+    # loaded under "ISM Cooperativity"), whatever mc_crosscluster's composite flags say: resumed after the ISM runs, mc_crosscluster may
     # hold other flags than the MSW that selected the composites (e.g. an earlier ENCODE combine's, without the MSW). The
     # composites dropped as errors ("Drop: Errors": core or flank label "_...") stay out of C5.
     mc_encode_composite_ids = set(MotifCompendium.load(cpaths.mc_composite_path, safe=args.safe)[MetadataCols.unique_id_col].astype(str))
-    mc_encode_error = (mc_encode[MetadataCols.composite_col] == True) & (
-        mc_encode[LabelCols.label_core_col].astype(str).str.startswith("_") | mc_encode[LabelCols.label_flank_col].astype(str).str.startswith("_")
+    mc_crosscluster_error = (mc_crosscluster[MetadataCols.composite_col] == True) & (
+        mc_crosscluster[LabelCols.label_core_col].astype(str).str.startswith("_") | mc_crosscluster[LabelCols.label_flank_col].astype(str).str.startswith("_")
     )
-    mc_encode_single = mc_encode[~mc_encode[MetadataCols.unique_id_col].astype(str).isin(mc_encode_composite_ids) & ~mc_encode_error]
-    logging.info(f"C5 singles: {len(mc_encode_single)} of {len(mc_encode)} filtered ENCODE clusters "
-                 f"({len(mc_encode_composite_ids)} composites, {int(mc_encode_error.sum())} dropped as errors)")
+    mc_crosscluster_single = mc_crosscluster[~mc_crosscluster[MetadataCols.unique_id_col].astype(str).isin(mc_encode_composite_ids) & ~mc_crosscluster_error]
+    logging.info(f"C5 singles: {len(mc_crosscluster_single)} of {len(mc_crosscluster)} filtered crossclusters "
+                 f"({len(mc_encode_composite_ids)} composites, {int(mc_crosscluster_error.sum())} dropped as errors)")
 
     # Re-Combine: Full ENCODE MotifCompendium
-    mc_encode_columns = list(dict.fromkeys(mc_encode_single.columns() + mc_encode_composite.columns()))  # in order: reproducible
-    mc_encode_images = list(dict.fromkeys(mc_encode_single.images() + mc_encode_composite.images()))
+    mc_encode_columns = list(dict.fromkeys(mc_crosscluster_single.columns() + mc_encode_composite.columns()))  # in order: reproducible
+    mc_encode_images = list(dict.fromkeys(mc_crosscluster_single.images() + mc_encode_composite.images()))
 
-    for mc_encode_i in [mc_encode_single, mc_encode_composite]:
+    for mc_encode_i in [mc_crosscluster_single, mc_encode_composite]:
         for col in mc_encode_columns:
             if col not in mc_encode_i.columns():
                 mc_encode_i.metadata[col] = [None] * len(mc_encode_i)
@@ -1660,7 +1659,7 @@ def run_encode_composite(args):
                 mc_encode_i.set_images(image_name=image_col, images=[None] * len(mc_encode_i))
 
     mc_encode = MotifCompendium.combine(
-        [mc_encode_single, mc_encode_composite],
+        [mc_crosscluster_single, mc_encode_composite],
         safe=args.safe,
     )
 
@@ -1668,33 +1667,33 @@ def run_encode_composite(args):
     # MCID
     mc_encode[MetadataCols.unique_id_col] = unique_id_initial + f".{CompositeArgs.mcid_level}." + mc_encode.metadata.index.map('{:08d}'.format)
 
-    ### SINGLEMULTICLUSTER LEVEL (C5) ------------------------------------------------------------------------------
-    # Numbered (as a clustering), with C5 MCIDs, named, with each ENCODE cluster of the combine (C4) mapped to its
-    # singlemulticluster (or why it has none)
-    logging.info("Singlemulticluster level (C5)...")
-    mc_singlemulticluster, singlemulticluster_membership_df, num_left_out = final_encode_compendium(
-        mc_encode, mc_encode_c4_filtered, mc_encode_c4_removed, mc_encode_composite_nosynergy,
+    ### ENCODECLUSTER LEVEL (C5) ------------------------------------------------------------------------------
+    # Numbered (as a clustering), with C5 MCIDs, named, with each crosscluster of the combine (C4) mapped to its
+    # encodecluster (or why it has none)
+    logging.info("Encodecluster level (C5)...")
+    mc_encodecluster, encodecluster_membership_df, num_left_out = final_encode_compendium(
+        mc_encode, mc_crosscluster_filtered, mc_crosscluster_removed, mc_encode_composite_nosynergy,
         f"{unique_id_initial}.{CompositeArgs.mcid_level}.", safe=args.safe,
     )
 
-    # #### Export: the singlemulticluster level (<composite-dir>); added to the ENCODE clusters and every level below
+    # #### Export: the encodecluster level (<composite-dir>); added to the crossclusters and every level below
     # (--update-constituents now)
-    pipeline_encode.export_singlemulticluster_level(args, cpaths, mc_singlemulticluster, singlemulticluster_membership_df, html_column_desc_dict)
+    pipeline_encode.export_encodecluster_level(args, cpaths, mc_encodecluster, encodecluster_membership_df, html_column_desc_dict)
     if args.update_constituents == "now":
-        pipeline_encode.export_singlemulticluster_constituents(args, cpaths, mc_singlemulticluster, singlemulticluster_membership_df)
+        pipeline_encode.export_encodecluster_constituents(args, cpaths, mc_encodecluster, encodecluster_membership_df)
     else:
-        logging.info("The levels below the singlemulticlusters: not updated (--update-constituents defer; later: --update-constituents only)")
+        logging.info("The levels below the encodeclusters: not updated (--update-constituents defer; later: --update-constituents only)")
 
     # Args JSON
     args_record = {
         "parser_args": vars(args),
         "configs": pipeline_encode.collect_configs_snapshot(),
         "composite_dir": cpaths.composite_dir,
-        "num_singlemulticluster": len(mc_singlemulticluster),
-        "num_left_out_of_singlemulticluster": num_left_out,
+        "num_encodecluster": len(mc_encodecluster),
+        "num_left_out_of_encodecluster": num_left_out,
         "log_path": log_path,
     }
-    args_json_path = os.path.join(cpaths.metadata_dir, "args_singlemulticluster.json")
+    args_json_path = os.path.join(cpaths.metadata_dir, "args_encodecluster.json")
     os.makedirs(os.path.dirname(args_json_path), exist_ok=True)
     with open(args_json_path, "w") as f:
         json.dump(args_record, f, indent=2, default=str)
@@ -1718,7 +1717,7 @@ if __name__ == "__main__":
     if args.time:
         start_time = time.time()
     if args.update_constituents == "only":
-        pipeline_encode.run_singlemulticluster_constituents(pipeline_encode.stage_args(args, **stage_dir_args))
+        pipeline_encode.run_encodecluster_constituents(pipeline_encode.stage_args(args, **stage_dir_args))
     else:
         run_encode_composite(pipeline_encode.stage_args(args, **stage_dir_args))
     if args.time:

@@ -1,6 +1,6 @@
 # ProCap atlas (ProCapNet / PRO-cap) configuration.
 # Copied from the Chromatin atlas (chromatlas/src/runs/configs.py); only the atlas identity differs:
-#   MetadataCols.atlas_type = 'ProCap', VisualizeArgs.metacluster_name = 'ProCap', and there is no
+#   MetadataCols.atlas_type = 'ProCap', VisualizeArgs.contribcluster_name = 'ProCap', and there is no
 #   model-accession column (the ProCapNet models are not ENCODE model accessions).
 # Filter, clustering, and labeling thresholds are identical to the Chromatin atlas; the TF-MoDISco region
 # width is that of the procap-atlas MotifCompendium objects (400, the build_from_modisco default).
@@ -92,7 +92,7 @@ class ReferenceMatchCols:
 ## LABELS ------------------------------------------------------------------------------------------------------------
 @dataclass
 class LabelCols:
-    label_col: str = 'label'  # Metacluster: Readable TF family label: {TF_family0}-{TF_family1}-...
+    label_col: str = 'label'  # Contribcluster: Readable TF family label: {TF_family0}-{TF_family1}-...
     label_constit_1_col: str = 'label_constit_prev'
     label_constit_all_col: str = 'label_constit_all'
 
@@ -639,9 +639,9 @@ class ClusterArgs:
     cluster_force_density: float = 1.0
     cluster_sim_assignment_threshold_kmeans: float = 0.1
     cluster_within: str = CellTypeCols.celltype_col
-    metacluster_within: str = MetadataCols.composite_col
-    # combine_counts-profile: merge counts + profile meta-clusters into atlasclusters
-    atlascluster_within: str = MetadataCols.composite_col
+    contribcluster_within: str = MetadataCols.composite_col
+    # combine_counts-profile: merge counts + profile contribclusters into modelclusters
+    modelcluster_within: str = MetadataCols.composite_col
     cluster_max_iter_main: int = 0
     cluster_max_iter_force: int = 50
     average_weight_col: str = MetadataCols.num_seqlets_col
@@ -716,10 +716,10 @@ class VisualizeArgs:
     motif_string_specificity: float = 0.6
 
     cluster_name_col: str = 'cluster_name'
-    metacluster_name_col: str = 'metacluster_name'
-    atlascluster_name_col: str = 'atlascluster_name'
-    encodecluster_name_col: str = 'ENCODE_name'  # Set by the ENCODE combine when it writes its final flags back
-    metacluster_name: str = 'ProCap'
+    contribcluster_name_col: str = 'contribcluster_name'
+    modelcluster_name_col: str = 'modelcluster_name'
+    crosscluster_name_col: str = 'crosscluster_name'  # Set by the ENCODE combine when it writes its final flags back
+    contribcluster_name: str = 'ProCap'
     sort_col: str = 'sort'
 
     max_major_family_frac: float = 0.3
@@ -739,7 +739,7 @@ class VisualizeArgs:
         MetadataCols.biosample_col,
         MetadataCols.num_subunit_col,
         VisualizeArgs.cluster_name_col,
-        VisualizeArgs.metacluster_name_col,
+        VisualizeArgs.contribcluster_name_col,
         CellTypeCols.celltype_col,
         CellTypeCols.organ_col,
         CellTypeCols.slim_cell_col,
@@ -748,8 +748,8 @@ class VisualizeArgs:
         CellTypeCols.slim_system_col,
     ])
 
-    # Motif index export columns: combine_counts-profile (atlascluster level)
-    motif_index_cols_atlascluster: List[str] = field(default_factory=lambda: [
+    # Motif index export columns: combine_counts-profile (modelcluster level)
+    motif_index_cols_modelcluster: List[str] = field(default_factory=lambda: [
         MetadataCols.name_col,
         MetadataCols.id_col,
         MetadataCols.model_col,
@@ -763,8 +763,8 @@ class VisualizeArgs:
         CellTypeCols.slim_system_col,
         MetadataCols.biosample_col,
         VisualizeArgs.cluster_name_col,
-        VisualizeArgs.metacluster_name_col,
-        VisualizeArgs.atlascluster_name_col,
+        VisualizeArgs.contribcluster_name_col,
+        VisualizeArgs.modelcluster_name_col,
     ])
 
     # HTML summary table columns

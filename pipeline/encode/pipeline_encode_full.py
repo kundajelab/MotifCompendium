@@ -5,27 +5,27 @@ ENCODE MotifCompendium: end-to-end pipeline, all atlases and the ENCODE stages i
 
 Runs the full atlas hierarchy from a single CLI, in order:
 
-  1. TF atlas       - counts head    : motif -> cluster -> meta-cluster
-  2. TF atlas       - profile head   : motif -> cluster -> meta-cluster
-  3. TF atlas       - combine        : counts + profile meta-clusters -> atlascluster
-  4. Chromatin atlas- counts head    : motif -> cell-type cluster -> meta-cluster
-  5. Chromatin atlas- profile head   : motif -> cell-type cluster -> meta-cluster
-  6. Chromatin atlas- combine        : counts + profile meta-clusters -> atlascluster
-  7. ProCap atlas   - counts head    : motif -> cell-type cluster -> meta-cluster
-  8. ProCap atlas   - profile head   : motif -> cell-type cluster -> meta-cluster
-  9. ProCap atlas   - combine        : counts + profile meta-clusters -> atlascluster
- 10. ENCODE         - combine        : TF + Chromatin + ProCap atlasclusters -> ENCODE cluster, and its composites
+  1. TF atlas       - counts head    : motif -> cluster -> contribcluster
+  2. TF atlas       - profile head   : motif -> cluster -> contribcluster
+  3. TF atlas       - combine        : counts + profile contribclusters -> modelcluster
+  4. Chromatin atlas- counts head    : motif -> cell-type cluster -> contribcluster
+  5. Chromatin atlas- profile head   : motif -> cell-type cluster -> contribcluster
+  6. Chromatin atlas- combine        : counts + profile contribclusters -> modelcluster
+  7. ProCap atlas   - counts head    : motif -> cell-type cluster -> contribcluster
+  8. ProCap atlas   - profile head   : motif -> cell-type cluster -> contribcluster
+  9. ProCap atlas   - combine        : counts + profile contribclusters -> modelcluster
+ 10. ENCODE         - combine        : TF + Chromatin + ProCap modelclusters -> crosscluster, and its composites
  11. ENCODE         - composite ISM  : ISM cooperativity of each composite, per model
- 12. ENCODE         - composite      : composites merged by cooperativity -> singlemulticluster level (C5)
+ 12. ENCODE         - composite      : composites merged by cooperativity -> encodecluster level (C5)
  13. ENCODE         - propagate      : the levels below C5 updated, from C5 down (see below)
- 14. ENCODE         - hits           : FiNeMo hits indexed and annotated with the singlemulticlusters
+ 14. ENCODE         - hits           : FiNeMo hits indexed and annotated with the encodeclusters
 
-Each clustering stage (3, 6, 9: atlasclusters; 10: ENCODE clusters; 12: singlemulticlusters) writes only its own level:
+Each clustering stage (3, 6, 9: modelclusters; 10: crossclusters; 12: encodeclusters) writes only its own level:
 the levels below it are left as they were made until C5 is (each stage's --update-constituents defer). Stage 13 then updates them
 (each stage's --update-constituents only), in the order the levels were made, so that each ends with the last one's: each
-atlas's levels get their atlascluster; every atlas level and the motif indexes their ENCODE cluster (names, final flags,
-confidence; re-split, exported); the ENCODE clusters, every atlas level and the motif indexes their singlemulticluster,
-and the singlemulticluster level its motif index. To check C5 first: --stages ... encode-composite, then
+atlas's levels get their modelcluster; every atlas level and the motif indexes their crosscluster (names, final flags,
+confidence; re-split, exported); the crossclusters, every atlas level and the motif indexes their encodecluster,
+and the encodecluster level its motif index. To check C5 first: --stages ... encode-composite, then
 --stages encode-propagate encode-hits.
 
 The stages are imported from the atlas pipelines, not copied: pipeline/bpnet/pipeline_bpnet.py (TF),
@@ -45,7 +45,7 @@ outputs are wired directly into the next stage's inputs:
   <root>/bpnet/counts         <root>/bpnet/profile        <root>/bpnet/combined
   <root>/chrombpnet/counts    <root>/chrombpnet/profile   <root>/chrombpnet/combined
   <root>/procapnet/counts     <root>/procapnet/profile    <root>/procapnet/combined
-  <root>/encode               <root>/single_multi         <root>/single_multi/ism
+  <root>/cross                <root>/encode               <root>/encode/ism
 """
 import os
 import sys
@@ -104,9 +104,9 @@ STAGES = {
     "procap-counts":  ("ProCap atlas: counts head",          "pipeline_procapnet"),
     "procap-profile": ("ProCap atlas: profile head",         "pipeline_procapnet"),
     "procap-combine": ("ProCap atlas: combine counts + profile", "pipeline_procapnet"),
-    "encode-combine": ("ENCODE: combine TF + Chromatin + ProCap atlasclusters", "pipeline_encode"),
+    "encode-combine": ("ENCODE: combine TF + Chromatin + ProCap modelclusters", "pipeline_encode"),
     "encode-composite-ism": ("ENCODE: ISM cooperativity of the composites, per model", None),
-    "encode-composite": ("ENCODE: composites merged by cooperativity -> singlemulticluster level (C5)", "pipeline_encode_composite"),
+    "encode-composite": ("ENCODE: composites merged by cooperativity -> encodecluster level (C5)", "pipeline_encode_composite"),
     "encode-propagate": ("ENCODE: the levels below C5 updated, from C5 down", None),
     "encode-hits":    ("ENCODE: FiNeMo hits indexed and annotated", "pipeline_encode_hits"),
 }
@@ -331,11 +331,11 @@ def stage_dirs(root):
         "procap-counts":  os.path.join(root, "procapnet", "counts"),
         "procap-profile": os.path.join(root, "procapnet", "profile"),
         "procap-combine": os.path.join(root, "procapnet", "combined"),
-        "encode-combine": os.path.join(root, "encode"),
-        "encode-composite-ism": os.path.join(root, "single_multi", "ism"),
-        "encode-composite": os.path.join(root, "single_multi"),
+        "encode-combine": os.path.join(root, "cross"),
+        "encode-composite-ism": os.path.join(root, "encode", "ism"),
+        "encode-composite": os.path.join(root, "encode"),
         "encode-propagate": root,
-        "encode-hits":    os.path.join(root, "single_multi"),
+        "encode-hits":    os.path.join(root, "encode"),
     }
 
 
@@ -406,7 +406,7 @@ if __name__ == "__main__":
         if missing:
             logging.error(f"Stage '{stage}' requires: " + ", ".join("--" + m.replace("_", "-") for m in missing))
             raise ValueError(f"Missing required arguments for {stage}: {missing}")
-    COMPOSITE_DIR = os.path.join(args.output_dir, "single_multi")  # CompositeArgs.composite_dir_name: the singlemulticluster level
+    COMPOSITE_DIR = os.path.join(args.output_dir, "encode")  # CompositeArgs.composite_dir_name: the encodecluster level
 
 
     ### RUN --------------------------------------------------------------------
@@ -463,7 +463,7 @@ if __name__ == "__main__":
             )
             ATLAS_PIPELINES[atlas_key][1](sa)
 
-        # --- 3, 6 & 9: combine the two heads into atlasclusters ------------------
+        # --- 3, 6 & 9: combine the two heads into modelclusters ------------------
         elif stage in ("tf-combine", "chrom-combine", "procap-combine"):
             atlas_key = stage.split("-")[0]
             sa = stage_args(
@@ -500,12 +500,12 @@ if __name__ == "__main__":
             logging.info("Running: " + " ".join(command))
             subprocess.run(command, check=True)
 
-        # --- 12: merge the composites by cooperativity: the singlemulticluster level (C5) ---
+        # --- 12: merge the composites by cooperativity: the encodecluster level (C5) ---
         elif stage == "encode-composite":
             pipeline_encode_composite.run_encode_composite(stage_args(args, **encode_args, update_constituents="defer"))
 
-        # --- 13: the levels below C5, in the order they were made: each atlas's (their atlascluster), then the
-        #         ENCODE clusters' (every atlas level, motif indexes), then the singlemulticlusters' -------------
+        # --- 13: the levels below C5, in the order they were made: each atlas's (their modelcluster), then the
+        #         crossclusters' (every atlas level, motif indexes), then the encodeclusters' -------------
         elif stage == "encode-propagate":
             for atlas_key, (module, _, _, run_constituents) in ATLAS_PIPELINES.items():
                 module.set_default_configs()
@@ -517,13 +517,13 @@ if __name__ == "__main__":
                     profile_dir=DIRS[f"{atlas_key}-profile"],
                 ))
             pipeline_encode.set_default_configs()
-            pipeline_encode.run_encode_constituents(stage_args(args, **encode_args))
+            pipeline_encode.run_crosscluster_constituents(stage_args(args, **encode_args))
             pipeline_encode_composite.set_default_configs()
-            pipeline_encode.run_singlemulticluster_constituents(stage_args(args, **encode_args))
+            pipeline_encode.run_encodecluster_constituents(stage_args(args, **encode_args))
 
-        # --- 14: index and annotate the FiNeMo hits with the singlemulticlusters -------
+        # --- 14: index and annotate the FiNeMo hits with the encodeclusters -------
         else:
-            pipeline_encode_hits.run_encode_hits(stage_args(args, **encode_args, level="singlemulticluster"))
+            pipeline_encode_hits.run_encode_hits(stage_args(args, **encode_args, level="encodecluster"))
 
         if args.time:
             logging.info(f"Stage '{stage}' time taken: {time.time() - stage_start:.2f}s")
