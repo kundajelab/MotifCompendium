@@ -847,10 +847,10 @@ def save_replace(mc, save_path):
 
 #### COMPOSITES: FUNCTIONS ----------------------------------------------------
 # From composite/identify_composite_motifs.ipynb, up to the ISM cooperativity runs (pipeline_encode_composite_ism.py).
-def prepare_composite_reference(mc_ref_direct, ref_clustered_hr_metadata_path):
+def prepare_composite_reference(mc_ref_direct, ref_clustered_hr_metadata_path, length_filter=True):
     """
     Direct reference monomers for the composite decomposition, with their reference cluster and its human-readable
-    label: without the reference composites, the long non-ZNF motifs and the IRFs (but one).
+    label: without the reference composites, the long non-ZNF motifs (length_filter) and the IRFs (but one).
 
     Returns:
         (mc_ref_direct_monomer, reference cluster name per reference motif, reference cluster label per reference motif)
@@ -906,7 +906,8 @@ def prepare_composite_reference(mc_ref_direct, ref_clustered_hr_metadata_path):
     )
     mask_match = mask_match_name | mask_match_nonznf
     mask_length = mc_ref_direct_monomer.metadata[f"{VisualizeArgs.motif_string_col}_fwd"].str.len() > CompositeArgs.monomer_max_length
-    mc_ref_direct_monomer = mc_ref_direct_monomer[~(mask_match & mask_length)]
+    if length_filter:
+        mc_ref_direct_monomer = mc_ref_direct_monomer[~(mask_match & mask_length)]
 
     # Remove all IRF, except one
     mc_ref_direct_monomer = mc_ref_direct_monomer[~((mc_ref_direct_monomer[MetadataCols.name_col].str.contains("IRF")) & (mc_ref_direct_monomer[MetadataCols.name_col] != CompositeArgs.monomer_irf_keep))]
@@ -1006,7 +1007,9 @@ def assign_msw_composites(mc_encode, mc_ref_composite, ic_scale, verbose=False):
 
             # Update metadata: Composite
             if label_conf_i not in LabelCols.label_confs[0:2]:  # Don't update high, medium
-                if (bellman_composite and ~composite_i) or (~bellman_composite and composite_i):  # Prior composites + flip only
+                # Prior composites + flip only. `not`, never `~`: composite_i comes from iterrows() as a Python bool,
+                # for which ~True == -2 and ~False == -1 are both truthy (every Bellman composite was relabeled)
+                if (bellman_composite and not composite_i) or (not bellman_composite and composite_i):
                     mc_encode.metadata.loc[org_idx, MetadataCols.composite_col] = bellman_composite
                     mc_encode.metadata.loc[org_idx, MetadataCols.num_subunit_col] = ref_num
                     mc_encode.metadata.loc[org_idx, LabelCols.label_core_col] = ref_cluster_labels[0] if ref_num > 0 else None  # If using mc_ref
@@ -1054,10 +1057,15 @@ def annotate_family(metadata_df, tf_col, family_col):
     metadata_df.loc[metadata_df[tf_col].str.contains("MX"), family_col] = "MAX"
 
 
-def identify_composites(mc_encode, mc_ref_direct_monomer, mc_ref_qc_cluster_name_dict):
+def identify_composites(mc_encode, mc_ref_direct_monomer, mc_ref_qc_cluster_name_dict, mc_ref_direct_monomer_all):
     """
     The composites of mc_encode (its filtered ENCODE clusters), each with its reference subunits: name, cluster,
     score, alignment, start, end and motif string per subunit, and the spacing between the first two.
+
+    The subunits of a core or flank label are found among its monomers of the composite reference
+    (mc_ref_direct_monomer), else, when it has none there (every motif of the label is longer than
+    CompositeArgs.monomer_max_length, e.g. CBFB, CAMTA, FERD3L, NFKB), among its monomers of mc_ref_direct_monomer_all:
+    the same reference without the length filter.
     """
     # Identify composites
     mc_encode_composite = mc_encode[(mc_encode[MetadataCols.composite_col] == True)]
@@ -1089,17 +1097,17 @@ def identify_composites(mc_encode, mc_ref_direct_monomer, mc_ref_qc_cluster_name
         label_flank_i = mc_encode_composite_i[LabelCols.label_flank_col].values[0]
         label_flank_family_i = mc_encode_composite_i[LabelCols.label_flank_readable_col].values[0]
 
-        # Reference: Mask
-        mc_ref_core_mask_i = _reference_label_mask(mc_ref_direct_monomer, label_core_i, label_core_family_i)
-        if mc_ref_core_mask_i.sum() == 0:
+        # Reference: Core, flank monomers
+        mc_ref_core_names_i = _subunit_reference_names(mc_ref_direct_monomer, mc_ref_direct_monomer_all, label_core_i, label_core_family_i)
+        if len(mc_ref_core_names_i) == 0:
             raise ValueError(f"Core label '{label_core_i}' ({label_core_family_i}) not found in reference motifs.")
 
-        mc_ref_flank_mask_i = _reference_label_mask(mc_ref_direct_monomer, label_flank_i, label_flank_family_i)
-        if mc_ref_flank_mask_i.sum() == 0:
+        mc_ref_flank_names_i = _subunit_reference_names(mc_ref_direct_monomer, mc_ref_direct_monomer_all, label_flank_i, label_flank_family_i)
+        if len(mc_ref_flank_names_i) == 0:
             raise ValueError(f"Flank label '{label_flank_i}' ({label_flank_family_i}) not found in reference motifs.")
 
-        # Reference: Subset
-        mc_ref_direct_monomer_i = mc_ref_direct_monomer[mc_ref_core_mask_i | mc_ref_flank_mask_i]
+        # Reference: Subset (the composite reference is mc_ref_direct_monomer_all's rows in order: same subsets)
+        mc_ref_direct_monomer_i = mc_ref_direct_monomer_all[mc_ref_direct_monomer_all[MetadataCols.name_col].isin(mc_ref_core_names_i | mc_ref_flank_names_i)]
         if len(mc_ref_direct_monomer_i) == 0:
             raise ValueError(f"No reference motifs found for core '{label_core_i}' and flank '{label_flank_i}'.")
 
@@ -1233,6 +1241,15 @@ def _reference_label_mask(mc_ref, label_i, label_family_i):
             elif label_family_j in mc_ref[ReferenceMatchCols.ref_tf_col].unique():
                 mask |= mc_ref[ReferenceMatchCols.ref_tf_col] == label_family_j
     return mask
+
+
+def _subunit_reference_names(mc_ref_direct_monomer, mc_ref_direct_monomer_all, label_i, label_family_i):
+    """Names of the subunit candidates of a core or flank label: its composite-reference monomers, else all of its monomers."""
+    for mc_ref in (mc_ref_direct_monomer, mc_ref_direct_monomer_all):
+        mask = _reference_label_mask(mc_ref, label_i, label_family_i)
+        if mask.sum() > 0:
+            return set(mc_ref[MetadataCols.name_col][mask.to_numpy()])
+    return set()
 
 
 def export_composites(mc_encode, mc_encode_composite, composite_paths_ns, all_paths_tsv, html_column_desc_dict):
@@ -3795,10 +3812,13 @@ def run_encode_combine(args):
 
     # #### Composites: Identify
     # The composites of the filtered ENCODE clusters, with their reference subunits: the inputs of the ISM
-    # cooperativity runs (pipeline_encode_composite_ism.py), in --composite-dir
+    # cooperativity runs (pipeline_encode_composite_ism.py), in --composite-dir. A core or flank label without a short
+    # enough monomer in the composite reference takes its long ones (mc_ref_composite_all)
     logging.info("Composites: identifying the composite ENCODE clusters and their reference subunits...")
     composite_paths_ns = composite_paths(getattr(args, "composite_dir", None) or default_composite_dir(args.output_dir))
-    mc_encode_composite = identify_composites(mc_encode_filtered, mc_ref_composite, mc_ref_qc_cluster_name_dict)
+    mc_ref_composite_all, _, _ = prepare_composite_reference(mc_ref_direct, args.ref_clustered_hr_metadata, length_filter=False)
+    mc_encode_composite = identify_composites(mc_encode_filtered, mc_ref_composite, mc_ref_qc_cluster_name_dict, mc_ref_composite_all)
+    del mc_ref_composite_all
     export_composites(mc_encode_filtered, mc_encode_composite, composite_paths_ns, getattr(args, "all_paths_tsv", None), html_column_desc_dict)
     del mc_encode_composite
 
