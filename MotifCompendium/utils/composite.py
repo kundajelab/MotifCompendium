@@ -18,8 +18,8 @@ import MotifCompendium.utils.config as utils_config
 def run_modified_smith_waterman_composite(
     target_motif, subunit_motif_stack,
     sim_threshold=0.0,
-    overlap_penalty_fraction=0.1,
-    match_count_max=3,
+    overlap_penalty_fraction=0.0,
+    match_count_max=2,
     match_count_penalty=0.1,
     match_count_fraction=1.0,
     subunit_motif_trim=True,
@@ -27,23 +27,34 @@ def run_modified_smith_waterman_composite(
     label_unsigned=True,
     allow_reverse_comp=True,
     ic_scale=True,
+    target_similarity=0.9,
+    collapse="sum_norm",
 ):
     '''
     Aligns a composite of subunit motifs of any lengths against a motif: each subunit is trimmed
     to its own length (subunit_motif_trim), and the matches are ordered by position on the motif alone.
 
     A candidate is a subunit, as given or reverse complemented (allow_reverse_comp), placed at a
-    start on the motif; it may overhang either end, overlapping the motif by as little as 1 bp.
-    An alignment is up to match_count_max candidates with strictly increasing starts: any
-    subunits, in any order and orientation, repeated or not. A candidate's match score is its
-    squared cosine similarity to the whole motif (the subunit placed at its start, zero
-    elsewhere): the motif energy of its window (its own length) times its similarity to the
-    window, squared. That is the share of the motif's energy that the candidate, scaled by its
-    least-squares weight (aligned_subunit_scale), explains. Two consecutive candidates (in
-    position order) that overlap are both credited for the motif energy of the overlapping
-    positions, so the overlap costs overlap_penalty_fraction times that energy: 1 takes it back
-    once. The score is the sum of the match scores, minus the overlap penalties. The alignment
-    found is the best one exactly (see _chain_composite()).
+    start on the motif; it may overhang either end, overlapping the motif by as little as 1 bp. Its
+    window must have a similarity (cosine) above sim_threshold. An alignment is up to
+    match_count_max (1 or 2) candidates with strictly increasing starts: any subunits, in any
+    orientation, repeated or not.
+
+    Each candidate is scaled by its least-squares weight, b = <motif, candidate>, the cosine of the
+    candidate (placed at its start, zero elsewhere) to the whole L2-normalized motif. The scaled
+    candidates are collapsed into one motif r, and the alignment's score is the cosine similarity
+    of the motif with r, L2-normalized, cos(motif, r) = <motif, r> / |r|. One candidate scores b,
+    and candidates that do not overlap score sqrt(sum_k b_k^2), whatever the collapse. Where two
+    candidates overlap, collapse sets r there:
+        "sum_norm": the sum of the two (the collapsed alignment returned): a subunit placed over
+            another adds only what it explains in addition. Exact (see _best_collapsed_pair())
+        "mean_norm": their mean. The best pair that overlaps is searched among the 3,000
+            placements with the highest b^2 (see _best_mean_pair())
+        "none": no collapse: the candidates' squared scores b^2 add, as if they did not overlap
+            (only overlap_penalty_fraction charges overlaps). Exact, for any number of candidates
+            (see _chain_composite())
+    overlap_penalty_fraction subtracts that fraction of the motif energy of the positions two
+    consecutive candidates both cover from the squared score (0, the default: none).
 
     Arguments:
         target_motif: Target motif - np.array of shape (L, D)
@@ -51,17 +62,20 @@ def run_modified_smith_waterman_composite(
             shape (F, M, D)
         sim_threshold: Minimum similarity of a subunit to its window (cosine) to consider a
             match - float
-        overlap_penalty_fraction: Fraction of the motif energy (of the L2-normalized motif,
-            which sums to 1) of the positions that two consecutive subunits overlap, subtracted
-            from the score: 1 takes back the energy both are credited for (default: 0.1)
-            - float >= 0
-        match_count_penalty: Penalty per subunit matched: keeps the alignment with the N that
-            maximizes its best score with N matches - match_count_penalty * N, and subtracts
-            match_count_penalty * N from msw_score; a subunit is kept only if it explains more
-            than this share of the motif's energy (default: 0.1) - float >= 0
+        overlap_penalty_fraction: Fraction of the motif energy (of the L2-normalized motif, which
+            sums to 1) of the positions that the two subunits overlap, subtracted from the squared
+            score; the score scores overlaps by itself, so 0 (the default) adds nothing - float >= 0
+        match_count_max: Most subunits matched (default: 2) - 1 or 2; with collapse="none", any
+            positive int, or None for no limit
+        match_count_penalty: Penalty per subunit matched, in cosine units: keeps the alignment with
+            the N that maximizes its best score with N matches - match_count_penalty * N, and
+            subtracts match_count_penalty * N from msw_score; a second subunit is kept only if it
+            raises the cosine by more than this (default: 0.1) - float >= 0
         match_count_fraction: Keep the fewest matches whose penalized best score reaches this
             fraction of the maximum; 1 keeps the maximum (default: 1) - float in (0, 1]
-        match_count_max: Most subunits matched (None: no limit) (default: 3) - int >= 1, or None
+        target_similarity: Stop adding subunits once the best alignment reaches this cosine: the
+            number of matches is the fewer of the penalized choice and the fewest whose best
+            score reaches it (None: no stop) (default: 0.9) - float or None
         return_match_profile: Also return msw_profile - bool
         subunit_motif_trim: How to trim each subunit, as logo_trimming in
             assign_label_from_other_compendium(): False keeps all M positions; True trims the
@@ -76,9 +90,11 @@ def run_modified_smith_waterman_composite(
             calculation), so that every similarity, match score and scaling uses the IC-scaled
             motifs; pass motifs that are not IC-scaled already. The global IC-scale setting is
             ignored (default: True) - bool
+        collapse: How two overlapping subunits are collapsed: "sum_norm", "mean_norm" or "none"
+            (see above) (default: "sum_norm") - str
 
     Returns:
-        msw_score: Score of the optimal alignment, minus match_count_penalty * N - float
+        msw_score: Score of the optimal alignment (cosine), minus match_count_penalty * N - float
         sim_score: MotifCompendium similarity score of the optimal alignment - float
         aligned_subunit_stack: Each matched subunit (IC-scaled, if ic_scale, and trimmed),
             scaled, in the orientation it matched in, left to right. The target spans columns M-1 to L+M-2, leaving M-1
@@ -89,11 +105,12 @@ def run_modified_smith_waterman_composite(
             complement) - np.array of shape (N,) of int
         aligned_subunit_alignment_h: Column of aligned_subunit_stack where each match starts
             (as oriented, trimmed) - np.array of shape (N,) of int
-        aligned_subunit_scale: Scaling of each match: the projection of its window on the
-            (normalized) subunit, its least-squares weight, so that subunits of any lengths
-            reconstruct the target - np.array of shape (N,)
-        msw_profile: Best score of an alignment with exactly N matches, by N (0: empty; -inf:
-            impossible), before match_count_penalty - np.array, only if return_match_profile
+        aligned_subunit_scale: Scaling of each match: its least-squares weight b, times the
+            least-squares weight of the collapsed alignment, <motif, r> / |r|^2 (1 without overlaps),
+            so that the summed aligned subunits are the best fit of the collapsed alignment to the
+            target - np.array of shape (N,)
+        msw_profile: Best score (cosine) of an alignment with exactly N matches, by N (0: empty;
+            -inf: impossible), before match_count_penalty - np.array, only if return_match_profile
     '''
     ## Check arguments
     F, M, D = subunit_motif_stack.shape
@@ -103,7 +120,15 @@ def run_modified_smith_waterman_composite(
     assert match_count_fraction is not None and 0 < match_count_fraction <= 1, \
         f"match_count_fraction must be in (0, 1], got {match_count_fraction}"
     assert sim_threshold < 1
-    _check_match_count_max(match_count_max)
+    if collapse not in ("sum_norm", "mean_norm", "none"):
+        raise ValueError(f"collapse must be 'sum_norm', 'mean_norm' or 'none', got {collapse!r}")
+    if collapse == "none":
+        _check_match_count_max(match_count_max)
+    elif isinstance(match_count_max, (bool, np.bool_)) or match_count_max not in (1, 2):
+        raise ValueError(f"match_count_max must be 1 or 2 with collapse={collapse!r}, got {match_count_max!r}")
+    if target_similarity is not None and not (isinstance(target_similarity, (int, float, np.integer, np.floating))
+                                              and not isinstance(target_similarity, (bool, np.bool_))):
+        raise ValueError(f"target_similarity must be a number or None, got {target_similarity!r}")
 
     # Setting: IC-scale off (store), so that compute_similarities() does not IC-scale again
     ic_scale_config = utils_config.get_ic_scale()
@@ -137,7 +162,7 @@ def run_modified_smith_waterman_composite(
     target_norm = target_padded / np.linalg.norm(target_padded)
     num_starts = len(target_norm)
 
-    ## Similarities and match scores, by candidate and start (padded positions)
+    ## Similarities and projections, by candidate and start (padded positions)
     sim = np.zeros((len(cand_motif), num_starts))
     energy = np.zeros((len(cand_motif), num_starts))
     valid = np.zeros((len(cand_motif), num_starts), dtype=bool)
@@ -152,33 +177,68 @@ def run_modified_smith_waterman_composite(
         sim[cands, :len(windows)] = compute_aligned_similarity(cp.asarray(stack_m), cp.asarray(windows_sim))
         energy[cands, :len(windows)] = (windows * windows).sum(axis=(1, 2))[None, :]
         valid[cands, :len(windows)] = True
-    match_scores = energy * sim ** 2  # Squared cosine to the whole (normalized) motif: (|w| * sim)^2
     matchable = valid & (sim > sim_threshold)
+    pairs_c, pairs_l = np.nonzero(matchable)  # (K,), (K,): The matchable placements
+    proj = np.sqrt(energy[pairs_c, pairs_l]) * np.maximum(sim[pairs_c, pairs_l], 0.0)  # (K,): b = |w| * cosine
+    ends = pairs_l + cand_len[pairs_c]  # (K,)
 
-    ## Align: The best alignment with N matches, for every N; then N
+    ## Align: The best alignment with each number of matches, as squared scores (explained energy)
     position_energy = (target_norm * target_norm).sum(axis=1)  # (L+2M-2,), sums to 1
-    msw_profile, trace = _chain_composite(match_scores, matchable, cand_len, overlap_penalty_fraction,
-                                          position_energy, match_count_max)
+    if collapse == "none":
+        explained, trace = _chain_composite(energy * sim ** 2, matchable, cand_len, overlap_penalty_fraction,
+                                            position_energy, match_count_max)
+        index = {(int(c), int(l)): k for k, (c, l) in enumerate(zip(pairs_c, pairs_l))}
+        best = {N: ([index[m] for m in trace(N)], 1.0) for N in range(len(explained)) if np.isfinite(explained[N])}
+    else:
+        explained = np.full(match_count_max + 1, -np.inf)
+        explained[0] = 0.0
+        best = {0: ([], 1.0)}  # N: (placements, least-squares weight of the collapsed alignment)
+        if len(proj):
+            k1 = int(np.argmax(proj))
+            explained[1], best[1] = proj[k1] ** 2, ([k1], 1.0)
+        if len(proj) and match_count_max >= 2:
+            sim_space = (lambda x: x) if label_unsigned else utils_motif.motif_4_to_8
+            unit = [sim_space(c) for c in cand_motif]  # Candidates in the similarity space (unit norm)
+            if collapse == "sum_norm":
+                value, pair, scale = _best_collapsed_pair(proj, pairs_l, ends, pairs_c, unit, position_energy,
+                                                          overlap_penalty_fraction)
+            else:
+                value, pair, scale = _best_mean_pair(proj, pairs_l, ends, pairs_c, unit, sim_space(target_norm),
+                                                     position_energy, overlap_penalty_fraction)
+            if pair is not None:
+                explained[2], best[2] = value, (pair, scale)
+    msw_profile = np.where(np.isfinite(explained), np.sqrt(np.maximum(explained, 0.0)), -np.inf)  # Cosines
+
+    ## Number of matches: The penalized best, then the fewest reaching target_similarity
     n = _select_match_count(msw_profile, match_count_penalty, match_count_fraction)
-    matches = trace(n)  # (candidate, start), left to right
+    if target_similarity is not None:
+        reached = [N for N in range(1, n) if msw_profile[N] >= target_similarity]
+        n = reached[0] if reached else n
+    matches, collapsed_scale = best[n]
     msw_score = float(msw_profile[n] - match_count_penalty * n)
 
-    ## Aligned subunits: One per match, scaled by its projection, <s, w> = |w| * similarity
+    ## Aligned subunits: One per match, scaled by its projection and the collapsed alignment's weight
     aligned_subunit_stack = np.zeros((n, num_starts, D))
     aligned_subunit_scale = np.zeros(n)
-    for i, (c, l) in enumerate(matches):
-        aligned_subunit_scale[i] = np.sqrt(energy[c, l]) * sim[c, l]
+    for i, k in enumerate(matches):
+        c, l = pairs_c[k], pairs_l[k]
+        aligned_subunit_scale[i] = proj[k] * collapsed_scale
         aligned_subunit_stack[i, l:l + cand_len[c]] = cand_motif[c] * aligned_subunit_scale[i]
-    aligned_subunit_idx = np.array([cand_subunit[c] for c, _ in matches], dtype=int)
-    aligned_subunit_alignment_rc = np.array([cand_rc[c] for c, _ in matches], dtype=int)
-    aligned_subunit_alignment_h = np.array([l for _, l in matches], dtype=int)
+    aligned_subunit_idx = np.array([cand_subunit[pairs_c[k]] for k in matches], dtype=int)
+    aligned_subunit_alignment_rc = np.array([cand_rc[pairs_c[k]] for k in matches], dtype=int)
+    aligned_subunit_alignment_h = np.array([pairs_l[k] for k in matches], dtype=int)
 
-    ## Similarity score: The collapsed alignment against the target
+    ## Similarity score: The collapsed alignment against the target (mean_norm: the mean where two overlap)
     if n == 0:
         sim_score = 0.0
     else:
+        collapsed = aligned_subunit_stack.sum(axis=0)
+        if collapse == "mean_norm" and n == 2:
+            k_i, k_j = matches
+            lo, hi = max(pairs_l[k_i], pairs_l[k_j]), min(ends[k_i], ends[k_j])
+            collapsed[lo:hi] /= 2
         sim_score, _, _ = utils_similarity.compute_similarities(
-            [aligned_subunit_stack.sum(axis=0)[np.newaxis], target_padded[np.newaxis]], [(0, 1)])[0]
+            [collapsed[np.newaxis], target_padded[np.newaxis]], [(0, 1)])[0]
 
     # Restore IC-scale setting
     if ic_scale_config:
@@ -340,6 +400,173 @@ def _chain_composite(match_scores, matchable, cand_len, overlap_penalty_fraction
             k, n = previous[k, n], n - 1
         return chain[::-1]
     return msw_profile, trace
+
+
+def _best_disjoint_pair(m, starts, ends):
+    '''
+    Best pair of placements that do not overlap (the first ends at or before the second starts), by
+    m_i + m_j, exactly: a running maximum of m over ends.
+
+    Returns:
+        value: m_i + m_j (-inf: no pair) - float
+        pair: The two placements, by start (None: no pair) - list of int
+    '''
+    K = len(m)
+    P = int(ends.max()) + 1
+    o = np.lexsort((np.arange(K), -m, ends))  # By end, the best first (ties: the first placement)
+    first = np.ones(K, dtype=bool)
+    first[1:] = ends[o][1:] != ends[o][:-1]
+    by_end, arg_end = np.full(P, -np.inf), np.full(P, -1)
+    by_end[ends[o][first]], arg_end[ends[o][first]] = m[o][first], o[first]
+    run, run_arg = _first_running_max(by_end)  # (P,), (P,): The best ending at or before each position
+    totals = np.where(np.isfinite(run[starts]), run[starts] + m, -np.inf)  # (K,)
+    j = int(np.argmax(totals))
+    if not np.isfinite(totals[j]):
+        return -np.inf, None
+    return float(totals[j]), [int(arg_end[run_arg[starts[j]]]), j]
+
+
+def _best_mean_pair(proj, starts, ends, cands, unit, target, position_energy, overlap_penalty_fraction,
+                    top=3000, row_block=512):
+    '''
+    Best pair of placements with strictly increasing starts, by the energy their collapsed
+    alignment explains once L2-normalized, with the mean of the two where they overlap:
+
+        <t, r>^2 / |r|^2 - p * E(overlap),
+        <t, r> = B - (A_i + A_j) / 2,    |r|^2 = B - 3/4 (Q_i + Q_j) + X / 2
+
+    with B = b_i^2 + b_j^2, A_k and Q_k the sums of <t_p, v_kp> and |v_kp|^2 over the overlap
+    (v = b u), X = <v_i, v_j>, and E(overlap) the motif energy there. A pair that does not overlap
+    scores B: the best exactly. The mean can score an overlapping pair above B (a weak partner
+    halves a subunit's columns that fit poorly), so those pairs have no bound to stop on: they are
+    searched among the top placements by b^2 (all of them if there are fewer).
+
+    Arguments:
+        proj, starts, ends, cands, unit, position_energy, overlap_penalty_fraction: As
+            _best_collapsed_pair()
+        target: The L2-normalized target, in the similarity space - np.array (S, D')
+        top: Placements searched for overlapping pairs - int
+        row_block: Block size of the search - int
+    Returns:
+        value: Best squared score (-inf: no pair) - float
+        pair: The two placements, by start (None: no pair) - list of int
+        scale: Least-squares weight of the pair's collapsed alignment, <t, r> / |r|^2 - float
+    '''
+    m = proj * proj
+    value, pair = _best_disjoint_pair(m, starts, ends)
+    scale = 1.0
+    I = np.argsort(-m, kind="stable")[:top]
+    T = len(I)
+    if T < 2:
+        return value, pair, scale
+    P = int(ends.max()) + 1
+    U = np.zeros((T, P, unit[0].shape[1]))  # Each placed candidate
+    for r, k in enumerate(I):
+        U[r, starts[k]:ends[k]] = unit[cands[k]]
+    t = np.zeros(U.shape[1:])
+    t[:min(P, len(target))] = target[:P]
+    U = cp.asarray(U)
+    Ct = cp.concatenate([cp.zeros((T, 1)), cp.cumsum((U * cp.asarray(t)[None]).sum(axis=2), axis=1)], axis=1)  # (T, P+1)
+    Cu = cp.concatenate([cp.zeros((T, 1)), cp.cumsum((U * U).sum(axis=2), axis=1)], axis=1)  # (T, P+1)
+    U = U.reshape(T, -1)
+    W = cp.asarray(np.concatenate([[0.0], np.cumsum(position_energy)]))
+    bI, mI, lI, eI = (cp.asarray(x[I]) for x in (proj, m, starts, ends))
+    cols = cp.arange(T)[None, :]
+    for s in range(0, T, row_block):
+        rows = slice(s, min(T, s + row_block))
+        ri = cp.arange(rows.start, rows.stop)[:, None]
+        lo = cp.maximum(lI[rows, None], lI[None, :])
+        hi = cp.minimum(eI[rows, None], eI[None, :])
+        ok = (lo < hi) & (lI[rows, None] < lI[None, :])  # Overlapping, the row first
+        lo, hi = cp.where(ok, lo, 0), cp.where(ok, hi, 0)
+        Ai = bI[rows, None] * (Ct[ri, hi] - Ct[ri, lo])
+        Aj = bI[None, :] * (Ct[cols, hi] - Ct[cols, lo])
+        Qi = mI[rows, None] * (Cu[ri, hi] - Cu[ri, lo])
+        Qj = mI[None, :] * (Cu[cols, hi] - Cu[cols, lo])
+        X = (U[rows] @ U.T) * bI[rows, None] * bI[None, :]
+        B = mI[rows, None] + mI[None, :]
+        num, den = B - (Ai + Aj) / 2, B - 0.75 * (Qi + Qj) + X / 2
+        val = cp.where(ok & (num > 0) & (den > 0),
+                       num * num / cp.maximum(den, 1e-300) - overlap_penalty_fraction * (W[hi] - W[lo]), -cp.inf)
+        flat = int(cp.argmax(val))
+        a, c = divmod(flat, T)
+        if float(val[a, c]) > value:
+            value = float(val[a, c])
+            pair = [int(I[s + a]), int(I[c])]  # The row starts first
+            scale = float(num[a, c] / den[a, c])
+    return value, pair, scale
+
+
+def _best_collapsed_pair(proj, starts, ends, cands, unit, position_energy, overlap_penalty_fraction,
+                         row_block=512, col_block=16384):
+    '''
+    Best pair of placements with strictly increasing starts, by the energy their collapsed
+    alignment explains once L2-normalized (its squared cosine to the motif), exactly:
+
+        B^2 / (B + 2X) - p * E(overlap),    B = b_i^2 + b_j^2,    X = b_i b_j <u_i, u_j>
+
+    with E(overlap) the motif energy of the positions both windows cover. A pair that does not
+    overlap scores B: the best is a running maximum of b^2 over ends. Overlap only lowers the score
+    below B, so an overlapping pair can win only if its B beats the best so far: those pairs are
+    searched in decreasing b^2 (on the GPU, in blocks), and the search stops once none left can.
+
+    Arguments:
+        proj: Projection b of each placement - np.array (K,)
+        starts, ends: Window [start, end) of each placement - np.array (K,) of int
+        cands: Candidate of each placement - np.array (K,) of int
+        unit: Each candidate, unit norm, in the similarity space - list of np.array (M_c, D')
+        position_energy: Motif energy of each position - np.array (S,)
+        overlap_penalty_fraction: p - float >= 0
+        row_block, col_block: Block sizes of the search - int
+    Returns:
+        value: Best squared score (-inf: no pair) - float
+        pair: The two placements, by start (None: no pair) - list of int
+        scale: Least-squares weight of the pair's collapsed alignment, B / (B + 2X) - float
+    '''
+    K = len(proj)
+    m = proj * proj  # (K,): Energy each placement explains alone
+    P = int(ends.max()) + 1
+
+    ## Pairs that do not overlap: Exactly
+    value, pair = _best_disjoint_pair(m, starts, ends)
+    scale = 1.0
+
+    ## Pairs that overlap: Both among the placements with m > value - max(m), by decreasing m
+    order = np.argsort(-m, kind="stable")
+    m_max = m[order[0]]
+    n_cand = K if not np.isfinite(value) else int(np.searchsorted(-m[order], -(value - m_max), side="left"))
+    if n_cand < 2:
+        return value, pair, scale
+    I = order[:n_cand]  # (n_cand,)
+    U = np.zeros((n_cand, P, unit[0].shape[1]))  # Each placed candidate
+    for r, k in enumerate(I):
+        U[r, starts[k]:ends[k]] = unit[cands[k]]
+    U = cp.asarray(U.reshape(n_cand, -1))
+    W = cp.asarray(np.concatenate([[0.0], np.cumsum(position_energy)]))  # W[x]: Energy of positions before x
+    mI, bI, lI, eI = (cp.asarray(x[I]) for x in (m, proj, starts, ends))
+    m_sorted = m[I]  # Decreasing
+    for s in range(0, n_cand, row_block):
+        if m_sorted[s] + m_max <= value:  # No pair left can beat value
+            break
+        rows = slice(s, min(n_cand, s + row_block))
+        n_col = n_cand if not np.isfinite(value) else int(np.searchsorted(-m_sorted, -(value - m_sorted[s]), side="left"))
+        for c0 in range(0, n_col, col_block):
+            cols = slice(c0, min(n_col, c0 + col_block))
+            X = (U[rows] @ U[cols].T) * bI[rows, None] * bI[None, cols]  # (R, C)
+            lo = cp.maximum(lI[rows, None], lI[None, cols])
+            hi = cp.minimum(eI[rows, None], eI[None, cols])
+            B = mI[rows, None] + mI[None, cols]
+            ok = (lo < hi) & (lI[rows, None] != lI[None, cols]) & (B > value)  # Overlapping, distinct starts
+            val = B * B / cp.maximum(B + 2 * X, 1e-300) - overlap_penalty_fraction * (W[hi] - W[lo])
+            val = cp.where(ok, val, -cp.inf)
+            flat = int(cp.argmax(val))
+            a, c = divmod(flat, val.shape[1])
+            if float(val[a, c]) > value:
+                i, jj = int(I[s + a]), int(I[c0 + c])
+                value = float(val[a, c])
+                pair = sorted([i, jj], key=lambda k: starts[k])
+                scale = float(B[a, c] / (B[a, c] + 2 * X[a, c]))
+    return value, pair, scale
 
 
 def run_modified_smith_waterman_alignment(

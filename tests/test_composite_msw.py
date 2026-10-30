@@ -632,8 +632,9 @@ def test_match_count(new, n_cases=60, seed=14):
     # grows (without a match count penalty, msw_score is the profile's best: the default is 0.1)
     for j in range(8):
         motif, stack = make_mixed_case(rng, 2, (3, 4)[j % 2], int(rng.integers(15, 30)))
-        base = new.run_modified_smith_waterman_composite(motif, stack, match_count_penalty=0.0)
-        out = new.run_modified_smith_waterman_composite(motif, stack, match_count_penalty=0.0, return_match_profile=True)
+        base = new.run_modified_smith_waterman_composite(motif, stack, match_count_penalty=0.0, target_similarity=None)
+        out = new.run_modified_smith_waterman_composite(motif, stack, match_count_penalty=0.0, target_similarity=None,
+                                                        return_match_profile=True)
         if (len(base) != 7 or len(out) != 8 or abs(out[7][len(out[3])] - out[0]) > 1e-12
                 or abs(out[0] - out[7].max()) > 1e-12 or out[0] != base[0]):
             n_bad += 1
@@ -719,7 +720,7 @@ def test_match_count_max(new, n_cases=60, seed=19):
     """h. match_count_max limits the number of matches whatever the penalty and fraction: with
     global_exact, msw_score is the best over every chain of at most that many matches (brute
     force), minus the penalty; the profile stops at it; a limit of min(F, N) or more is no limit;
-    and the composite wrapper limits to 3 by default."""
+    and the composite wrapper limits to 2 by default, and to at most 2."""
     rng = np.random.default_rng(seed)
     n_bad = n_runs = 0
     for i in range(n_cases):
@@ -775,16 +776,28 @@ def test_match_count_max(new, n_cases=60, seed=19):
         n_bad += 1
         print("  [FAIL] limited the number of matches of a global alignment")
 
-    # Wrappers: The composite limits to 3 by default (here: 5 planted subunits); the alignment
-    # wrapper does not limit by default, and its limit holds for its local alignment
+    # Wrappers: The composite limits to 2 by default (here: 5 planted subunits), and rejects more; the
+    # alignment wrapper does not limit by default, and its limit holds for its local alignment
     for j in range(6):
         subunits, target, planted = plant_subunits(rng, 2, (3, 4, 5)[j % 3], 5)
         kw = dict(sim_threshold=0.99, subunit_motif_trim=0)
         sizes = [len(new.run_modified_smith_waterman_composite(target, subunits, **kw, **extra)[3])
-                 for extra in ({}, dict(match_count_max=None), dict(match_count_max=2), dict(match_count_max=5))]
-        if sizes != [3, 5, 2, 5]:
+                 for extra in ({}, dict(match_count_max=1), dict(match_count_max=2))]
+        if sizes != [2, 1, 2]:
             n_bad += 1
-            print(f"  [FAIL] composite: matches by limit (default, None, 2, 5) {sizes}")
+            print(f"  [FAIL] composite: matches by limit (default, 1, 2) {sizes}")
+        for bad in (None, 3, 5):
+            try:
+                new.run_modified_smith_waterman_composite(target, subunits, match_count_max=bad, **kw)
+            except ValueError:
+                continue
+            n_bad += 1
+            print(f"  [FAIL] composite: accepted match_count_max={bad!r}")
+        none = len(new.run_modified_smith_waterman_composite(target, subunits, collapse="none", match_count_max=None,
+                                                             **kw)[3])
+        if none != 5:
+            n_bad += 1
+            print(f"  [FAIL] composite collapse='none': {none} matches without a limit, expected 5")
     motif, fingers = make_case(rng, 6, 3, 30)
     if differing(call_znf(new, motif, fingers), call_znf(new, motif, fingers, match_count_max=None)):
         n_bad += 1
@@ -826,7 +839,7 @@ def test_signed(new, seed=20):
         a, b = np.eye(4)[[0] * (M - 1) + [1]], np.eye(4)[[2] + [3] * (M - 1)]
         target = np.concatenate([a, np.full((3, 4), 0.01), -b])
         stack = np.stack([a, b, -b])
-        kw = dict(sim_threshold=0.9, allow_reverse_comp=False, match_count_max=None, subunit_motif_trim=0)
+        kw = dict(sim_threshold=0.9, allow_reverse_comp=False, match_count_max=2, subunit_motif_trim=0)
         signed = new.run_modified_smith_waterman_composite(target, stack, label_unsigned=False, **kw)
         unsigned = new.run_modified_smith_waterman_composite(target, stack, label_unsigned=True, **kw)
         starts = list(signed[5] - (M - 1))
@@ -872,13 +885,38 @@ def brute_force_chains(scores, matchable, lengths, penalty, max_count, weight):
     return profile
 
 
+def brute_force_collapsed(target, proj, starts, ends, vectors, weight, penalty, collapse="sum_norm"):
+    """Best squared score over every pair of placements with distinct starts: the energy their
+    collapsed alignment (b_i u_i + b_j u_j; mean_norm: halved where both windows cover), L2-normalized,
+    explains, minus penalty * the weight of the positions both windows cover; and the pair, by start."""
+    W = np.concatenate([[0.0], np.cumsum(weight)])
+    value, pair = -np.inf, None
+    for i, j in itertools.combinations(range(len(proj)), 2):
+        if starts[i] == starts[j]:
+            continue
+        r = proj[i] * vectors[i] + proj[j] * vectors[j]
+        lo, hi = max(starts[i], starts[j]), min(ends[i], ends[j])
+        if collapse == "mean_norm" and hi > lo:
+            r[lo:hi] /= 2
+        norm2 = float((r * r).sum())
+        if norm2 <= 0:
+            continue
+        v = float((target * r).sum()) ** 2 / norm2 - (penalty * (W[hi] - W[lo]) if hi > lo else 0.0)
+        if v > value + 1e-12:
+            value, pair = v, sorted([i, j], key=lambda k: starts[k])
+    return value, pair
+
+
 def test_composite_score(new, n_cases=60, seed=23):
-    """l. run_modified_smith_waterman_composite()'s match score is the squared cosine of the
-    subunit, placed at its start (zero elsewhere), to the whole padded, L2-normalized motif, with the
-    cosine to its window above sim_threshold: computed here from scratch, its best chains by number
-    of matches (brute force) are the composite's profile, its reported matches re-score to msw_score,
-    and each match is scaled by its cosine to the whole motif (its least-squares weight). The
-    overlap penalty and the match count penalty default to 0.1."""
+    """l. run_modified_smith_waterman_composite()'s score is the cosine similarity of the motif with
+    its collapsed alignment, L2-normalized: each subunit, placed at its start (zero elsewhere), is
+    scaled by its cosine to the whole padded, L2-normalized motif (its least-squares weight), and the
+    scaled subunits are summed (sum_norm), averaged where they overlap (mean_norm), or not collapsed
+    (none: the squared scores add, minus the overlap penalty). Computed here from scratch over every
+    alignment (brute force): the profile, the reported matches re-scored, and the scales. Also: an
+    imperfect match scores its cosine; the defaults (no overlap penalty, 0.1 per subunit in cosine
+    units, target similarity 0.9, at most 2 subunits); target_similarity stops at the fewest
+    subunits reaching it; and match_count_max above 2 is rejected."""
     import inspect
     rng = np.random.default_rng(seed)
     n_bad = n_runs = 0
@@ -887,83 +925,155 @@ def test_composite_score(new, n_cases=60, seed=23):
         target = rng.normal(size=(L, 4)) * (rng.random((L, 1)) < 0.8)
         stack = np.abs(rng.normal(size=(F, M, 4)))  # No all-zero subunit (trimming one away raises)
         trim = (True, 0)[i % 2]
-        penalty = (0.0, 0.5, 0.9, 1.0)[i % 4]
+        penalty = (0.0, 0.5)[(i // 2) % 2]
         sim_threshold = (0.0, 0.4)[(i // 4) % 2]
-        max_count = (1, 2, 3)[i % 3]
+        collapse = ("sum_norm", "mean_norm", "none")[i % 3]
+        max_count = ((1, 2, 2) if collapse != "none" else (1, 2, 3))[(i // 3) % 3]
         out = new.run_modified_smith_waterman_composite(
             target, stack, sim_threshold=sim_threshold, overlap_penalty_fraction=penalty, match_count_max=max_count,
-            match_count_penalty=0.0, subunit_motif_trim=trim, return_match_profile=True)
+            match_count_penalty=0.0, target_similarity=None, subunit_motif_trim=trim, return_match_profile=True,
+            collapse=collapse)
 
         # From scratch: Candidates (as given, reverse complemented), on the padded, normalized target
         subunits = new._trim_subunits(np.abs(stack), trim)
-        candidates = [(s[::-1, ::-1] if rc else s) for s in subunits for rc in (0, 1)]
+        candidates = [(s_[::-1, ::-1] if rc else s_) for s_ in subunits for rc in (0, 1)]
         candidates = [c / np.linalg.norm(c) if np.linalg.norm(c) > 0 else c for c in candidates]
         lengths = np.array([len(c) for c in candidates])
         padded = np.pad(np.abs(target), ((M - 1, M - 1), (0, 0)))
         target_norm = padded / np.linalg.norm(padded)
         S = len(target_norm)
-        scores, matchable, cos_motif = np.zeros((len(candidates), S)), np.zeros((len(candidates), S), dtype=bool), {}
+        scores, matchable = np.zeros((len(candidates), S)), np.zeros((len(candidates), S), dtype=bool)
+        placements, proj, starts, ends, vectors = [], [], [], [], []
         for c, cand in enumerate(candidates):
             for l in range(S - len(cand) + 1):
                 window = target_norm[l:l + len(cand)]
-                cos_global = float((window * cand).sum())  # <motif, placed subunit>: both have norm 1
-                cos_window = cos_global / np.linalg.norm(window) if np.linalg.norm(window) > 0 else 0.0
-                scores[c, l], matchable[c, l], cos_motif[c, l] = cos_global ** 2, cos_window > sim_threshold, cos_global
+                b = float((window * cand).sum())  # <motif, placed subunit>: both have norm 1
+                cos_window = b / np.linalg.norm(window) if np.linalg.norm(window) > 0 else 0.0
+                scores[c, l], matchable[c, l] = b * b, cos_window > sim_threshold
+                if cos_window > sim_threshold:
+                    placed = np.zeros_like(target_norm)
+                    placed[l:l + len(cand)] = cand
+                    placements.append((c, l)); proj.append(b); starts.append(l); ends.append(l + len(cand))
+                    vectors.append(placed)
+        proj, starts, ends = np.array(proj), np.array(starts), np.array(ends)
         weight = (target_norm * target_norm).sum(axis=1)
-        expected = brute_force_chains(scores, matchable, lengths, penalty, max_count, weight)
+        if collapse == "none":
+            expected = brute_force_chains(scores, matchable, lengths, penalty, max_count, weight)
+            expected = np.where(np.isfinite(expected), np.sqrt(np.maximum(expected, 0.0)), -np.inf)
+        else:
+            expected = np.full(max_count + 1, -np.inf)
+            expected[0] = 0.0
+            if len(proj):
+                expected[1] = proj.max()
+            if len(proj) and max_count == 2:
+                value, _ = brute_force_collapsed(target_norm, proj, starts, ends, vectors, weight, penalty, collapse)
+                expected[2] = np.sqrt(max(value, 0.0)) if np.isfinite(value) else -np.inf
         profile = out[7]
         n_runs += 1
         problems = []
-        if profile.shape != expected.shape or not np.allclose(profile, expected, rtol=0, atol=1e-10):
+        if profile.shape != expected.shape or not np.allclose(profile, expected, rtol=0, atol=1e-9):
             problems.append(f"profile {np.round(profile, 4)} vs from scratch {np.round(expected, 4)}")
         else:
-            # The reported matches: their squared cosines, minus the overlap penalty, are msw_score
-            matches = [(2 * int(f) + int(rc), int(h)) for f, rc, h in zip(out[3], out[4], out[5])]
-            W = np.concatenate([[0.0], np.cumsum(np.concatenate([weight, np.zeros(int(lengths.max()) + 2)]))])
-            rescored = (sum(scores[c, l] for c, l in matches)
-                        - penalty * sum(overlap_cost(a, b, lengths, W) for a, b in zip(matches, matches[1:])))
-            if abs(rescored - out[0]) > 1e-10:
+            # The reported matches re-score to msw_score; their scales
+            matches = [placements.index((2 * int(f) + int(rc), int(h))) for f, rc, h in zip(out[3], out[4], out[5])]
+            if not matches:
+                rescored, scales = 0.0, []
+            elif collapse == "none":
+                W = np.concatenate([[0.0], np.cumsum(np.concatenate([weight, np.zeros(int(lengths.max()) + 2)]))])
+                chain = [placements[k] for k in matches]
+                energy = (sum(proj[k] ** 2 for k in matches)
+                          - penalty * sum(overlap_cost(x, y, lengths, W) for x, y in zip(chain, chain[1:])))
+                rescored, scales = np.sqrt(max(energy, 0.0)), [proj[k] for k in matches]
+            else:
+                r = sum(proj[k] * vectors[k] for k in matches)
+                lo, hi = max(starts[k] for k in matches), min(ends[k] for k in matches)
+                if collapse == "mean_norm" and len(matches) == 2 and hi > lo:
+                    r[lo:hi] /= 2
+                tr, rr = float((target_norm * r).sum()), float((r * r).sum())
+                pen = penalty * float(weight[lo:hi].sum()) if len(matches) == 2 and hi > lo else 0.0
+                rescored, scales = np.sqrt(max(tr * tr / rr - pen, 0.0)), [proj[k] * tr / rr for k in matches]
+            if abs(rescored - out[0]) > 1e-9 or abs(out[0] - profile.max()) > 1e-9:
                 problems.append(f"matches {matches} re-score to {rescored!r}, msw_score {out[0]!r}")
-            if not np.allclose(out[6], [cos_motif[m] for m in matches], rtol=0, atol=1e-10):
-                problems.append(f"scales {out[6]} are not the cosines to the motif")
+            if not np.allclose(out[6], scales, rtol=0, atol=1e-9):
+                problems.append(f"scales {out[6]} vs {scales}")
         if problems:
             n_bad += 1
             if n_bad <= 5:
-                print(f"  [FAIL] F={F} M={M} L={L} trim={trim} p={penalty} thr={sim_threshold} max={max_count}: {problems[:2]}")
+                print(f"  [FAIL] {collapse} F={F} M={M} L={L} trim={trim} p={penalty} thr={sim_threshold} max={max_count}: {problems[:2]}")
 
-    # An imperfect match scores its squared cosine, below the window energy x cosine
+    # An imperfect match scores its cosine to the motif
     target = np.eye(4)[[0, 0, 1, 1]] + 0.3
     sub = np.eye(4)[[0, 0, 1, 1]]
     out = new.run_modified_smith_waterman_composite(target, sub[None], subunit_motif_trim=0, return_match_profile=True,
                                                     allow_reverse_comp=False)
     cos = float((target / np.linalg.norm(target) * sub / np.linalg.norm(sub)).sum())
-    if abs(out[7][1] - cos ** 2) > 1e-12:
+    if abs(out[7][1] - cos) > 1e-12:
         n_bad += 1
-        print(f"  [FAIL] one imperfect match: {out[7][1]!r}, cosine squared {cos ** 2!r}")
+        print(f"  [FAIL] one imperfect match: {out[7][1]!r}, cosine {cos!r}")
 
-    # Defaults: overlap penalty 0.1 and match count penalty 0.1, the same as passing them
+    # Defaults: no overlap penalty, 0.1 per subunit, target similarity 0.9, at most 2 subunits
     parameters = inspect.signature(new.run_modified_smith_waterman_composite).parameters
-    defaults = (parameters["overlap_penalty_fraction"].default, parameters["match_count_penalty"].default)
+    defaults = tuple(parameters[k].default for k in ("overlap_penalty_fraction", "match_count_penalty",
+                                                     "target_similarity", "match_count_max"))
     target = np.concatenate([np.eye(4)[[0, 1, 2]], np.eye(4)[[2, 3, 0]]]) + 0.05
     stack = np.stack([np.eye(4)[[0, 1, 2, 2]], np.eye(4)[[2, 2, 3, 0]]])
     same = same_outputs(new.run_modified_smith_waterman_composite(target, stack, subunit_motif_trim=0),
-                        new.run_modified_smith_waterman_composite(target, stack, subunit_motif_trim=0,
-                                                                  overlap_penalty_fraction=0.1, match_count_penalty=0.1))
-    if defaults != (0.1, 0.1) or not same:
+                        new.run_modified_smith_waterman_composite(
+                            target, stack, subunit_motif_trim=0, overlap_penalty_fraction=0.0, match_count_penalty=0.1,
+                            target_similarity=0.9, match_count_max=2))
+    if defaults != (0.0, 0.1, 0.9, 2) or not same:
         n_bad += 1
-        print(f"  [FAIL] overlap_penalty_fraction / match_count_penalty defaults {defaults!r}, same as 0.1 / 0.1: {same}")
-    print(f"l. composite match score: {n_runs - n_bad}/{n_runs} profiles from scratch (squared cosine to the motif, "
-          f"brute force), matches re-scored, scales; imperfect match and the default penalties "
+        print(f"  [FAIL] defaults {defaults!r}, same as passing them: {same}")
+
+    # Target similarity: A subunit explaining most of the motif is kept alone, even if a second raises the cosine
+    target = np.concatenate([np.eye(4)[[0, 1, 2, 3, 0, 1]], np.eye(4)[[3]] * 0.4])
+    stack = np.stack([np.eye(4)[[0, 1, 2, 3, 0, 1]], np.eye(4)[[3, 3, 3, 3, 3, 3]]])
+    kw = dict(subunit_motif_trim=0, allow_reverse_comp=False, match_count_penalty=0.0, return_match_profile=True)
+    stop = new.run_modified_smith_waterman_composite(target, stack, target_similarity=0.9, **kw)
+    free = new.run_modified_smith_waterman_composite(target, stack, target_similarity=None, **kw)
+    if not (stop[7][1] >= 0.9 and stop[7][2] > stop[7][1] and len(stop[3]) == 1 and len(free[3]) == 2):
+        n_bad += 1
+        print(f"  [FAIL] target similarity: profile {stop[7]}, subunits {len(stop[3])} (0.9) and {len(free[3])} (None)")
+
+    # Validation
+    for bad in (None, 0, 3, 5, True):
+        try:
+            new.run_modified_smith_waterman_composite(target, stack, match_count_max=bad)
+        except ValueError:
+            continue
+        n_bad += 1
+        print(f"  [FAIL] accepted match_count_max={bad!r}")
+    try:
+        new.run_modified_smith_waterman_composite(target, stack, target_similarity="0.9")
+    except ValueError:
+        pass
+    else:
+        n_bad += 1
+        print("  [FAIL] accepted target_similarity='0.9'")
+    try:
+        new.run_modified_smith_waterman_composite(target, stack, collapse="max")
+    except ValueError:
+        pass
+    else:
+        n_bad += 1
+        print("  [FAIL] accepted collapse='max'")
+    for limit in (3, None):
+        new.run_modified_smith_waterman_composite(target, stack, collapse="none", match_count_max=limit,
+                                                  subunit_motif_trim=0)
+    print(f"l. composite score (cosine of the collapsed alignment): {n_runs - n_bad}/{n_runs} profiles from scratch "
+          f"(brute force), matches re-scored, scales; imperfect match, defaults, target similarity and validation "
           f"{'ok' if n_bad == 0 else f'FAIL ({n_bad})'}")
     return n_bad
 
 
 def test_composite_varlen(new, seed=21):
     """j. run_modified_smith_waterman_composite(): subunits of any lengths (subunit_motif_trim), ordered by
-    position. The chain DP is the best over every chain (brute force), by number of matches, with
-    an overlap penalty (per bp or energy-weighted) and a limit; planted composites of mixed
-    lengths, in any order, orientation and repetition, are recovered; and signed motifs, trimming
-    and the default limit of 3."""
+    position. The chain DP (collapse="none") is the best over every chain (brute force), by number
+    of matches, with an overlap penalty (per bp or energy-weighted) and a limit; the pair searches
+    (sum_norm, mean_norm) are the best over every pair of placements, with or without an overlap
+    penalty, across several blocks; planted composites of mixed lengths, in any
+    order, orientation and repetition, are recovered; and signed motifs, trimming and the default
+    limit of 2."""
     import MotifCompendium.utils.motif as utils_motif
     rng = np.random.default_rng(seed)
     n_bad = n_runs = 0
@@ -999,6 +1109,51 @@ def test_composite_varlen(new, seed=21):
             n_bad += 1
             if n_bad <= 5:
                 print(f"  [FAIL] chain C={C} S={S} p={penalty} max={max_count}: {problems[:1]}")
+    # (b) The pair searches (sum_norm, mean_norm), against brute force (small blocks)
+    for i in range(150):
+        K, S, D = int(rng.integers(2, 12)), int(rng.integers(4, 12)), (4, 8)[i % 2]
+        target = np.abs(rng.normal(size=(S, D))) + 0.01  # Every placement has b > 0, as every matchable one
+        target = target / np.linalg.norm(target)
+        starts = rng.integers(0, S, size=K)
+        ends = np.minimum(starts + rng.integers(1, 5, size=K), S)
+        unit, vectors = [], []
+        for k in range(K):
+            u = np.abs(rng.normal(size=(ends[k] - starts[k], D))) * (rng.random((ends[k] - starts[k], 1)) < 0.8)
+            u[int(rng.integers(len(u)))] += 0.01  # Not all zero
+            u = u / np.linalg.norm(u)
+            v = np.zeros((S, D))
+            v[starts[k]:ends[k]] = u
+            unit.append(u)
+            vectors.append(v)
+        proj = np.array([float((target * v).sum()) for v in vectors])  # b = <target, placed candidate>
+        weight = (target * target).sum(axis=1)
+        penalty = (0.0, 0.3)[i % 2]
+        collapse = ("sum_norm", "mean_norm")[(i // 2) % 2]
+        if collapse == "sum_norm":
+            value, pair, scale = new._best_collapsed_pair(proj, starts, ends, np.arange(K), unit, weight, penalty,
+                                                          row_block=2, col_block=3)
+        else:
+            value, pair, scale = new._best_mean_pair(proj, starts, ends, np.arange(K), unit, target, weight, penalty,
+                                                     row_block=2)
+        expected, _ = brute_force_collapsed(target, proj, starts, ends, vectors, weight, penalty, collapse)
+        n_runs += 1
+        problems = []
+        if not (np.isclose(value, expected, rtol=0, atol=1e-12) or (np.isinf(value) and np.isinf(expected))):
+            problems.append(f"value {value!r} vs brute force {expected!r}")
+        elif pair is not None:
+            i0, j0 = pair
+            r = proj[i0] * vectors[i0] + proj[j0] * vectors[j0]
+            lo, hi = max(starts[i0], starts[j0]), min(ends[i0], ends[j0])
+            if collapse == "mean_norm" and hi > lo:
+                r[lo:hi] /= 2
+            tr, rr = float((target * r).sum()), float((r * r).sum())
+            pen = penalty * float(weight[lo:hi].sum()) if hi > lo else 0.0
+            if starts[i0] >= starts[j0] or abs(tr * tr / rr - pen - value) > 1e-12 or abs(scale - tr / rr) > 1e-12:
+                problems.append(f"pair {pair} does not re-score to {value!r} (scale {scale!r})")
+        if problems:
+            n_bad += 1
+            if n_bad <= 5:
+                print(f"  [FAIL] {collapse} pair K={K} S={S} D={D} p={penalty}: {problems[:1]}")
     # (c) Trimming: As logo_trimming
     stack = np.zeros((3, 8, 4))
     stack[0, 2:5] = rng.random((3, 4)) + 0.1
@@ -1032,7 +1187,7 @@ def test_composite_varlen(new, seed=21):
         F = int(rng.integers(1, 4))
         for _ in range(200):
             subunits = [np.eye(4)[rng.integers(0, 4, size=int(rng.integers(3, M + 1)))] for _ in range(F)]
-            planted = [(int(rng.integers(F)), int(rng.random() < 0.5)) for _ in range(int(rng.integers(1, 4)))]
+            planted = [(int(rng.integers(F)), int(rng.random() < 0.5)) for _ in range(int(rng.integers(1, 3)))]
             pieces = [subunits[f][::-1, ::-1] if rc else subunits[f] for f, rc in planted]
             gaps = [int(rng.integers(0, 3)) for _ in planted]
             target = np.concatenate([np.concatenate([np.full((g, 4), 0.0), p]) for g, p in zip(gaps, pieces)])
@@ -1052,7 +1207,7 @@ def test_composite_varlen(new, seed=21):
         for f, (x, o) in enumerate(zip(subunits, offsets)):
             stack[f, o:o + len(x)] = x
         out = new.run_modified_smith_waterman_composite(target, stack, subunit_motif_trim=0, sim_threshold=0.99,
-                                                        overlap_penalty_fraction=1.0, match_count_max=None)
+                                                        target_similarity=None)
         starts, pos = [], 0
         for g, x in zip(gaps, pieces):
             starts.append(pos + g)
@@ -1081,14 +1236,14 @@ def test_composite_varlen(new, seed=21):
         if list(out[3]) != [0, 2] or list(out[5] - (M - 1)) != [0, M + 3]:
             n_bad += 1
             print(f"  [FAIL] signed M={M}: subunits {list(out[3])} at {list(out[5] - (M - 1))}")
-    # (f) At most 3 matches by default
+    # (f) At most 2 matches by default
     x = np.eye(4)[[0, 1, 2, 3]]
     target = np.concatenate([x] * 5)
     out = new.run_modified_smith_waterman_composite(target, x[None], subunit_motif_trim=0, sim_threshold=0.99)
-    if len(out[3]) != 3:
+    if len(out[3]) != 2:
         n_bad += 1
         print(f"  [FAIL] default limit: {len(out[3])} matches")
-    print(f"j. variable-length composite: {n_runs - n_bad}/{n_runs} chains optimal (brute force), planted "
+    print(f"j. variable-length composite: {n_runs - n_bad}/{n_runs} chains and pairs optimal (brute force), planted "
           f"recovered; trimming, signs and the default limit "
           f"{'ok' if n_bad == 0 else f'FAIL ({n_bad})'}")
     return n_bad
@@ -1180,7 +1335,7 @@ def test_padding(new):
             L = len(target)
             out = new.run_modified_smith_waterman_composite(
                 target, s[None], sim_threshold=0.5 / math.sqrt(M), allow_reverse_comp=False,
-                subunit_motif_trim=0, match_count_max=None, match_count_penalty=0.0)
+                subunit_motif_trim=0, match_count_max=2, match_count_penalty=0.0)
             (_, _, stack, idx, rc, h, _) = out
             if list(h) != [0, L + M - 2] or stack.shape != (2, L + 2 * M - 2, 4):
                 n_bad += 1
