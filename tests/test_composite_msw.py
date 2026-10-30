@@ -288,8 +288,9 @@ def same_outputs(a, b):
 
 def test_matches_base(new, base, n_cases=20, seed=22):
     """0c. Against the composite.py from before general_penalty_root and the fixed-length composite
-    were removed (run with general_penalty_root=0, and overlap_penalty for overlap_penalty_fraction):
-    the alignment and ZNF wrappers, with their matrices, and the composite, bit for bit."""
+    were removed (run with general_penalty_root=0): the alignment and ZNF wrappers, with their
+    matrices, bit for bit. The composite is no longer compared: its match score is the squared
+    cosine to the whole motif since 2026-10-30, not the window energy x cosine (section l)."""
     rng = np.random.default_rng(seed)
     n_runs = n_diff = 0
     for i in range(n_cases):
@@ -308,19 +309,7 @@ def test_matches_base(new, base, n_cases=20, seed=22):
                     n_diff += 1
                     if n_diff <= 3:
                         print(f"  [diff] {fn} M={M} {p} global_exact={exact} {mc} unsigned={unsigned}")
-        stack = np.abs(rng.normal(size=(F, 6, 4))) * (rng.random((F, 6, 1)) < 0.8)
-        for lam, mc, trim, ic in itertools.product((0.0, 1.0, 2.5), (dict(), dict(match_count_penalty=0.05)), (True, 0),
-                                                   (False, True)):
-            # ic_scale given to both: the new module's composite is pinned to ic_scale=False below
-            kw = dict(sim_threshold=0.3, subunit_motif_trim=trim, return_match_profile=True, ic_scale=ic, **mc)
-            n_runs += 1
-            a = new.run_modified_smith_waterman_composite(motif, stack, overlap_penalty_fraction=lam, **kw)
-            b = base.run_modified_smith_waterman_composite(motif, stack, overlap_penalty=lam, general_penalty_root=0, **kw)
-            if not same_outputs(a, b):
-                n_diff += 1
-                if n_diff <= 5:
-                    print(f"  [diff] composite lam={lam} {mc} trim={trim} ic_scale={ic}")
-    print(f"0c. vs base (general_penalty_root=0): {n_runs - n_diff}/{n_runs} identical")
+    print(f"0c. vs base (general_penalty_root=0): {n_runs - n_diff}/{n_runs} alignment and ZNF runs identical")
     return n_diff
 
 
@@ -883,6 +872,90 @@ def brute_force_chains(scores, matchable, lengths, penalty, max_count, weight):
     return profile
 
 
+def test_composite_score(new, n_cases=60, seed=23):
+    """l. run_modified_smith_waterman_composite()'s match score is the squared cosine of the
+    subunit, placed at its start (zero elsewhere), to the whole padded, L2-normalized motif, with the
+    cosine to its window above sim_threshold: computed here from scratch, its best chains by number
+    of matches (brute force) are the composite's profile, its reported matches re-score to msw_score,
+    and each match is scaled by its cosine to the whole motif (its least-squares weight). The
+    overlap penalty defaults to 0.9."""
+    import inspect
+    rng = np.random.default_rng(seed)
+    n_bad = n_runs = 0
+    for i in range(n_cases):
+        F, M, L = int(rng.integers(1, 3)), int(rng.integers(3, 6)), int(rng.integers(5, 10))
+        target = rng.normal(size=(L, 4)) * (rng.random((L, 1)) < 0.8)
+        stack = np.abs(rng.normal(size=(F, M, 4)))  # No all-zero subunit (trimming one away raises)
+        trim = (True, 0)[i % 2]
+        penalty = (0.0, 0.5, 0.9, 1.0)[i % 4]
+        sim_threshold = (0.0, 0.4)[(i // 4) % 2]
+        max_count = (1, 2, 3)[i % 3]
+        out = new.run_modified_smith_waterman_composite(
+            target, stack, sim_threshold=sim_threshold, overlap_penalty_fraction=penalty, match_count_max=max_count,
+            subunit_motif_trim=trim, return_match_profile=True)
+
+        # From scratch: Candidates (as given, reverse complemented), on the padded, normalized target
+        subunits = new._trim_subunits(np.abs(stack), trim)
+        candidates = [(s[::-1, ::-1] if rc else s) for s in subunits for rc in (0, 1)]
+        candidates = [c / np.linalg.norm(c) if np.linalg.norm(c) > 0 else c for c in candidates]
+        lengths = np.array([len(c) for c in candidates])
+        padded = np.pad(np.abs(target), ((M - 1, M - 1), (0, 0)))
+        target_norm = padded / np.linalg.norm(padded)
+        S = len(target_norm)
+        scores, matchable, cos_motif = np.zeros((len(candidates), S)), np.zeros((len(candidates), S), dtype=bool), {}
+        for c, cand in enumerate(candidates):
+            for l in range(S - len(cand) + 1):
+                window = target_norm[l:l + len(cand)]
+                cos_global = float((window * cand).sum())  # <motif, placed subunit>: both have norm 1
+                cos_window = cos_global / np.linalg.norm(window) if np.linalg.norm(window) > 0 else 0.0
+                scores[c, l], matchable[c, l], cos_motif[c, l] = cos_global ** 2, cos_window > sim_threshold, cos_global
+        weight = (target_norm * target_norm).sum(axis=1)
+        expected = brute_force_chains(scores, matchable, lengths, penalty, max_count, weight)
+        profile = out[7]
+        n_runs += 1
+        problems = []
+        if profile.shape != expected.shape or not np.allclose(profile, expected, rtol=0, atol=1e-10):
+            problems.append(f"profile {np.round(profile, 4)} vs from scratch {np.round(expected, 4)}")
+        else:
+            # The reported matches: their squared cosines, minus the overlap penalty, are msw_score
+            matches = [(2 * int(f) + int(rc), int(h)) for f, rc, h in zip(out[3], out[4], out[5])]
+            W = np.concatenate([[0.0], np.cumsum(np.concatenate([weight, np.zeros(int(lengths.max()) + 2)]))])
+            rescored = (sum(scores[c, l] for c, l in matches)
+                        - penalty * sum(overlap_cost(a, b, lengths, W) for a, b in zip(matches, matches[1:])))
+            if abs(rescored - out[0]) > 1e-10:
+                problems.append(f"matches {matches} re-score to {rescored!r}, msw_score {out[0]!r}")
+            if not np.allclose(out[6], [cos_motif[m] for m in matches], rtol=0, atol=1e-10):
+                problems.append(f"scales {out[6]} are not the cosines to the motif")
+        if problems:
+            n_bad += 1
+            if n_bad <= 5:
+                print(f"  [FAIL] F={F} M={M} L={L} trim={trim} p={penalty} thr={sim_threshold} max={max_count}: {problems[:2]}")
+
+    # An imperfect match scores its squared cosine, below the window energy x cosine
+    target = np.eye(4)[[0, 0, 1, 1]] + 0.3
+    sub = np.eye(4)[[0, 0, 1, 1]]
+    out = new.run_modified_smith_waterman_composite(target, sub[None], subunit_motif_trim=0, return_match_profile=True,
+                                                    allow_reverse_comp=False)
+    cos = float((target / np.linalg.norm(target) * sub / np.linalg.norm(sub)).sum())
+    if abs(out[7][1] - cos ** 2) > 1e-12:
+        n_bad += 1
+        print(f"  [FAIL] one imperfect match: {out[7][1]!r}, cosine squared {cos ** 2!r}")
+
+    # Default overlap penalty: 0.9, the same as passing it
+    default = inspect.signature(new.run_modified_smith_waterman_composite).parameters["overlap_penalty_fraction"].default
+    target = np.concatenate([np.eye(4)[[0, 1, 2]], np.eye(4)[[2, 3, 0]]]) + 0.05
+    stack = np.stack([np.eye(4)[[0, 1, 2, 2]], np.eye(4)[[2, 2, 3, 0]]])
+    same = same_outputs(new.run_modified_smith_waterman_composite(target, stack, subunit_motif_trim=0),
+                        new.run_modified_smith_waterman_composite(target, stack, subunit_motif_trim=0, overlap_penalty_fraction=0.9))
+    if default != 0.9 or not same:
+        n_bad += 1
+        print(f"  [FAIL] overlap_penalty_fraction default {default!r}, same as 0.9: {same}")
+    print(f"l. composite match score: {n_runs - n_bad}/{n_runs} profiles from scratch (squared cosine to the motif, "
+          f"brute force), matches re-scored, scales; imperfect match and default overlap penalty "
+          f"{'ok' if n_bad == 0 else f'FAIL ({n_bad})'}")
+    return n_bad
+
+
 def test_composite_varlen(new, seed=21):
     """j. run_modified_smith_waterman_composite(): subunits of any lengths (subunit_motif_trim), ordered by
     position. The chain DP is the best over every chain (brute force), by number of matches, with
@@ -1376,6 +1449,7 @@ if __name__ == "__main__":
     failures += test_match_count_max(new)
     failures += test_signed(new)
     failures += test_composite_varlen(new)
+    failures += test_composite_score(new)
     failures += test_storage(new)
     failures += test_l2_norm_removed(new)
     failures += test_padding(new)

@@ -18,7 +18,7 @@ import MotifCompendium.utils.config as utils_config
 def run_modified_smith_waterman_composite(
     target_motif, subunit_motif_stack,
     sim_threshold=0.0,
-    overlap_penalty_fraction=1.0,
+    overlap_penalty_fraction=0.9,
     match_count_max=3,
     match_count_penalty=0.0,
     match_count_fraction=1.0,
@@ -35,21 +35,26 @@ def run_modified_smith_waterman_composite(
     A candidate is a subunit, as given or reverse complemented (allow_reverse_comp), placed at a
     start on the motif; it may overhang either end, overlapping the motif by as little as 1 bp.
     An alignment is up to match_count_max candidates with strictly increasing starts: any
-    subunits, in any order and orientation, repeated or not. A candidate's match score is the
-    motif energy of its window (its own length) times its similarity to the window. Two
-    consecutive candidates (in position order) that overlap are both credited for the motif
-    energy of the overlapping positions, so the overlap costs overlap_penalty_fraction times that
-    energy: 1 takes it back once. The score is the sum of the match scores, minus the overlap
-    penalties. The alignment found is the best one exactly (see _chain_composite()).
+    subunits, in any order and orientation, repeated or not. A candidate's match score is its
+    squared cosine similarity to the whole motif (the subunit placed at its start, zero
+    elsewhere): the motif energy of its window (its own length) times its similarity to the
+    window, squared. That is the share of the motif's energy that the candidate, scaled by its
+    least-squares weight (aligned_subunit_scale), explains. Two consecutive candidates (in
+    position order) that overlap are both credited for the motif energy of the overlapping
+    positions, so the overlap costs overlap_penalty_fraction times that energy: 1 takes it back
+    once. The score is the sum of the match scores, minus the overlap penalties. The alignment
+    found is the best one exactly (see _chain_composite()).
 
     Arguments:
         target_motif: Target motif - np.array of shape (L, D)
         subunit_motif_stack: Stack of subunit motifs, padded to a common length M - np.array of
             shape (F, M, D)
-        sim_threshold: Minimum similarity to consider a match - float
+        sim_threshold: Minimum similarity of a subunit to its window (cosine) to consider a
+            match - float
         overlap_penalty_fraction: Fraction of the motif energy (of the L2-normalized motif,
             which sums to 1) of the positions that two consecutive subunits overlap, subtracted
-            from the score: 1 takes back the energy both are credited for (default: 1) - float >= 0
+            from the score: 1 takes back the energy both are credited for (default: 0.9)
+            - float >= 0
         match_count_penalty: Penalty per subunit matched: keeps the alignment with the N that
             maximizes its best score with N matches - match_count_penalty * N, and subtracts
             match_count_penalty * N from msw_score - float >= 0
@@ -146,7 +151,7 @@ def run_modified_smith_waterman_composite(
         sim[cands, :len(windows)] = compute_aligned_similarity(cp.asarray(stack_m), cp.asarray(windows_sim))
         energy[cands, :len(windows)] = (windows * windows).sum(axis=(1, 2))[None, :]
         valid[cands, :len(windows)] = True
-    match_scores = energy * sim
+    match_scores = energy * sim ** 2  # Squared cosine to the whole (normalized) motif: (|w| * sim)^2
     matchable = valid & (sim > sim_threshold)
 
     ## Align: The best alignment with N matches, for every N; then N
