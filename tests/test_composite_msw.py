@@ -629,11 +629,11 @@ def test_match_count(new, n_cases=60, seed=14):
         print(f"  [FAIL] accepted match_count_fraction {fraction!r}")
 
     # Wrappers: One more output, only when asked; the composite keeps fewer subunits as the penalty
-    # grows
+    # grows (without a match count penalty, msw_score is the profile's best: the default is 0.1)
     for j in range(8):
         motif, stack = make_mixed_case(rng, 2, (3, 4)[j % 2], int(rng.integers(15, 30)))
-        base = new.run_modified_smith_waterman_composite(motif, stack)
-        out = new.run_modified_smith_waterman_composite(motif, stack, return_match_profile=True)
+        base = new.run_modified_smith_waterman_composite(motif, stack, match_count_penalty=0.0)
+        out = new.run_modified_smith_waterman_composite(motif, stack, match_count_penalty=0.0, return_match_profile=True)
         if (len(base) != 7 or len(out) != 8 or abs(out[7][len(out[3])] - out[0]) > 1e-12
                 or abs(out[0] - out[7].max()) > 1e-12 or out[0] != base[0]):
             n_bad += 1
@@ -878,7 +878,7 @@ def test_composite_score(new, n_cases=60, seed=23):
     cosine to its window above sim_threshold: computed here from scratch, its best chains by number
     of matches (brute force) are the composite's profile, its reported matches re-score to msw_score,
     and each match is scaled by its cosine to the whole motif (its least-squares weight). The
-    overlap penalty defaults to 0.9."""
+    overlap penalty and the match count penalty default to 0.1."""
     import inspect
     rng = np.random.default_rng(seed)
     n_bad = n_runs = 0
@@ -892,7 +892,7 @@ def test_composite_score(new, n_cases=60, seed=23):
         max_count = (1, 2, 3)[i % 3]
         out = new.run_modified_smith_waterman_composite(
             target, stack, sim_threshold=sim_threshold, overlap_penalty_fraction=penalty, match_count_max=max_count,
-            subunit_motif_trim=trim, return_match_profile=True)
+            match_count_penalty=0.0, subunit_motif_trim=trim, return_match_profile=True)
 
         # From scratch: Candidates (as given, reverse complemented), on the padded, normalized target
         subunits = new._trim_subunits(np.abs(stack), trim)
@@ -941,17 +941,19 @@ def test_composite_score(new, n_cases=60, seed=23):
         n_bad += 1
         print(f"  [FAIL] one imperfect match: {out[7][1]!r}, cosine squared {cos ** 2!r}")
 
-    # Default overlap penalty: 0.9, the same as passing it
-    default = inspect.signature(new.run_modified_smith_waterman_composite).parameters["overlap_penalty_fraction"].default
+    # Defaults: overlap penalty 0.1 and match count penalty 0.1, the same as passing them
+    parameters = inspect.signature(new.run_modified_smith_waterman_composite).parameters
+    defaults = (parameters["overlap_penalty_fraction"].default, parameters["match_count_penalty"].default)
     target = np.concatenate([np.eye(4)[[0, 1, 2]], np.eye(4)[[2, 3, 0]]]) + 0.05
     stack = np.stack([np.eye(4)[[0, 1, 2, 2]], np.eye(4)[[2, 2, 3, 0]]])
     same = same_outputs(new.run_modified_smith_waterman_composite(target, stack, subunit_motif_trim=0),
-                        new.run_modified_smith_waterman_composite(target, stack, subunit_motif_trim=0, overlap_penalty_fraction=0.9))
-    if default != 0.9 or not same:
+                        new.run_modified_smith_waterman_composite(target, stack, subunit_motif_trim=0,
+                                                                  overlap_penalty_fraction=0.1, match_count_penalty=0.1))
+    if defaults != (0.1, 0.1) or not same:
         n_bad += 1
-        print(f"  [FAIL] overlap_penalty_fraction default {default!r}, same as 0.9: {same}")
+        print(f"  [FAIL] overlap_penalty_fraction / match_count_penalty defaults {defaults!r}, same as 0.1 / 0.1: {same}")
     print(f"l. composite match score: {n_runs - n_bad}/{n_runs} profiles from scratch (squared cosine to the motif, "
-          f"brute force), matches re-scored, scales; imperfect match and default overlap penalty "
+          f"brute force), matches re-scored, scales; imperfect match and the default penalties "
           f"{'ok' if n_bad == 0 else f'FAIL ({n_bad})'}")
     return n_bad
 
@@ -1172,12 +1174,13 @@ def test_padding(new):
         s = np.eye(4)[[0] + [1] * (M - 2) + [2]]
         for middle in (1, 3, 6):
             # Only the subunit's last bp at the start, and its first bp at the end: A 1 bp overlap
-            # has cosine 1/sqrt(M), and every other window 0
+            # has cosine 1/sqrt(M), and every other window 0. No match count penalty: a 1 bp overlap
+            # explains too little of the target to pass the default (0.1)
             target = np.concatenate([s[M - 1:], np.eye(4)[[3] * middle], s[:1]])
             L = len(target)
             out = new.run_modified_smith_waterman_composite(
                 target, s[None], sim_threshold=0.5 / math.sqrt(M), allow_reverse_comp=False,
-                subunit_motif_trim=0, match_count_max=None)
+                subunit_motif_trim=0, match_count_max=None, match_count_penalty=0.0)
             (_, _, stack, idx, rc, h, _) = out
             if list(h) != [0, L + M - 2] or stack.shape != (2, L + 2 * M - 2, 4):
                 n_bad += 1

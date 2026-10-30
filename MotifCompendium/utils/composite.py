@@ -18,9 +18,9 @@ import MotifCompendium.utils.config as utils_config
 def run_modified_smith_waterman_composite(
     target_motif, subunit_motif_stack,
     sim_threshold=0.0,
-    overlap_penalty_fraction=0.9,
+    overlap_penalty_fraction=0.1,
     match_count_max=3,
-    match_count_penalty=0.0,
+    match_count_penalty=0.1,
     match_count_fraction=1.0,
     subunit_motif_trim=True,
     return_match_profile=False,
@@ -53,11 +53,12 @@ def run_modified_smith_waterman_composite(
             match - float
         overlap_penalty_fraction: Fraction of the motif energy (of the L2-normalized motif,
             which sums to 1) of the positions that two consecutive subunits overlap, subtracted
-            from the score: 1 takes back the energy both are credited for (default: 0.9)
+            from the score: 1 takes back the energy both are credited for (default: 0.1)
             - float >= 0
         match_count_penalty: Penalty per subunit matched: keeps the alignment with the N that
             maximizes its best score with N matches - match_count_penalty * N, and subtracts
-            match_count_penalty * N from msw_score - float >= 0
+            match_count_penalty * N from msw_score; a subunit is kept only if it explains more
+            than this share of the motif's energy (default: 0.1) - float >= 0
         match_count_fraction: Keep the fewest matches whose penalized best score reaches this
             fraction of the maximum; 1 keeps the maximum (default: 1) - float in (0, 1]
         match_count_max: Most subunits matched (None: no limit) (default: 3) - int >= 1, or None
