@@ -629,7 +629,7 @@ def test_match_count(new, n_cases=60, seed=14):
         print(f"  [FAIL] accepted match_count_fraction {fraction!r}")
 
     # Wrappers: One more output, only when asked; the composite keeps fewer subunits as the penalty
-    # grows (without a match count penalty, msw_score is the profile's best: the default is 0.1)
+    # grows (without a match count penalty, msw_score is the profile's best: the default is 0.05)
     for j in range(8):
         motif, stack = make_mixed_case(rng, 2, (3, 4)[j % 2], int(rng.integers(15, 30)))
         base = new.run_modified_smith_waterman_composite(motif, stack, match_count_penalty=0.0, target_similarity=None)
@@ -914,7 +914,7 @@ def test_composite_score(new, n_cases=60, seed=23):
     scaled subunits are summed (sum_norm), averaged where they overlap (mean_norm), or not collapsed
     (none: the squared scores add, minus the overlap penalty). Computed here from scratch over every
     alignment (brute force): the profile, the reported matches re-scored, and the scales. Also: an
-    imperfect match scores its cosine; the defaults (no overlap penalty, 0.1 per subunit in cosine
+    imperfect match scores its cosine; the defaults (no overlap penalty, 0.05 per subunit in cosine
     units, target similarity 0.9, at most 2 subunits); target_similarity stops at the fewest
     subunits reaching it; and match_count_max above 2 is rejected."""
     import inspect
@@ -1011,7 +1011,7 @@ def test_composite_score(new, n_cases=60, seed=23):
         n_bad += 1
         print(f"  [FAIL] one imperfect match: {out[7][1]!r}, cosine {cos!r}")
 
-    # Defaults: no overlap penalty, 0.1 per subunit, target similarity 0.9, at most 2 subunits
+    # Defaults: no overlap penalty, 0.05 per subunit, target similarity 0.9, at most 2 subunits
     parameters = inspect.signature(new.run_modified_smith_waterman_composite).parameters
     defaults = tuple(parameters[k].default for k in ("overlap_penalty_fraction", "match_count_penalty",
                                                      "target_similarity", "match_count_max"))
@@ -1019,9 +1019,9 @@ def test_composite_score(new, n_cases=60, seed=23):
     stack = np.stack([np.eye(4)[[0, 1, 2, 2]], np.eye(4)[[2, 2, 3, 0]]])
     same = same_outputs(new.run_modified_smith_waterman_composite(target, stack, subunit_motif_trim=0),
                         new.run_modified_smith_waterman_composite(
-                            target, stack, subunit_motif_trim=0, overlap_penalty_fraction=0.0, match_count_penalty=0.1,
+                            target, stack, subunit_motif_trim=0, overlap_penalty_fraction=0.0, match_count_penalty=0.05,
                             target_similarity=0.9, match_count_max=2))
-    if defaults != (0.0, 0.1, 0.9, 2) or not same:
+    if defaults != (0.0, 0.05, 0.9, 2) or not same:
         n_bad += 1
         print(f"  [FAIL] defaults {defaults!r}, same as passing them: {same}")
 
@@ -1330,7 +1330,7 @@ def test_padding(new):
         for middle in (1, 3, 6):
             # Only the subunit's last bp at the start, and its first bp at the end: A 1 bp overlap
             # has cosine 1/sqrt(M), and every other window 0. No match count penalty: a 1 bp overlap
-            # explains too little of the target to pass the default (0.1)
+            # explains too little of the target to pass the default (0.05)
             target = np.concatenate([s[M - 1:], np.eye(4)[[3] * middle], s[:1]])
             L = len(target)
             out = new.run_modified_smith_waterman_composite(

@@ -20,7 +20,7 @@ def run_modified_smith_waterman_composite(
     sim_threshold=0.0,
     overlap_penalty_fraction=0.0,
     match_count_max=2,
-    match_count_penalty=0.1,
+    match_count_penalty=0.05,
     match_count_fraction=1.0,
     subunit_motif_trim=True,
     return_match_profile=False,
@@ -70,7 +70,7 @@ def run_modified_smith_waterman_composite(
         match_count_penalty: Penalty per subunit matched, in cosine units: keeps the alignment with
             the N that maximizes its best score with N matches - match_count_penalty * N, and
             subtracts match_count_penalty * N from msw_score; a second subunit is kept only if it
-            raises the cosine by more than this (default: 0.1) - float >= 0
+            raises the cosine by more than this (default: 0.05) - float >= 0
         match_count_fraction: Keep the fewest matches whose penalized best score reaches this
             fraction of the maximum; 1 keeps the maximum (default: 1) - float in (0, 1]
         target_similarity: Stop adding subunits once the best alignment reaches this cosine: the
