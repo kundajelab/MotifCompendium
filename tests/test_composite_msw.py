@@ -885,16 +885,28 @@ def brute_force_chains(scores, matchable, lengths, penalty, max_count, weight):
     return profile
 
 
-def brute_force_collapsed(target, proj, starts, ends, vectors, weight, penalty, collapse="sum_norm"):
+def pool(x_i, x_j, p):
+    """Lp pool of two nonnegative arrays, entry by entry: (x_i^p + x_j^p)^(1/p), the maximum for p = inf."""
+    return np.maximum(x_i, x_j) if np.isinf(p) else (x_i ** p + x_j ** p) ** (1.0 / p)
+
+
+def collapse_pool_p(collapse, collapse_p):
+    """The order of the Lp pool of a collapse (None: sum_norm's sum or mean_norm's mean)."""
+    return {"max_norm": np.inf, "lp_norm": collapse_p}.get(collapse)
+
+
+def brute_force_collapsed(target, proj, starts, ends, vectors, weight, penalty, collapse="sum_norm", collapse_p=None):
     """Best squared score over every pair of placements with distinct starts: the energy their
-    collapsed alignment (b_i u_i + b_j u_j; mean_norm: halved where both windows cover), L2-normalized,
-    explains, minus penalty * the weight of the positions both windows cover; and the pair, by start."""
+    collapsed alignment (b_i u_i + b_j u_j; mean_norm: halved where both windows cover; max_norm,
+    lp_norm: their Lp pool, entry by entry), L2-normalized, explains, minus penalty * the weight of
+    the positions both windows cover; and the pair, by start."""
     W = np.concatenate([[0.0], np.cumsum(weight)])
     value, pair = -np.inf, None
+    q = collapse_pool_p(collapse, collapse_p)
     for i, j in itertools.combinations(range(len(proj)), 2):
         if starts[i] == starts[j]:
             continue
-        r = proj[i] * vectors[i] + proj[j] * vectors[j]
+        r = proj[i] * vectors[i] + proj[j] * vectors[j] if q is None else pool(proj[i] * vectors[i], proj[j] * vectors[j], q)
         lo, hi = max(starts[i], starts[j]), min(ends[i], ends[j])
         if collapse == "mean_norm" and hi > lo:
             r[lo:hi] /= 2
@@ -907,16 +919,22 @@ def brute_force_collapsed(target, proj, starts, ends, vectors, weight, penalty, 
     return value, pair
 
 
-def test_composite_score(new, n_cases=60, seed=23):
+COLLAPSES = [("sum_norm", None), ("mean_norm", None), ("none", None), ("max_norm", None), ("lp_norm", 2.0),
+             ("lp_norm", 3.5)]
+
+
+def test_composite_score(new, n_cases=144, seed=23):
     """l. run_modified_smith_waterman_composite()'s score is the cosine similarity of the motif with
     its collapsed alignment, L2-normalized: each subunit, placed at its start (zero elsewhere), is
     scaled by its cosine to the whole padded, L2-normalized motif (its least-squares weight), and the
-    scaled subunits are summed (sum_norm), averaged where they overlap (mean_norm), or not collapsed
-    (none: the squared scores add, minus the overlap penalty). Computed here from scratch over every
-    alignment (brute force): the profile, the reported matches re-scored, and the scales. Also: an
-    imperfect match scores its cosine; the defaults (no overlap penalty, 0.05 per subunit in cosine
-    units, target similarity 0.9, at most 2 subunits); target_similarity stops at the fewest
-    subunits reaching it; and match_count_max above 2 is rejected."""
+    scaled subunits are summed (sum_norm), pooled by their maximum (max_norm) or Lp norm (lp_norm)
+    entry by entry, averaged where they overlap (mean_norm), or not collapsed (none: the squared
+    scores add, minus the overlap penalty). Computed here from scratch over every alignment (brute
+    force): the profile, the reported matches re-scored, and the scales; every collapse with every
+    trim, penalty, threshold and limit. Also: an imperfect match scores its cosine; the defaults (no
+    overlap penalty, 0.05 per subunit in cosine units, target similarity 0.9, at most 2 subunits);
+    target_similarity stops at the fewest subunits reaching it; lp_norm with p = 1 and p = inf is
+    sum_norm and max_norm; and match_count_max above 2 and a misused collapse_p are rejected."""
     import inspect
     rng = np.random.default_rng(seed)
     n_bad = n_runs = 0
@@ -924,15 +942,15 @@ def test_composite_score(new, n_cases=60, seed=23):
         F, M, L = int(rng.integers(1, 3)), int(rng.integers(3, 6)), int(rng.integers(5, 10))
         target = rng.normal(size=(L, 4)) * (rng.random((L, 1)) < 0.8)
         stack = np.abs(rng.normal(size=(F, M, 4)))  # No all-zero subunit (trimming one away raises)
-        trim = (True, 0)[i % 2]
-        penalty = (0.0, 0.5)[(i // 2) % 2]
-        sim_threshold = (0.0, 0.4)[(i // 4) % 2]
-        collapse = ("sum_norm", "mean_norm", "none")[i % 3]
-        max_count = ((1, 2, 2) if collapse != "none" else (1, 2, 3))[(i // 3) % 3]
+        collapse, collapse_p = COLLAPSES[i % len(COLLAPSES)]
+        trim = (True, 0)[(i // 6) % 2]
+        penalty = (0.0, 0.5)[(i // 12) % 2]
+        sim_threshold = (0.0, 0.4)[(i // 24) % 2]
+        max_count = ((1, 2, 2) if collapse != "none" else (1, 2, 3))[(i // 48) % 3]
         out = new.run_modified_smith_waterman_composite(
             target, stack, sim_threshold=sim_threshold, overlap_penalty_fraction=penalty, match_count_max=max_count,
             match_count_penalty=0.0, target_similarity=None, subunit_motif_trim=trim, return_match_profile=True,
-            collapse=collapse)
+            collapse=collapse, collapse_p=collapse_p)
 
         # From scratch: Candidates (as given, reverse complemented), on the padded, normalized target
         subunits = new._trim_subunits(np.abs(stack), trim)
@@ -966,7 +984,8 @@ def test_composite_score(new, n_cases=60, seed=23):
             if len(proj):
                 expected[1] = proj.max()
             if len(proj) and max_count == 2:
-                value, _ = brute_force_collapsed(target_norm, proj, starts, ends, vectors, weight, penalty, collapse)
+                value, _ = brute_force_collapsed(target_norm, proj, starts, ends, vectors, weight, penalty, collapse,
+                                                 collapse_p)
                 expected[2] = np.sqrt(max(value, 0.0)) if np.isfinite(value) else -np.inf
         profile = out[7]
         n_runs += 1
@@ -985,7 +1004,11 @@ def test_composite_score(new, n_cases=60, seed=23):
                           - penalty * sum(overlap_cost(x, y, lengths, W) for x, y in zip(chain, chain[1:])))
                 rescored, scales = np.sqrt(max(energy, 0.0)), [proj[k] for k in matches]
             else:
-                r = sum(proj[k] * vectors[k] for k in matches)
+                q = collapse_pool_p(collapse, collapse_p)
+                if q is not None and len(matches) == 2:
+                    r = pool(proj[matches[0]] * vectors[matches[0]], proj[matches[1]] * vectors[matches[1]], q)
+                else:
+                    r = sum(proj[k] * vectors[k] for k in matches)
                 lo, hi = max(starts[k] for k in matches), min(ends[k] for k in matches)
                 if collapse == "mean_norm" and len(matches) == 2 and hi > lo:
                     r[lo:hi] /= 2
@@ -999,7 +1022,8 @@ def test_composite_score(new, n_cases=60, seed=23):
         if problems:
             n_bad += 1
             if n_bad <= 5:
-                print(f"  [FAIL] {collapse} F={F} M={M} L={L} trim={trim} p={penalty} thr={sim_threshold} max={max_count}: {problems[:2]}")
+                print(f"  [FAIL] {collapse} (p={collapse_p}) F={F} M={M} L={L} trim={trim} p={penalty} thr={sim_threshold} "
+                      f"max={max_count}: {problems[:2]}")
 
     # An imperfect match scores its cosine to the motif
     target = np.eye(4)[[0, 0, 1, 1]] + 0.3
@@ -1057,12 +1081,109 @@ def test_composite_score(new, n_cases=60, seed=23):
     else:
         n_bad += 1
         print("  [FAIL] accepted collapse='max'")
+    for kw_bad in (dict(collapse="lp_norm"), dict(collapse="lp_norm", collapse_p=0.5), dict(collapse="lp_norm", collapse_p=True),
+                   dict(collapse="lp_norm", collapse_p="2"), dict(collapse="sum_norm", collapse_p=2.0),
+                   dict(collapse="max_norm", collapse_p=np.inf)):
+        try:
+            new.run_modified_smith_waterman_composite(target, stack, **kw_bad)
+        except ValueError:
+            continue
+        n_bad += 1
+        print(f"  [FAIL] accepted {kw_bad}")
+
+    # lp_norm: p = 1 is sum_norm and p = inf is max_norm, output for output
+    rng = np.random.default_rng(seed + 1)
+    for _ in range(8):
+        target = rng.normal(size=(int(rng.integers(6, 12)), 4))
+        stack = np.abs(rng.normal(size=(3, 5, 4)))
+        kw = dict(match_count_penalty=0.0, target_similarity=None, return_match_profile=True)
+        for (c_a, p_a), (c_b, p_b) in ((("lp_norm", 1), ("sum_norm", None)), (("lp_norm", np.inf), ("max_norm", None))):
+            out_a = new.run_modified_smith_waterman_composite(target, stack, collapse=c_a, collapse_p=p_a, **kw)
+            out_b = new.run_modified_smith_waterman_composite(target, stack, collapse=c_b, collapse_p=p_b, **kw)
+            if not same_outputs(out_a, out_b):
+                n_bad += 1
+                print(f"  [FAIL] lp_norm p={p_a} differs from {c_b}")
+        # Signed (8 channels): The pooled collapse is scored, finite
+        for c_s, p_s in (("max_norm", None), ("lp_norm", 2.0)):
+            out_s = new.run_modified_smith_waterman_composite(rng.normal(size=(10, 4)), rng.normal(size=(3, 5, 4)),
+                                                              label_unsigned=False, collapse=c_s, collapse_p=p_s, **kw)
+            if not (np.isfinite(out_s[0]) and np.isfinite(out_s[1])):
+                n_bad += 1
+                print(f"  [FAIL] signed {c_s}: msw_score {out_s[0]!r}, sim_score {out_s[1]!r}")
     for limit in (3, None):
         new.run_modified_smith_waterman_composite(target, stack, collapse="none", match_count_max=limit,
                                                   subunit_motif_trim=0)
     print(f"l. composite score (cosine of the collapsed alignment): {n_runs - n_bad}/{n_runs} profiles from scratch "
           f"(brute force), matches re-scored, scales; imperfect match, defaults, target similarity and validation "
           f"{'ok' if n_bad == 0 else f'FAIL ({n_bad})'}")
+    return n_bad
+
+
+def test_pooled_search(new, n_cases=14, seed=31):
+    """m. _best_pooled_pair() (max_norm, lp_norm) is exact: on random nonnegative targets with up to
+    400 placements of random lengths and starts, its best pair scores the same as the best over
+    every pair (brute force), for p = 1.5, 2, 4 and inf, with and without an overlap penalty, in
+    small blocks so that the search crosses blocks and prunes; also when every pair overlaps (no
+    pair without overlap to start from)."""
+    rng = np.random.default_rng(seed)
+    n_bad = n_runs = 0
+    for case in range(n_cases):
+        P, D = int(rng.integers(20, 50)), 4
+        t = np.abs(rng.normal(size=(P, D))) * (rng.random((P, 1)) < 0.85)
+        t /= np.linalg.norm(t)
+        K = int(rng.integers(40, 400))
+        narrow = case % 4 == 3  # Every window covers the middle: every pair overlaps
+        lengths = rng.integers(3, 12, size=K)
+        if narrow:
+            starts = np.array([int(rng.integers(max(0, P // 2 - m + 1), P // 2 + 1)) for m in lengths])
+        else:
+            starts = np.array([int(rng.integers(0, P - m + 1)) for m in lengths])
+        ends = starts + lengths
+        unit, proj, U = [], np.zeros(K), np.zeros((K, P, D))
+        for k in range(K):
+            u = np.abs(rng.normal(size=(lengths[k], D))) * (rng.random((lengths[k], 1)) < 0.9) + 1e-3
+            u /= np.linalg.norm(u)
+            unit.append(u)
+            U[k, starts[k]:ends[k]] = u
+            proj[k] = float((t[starts[k]:ends[k]] * u).sum())
+        cands = np.arange(K)
+        weight = (t * t).sum(axis=1)
+        W = np.concatenate([[0.0], np.cumsum(weight)])
+        V = U * proj[:, None, None]  # (K, P, D): Scaled placements
+        i_all, j_all = np.triu_indices(K, 1)
+        keep = starts[i_all] != starts[j_all]
+        i_all, j_all = i_all[keep], j_all[keep]
+        lo, hi = np.maximum(starts[i_all], starts[j_all]), np.minimum(ends[i_all], ends[j_all])
+        overlap = np.where(hi > lo, W[np.maximum(hi, lo)] - W[lo], 0.0)
+        for p in (1.5, 2.0, 4.0, np.inf):
+            for penalty in (0.0, 0.3):
+                expected = -np.inf
+                for c0 in range(0, len(i_all), 20000):
+                    ii, jj = i_all[c0:c0 + 20000], j_all[c0:c0 + 20000]
+                    r = pool(V[ii], V[jj], p).reshape(len(ii), -1)
+                    y, z2 = r @ t.reshape(-1), (r * r).sum(axis=1)
+                    val = np.where(y > 0, y * y / np.maximum(z2, 1e-300), -np.inf) - penalty * overlap[c0:c0 + 20000]
+                    expected = max(expected, float(val.max()))
+                value, pair, scale = new._best_pooled_pair(proj, starts, ends, cands, unit, t, weight, penalty, p,
+                                                           row_block=16, col_block=64, pair_block=32)
+                n_runs += 1
+                problems = []
+                if abs(value - expected) > 1e-9:
+                    problems.append(f"value {value!r} vs brute force {expected!r}")
+                elif pair is not None:  # The pair re-scores to the value
+                    a, b = pair
+                    r = pool(V[a], V[b], p)
+                    y, z2 = float((r * t).sum()), float((r * r).sum())
+                    lo_ab, hi_ab = max(starts[a], starts[b]), min(ends[a], ends[b])
+                    pen = penalty * (W[hi_ab] - W[lo_ab]) if hi_ab > lo_ab else 0.0
+                    if abs(y * y / z2 - pen - value) > 1e-9 or starts[a] >= starts[b] or abs(scale - (y / z2 if hi_ab > lo_ab else 1.0)) > 1e-9:
+                        problems.append(f"pair {pair} re-scores to {y * y / z2 - pen!r}, scale {scale!r}")
+                if problems:
+                    n_bad += 1
+                    if n_bad <= 5:
+                        print(f"  [FAIL] case {case} K={K} P={P} p={p} penalty={penalty} narrow={narrow}: {problems}")
+    print(f"m. pooled pair search (max_norm, lp_norm): {n_runs - n_bad}/{n_runs} best pairs exact (brute force over "
+          f"every pair), re-scored")
     return n_bad
 
 
@@ -1608,6 +1729,7 @@ if __name__ == "__main__":
     failures += test_signed(new)
     failures += test_composite_varlen(new)
     failures += test_composite_score(new)
+    failures += test_pooled_search(new)
     failures += test_storage(new)
     failures += test_l2_norm_removed(new)
     failures += test_padding(new)
