@@ -891,47 +891,71 @@ def pool(x_i, x_j, p):
 
 
 def collapse_pool_p(collapse, collapse_p):
-    """The order of the Lp pool of a collapse (None: sum_norm's sum or mean_norm's mean)."""
+    """The order of the Lp pool of a collapse (None: the sum or mean, or lsq)."""
     return {"max_norm": np.inf, "lp_norm": collapse_p}.get(collapse)
 
 
+def collapse_pair(collapse, collapse_p, v_i, v_j, lo, hi):
+    """The collapsed alignment of two scaled placements: their sum; their Lp pool (max_norm,
+    lp_norm); halved where both windows cover (mean_norm)."""
+    q = collapse_pool_p(collapse, collapse_p)
+    if q is not None:
+        return pool(v_i, v_j, q)
+    r = v_i + v_j
+    if hi > lo and collapse == "mean_norm":
+        r[lo:hi] /= 2
+    return r
+
+
+def pair_score(target, collapse, collapse_p, b_i, b_j, u_i, u_j, lo, hi):
+    """Squared score of a pair of placements (unit vectors u, projections b), before the overlap
+    penalty, and the scale of each over its b: the energy the collapsed alignment explains,
+    L2-normalized (<t, r>^2 / |r|^2); lsq: the energy of the non-negative least-squares fit of the
+    two (scipy's nnls), which is at its least-squares scale already."""
+    if collapse == "lsq":
+        from scipy.optimize import nnls
+        basis = np.stack([u_i.ravel(), u_j.ravel()], axis=1)
+        x, _ = nnls(basis, target.ravel())
+        r = basis @ x
+        return 2 * float(target.ravel() @ r) - float(r @ r), [x[0] / b_i if b_i > 0 else 0.0, x[1] / b_j if b_j > 0 else 0.0]
+    r = collapse_pair(collapse, collapse_p, b_i * u_i, b_j * u_j, lo, hi)
+    tr, rr = float((target * r).sum()), float((r * r).sum())
+    if rr <= 0:
+        return -np.inf, [1.0, 1.0]
+    return tr * tr / rr, [tr / rr, tr / rr]
+
+
 def brute_force_collapsed(target, proj, starts, ends, vectors, weight, penalty, collapse="sum_norm", collapse_p=None):
-    """Best squared score over every pair of placements with distinct starts: the energy their
-    collapsed alignment (b_i u_i + b_j u_j; mean_norm: halved where both windows cover; max_norm,
-    lp_norm: their Lp pool, entry by entry), L2-normalized, explains, minus penalty * the weight of
-    the positions both windows cover; and the pair, by start."""
+    """Best squared score over every pair of placements with distinct starts (pair_score(), minus
+    penalty * the weight of the positions both windows cover), and the pair, by start."""
     W = np.concatenate([[0.0], np.cumsum(weight)])
     value, pair = -np.inf, None
-    q = collapse_pool_p(collapse, collapse_p)
     for i, j in itertools.combinations(range(len(proj)), 2):
         if starts[i] == starts[j]:
             continue
-        r = proj[i] * vectors[i] + proj[j] * vectors[j] if q is None else pool(proj[i] * vectors[i], proj[j] * vectors[j], q)
         lo, hi = max(starts[i], starts[j]), min(ends[i], ends[j])
-        if collapse == "mean_norm" and hi > lo:
-            r[lo:hi] /= 2
-        norm2 = float((r * r).sum())
-        if norm2 <= 0:
-            continue
-        v = float((target * r).sum()) ** 2 / norm2 - (penalty * (W[hi] - W[lo]) if hi > lo else 0.0)
+        e, _ = pair_score(target, collapse, collapse_p, proj[i], proj[j], vectors[i], vectors[j], lo, hi)
+        v = e - (penalty * (W[hi] - W[lo]) if hi > lo else 0.0)
         if v > value + 1e-12:
             value, pair = v, sorted([i, j], key=lambda k: starts[k])
     return value, pair
 
 
 COLLAPSES = [("sum_norm", None), ("mean_norm", None), ("none", None), ("max_norm", None), ("lp_norm", 2.0),
-             ("lp_norm", 3.5)]
+             ("lp_norm", 3.5), ("lsq", None)]
 
 
-def test_composite_score(new, n_cases=144, seed=23):
+def test_composite_score(new, n_cases=24 * len(COLLAPSES), seed=23):
     """l. run_modified_smith_waterman_composite()'s score is the cosine similarity of the motif with
     its collapsed alignment, L2-normalized: each subunit, placed at its start (zero elsewhere), is
     scaled by its cosine to the whole padded, L2-normalized motif (its least-squares weight), and the
     scaled subunits are summed (sum_norm), pooled by their maximum (max_norm) or Lp norm (lp_norm)
-    entry by entry, averaged where they overlap (mean_norm), or not collapsed (none: the squared
-    scores add, minus the overlap penalty). Computed here from scratch over every alignment (brute
-    force): the profile, the reported matches re-scored, and the scales; every collapse with every
-    trim, penalty, threshold and limit. Also: an imperfect match scores its cosine; the defaults (no
+    entry by entry, averaged where they overlap (mean_norm), summed with both scales refit by
+    non-negative least squares (lsq, scipy's nnls), or not collapsed (none: the squared scores add,
+    minus the overlap penalty). Computed here
+    from scratch over every alignment (brute force): the profile, the reported matches re-scored,
+    and the scales; every collapse with every trim, penalty, threshold and limit. Also: an
+    imperfect match scores its cosine; the defaults (no
     overlap penalty, 0.05 per subunit in cosine units, target similarity 0.9, at most 2 subunits);
     target_similarity stops at the fewest subunits reaching it; lp_norm with p = 1 and p = inf is
     sum_norm and max_norm; and match_count_max above 2 and a misused collapse_p are rejected."""
@@ -942,11 +966,12 @@ def test_composite_score(new, n_cases=144, seed=23):
         F, M, L = int(rng.integers(1, 3)), int(rng.integers(3, 6)), int(rng.integers(5, 10))
         target = rng.normal(size=(L, 4)) * (rng.random((L, 1)) < 0.8)
         stack = np.abs(rng.normal(size=(F, M, 4)))  # No all-zero subunit (trimming one away raises)
-        collapse, collapse_p = COLLAPSES[i % len(COLLAPSES)]
-        trim = (True, 0)[(i // 6) % 2]
-        penalty = (0.0, 0.5)[(i // 12) % 2]
-        sim_threshold = (0.0, 0.4)[(i // 24) % 2]
-        max_count = ((1, 2, 2) if collapse != "none" else (1, 2, 3))[(i // 48) % 3]
+        n_modes = len(COLLAPSES)
+        collapse, collapse_p = COLLAPSES[i % n_modes]
+        trim = (True, 0)[(i // n_modes) % 2]
+        penalty = (0.0, 0.5)[(i // (2 * n_modes)) % 2]
+        sim_threshold = (0.0, 0.4)[(i // (4 * n_modes)) % 2]
+        max_count = ((1, 2, 2) if collapse != "none" else (1, 2, 3))[(i // (8 * n_modes)) % 3]
         out = new.run_modified_smith_waterman_composite(
             target, stack, sim_threshold=sim_threshold, overlap_penalty_fraction=penalty, match_count_max=max_count,
             match_count_penalty=0.0, target_similarity=None, subunit_motif_trim=trim, return_match_profile=True,
@@ -1003,18 +1028,14 @@ def test_composite_score(new, n_cases=144, seed=23):
                 energy = (sum(proj[k] ** 2 for k in matches)
                           - penalty * sum(overlap_cost(x, y, lengths, W) for x, y in zip(chain, chain[1:])))
                 rescored, scales = np.sqrt(max(energy, 0.0)), [proj[k] for k in matches]
+            elif len(matches) == 1:
+                rescored, scales = proj[matches[0]], [proj[matches[0]]]
             else:
-                q = collapse_pool_p(collapse, collapse_p)
-                if q is not None and len(matches) == 2:
-                    r = pool(proj[matches[0]] * vectors[matches[0]], proj[matches[1]] * vectors[matches[1]], q)
-                else:
-                    r = sum(proj[k] * vectors[k] for k in matches)
-                lo, hi = max(starts[k] for k in matches), min(ends[k] for k in matches)
-                if collapse == "mean_norm" and len(matches) == 2 and hi > lo:
-                    r[lo:hi] /= 2
-                tr, rr = float((target_norm * r).sum()), float((r * r).sum())
-                pen = penalty * float(weight[lo:hi].sum()) if len(matches) == 2 and hi > lo else 0.0
-                rescored, scales = np.sqrt(max(tr * tr / rr - pen, 0.0)), [proj[k] * tr / rr for k in matches]
+                k_i, k_j = matches
+                lo, hi = max(starts[k_i], starts[k_j]), min(ends[k_i], ends[k_j])
+                e, f = pair_score(target_norm, collapse, collapse_p, proj[k_i], proj[k_j], vectors[k_i], vectors[k_j], lo, hi)
+                pen = penalty * float(weight[lo:hi].sum()) if hi > lo else 0.0
+                rescored, scales = np.sqrt(max(e - pen, 0.0)), [proj[k_i] * f[0], proj[k_j] * f[1]]
             if abs(rescored - out[0]) > 1e-9 or abs(out[0] - profile.max()) > 1e-9:
                 problems.append(f"matches {matches} re-score to {rescored!r}, msw_score {out[0]!r}")
             if not np.allclose(out[6], scales, rtol=0, atol=1e-9):
@@ -1120,13 +1141,14 @@ def test_composite_score(new, n_cases=144, seed=23):
 
 
 def test_pooled_search(new, n_cases=14, seed=31):
-    """m. _best_pooled_pair() (max_norm, lp_norm) is exact: on random nonnegative targets with up to
-    400 placements of random lengths and starts, its best pair scores the same as the best over
-    every pair (brute force), for p = 1.5, 2, 4 and inf, with and without an overlap penalty, in
-    small blocks so that the search crosses blocks and prunes; also when every pair overlaps (no
-    pair without overlap to start from)."""
+    """m. The pair searches are exact at scale: on random nonnegative targets with up to 400
+    placements of random lengths and starts, the best pair scores the same as the best over every
+    pair (brute force), with and without an overlap penalty, in small blocks so that the searches
+    cross blocks and prune; also when every pair overlaps (no pair without overlap to start from).
+    _best_pooled_pair(): lp_norm p = 1.5, 2, 4 and max_norm; _best_collapsed_pair(): lsq."""
     rng = np.random.default_rng(seed)
     n_bad = n_runs = 0
+    modes = [("lp 1.5", 1.5), ("lp 2", 2.0), ("lp 4", 4.0), ("max_norm", np.inf), ("lsq", None)]
     for case in range(n_cases):
         P, D = int(rng.integers(20, 50)), 4
         t = np.abs(rng.normal(size=(P, D))) * (rng.random((P, 1)) < 0.85)
@@ -1153,37 +1175,45 @@ def test_pooled_search(new, n_cases=14, seed=31):
         i_all, j_all = np.triu_indices(K, 1)
         keep = starts[i_all] != starts[j_all]
         i_all, j_all = i_all[keep], j_all[keep]
-        lo, hi = np.maximum(starts[i_all], starts[j_all]), np.minimum(ends[i_all], ends[j_all])
-        overlap = np.where(hi > lo, W[np.maximum(hi, lo)] - W[lo], 0.0)
-        for p in (1.5, 2.0, 4.0, np.inf):
-            for penalty in (0.0, 0.3):
-                expected = -np.inf
-                for c0 in range(0, len(i_all), 20000):
-                    ii, jj = i_all[c0:c0 + 20000], j_all[c0:c0 + 20000]
-                    r = pool(V[ii], V[jj], p).reshape(len(ii), -1)
+        lo_all, hi_all = np.maximum(starts[i_all], starts[j_all]), np.minimum(ends[i_all], ends[j_all])
+        overlap = np.where(hi_all > lo_all, W[np.maximum(hi_all, lo_all)] - W[lo_all], 0.0)
+
+        def brute(name, q, penalty):
+            best = -np.inf
+            for c0 in range(0, len(i_all), 20000):
+                ii, jj = i_all[c0:c0 + 20000], j_all[c0:c0 + 20000]
+                lo, hi = lo_all[c0:c0 + 20000], hi_all[c0:c0 + 20000]
+                if name == "lsq":
+                    b_i, b_j = proj[ii], proj[jj]
+                    g = (U[ii] * U[jj]).sum(axis=(1, 2))
+                    det = 1 - g * g
+                    x_i, x_j = (b_i - g * b_j) / np.where(det > 1e-12, det, 1.0), (b_j - g * b_i) / np.where(det > 1e-12, det, 1.0)
+                    both = (x_i >= 0) & (x_j >= 0) & (det > 1e-12)
+                    val = np.where(both, x_i * b_i + x_j * b_j, np.maximum(b_i ** 2, b_j ** 2))
+                else:
+                    r = pool(V[ii], V[jj], q).reshape(len(ii), -1)
                     y, z2 = r @ t.reshape(-1), (r * r).sum(axis=1)
-                    val = np.where(y > 0, y * y / np.maximum(z2, 1e-300), -np.inf) - penalty * overlap[c0:c0 + 20000]
-                    expected = max(expected, float(val.max()))
-                value, pair, scale = new._best_pooled_pair(proj, starts, ends, cands, unit, t, weight, penalty, p,
-                                                           row_block=16, col_block=64, pair_block=32)
+                    val = np.where(y > 0, y * y / np.maximum(z2, 1e-300), -np.inf)
+                best = max(best, float((val - penalty * overlap[c0:c0 + 20000]).max()))
+            return best
+
+        for name, q in modes:
+            for penalty in (0.0, 0.3):
+                expected = brute(name, q, penalty)
+                args = (proj, starts, ends, cands, unit)
+                if name == "lsq":
+                    value, pair, _ = new._best_collapsed_pair(*args, weight, penalty, row_block=16, col_block=64, score="lsq")
+                else:
+                    value, pair, _ = new._best_pooled_pair(*args, t, weight, penalty, q, row_block=16, col_block=64,
+                                                           pair_block=32)
                 n_runs += 1
-                problems = []
-                if abs(value - expected) > 1e-9:
-                    problems.append(f"value {value!r} vs brute force {expected!r}")
-                elif pair is not None:  # The pair re-scores to the value
-                    a, b = pair
-                    r = pool(V[a], V[b], p)
-                    y, z2 = float((r * t).sum()), float((r * r).sum())
-                    lo_ab, hi_ab = max(starts[a], starts[b]), min(ends[a], ends[b])
-                    pen = penalty * (W[hi_ab] - W[lo_ab]) if hi_ab > lo_ab else 0.0
-                    if abs(y * y / z2 - pen - value) > 1e-9 or starts[a] >= starts[b] or abs(scale - (y / z2 if hi_ab > lo_ab else 1.0)) > 1e-9:
-                        problems.append(f"pair {pair} re-scores to {y * y / z2 - pen!r}, scale {scale!r}")
-                if problems:
+                if abs(value - expected) > 1e-9 or (pair is not None and starts[pair[0]] >= starts[pair[1]]):
                     n_bad += 1
                     if n_bad <= 5:
-                        print(f"  [FAIL] case {case} K={K} P={P} p={p} penalty={penalty} narrow={narrow}: {problems}")
-    print(f"m. pooled pair search (max_norm, lp_norm): {n_runs - n_bad}/{n_runs} best pairs exact (brute force over "
-          f"every pair), re-scored")
+                        print(f"  [FAIL] case {case} K={K} P={P} {name} penalty={penalty} narrow={narrow}: value {value!r} "
+                              f"vs brute force {expected!r}, pair {pair}")
+    print(f"m. pair searches at scale (lp_norm, max_norm, lsq): {n_runs - n_bad}/{n_runs} best pairs "
+          f"exact (brute force over every pair)")
     return n_bad
 
 

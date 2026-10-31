@@ -49,6 +49,9 @@ def run_modified_smith_waterman_composite(
     candidates overlap, collapse sets r there:
         "sum_norm": the sum of the two (the collapsed alignment returned): a subunit placed over
             another adds only what it explains in addition. Exact (see _best_collapsed_pair())
+        "lsq": the sum of the two with both scales refit together by non-negative least squares
+            (r is then the best fit of the two, already at its least-squares scale), in place of
+            each subunit's own b. Exact (see _best_collapsed_pair())
         "max_norm": the larger of the two, entry by entry: a subunit placed over another changes
             r only where it exceeds it, so overlapping costs nothing. Exact (see _best_pooled_pair())
         "lp_norm": the Lp norm of the two, entry by entry, (x_i^p + x_j^p)^(1/p) with p =
@@ -96,8 +99,8 @@ def run_modified_smith_waterman_composite(
             calculation), so that every similarity, match score and scaling uses the IC-scaled
             motifs; pass motifs that are not IC-scaled already. The global IC-scale setting is
             ignored (default: True) - bool
-        collapse: How two overlapping subunits are collapsed: "sum_norm", "max_norm", "lp_norm",
-            "mean_norm" or "none" (see above) (default: "sum_norm") - str
+        collapse: How two overlapping subunits are collapsed: "sum_norm", "lsq", "max_norm",
+            "lp_norm", "mean_norm" or "none" (see above) (default: "sum_norm") - str
         collapse_p: p of collapse="lp_norm", at least 1 (1: the same as "sum_norm"; inf: the same
             as "max_norm"); only with "lp_norm" (default: None) - float
 
@@ -128,8 +131,8 @@ def run_modified_smith_waterman_composite(
     assert match_count_fraction is not None and 0 < match_count_fraction <= 1, \
         f"match_count_fraction must be in (0, 1], got {match_count_fraction}"
     assert sim_threshold < 1
-    if collapse not in ("sum_norm", "max_norm", "lp_norm", "mean_norm", "none"):
-        raise ValueError(f"collapse must be 'sum_norm', 'max_norm', 'lp_norm', 'mean_norm' or 'none', got {collapse!r}")
+    if collapse not in ("sum_norm", "lsq", "max_norm", "lp_norm", "mean_norm", "none"):
+        raise ValueError(f"collapse must be 'sum_norm', 'lsq', 'max_norm', 'lp_norm', 'mean_norm' or 'none', got {collapse!r}")
     if collapse == "lp_norm":
         if (isinstance(collapse_p, (bool, np.bool_)) or not isinstance(collapse_p, (int, float, np.integer, np.floating))
                 or not collapse_p >= 1):
@@ -214,9 +217,9 @@ def run_modified_smith_waterman_composite(
         if len(proj) and match_count_max >= 2:
             sim_space = (lambda x: x) if label_unsigned else utils_motif.motif_4_to_8
             unit = [sim_space(c) for c in cand_motif]  # Candidates in the similarity space (unit norm)
-            if pool_p == 1:  # sum_norm, or lp_norm with p = 1
+            if pool_p == 1 or collapse == "lsq":  # sum_norm, lp_norm with p = 1, or lsq
                 value, pair, scale = _best_collapsed_pair(proj, pairs_l, ends, pairs_c, unit, position_energy,
-                                                          overlap_penalty_fraction)
+                                                          overlap_penalty_fraction, score="lsq" if collapse == "lsq" else "sum_norm")
             elif collapse == "mean_norm":
                 value, pair, scale = _best_mean_pair(proj, pairs_l, ends, pairs_c, unit, sim_space(target_norm),
                                                      position_energy, overlap_penalty_fraction)
@@ -240,7 +243,7 @@ def run_modified_smith_waterman_composite(
     aligned_subunit_scale = np.zeros(n)
     for i, k in enumerate(matches):
         c, l = pairs_c[k], pairs_l[k]
-        aligned_subunit_scale[i] = proj[k] * collapsed_scale
+        aligned_subunit_scale[i] = proj[k] * (collapsed_scale[i] if np.ndim(collapsed_scale) else collapsed_scale)
         aligned_subunit_stack[i, l:l + cand_len[c]] = cand_motif[c] * aligned_subunit_scale[i]
     aligned_subunit_idx = np.array([cand_subunit[pairs_c[k]] for k in matches], dtype=int)
     aligned_subunit_alignment_rc = np.array([cand_rc[pairs_c[k]] for k in matches], dtype=int)
@@ -652,17 +655,22 @@ def _best_pooled_pair(proj, starts, ends, cands, unit, target, position_energy, 
 
 
 def _best_collapsed_pair(proj, starts, ends, cands, unit, position_energy, overlap_penalty_fraction,
-                         row_block=512, col_block=16384):
+                         row_block=512, col_block=16384, score="sum_norm"):
     '''
     Best pair of placements with strictly increasing starts, by the energy their collapsed
-    alignment explains once L2-normalized (its squared cosine to the motif), exactly:
+    alignment (the sum of the two) explains once L2-normalized (its squared cosine to the motif),
+    exactly:
 
-        B^2 / (B + 2X) - p * E(overlap),    B = b_i^2 + b_j^2,    X = b_i b_j <u_i, u_j>
+        "sum_norm": B^2 / (B + 2X) - p * E(overlap),    B = b_i^2 + b_j^2,    X = b_i b_j g
+        "lsq": with the two scales x_i, x_j refit by non-negative least squares, the energy of
+            that fit (its squared cosine, as it is at its least-squares scale): x_i b_i + x_j b_j =
+            (B - 2 g b_i b_j) / (1 - g^2) if both x are non-negative, else the larger b^2 alone
 
-    with E(overlap) the motif energy of the positions both windows cover. A pair that does not
-    overlap scores B: the best is a running maximum of b^2 over ends. Overlap only lowers the score
-    below B, so an overlapping pair can win only if its B beats the best so far: those pairs are
-    searched in decreasing b^2 (on the GPU, in blocks), and the search stops once none left can.
+    with g = <u_i, u_j> >= 0 and E(overlap) the motif energy of the positions both windows cover.
+    A pair that does not overlap scores B: the best is a running maximum of b^2 over ends. Overlap
+    only lowers either score below B, so an overlapping pair can win only if its B beats the best
+    so far: those pairs are searched in decreasing b^2 (on the GPU, in blocks), and the search
+    stops once none left can.
 
     Arguments:
         proj: Projection b of each placement - np.array (K,)
@@ -672,10 +680,13 @@ def _best_collapsed_pair(proj, starts, ends, cands, unit, position_energy, overl
         position_energy: Motif energy of each position - np.array (S,)
         overlap_penalty_fraction: p - float >= 0
         row_block, col_block: Block sizes of the search - int
+        score: "sum_norm" or "lsq" - str
     Returns:
         value: Best squared score (-inf: no pair) - float
         pair: The two placements, by start (None: no pair) - list of int
-        scale: Least-squares weight of the pair's collapsed alignment, B / (B + 2X) - float
+        scale: Scaling of the pair's subunits, times b: "sum_norm", the least-squares weight of
+            the collapsed alignment, B / (B + 2X); "lsq", each refit scale over its b, by start
+            - float, or list of float ("lsq")
     '''
     K = len(proj)
     m = proj * proj  # (K,): Energy each placement explains alone
@@ -711,7 +722,17 @@ def _best_collapsed_pair(proj, starts, ends, cands, unit, position_energy, overl
             hi = cp.minimum(eI[rows, None], eI[None, cols])
             B = mI[rows, None] + mI[None, cols]
             ok = (lo < hi) & (lI[rows, None] != lI[None, cols]) & (B > value)  # Overlapping, distinct starts
-            val = B * B / cp.maximum(B + 2 * X, 1e-300) - overlap_penalty_fraction * (W[hi] - W[lo])
+            if score == "lsq":  # The refit scales x_i, x_j of the two (non-negative), or the better one alone
+                b_i, b_j = bI[rows, None], bI[None, cols]
+                g = cp.where(b_i * b_j > 0, X / cp.where(b_i * b_j > 0, b_i * b_j, 1.0), 0.0)
+                det = 1 - g * g
+                x_i = (b_i - g * b_j) / cp.where(det > 1e-12, det, 1.0)
+                x_j = (b_j - g * b_i) / cp.where(det > 1e-12, det, 1.0)
+                both = (x_i >= 0) & (x_j >= 0) & (det > 1e-12)
+                val = cp.where(both, x_i * b_i + x_j * b_j, B - cp.minimum(mI[rows, None], mI[None, cols]))
+                val = val - overlap_penalty_fraction * (W[hi] - W[lo])
+            else:
+                val = B * B / cp.maximum(B + 2 * X, 1e-300) - overlap_penalty_fraction * (W[hi] - W[lo])
             val = cp.where(ok, val, -cp.inf)
             flat = int(cp.argmax(val))
             a, c = divmod(flat, val.shape[1])
@@ -719,7 +740,15 @@ def _best_collapsed_pair(proj, starts, ends, cands, unit, position_energy, overl
                 i, jj = int(I[s + a]), int(I[c0 + c])
                 value = float(val[a, c])
                 pair = sorted([i, jj], key=lambda k: starts[k])
-                scale = float(B[a, c] / (B[a, c] + 2 * X[a, c]))
+                if score == "lsq":
+                    if bool(both[a, c]):
+                        ratio = lambda x, b: float(x / b) if float(b) > 0 else 0.0
+                        by_row = {i: ratio(x_i[a, c], b_i[a, 0]), jj: ratio(x_j[a, c], b_j[0, c])}
+                    else:  # The better one alone
+                        by_row = {i: float(mI[s + a] >= mI[c0 + c]), jj: float(mI[s + a] < mI[c0 + c])}
+                    scale = [by_row[k] for k in pair]
+                else:
+                    scale = float(B[a, c] / (B[a, c] + 2 * X[a, c]))
     return value, pair, scale
 
 
