@@ -891,7 +891,7 @@ def pool(x_i, x_j, p):
 
 
 def collapse_pool_p(collapse, collapse_p):
-    """The order of the Lp pool of a collapse (None: the sum or mean, or lsq)."""
+    """The order of the Lp pool of a collapse (None: the sum or mean, or lsq_norm)."""
     return {"max_norm": np.inf, "lp_norm": collapse_p}.get(collapse)
 
 
@@ -910,9 +910,9 @@ def collapse_pair(collapse, collapse_p, v_i, v_j, lo, hi):
 def pair_score(target, collapse, collapse_p, b_i, b_j, u_i, u_j, lo, hi):
     """Squared score of a pair of placements (unit vectors u, projections b), before the overlap
     penalty, and the scale of each over its b: the energy the collapsed alignment explains,
-    L2-normalized (<t, r>^2 / |r|^2); lsq: the energy of the non-negative least-squares fit of the
+    L2-normalized (<t, r>^2 / |r|^2); lsq_norm: the energy of the non-negative least-squares fit of the
     two (scipy's nnls), which is at its least-squares scale already."""
-    if collapse == "lsq":
+    if collapse == "lsq_norm":
         from scipy.optimize import nnls
         basis = np.stack([u_i.ravel(), u_j.ravel()], axis=1)
         x, _ = nnls(basis, target.ravel())
@@ -942,7 +942,7 @@ def brute_force_collapsed(target, proj, starts, ends, vectors, weight, penalty, 
 
 
 COLLAPSES = [("sum_norm", None), ("mean_norm", None), ("none", None), ("max_norm", None), ("lp_norm", 2.0),
-             ("lp_norm", 3.5), ("lsq", None)]
+             ("lp_norm", 3.5), ("lsq_norm", None)]
 
 
 def test_composite_score(new, n_cases=24 * len(COLLAPSES), seed=23):
@@ -951,7 +951,7 @@ def test_composite_score(new, n_cases=24 * len(COLLAPSES), seed=23):
     scaled by its cosine to the whole padded, L2-normalized motif (its least-squares weight), and the
     scaled subunits are summed (sum_norm), pooled by their maximum (max_norm) or Lp norm (lp_norm)
     entry by entry, averaged where they overlap (mean_norm), summed with both scales refit by
-    non-negative least squares (lsq, scipy's nnls), or not collapsed (none: the squared scores add,
+    non-negative least squares (lsq_norm, scipy's nnls), or not collapsed (none: the squared scores add,
     minus the overlap penalty). Computed here
     from scratch over every alignment (brute force): the profile, the reported matches re-scored,
     and the scales; every collapse with every trim, penalty, threshold and limit. Also: an
@@ -1145,10 +1145,10 @@ def test_pooled_search(new, n_cases=14, seed=31):
     placements of random lengths and starts, the best pair scores the same as the best over every
     pair (brute force), with and without an overlap penalty, in small blocks so that the searches
     cross blocks and prune; also when every pair overlaps (no pair without overlap to start from).
-    _best_pooled_pair(): lp_norm p = 1.5, 2, 4 and max_norm; _best_collapsed_pair(): lsq."""
+    _best_pooled_pair(): lp_norm p = 1.5, 2, 4 and max_norm; _best_collapsed_pair(): lsq_norm."""
     rng = np.random.default_rng(seed)
     n_bad = n_runs = 0
-    modes = [("lp 1.5", 1.5), ("lp 2", 2.0), ("lp 4", 4.0), ("max_norm", np.inf), ("lsq", None)]
+    modes = [("lp 1.5", 1.5), ("lp 2", 2.0), ("lp 4", 4.0), ("max_norm", np.inf), ("lsq_norm", None)]
     for case in range(n_cases):
         P, D = int(rng.integers(20, 50)), 4
         t = np.abs(rng.normal(size=(P, D))) * (rng.random((P, 1)) < 0.85)
@@ -1183,7 +1183,7 @@ def test_pooled_search(new, n_cases=14, seed=31):
             for c0 in range(0, len(i_all), 20000):
                 ii, jj = i_all[c0:c0 + 20000], j_all[c0:c0 + 20000]
                 lo, hi = lo_all[c0:c0 + 20000], hi_all[c0:c0 + 20000]
-                if name == "lsq":
+                if name == "lsq_norm":
                     b_i, b_j = proj[ii], proj[jj]
                     g = (U[ii] * U[jj]).sum(axis=(1, 2))
                     det = 1 - g * g
@@ -1201,8 +1201,8 @@ def test_pooled_search(new, n_cases=14, seed=31):
             for penalty in (0.0, 0.3):
                 expected = brute(name, q, penalty)
                 args = (proj, starts, ends, cands, unit)
-                if name == "lsq":
-                    value, pair, _ = new._best_collapsed_pair(*args, weight, penalty, row_block=16, col_block=64, score="lsq")
+                if name == "lsq_norm":
+                    value, pair, _ = new._best_collapsed_pair(*args, weight, penalty, row_block=16, col_block=64, score="lsq_norm")
                 else:
                     value, pair, _ = new._best_pooled_pair(*args, t, weight, penalty, q, row_block=16, col_block=64,
                                                            pair_block=32)
@@ -1212,7 +1212,7 @@ def test_pooled_search(new, n_cases=14, seed=31):
                     if n_bad <= 5:
                         print(f"  [FAIL] case {case} K={K} P={P} {name} penalty={penalty} narrow={narrow}: value {value!r} "
                               f"vs brute force {expected!r}, pair {pair}")
-    print(f"m. pair searches at scale (lp_norm, max_norm, lsq): {n_runs - n_bad}/{n_runs} best pairs "
+    print(f"m. pair searches at scale (lp_norm, max_norm, lsq_norm): {n_runs - n_bad}/{n_runs} best pairs "
           f"exact (brute force over every pair)")
     return n_bad
 
