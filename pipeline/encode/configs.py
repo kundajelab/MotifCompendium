@@ -1066,12 +1066,16 @@ class Encode_CompositeArgs:
     bellman_align_col: str = "bellman_composite_alignment"
     bellman_logo_col: str = "bellman_composite_logo"
 
-    bellman_sim_min_threshold: float = 0.5
+    # utils_composite.run_modified_smith_waterman_composite() at its defaults since 3acaa1f (v27; v26 and before:
+    # sim threshold 0.5, overlap penalty 1.0, match count penalty 0.1, the old score)
+    bellman_sim_min_threshold: float = 0.0
     bellman_subunit_motif_trim: bool = True  # Trim each reference subunit (as logo_trimming: True = 1/M)
-    bellman_overlap_penalty_fraction: float = 1.0  # Of the target energy two consecutive subunits both cover (1: take it back once)
+    bellman_overlap_penalty_fraction: float = 0.0  # Of the target energy two consecutive subunits both cover (0: no penalty)
     bellman_match_count_max: int = 2
-    bellman_match_count_penalty: float = 0.1  # Per match, subtracted from the score
+    bellman_match_count_penalty: float = 0.05  # Per match, subtracted from the score (cosine units)
     bellman_match_count_fraction: float = 1
+    bellman_target_similarity: float = 0.9
+    bellman_collapse: str = "sum_norm"  # The matched subunits' collapse into one motif, scored by its cosine
 
     # Reference monomers: the direct reference without its composites, long non-ZNF motifs and IRFs
     reference_cluster_col: str = "reference_cluster"

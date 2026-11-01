@@ -972,6 +972,8 @@ def assign_msw_composites(mc_crosscluster, mc_ref_composite, ic_scale, verbose=F
             label_unsigned=True,
             allow_reverse_comp=True,
             ic_scale=ic_scale,
+            target_similarity=CompositeArgs.bellman_target_similarity,
+            collapse=CompositeArgs.bellman_collapse,
         )
 
         # Aligned reference motif (collapsed)
