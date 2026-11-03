@@ -30,6 +30,7 @@ def run_modified_smith_waterman_composite(
     target_similarity=0.9,
     collapse="sum_norm",
     collapse_p=None,
+    overlap_penalty_mode="energy",
 ):
     '''
     Aligns a composite of subunit motifs of any lengths against a motif: each subunit is trimmed
@@ -64,6 +65,15 @@ def run_modified_smith_waterman_composite(
             (see _chain_composite())
     overlap_penalty_fraction subtracts that fraction of the motif energy of the positions two
     consecutive candidates both cover from the squared score (0, the default: none).
+
+    overlap_penalty_mode="masked" (collapse="none" only) charges an overlap through the incoming
+    candidate's own match score instead: the candidate's window similarity, over its whole window,
+    still decides whether it is matchable (sim_threshold), but its match score b^2 = <motif, b u>,
+    a sum over the positions of its window, loses the positions the previous candidate covers:
+    b^2 - overlap_penalty_fraction * b * <motif, u> summed over the overlap only. b and u are not
+    rescaled. With overlap_penalty_fraction = 1 the overlap is masked from the incoming candidate's
+    dot product, so the overlap counts once, for the earlier candidate; a candidate inside the
+    previous one adds nothing. Exact, for any number of candidates (see _chain_composite()).
 
     Arguments:
         target_motif: Target motif - np.array of shape (L, D)
@@ -103,10 +113,15 @@ def run_modified_smith_waterman_composite(
             "lp_norm", "mean_norm" or "none" (see above) (default: "sum_norm") - str
         collapse_p: p of collapse="lp_norm", at least 1 (1: the same as "sum_norm"; inf: the same
             as "max_norm"); only with "lp_norm" (default: None) - float
+        overlap_penalty_mode: What overlap_penalty_fraction charges for an overlap (see above):
+            "energy", the motif energy of the overlapping positions; "masked", the incoming
+            candidate's match score inside them, only with collapse="none" (default: "energy") - str
 
     Returns:
         msw_score: Score of the optimal alignment (cosine), minus match_count_penalty * N - float
-        sim_score: MotifCompendium similarity score of the optimal alignment - float
+        sim_score: MotifCompendium similarity score of the optimal alignment (overlap_penalty_mode
+            "masked": with each incoming subunit, times overlap_penalty_fraction, taken out where it
+            covers the previous one, as scored) - float
         aligned_subunit_stack: Each matched subunit (IC-scaled, if ic_scale, and trimmed),
             scaled, in the orientation it matched in, left to right. The target spans columns M-1 to L+M-2, leaving M-1
             columns past either end - np.array of shape (N, 2*M + L - 2, D)
@@ -140,6 +155,12 @@ def run_modified_smith_waterman_composite(
     elif collapse_p is not None:
         raise ValueError(f"collapse_p applies only to collapse='lp_norm', got collapse={collapse!r}")
     pool_p = {"sum_norm": 1.0, "max_norm": np.inf}.get(collapse, None if collapse_p is None else float(collapse_p))
+    if overlap_penalty_mode not in ("energy", "masked"):
+        raise ValueError(f"overlap_penalty_mode must be 'energy' or 'masked', got {overlap_penalty_mode!r}")
+    if overlap_penalty_mode == "masked" and collapse != "none" and overlap_penalty_fraction > 0:
+        raise ValueError(f"overlap_penalty_mode='masked' applies only to collapse='none', got collapse={collapse!r} "
+                         f"(pass overlap_penalty_fraction=0 or overlap_penalty_mode='energy')")
+    masked = overlap_penalty_mode == "masked" and collapse == "none" and overlap_penalty_fraction > 0
     if collapse == "none":
         _check_match_count_max(match_count_max)
     elif isinstance(match_count_max, (bool, np.bool_)) or match_count_max not in (1, 2):
@@ -184,6 +205,8 @@ def run_modified_smith_waterman_composite(
     sim = np.zeros((len(cand_motif), num_starts))
     energy = np.zeros((len(cand_motif), num_starts))
     valid = np.zeros((len(cand_motif), num_starts), dtype=bool)
+    # masked: prefix[c, l, j], the summed <motif, candidate> of the first j positions of candidate c at l (sums to b)
+    prefix = np.zeros((len(cand_motif), num_starts, int(cand_len.max()) + 1)) if masked else None
     for m in np.unique(cand_len):
         cands = np.flatnonzero(cand_len == m)
         windows = _unroll_motif(target_norm, m, np)  # (L+2M-1-m, m, D)
@@ -195,6 +218,10 @@ def run_modified_smith_waterman_composite(
         sim[cands, :len(windows)] = compute_aligned_similarity(cp.asarray(stack_m), cp.asarray(windows_sim))
         energy[cands, :len(windows)] = (windows * windows).sum(axis=(1, 2))[None, :]
         valid[cands, :len(windows)] = True
+        if masked:  # Per position, in the similarity space: (cands, windows, m)
+            per_position = np.einsum("cxd,lxd->clx", stack_m, windows_sim)
+            prefix[cands[:, None], np.arange(len(windows))[None, :], 1:m + 1] = np.cumsum(per_position, axis=2)
+            prefix[cands[:, None], np.arange(len(windows))[None, :], m + 1:] = prefix[cands, :len(windows), m:m + 1]
     matchable = valid & (sim > sim_threshold)
     pairs_c, pairs_l = np.nonzero(matchable)  # (K,), (K,): The matchable placements
     proj = np.sqrt(energy[pairs_c, pairs_l]) * np.maximum(sim[pairs_c, pairs_l], 0.0)  # (K,): b = |w| * cosine
@@ -203,8 +230,11 @@ def run_modified_smith_waterman_composite(
     ## Align: The best alignment with each number of matches, as squared scores (explained energy)
     position_energy = (target_norm * target_norm).sum(axis=1)  # (L+2M-2,), sums to 1
     if collapse == "none":
+        # masked: The cost of an overlap of j positions is p * b * prefix[..., j], b the candidate's projection
+        costs = (overlap_penalty_fraction * (np.sqrt(energy) * np.maximum(sim, 0.0))[:, :, None] * prefix
+                 if masked else None)  # (C, S, max(cand_len)+1)
         explained, trace = _chain_composite(energy * sim ** 2, matchable, cand_len, overlap_penalty_fraction,
-                                            position_energy, match_count_max)
+                                            position_energy, match_count_max, overlap_costs=costs)
         index = {(int(c), int(l)): k for k, (c, l) in enumerate(zip(pairs_c, pairs_l))}
         best = {N: ([index[m] for m in trace(N)], 1.0) for N in range(len(explained)) if np.isfinite(explained[N])}
     else:
@@ -255,6 +285,11 @@ def run_modified_smith_waterman_composite(
         sim_score = 0.0
     else:
         collapsed = aligned_subunit_stack.sum(axis=0)
+        if masked:  # The incoming subunit loses, by the fraction, what it covers of the previous one
+            for i in range(1, n):
+                lo, hi = pairs_l[matches[i]], min(ends[matches[i - 1]], ends[matches[i]])
+                if hi > lo:
+                    collapsed[lo:hi] -= overlap_penalty_fraction * aligned_subunit_stack[i, lo:hi]
         if collapse == "mean_norm" and n == 2:
             k_i, k_j = matches
             lo, hi = max(pairs_l[k_i], pairs_l[k_j]), min(ends[k_i], ends[k_j])
@@ -323,7 +358,8 @@ def _first_running_max(values):
     return running, np.maximum.accumulate(np.where(new, np.arange(len(values)), 0))
 
 
-def _chain_composite(match_scores, matchable, cand_len, overlap_penalty_fraction, overlap_weight, max_count):
+def _chain_composite(match_scores, matchable, cand_len, overlap_penalty_fraction, overlap_weight, max_count,
+                     overlap_costs=None):
     '''
     Best chain of candidates (variable-length subunits at starts) with exactly N matches, for
     every N, exactly: starts strictly increase, and an overlap with the previous candidate costs
@@ -343,6 +379,11 @@ def _chain_composite(match_scores, matchable, cand_len, overlap_penalty_fraction
             best, from the right
     and is added to best once every candidate at l is scored.
 
+    overlap_costs, if given, replaces p * (W[min(e, t)] - W[l]) by a cost of the candidate's own:
+    overlap_costs[c, l, j] for an overlap of its first j = min(e, t) - l positions (the masked
+    overlap penalty). Each candidate then takes the best of best[e] - overlap_costs[c, l, e - l]
+    over l < e <= t itself (at most M_c ends), and overlap_costs[c, l, M_c] when covered.
+
     Arguments:
         match_scores: Match score of each candidate at each start - np.array (C, S)
         matchable: Similarity above sim_threshold - np.array of bool (C, S)
@@ -350,6 +391,8 @@ def _chain_composite(match_scores, matchable, cand_len, overlap_penalty_fraction
         overlap_penalty_fraction: Penalty on the weight of the overlapping positions - float >= 0
         overlap_weight: Weight of each start position (the motif energy) - np.array (S,)
         max_count: Most matches (None: no limit) - int or None
+        overlap_costs: Cost of an overlap of the first j positions of each candidate at each
+            start, in place of the weight's (None: the weight's) - np.array (C, S, >= max(cand_len)+1)
     Returns:
         msw_profile: Best score with exactly N matches, by N (0: the empty alignment; -inf:
             impossible) - np.array
@@ -384,15 +427,27 @@ def _chain_composite(match_scores, matchable, cand_len, overlap_penalty_fraction
             # e <= l: No overlap
             pre_max, pre_arg = _first_running_max(prior)  # (P,), (P,)
             options = [np.full(len(ks), pre_max[l]), np.full(len(ks), pre_arg[l])]  # [(K_l,), (K_l,)]
-            # l < e <= t: Overlap of e - l bp
-            inner = prior[l + 1:] - penalty * W[l + 1:len(prior)]  # (P-l-1,)
-            in_max, in_arg = _first_running_max(inner)  # (P-l-1,), (P-l-1,)
-            in_val, in_e = in_max[t - l - 1] + penalty * W[l], in_arg[t - l - 1] + l + 1  # (K_l,), (K_l,)
-            # e > t: The candidate is covered (overlap of M_c bp)
             rev_max, rev_arg = _first_running_max(prior[::-1])  # (P,), (P,): rev index j: e = len-1-j
             j = len(prior) - 1 - (t + 1)  # (K_l,)
-            out_val = np.where(j >= 0, rev_max[np.maximum(j, 0)] - penalty * (W[t] - W[l]), -np.inf)  # (K_l,)
             out_e = len(prior) - 1 - rev_arg[np.maximum(j, 0)]  # (K_l,)
+            if overlap_costs is None:
+                # l < e <= t: Overlap of e - l bp
+                inner = prior[l + 1:] - penalty * W[l + 1:len(prior)]  # (P-l-1,)
+                in_max, in_arg = _first_running_max(inner)  # (P-l-1,), (P-l-1,)
+                in_val, in_e = in_max[t - l - 1] + penalty * W[l], in_arg[t - l - 1] + l + 1  # (K_l,), (K_l,)
+                # e > t: The candidate is covered (overlap of M_c bp)
+                out_val = np.where(j >= 0, rev_max[np.maximum(j, 0)] - penalty * (W[t] - W[l]), -np.inf)  # (K_l,)
+            else:
+                # l < e <= t: Overlap of j_e = e - l bp, at the candidate's own cost (first maximum: less overlap)
+                lens = t - l  # (K_l,)
+                J = int(lens.max())
+                cost = overlap_costs[pairs_c[ks], l]  # (K_l, >= J+1)
+                inner = np.where(np.arange(1, J + 1)[None, :] <= lens[:, None],
+                                 prior[l + 1:l + 1 + J][None, :] - cost[:, 1:J + 1], -np.inf)  # (K_l, J)
+                in_arg = inner.argmax(axis=1)  # (K_l,)
+                in_val, in_e = inner[np.arange(len(ks)), in_arg], in_arg + l + 1  # (K_l,), (K_l,)
+                # e > t: The candidate is covered (overlap of M_c bp)
+                out_val = np.where(j >= 0, rev_max[np.maximum(j, 0)] - cost[np.arange(len(ks)), lens], -np.inf)  # (K_l,)
             # Ties: Less overlap first
             vals = np.stack([options[0], in_val, out_val])  # (3, K_l)
             es = np.stack([options[1], in_e, out_e])  # (3, K_l)

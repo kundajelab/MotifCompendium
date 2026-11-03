@@ -1217,6 +1217,150 @@ def test_pooled_search(new, n_cases=14, seed=31):
     return n_bad
 
 
+def masked_cost(prev, cur, starts, ends, proj, q, penalty):
+    """The masked overlap penalty of placement cur after prev: penalty * b_cur times cur's own
+    <motif, candidate>, summed over the positions of cur that prev covers (q: per position of cur)."""
+    j = min(ends[prev], ends[cur]) - starts[cur]
+    return penalty * proj[cur] * float(q[cur][:j].sum()) if j > 0 else 0.0
+
+
+def brute_force_masked(proj, q, starts, ends, penalty, max_count):
+    """Best squared score with exactly N matches, by N, and its chain, over every chain of placements with
+    strictly increasing starts: the sum of b^2, minus the masked overlap penalty of each placement after the first."""
+    order = sorted(range(len(proj)), key=lambda k: starts[k])
+    n_starts = len({int(s) for s in starts})
+    top = n_starts if max_count is None else min(n_starts, max_count)
+    profile, chains = np.full(top + 1, -np.inf), [[] for _ in range(top + 1)]
+    profile[0] = 0.0
+    def extend(chain, v):
+        n = len(chain)
+        if n and v > profile[n]:
+            profile[n], chains[n] = v, list(chain)
+        if n == top:
+            return
+        for k in order:
+            if chain and starts[k] <= starts[chain[-1]]:
+                continue
+            extend(chain + [k], v + proj[k] ** 2 - (masked_cost(chain[-1], k, starts, ends, proj, q, penalty) if chain else 0.0))
+    extend([], 0.0)
+    return profile, chains
+
+
+def test_masked_overlap(new, n_cases=96, seed=37):
+    """n. overlap_penalty_mode="masked" (collapse="none"): an incoming subunit's window similarity, over its
+    whole window, still decides whether it is matchable, but its match score b^2 = <motif, b u> loses
+    penalty * b * <motif, u> over the positions the previous subunit covers, not rescaled. Computed here
+    from scratch (per-position dot products, unsigned and signed on 8 channels) over every chain (brute
+    force), with penalties 1 and 0.5, both trims, thresholds and up to 3 subunits: the profile, the
+    reported matches re-scored, the scales (b), and sim_score, the similarity of the reconstruction with
+    each incoming subunit taken out, times the penalty, where it covers the previous one. Also: with
+    penalty 0 it is the energy mode, output for output; the default mode is "energy"; and "masked" with
+    another collapse, or an unknown mode, is rejected."""
+    import inspect
+    rng = np.random.default_rng(seed)
+    n_bad = n_runs = 0
+    for i in range(n_cases):
+        F, M, L = int(rng.integers(1, 4)), int(rng.integers(3, 6)), int(rng.integers(5, 10))
+        signed = i % 4 == 3
+        target = rng.normal(size=(L, 4)) * (rng.random((L, 1)) < 0.8)
+        stack = rng.normal(size=(F, M, 4)) if signed else np.abs(rng.normal(size=(F, M, 4)))
+        penalty = (1.0, 0.5)[(i // 4) % 2]
+        trim = (True, 0)[(i // 8) % 2]
+        sim_threshold = (0.0, 0.4)[(i // 16) % 2]
+        max_count = (1, 2, 3)[(i // 32) % 3]
+        out = new.run_modified_smith_waterman_composite(
+            target, stack, sim_threshold=sim_threshold, overlap_penalty_fraction=penalty, overlap_penalty_mode="masked",
+            collapse="none", match_count_max=max_count, match_count_penalty=0.0, target_similarity=None,
+            subunit_motif_trim=trim, return_match_profile=True, label_unsigned=not signed)
+
+        # From scratch: Candidates (as given, reverse complemented), on the padded, normalized target
+        split = (lambda x: np.concatenate([np.maximum(x, 0), np.maximum(-x, 0)], axis=-1)) if signed else (lambda x: x)
+        subunits = new._trim_subunits(stack if signed else np.abs(stack), trim)
+        candidates = [(s_[::-1, ::-1] if rc else s_) for s_ in subunits for rc in (0, 1)]
+        candidates = [c / np.linalg.norm(c) if np.linalg.norm(c) > 0 else c for c in candidates]
+        padded = np.pad(target if signed else np.abs(target), ((M - 1, M - 1), (0, 0)))
+        target_norm = padded / np.linalg.norm(padded)
+        placements, proj, starts, ends, q = [], [], [], [], []
+        for c, cand in enumerate(candidates):
+            for l in range(len(target_norm) - len(cand) + 1):
+                window = target_norm[l:l + len(cand)]
+                per_position = (split(window) * split(cand)).sum(axis=1)  # <motif, candidate>, by position
+                b = float(per_position.sum())
+                cos_window = b / np.linalg.norm(window) if np.linalg.norm(window) > 0 else 0.0
+                if cos_window > sim_threshold:
+                    placements.append((c, l)); proj.append(max(b, 0.0)); starts.append(l); ends.append(l + len(cand))
+                    q.append(per_position)
+        proj, starts, ends = np.array(proj), np.array(starts), np.array(ends)
+        expected, chains = brute_force_masked(proj, q, starts, ends, penalty, max_count)
+        expected = np.where(np.isfinite(expected), np.sqrt(np.maximum(expected, 0.0)), -np.inf)
+        profile = out[7]
+        n_runs += 1
+        problems = []
+        if profile.shape != expected.shape or not np.allclose(profile, expected, rtol=0, atol=1e-9):
+            problems.append(f"profile {np.round(profile, 4)} vs from scratch {np.round(expected, 4)}")
+        else:
+            matches = [placements.index((2 * int(f) + int(rc), int(h))) for f, rc, h in zip(out[3], out[4], out[5])]
+            energy = sum(proj[k] ** 2 for k in matches) - sum(
+                masked_cost(a, b, starts, ends, proj, q, penalty) for a, b in zip(matches, matches[1:]))
+            rescored = np.sqrt(max(energy, 0.0)) if matches else 0.0
+            if abs(rescored - out[0]) > 1e-9 or abs(out[0] - profile.max()) > 1e-9:
+                problems.append(f"matches {matches} re-score to {rescored!r}, msw_score {out[0]!r}")
+            if not np.allclose(out[6], [proj[k] for k in matches], rtol=0, atol=1e-9):
+                problems.append(f"scales {out[6]} vs {[proj[k] for k in matches]}")
+            if matches:  # sim_score: The reconstruction, each incoming subunit masked where it covers the previous one
+                recon = np.zeros_like(padded)
+                for n_i, k in enumerate(matches):
+                    placed = np.zeros_like(padded)
+                    placed[starts[k]:ends[k]] = candidates[placements[k][0]] * proj[k]
+                    if n_i:
+                        hi = min(ends[matches[n_i - 1]], ends[k])
+                        if hi > starts[k]:
+                            placed[starts[k]:hi] *= 1 - penalty
+                    recon += placed
+                ic = new.utils_config.get_ic_scale()
+                new.utils_config.set_ic_scale(False)
+                sim_expected = new.utils_similarity.compute_similarities([recon[np.newaxis], padded[np.newaxis]], [(0, 1)])[0][0]
+                new.utils_config.set_ic_scale(ic)
+                if abs(float(np.squeeze(out[1])) - float(np.squeeze(sim_expected))) > 1e-9:
+                    problems.append(f"sim_score {float(np.squeeze(out[1]))!r} vs the masked reconstruction's "
+                                    f"{float(np.squeeze(sim_expected))!r}")
+        if problems:
+            n_bad += 1
+            if n_bad <= 5:
+                print(f"  [FAIL] masked F={F} M={M} L={L} signed={signed} p={penalty} trim={trim} thr={sim_threshold} "
+                      f"max={max_count}: {problems[:2]}")
+
+    # Penalty 0: The energy mode, output for output; the default mode is "energy"
+    for _ in range(8):
+        target, stack = rng.normal(size=(int(rng.integers(6, 12)), 4)), np.abs(rng.normal(size=(3, 5, 4)))
+        kw = dict(collapse="none", overlap_penalty_fraction=0.0, match_count_penalty=0.0, target_similarity=None,
+                  return_match_profile=True)
+        if not same_outputs(new.run_modified_smith_waterman_composite(target, stack, overlap_penalty_mode="masked", **kw),
+                            new.run_modified_smith_waterman_composite(target, stack, overlap_penalty_mode="energy", **kw)):
+            n_bad += 1
+            print("  [FAIL] masked with penalty 0 differs from energy")
+    default_mode = inspect.signature(new.run_modified_smith_waterman_composite).parameters["overlap_penalty_mode"].default
+    if default_mode != "energy":
+        n_bad += 1
+        print(f"  [FAIL] default overlap_penalty_mode {default_mode!r}")
+
+    # Validation: masked only with collapse="none" (unless no penalty); known modes only
+    target, stack = rng.normal(size=(8, 4)), np.abs(rng.normal(size=(2, 4, 4)))
+    for kw_bad in (dict(overlap_penalty_mode="masked", overlap_penalty_fraction=1.0),
+                   dict(overlap_penalty_mode="masked", overlap_penalty_fraction=0.5, collapse="lsq_norm"),
+                   dict(overlap_penalty_mode="mask", collapse="none")):
+        try:
+            new.run_modified_smith_waterman_composite(target, stack, **kw_bad)
+        except ValueError:
+            continue
+        n_bad += 1
+        print(f"  [FAIL] accepted {kw_bad}")
+    new.run_modified_smith_waterman_composite(target, stack, overlap_penalty_mode="masked", overlap_penalty_fraction=0.0)
+    print(f"n. masked overlap penalty: {n_runs - n_bad}/{n_runs} profiles from scratch (brute force), matches re-scored, "
+          f"scales and sim_score; penalty 0, default and validation {'ok' if n_bad == 0 else f'FAIL ({n_bad})'}")
+    return n_bad
+
+
 def test_composite_varlen(new, seed=21):
     """j. run_modified_smith_waterman_composite(): subunits of any lengths (subunit_motif_trim), ordered by
     position. The chain DP (collapse="none") is the best over every chain (brute force), by number
@@ -1760,6 +1904,7 @@ if __name__ == "__main__":
     failures += test_composite_varlen(new)
     failures += test_composite_score(new)
     failures += test_pooled_search(new)
+    failures += test_masked_overlap(new)
     failures += test_storage(new)
     failures += test_l2_norm_removed(new)
     failures += test_padding(new)
