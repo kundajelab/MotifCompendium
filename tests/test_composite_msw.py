@@ -1145,10 +1145,13 @@ def test_pooled_search(new, n_cases=14, seed=31):
     placements of random lengths and starts, the best pair scores the same as the best over every
     pair (brute force), with and without an overlap penalty, in small blocks so that the searches
     cross blocks and prune; also when every pair overlaps (no pair without overlap to start from).
-    _best_pooled_pair(): lp_norm p = 1.5, 2, 4 and max_norm; _best_collapsed_pair(): lsq_norm."""
+    _best_pooled_pair(): lp_norm p = 1.5, 2, 4 and max_norm; _best_collapsed_pair(): lsq_norm and
+    sum_norm; _best_mean_pair(): mean_norm. The penalty is on the motif energy of the overlap, or the
+    masked one (overlap_cost_prefix: the later-starting placement's own <motif, b u> on the overlap)."""
     rng = np.random.default_rng(seed)
     n_bad = n_runs = 0
-    modes = [("lp 1.5", 1.5), ("lp 2", 2.0), ("lp 4", 4.0), ("max_norm", np.inf), ("lsq_norm", None)]
+    modes = [("lp 1.5", 1.5), ("lp 2", 2.0), ("lp 4", 4.0), ("max_norm", np.inf), ("lsq_norm", None), ("sum_norm", 1.0),
+             ("mean_norm", None)]
     for case in range(n_cases):
         P, D = int(rng.integers(20, 50)), 4
         t = np.abs(rng.normal(size=(P, D))) * (rng.random((P, 1)) < 0.85)
@@ -1177,8 +1180,15 @@ def test_pooled_search(new, n_cases=14, seed=31):
         i_all, j_all = i_all[keep], j_all[keep]
         lo_all, hi_all = np.maximum(starts[i_all], starts[j_all]), np.minimum(ends[i_all], ends[j_all])
         overlap = np.where(hi_all > lo_all, W[np.maximum(hi_all, lo_all)] - W[lo_all], 0.0)
+        # Masked: <motif, u> by position of each placement, summed over its first j positions
+        prefix = np.zeros((K, int(lengths.max()) + 1))
+        for k in range(K):
+            prefix[k, 1:lengths[k] + 1] = np.cumsum((t[starts[k]:ends[k]] * unit[k]).sum(axis=1))
+            prefix[k, lengths[k] + 1:] = prefix[k, lengths[k]]
+        later = np.where(starts[i_all] > starts[j_all], i_all, j_all)
+        masked_all = np.where(hi_all > lo_all, proj[later] * prefix[later, np.clip(hi_all - starts[later], 0, None)], 0.0)
 
-        def brute(name, q, penalty):
+        def brute(name, q, penalty, masked=False):
             best = -np.inf
             for c0 in range(0, len(i_all), 20000):
                 ii, jj = i_all[c0:c0 + 20000], j_all[c0:c0 + 20000]
@@ -1191,29 +1201,38 @@ def test_pooled_search(new, n_cases=14, seed=31):
                     both = (x_i >= 0) & (x_j >= 0) & (det > 1e-12)
                     val = np.where(both, x_i * b_i + x_j * b_j, np.maximum(b_i ** 2, b_j ** 2))
                 else:
-                    r = pool(V[ii], V[jj], q).reshape(len(ii), -1)
+                    if name == "mean_norm":
+                        r = V[ii] + V[jj]
+                        both = (np.arange(P)[None, :] >= lo[:, None]) & (np.arange(P)[None, :] < hi[:, None])
+                        r = (r * np.where(both, 0.5, 1.0)[:, :, None]).reshape(len(ii), -1)
+                    else:
+                        r = pool(V[ii], V[jj], q).reshape(len(ii), -1)
                     y, z2 = r @ t.reshape(-1), (r * r).sum(axis=1)
                     val = np.where(y > 0, y * y / np.maximum(z2, 1e-300), -np.inf)
-                best = max(best, float((val - penalty * overlap[c0:c0 + 20000]).max()))
+                charge = masked_all[c0:c0 + 20000] if masked else overlap[c0:c0 + 20000]
+                best = max(best, float((val - penalty * charge).max()))
             return best
 
         for name, q in modes:
-            for penalty in (0.0, 0.3):
-                expected = brute(name, q, penalty)
+            for penalty, masked in ((0.0, False), (0.3, False), (0.3, True), (1.0, True)):
+                expected = brute(name, q, penalty, masked)
                 args = (proj, starts, ends, cands, unit)
-                if name == "lsq_norm":
-                    value, pair, _ = new._best_collapsed_pair(*args, weight, penalty, row_block=16, col_block=64, score="lsq_norm")
+                kw = dict(overlap_cost_prefix=penalty * proj[:, None] * prefix) if masked else {}
+                if name in ("lsq_norm", "sum_norm"):
+                    value, pair, _ = new._best_collapsed_pair(*args, weight, penalty, row_block=16, col_block=64, score=name, **kw)
+                elif name == "mean_norm":
+                    value, pair, _ = new._best_mean_pair(*args, t, weight, penalty, row_block=16, **kw)
                 else:
                     value, pair, _ = new._best_pooled_pair(*args, t, weight, penalty, q, row_block=16, col_block=64,
-                                                           pair_block=32)
+                                                           pair_block=32, **kw)
                 n_runs += 1
                 if abs(value - expected) > 1e-9 or (pair is not None and starts[pair[0]] >= starts[pair[1]]):
                     n_bad += 1
                     if n_bad <= 5:
-                        print(f"  [FAIL] case {case} K={K} P={P} {name} penalty={penalty} narrow={narrow}: value {value!r} "
+                        print(f"  [FAIL] case {case} K={K} P={P} {name} penalty={penalty} masked={masked} narrow={narrow}: value {value!r} "
                               f"vs brute force {expected!r}, pair {pair}")
-    print(f"m. pair searches at scale (lp_norm, max_norm, lsq_norm): {n_runs - n_bad}/{n_runs} best pairs "
-          f"exact (brute force over every pair)")
+    print(f"m. pair searches at scale (lp_norm, max_norm, lsq_norm, sum_norm, mean_norm; energy and masked penalties): "
+          f"{n_runs - n_bad}/{n_runs} best pairs exact (brute force over every pair)")
     return n_bad
 
 
@@ -1246,32 +1265,40 @@ def brute_force_masked(proj, q, starts, ends, penalty, max_count):
     return profile, chains
 
 
-def test_masked_overlap(new, n_cases=96, seed=37):
-    """n. overlap_penalty_mode="masked" (collapse="none"): an incoming subunit's window similarity, over its
-    whole window, still decides whether it is matchable, but its match score b^2 = <motif, b u> loses
-    penalty * b * <motif, u> over the positions the previous subunit covers, not rescaled. Computed here
-    from scratch (per-position dot products, unsigned and signed on 8 channels) over every chain (brute
-    force), with penalties 1 and 0.5, both trims, thresholds and up to 3 subunits: the profile, the
-    reported matches re-scored, the scales (b), and sim_score, the similarity of the reconstruction with
-    each incoming subunit taken out, times the penalty, where it covers the previous one. Also: with
-    penalty 0 it is the energy mode, output for output; the default mode is "energy"; and "masked" with
-    another collapse, or an unknown mode, is rejected."""
+def test_masked_overlap(new, n_cases=96, n_pair_cases=24 * 5, seed=37):
+    """n. The masked overlap penalty (overlap_penalty_mode="masked", the default): an incoming subunit's
+    window similarity, over its whole window, still decides whether it is matchable, but its match score
+    b^2 = <motif, b u> loses penalty * b * <motif, u> over the positions the previous subunit covers, not
+    rescaled. Computed here from scratch (per-position dot products, unsigned and signed on 8 channels),
+    with penalties 1 and 0.5, both trims and thresholds: collapse="none" over every chain of up to 3
+    subunits (brute force), its profile, the reported matches re-scored, the scales (b), and sim_score,
+    the similarity of the reconstruction with each incoming subunit taken out, times the penalty, where
+    it covers the previous one; and sum_norm, mean_norm, max_norm, lp_norm and lsq_norm over every pair
+    (their collapsed score, minus the later-starting subunit's masked cost), with the matches re-scored
+    and the scales. Also: with penalty 0 it is the energy mode, output for output; the defaults (masked,
+    penalty 0, sum_norm); and an unknown mode is rejected."""
     import inspect
     rng = np.random.default_rng(seed)
     n_bad = n_runs = 0
-    for i in range(n_cases):
+    pair_collapses = [("sum_norm", None), ("mean_norm", None), ("max_norm", None), ("lp_norm", 2.0), ("lsq_norm", None)]
+    for i in range(n_cases + n_pair_cases):
+        chain_case = i < n_cases
         F, M, L = int(rng.integers(1, 4)), int(rng.integers(3, 6)), int(rng.integers(5, 10))
-        signed = i % 4 == 3
+        signed = i % 4 == 3 and chain_case
         target = rng.normal(size=(L, 4)) * (rng.random((L, 1)) < 0.8)
         stack = rng.normal(size=(F, M, 4)) if signed else np.abs(rng.normal(size=(F, M, 4)))
         penalty = (1.0, 0.5)[(i // 4) % 2]
         trim = (True, 0)[(i // 8) % 2]
         sim_threshold = (0.0, 0.4)[(i // 16) % 2]
-        max_count = (1, 2, 3)[(i // 32) % 3]
+        if chain_case:
+            collapse, collapse_p, max_count = "none", None, (1, 2, 3)[(i // 32) % 3]
+        else:
+            collapse, collapse_p = pair_collapses[i % len(pair_collapses)]
+            max_count = (2, 1)[(i // 64) % 2]
         out = new.run_modified_smith_waterman_composite(
             target, stack, sim_threshold=sim_threshold, overlap_penalty_fraction=penalty, overlap_penalty_mode="masked",
-            collapse="none", match_count_max=max_count, match_count_penalty=0.0, target_similarity=None,
-            subunit_motif_trim=trim, return_match_profile=True, label_unsigned=not signed)
+            collapse=collapse, collapse_p=collapse_p, match_count_max=max_count, match_count_penalty=0.0,
+            target_similarity=None, subunit_motif_trim=trim, return_match_profile=True, label_unsigned=not signed)
 
         # From scratch: Candidates (as given, reverse complemented), on the padded, normalized target
         split = (lambda x: np.concatenate([np.maximum(x, 0), np.maximum(-x, 0)], axis=-1)) if signed else (lambda x: x)
@@ -1280,7 +1307,7 @@ def test_masked_overlap(new, n_cases=96, seed=37):
         candidates = [c / np.linalg.norm(c) if np.linalg.norm(c) > 0 else c for c in candidates]
         padded = np.pad(target if signed else np.abs(target), ((M - 1, M - 1), (0, 0)))
         target_norm = padded / np.linalg.norm(padded)
-        placements, proj, starts, ends, q = [], [], [], [], []
+        placements, proj, starts, ends, q, vectors = [], [], [], [], [], []
         for c, cand in enumerate(candidates):
             for l in range(len(target_norm) - len(cand) + 1):
                 window = target_norm[l:l + len(cand)]
@@ -1290,9 +1317,28 @@ def test_masked_overlap(new, n_cases=96, seed=37):
                 if cos_window > sim_threshold:
                     placements.append((c, l)); proj.append(max(b, 0.0)); starts.append(l); ends.append(l + len(cand))
                     q.append(per_position)
+                    placed = np.zeros_like(target_norm)
+                    placed[l:l + len(cand)] = cand
+                    vectors.append(placed)
         proj, starts, ends = np.array(proj), np.array(starts), np.array(ends)
-        expected, chains = brute_force_masked(proj, q, starts, ends, penalty, max_count)
-        expected = np.where(np.isfinite(expected), np.sqrt(np.maximum(expected, 0.0)), -np.inf)
+        later = lambda x, y: (x, y) if starts[x] < starts[y] else (y, x)  # (earlier, later)
+        if chain_case:
+            expected, _ = brute_force_masked(proj, q, starts, ends, penalty, max_count)
+            expected = np.where(np.isfinite(expected), np.sqrt(np.maximum(expected, 0.0)), -np.inf)
+        else:
+            expected = np.full(max_count + 1, -np.inf)
+            expected[0] = 0.0
+            if len(proj):
+                expected[1] = proj.max()
+            if len(proj) and max_count == 2:
+                best = -np.inf
+                for x, y in itertools.combinations(range(len(proj)), 2):
+                    if starts[x] == starts[y]:
+                        continue
+                    lo, hi = max(starts[x], starts[y]), min(ends[x], ends[y])
+                    e, _ = pair_score(target_norm, collapse, collapse_p, proj[x], proj[y], vectors[x], vectors[y], lo, hi)
+                    best = max(best, e - masked_cost(*later(x, y), starts, ends, proj, q, penalty))
+                expected[2] = np.sqrt(max(best, 0.0)) if np.isfinite(best) else -np.inf
         profile = out[7]
         n_runs += 1
         problems = []
@@ -1300,14 +1346,22 @@ def test_masked_overlap(new, n_cases=96, seed=37):
             problems.append(f"profile {np.round(profile, 4)} vs from scratch {np.round(expected, 4)}")
         else:
             matches = [placements.index((2 * int(f) + int(rc), int(h))) for f, rc, h in zip(out[3], out[4], out[5])]
-            energy = sum(proj[k] ** 2 for k in matches) - sum(
-                masked_cost(a, b, starts, ends, proj, q, penalty) for a, b in zip(matches, matches[1:]))
+            if chain_case or len(matches) < 2:
+                energy = sum(proj[k] ** 2 for k in matches) - sum(
+                    masked_cost(a, b, starts, ends, proj, q, penalty) for a, b in zip(matches, matches[1:]))
+                scales = [proj[k] for k in matches]
+            else:
+                k_i, k_j = matches
+                lo, hi = max(starts[k_i], starts[k_j]), min(ends[k_i], ends[k_j])
+                e, f = pair_score(target_norm, collapse, collapse_p, proj[k_i], proj[k_j], vectors[k_i], vectors[k_j], lo, hi)
+                energy = e - masked_cost(*later(k_i, k_j), starts, ends, proj, q, penalty)
+                scales = [proj[k_i] * f[0], proj[k_j] * f[1]]
             rescored = np.sqrt(max(energy, 0.0)) if matches else 0.0
             if abs(rescored - out[0]) > 1e-9 or abs(out[0] - profile.max()) > 1e-9:
                 problems.append(f"matches {matches} re-score to {rescored!r}, msw_score {out[0]!r}")
-            if not np.allclose(out[6], [proj[k] for k in matches], rtol=0, atol=1e-9):
-                problems.append(f"scales {out[6]} vs {[proj[k] for k in matches]}")
-            if matches:  # sim_score: The reconstruction, each incoming subunit masked where it covers the previous one
+            if not np.allclose(out[6], scales, rtol=0, atol=1e-9):
+                problems.append(f"scales {out[6]} vs {scales}")
+            if chain_case and matches:  # sim_score: The reconstruction, each incoming subunit masked where it covers the previous one
                 recon = np.zeros_like(padded)
                 for n_i, k in enumerate(matches):
                     placed = np.zeros_like(padded)
@@ -1327,37 +1381,40 @@ def test_masked_overlap(new, n_cases=96, seed=37):
         if problems:
             n_bad += 1
             if n_bad <= 5:
-                print(f"  [FAIL] masked F={F} M={M} L={L} signed={signed} p={penalty} trim={trim} thr={sim_threshold} "
-                      f"max={max_count}: {problems[:2]}")
+                print(f"  [FAIL] masked {collapse} (p={collapse_p}) F={F} M={M} L={L} signed={signed} penalty={penalty} "
+                      f"trim={trim} thr={sim_threshold} max={max_count}: {problems[:2]}")
 
-    # Penalty 0: The energy mode, output for output; the default mode is "energy"
-    for _ in range(8):
+    # Penalty 0: The energy mode, output for output, with every collapse
+    for n_i in range(12):
         target, stack = rng.normal(size=(int(rng.integers(6, 12)), 4)), np.abs(rng.normal(size=(3, 5, 4)))
-        kw = dict(collapse="none", overlap_penalty_fraction=0.0, match_count_penalty=0.0, target_similarity=None,
-                  return_match_profile=True)
+        collapse, collapse_p = ([("none", None)] + pair_collapses)[n_i % 6]
+        kw = dict(collapse=collapse, collapse_p=collapse_p, overlap_penalty_fraction=0.0, match_count_penalty=0.0,
+                  target_similarity=None, return_match_profile=True)
         if not same_outputs(new.run_modified_smith_waterman_composite(target, stack, overlap_penalty_mode="masked", **kw),
                             new.run_modified_smith_waterman_composite(target, stack, overlap_penalty_mode="energy", **kw)):
             n_bad += 1
-            print("  [FAIL] masked with penalty 0 differs from energy")
-    default_mode = inspect.signature(new.run_modified_smith_waterman_composite).parameters["overlap_penalty_mode"].default
-    if default_mode != "energy":
-        n_bad += 1
-        print(f"  [FAIL] default overlap_penalty_mode {default_mode!r}")
+            print(f"  [FAIL] masked with penalty 0 differs from energy ({collapse})")
 
-    # Validation: masked only with collapse="none" (unless no penalty); known modes only
-    target, stack = rng.normal(size=(8, 4)), np.abs(rng.normal(size=(2, 4, 4)))
-    for kw_bad in (dict(overlap_penalty_mode="masked", overlap_penalty_fraction=1.0),
-                   dict(overlap_penalty_mode="masked", overlap_penalty_fraction=0.5, collapse="lsq_norm"),
-                   dict(overlap_penalty_mode="mask", collapse="none")):
-        try:
-            new.run_modified_smith_waterman_composite(target, stack, **kw_bad)
-        except ValueError:
-            continue
+    # Defaults (unpinned): the masked mode, no penalty, sum_norm
+    unpinned = getattr(new.run_modified_smith_waterman_composite, "func", new.run_modified_smith_waterman_composite)
+    parameters = inspect.signature(unpinned).parameters
+    defaults = tuple(parameters[k].default for k in ("overlap_penalty_mode", "overlap_penalty_fraction", "collapse"))
+    if defaults != ("masked", 0.0, "sum_norm"):
         n_bad += 1
-        print(f"  [FAIL] accepted {kw_bad}")
-    new.run_modified_smith_waterman_composite(target, stack, overlap_penalty_mode="masked", overlap_penalty_fraction=0.0)
-    print(f"n. masked overlap penalty: {n_runs - n_bad}/{n_runs} profiles from scratch (brute force), matches re-scored, "
-          f"scales and sim_score; penalty 0, default and validation {'ok' if n_bad == 0 else f'FAIL ({n_bad})'}")
+        print(f"  [FAIL] defaults {defaults!r}")
+
+    # Validation: known modes only
+    target, stack = rng.normal(size=(8, 4)), np.abs(rng.normal(size=(2, 4, 4)))
+    try:
+        new.run_modified_smith_waterman_composite(target, stack, overlap_penalty_mode="mask")
+    except ValueError:
+        pass
+    else:
+        n_bad += 1
+        print("  [FAIL] accepted overlap_penalty_mode='mask'")
+    print(f"n. masked overlap penalty: {n_runs - n_bad}/{n_runs} profiles from scratch (brute force; chains with none, "
+          f"pairs with every other collapse), matches re-scored, scales and sim_score; penalty 0, defaults and "
+          f"validation {'ok' if n_bad == 0 else f'FAIL ({n_bad})'}")
     return n_bad
 
 
@@ -1869,9 +1926,11 @@ def test_ic_scale(new):
 
 def pin_ic_scale_off(new):
     '''The tests below check the alignment against composite.py versions without IC-scaling: pin
-    the composite wrappers to ic_scale=False (test_ic_scale() checks ic_scale).'''
+    the composite wrappers to ic_scale=False (test_ic_scale() checks ic_scale). They were written for
+    the overlap penalty on the motif energy: pin overlap_penalty_mode="energy" too (the masked penalty,
+    the default, is checked in test_masked_overlap()); a test passing it explicitly overrides the pin.'''
     for name in ("run_modified_smith_waterman_composite",):
-        setattr(new, name, functools.partial(getattr(new, name), ic_scale=False))
+        setattr(new, name, functools.partial(getattr(new, name), ic_scale=False, overlap_penalty_mode="energy"))
 
 
 if __name__ == "__main__":
