@@ -38,6 +38,7 @@ def run_modified_bellman_ford_composite(
     collapse="sum_norm",
     collapse_p=None,
     overlap_penalty_mode="masked",
+    subunit_groups=None,
 ):
     '''
     Aligns a composite of subunit motifs of any lengths against a motif: each subunit is trimmed
@@ -47,7 +48,8 @@ def run_modified_bellman_ford_composite(
     start on the motif; it may overhang either end, overlapping the motif by as little as 1 bp. Its
     window must have a similarity (cosine) above sim_threshold. An alignment is up to
     match_count_max (1 or 2) candidates with strictly increasing starts: any subunits, in any
-    orientation, repeated or not.
+    orientation, repeated or not. With subunit_groups, exactly two: one subunit of each group (e.g.
+    a composite's core motifs and its flank motifs), the best such pair, exactly.
 
     Each candidate is scaled by its least-squares weight, b = <motif, candidate>, the cosine of the
     candidate (placed at its start, zero elsewhere) to the whole L2-normalized motif. The scaled
@@ -125,6 +127,14 @@ def run_modified_bellman_ford_composite(
         overlap_penalty_mode: What overlap_penalty_fraction charges for an overlap (see above):
             "masked", the incoming candidate's own match score inside it; "energy", the motif
             energy of the overlapping positions (default: "masked") - str
+        subunit_groups: Group of each subunit, 0 or 1, both used (None: no groups): the alignment
+            is then the best pair of one subunit of group 0 and one of group 1 (in any order and
+            orientations; a subunit given in both groups may be matched twice, once as each), so
+            exactly two matches: match_count_penalty, match_count_fraction and target_similarity
+            do not choose the number of matches (mbf_score is still the cosine minus 2 *
+            match_count_penalty); only if no such pair is matchable, the usual choice among fewer.
+            Needs match_count_max=2 and a collapse other than "none" (default: None)
+            - np.array of shape (F,) of int, or None
 
     Returns:
         mbf_score: Score of the optimal alignment (cosine), minus match_count_penalty * N - float
@@ -171,6 +181,16 @@ def run_modified_bellman_ford_composite(
         _check_match_count_max(match_count_max)
     elif isinstance(match_count_max, (bool, np.bool_)) or match_count_max not in (1, 2):
         raise ValueError(f"match_count_max must be 1 or 2 with collapse={collapse!r}, got {match_count_max!r}")
+    if subunit_groups is not None:
+        subunit_groups = np.asarray(subunit_groups)
+        if subunit_groups.shape != (F,) or not np.isin(subunit_groups, (0, 1)).all():
+            raise ValueError(f"subunit_groups must give each of the {F} subunits a group, 0 or 1, got {subunit_groups!r}")
+        if not ((subunit_groups == 0).any() and (subunit_groups == 1).any()):
+            raise ValueError("subunit_groups must have subunits in both groups (0 and 1)")
+        if collapse == "none" or match_count_max != 2:
+            raise ValueError(f"subunit_groups needs a pair: match_count_max=2 (got {match_count_max!r}) and a collapse "
+                             f"other than 'none' (got {collapse!r})")
+        subunit_groups = subunit_groups.astype(int)
     if target_similarity is not None and not (isinstance(target_similarity, (int, float, np.integer, np.floating))
                                               and not isinstance(target_similarity, (bool, np.bool_))):
         raise ValueError(f"target_similarity must be a number or None, got {target_similarity!r}")
@@ -232,6 +252,7 @@ def run_modified_bellman_ford_composite(
     pairs_c, pairs_l = np.nonzero(matchable)  # (K,), (K,): The matchable placements
     proj = np.sqrt(energy[pairs_c, pairs_l]) * np.maximum(sim[pairs_c, pairs_l], 0.0)  # (K,): b = |w| * cosine
     ends = pairs_l + cand_len[pairs_c]  # (K,)
+    groups = None if subunit_groups is None else subunit_groups[cand_subunit[pairs_c]]  # (K,): Group of each placement
 
     ## Align: The best alignment with each number of matches, as squared scores (explained energy)
     position_energy = (target_norm * target_norm).sum(axis=1)  # (L+2M-2,), sums to 1
@@ -258,22 +279,27 @@ def run_modified_bellman_ford_composite(
             if pool_p == 1 or collapse == "lsq_norm":  # sum_norm, lp_norm with p = 1, or lsq_norm
                 value, pair, scale = _best_collapsed_pair(proj, pairs_l, ends, pairs_c, unit, position_energy,
                                                           overlap_penalty_fraction, score="lsq_norm" if collapse == "lsq_norm" else "sum_norm",
-                                                          overlap_cost_prefix=cost)
+                                                          overlap_cost_prefix=cost, groups=groups)
             elif collapse == "mean_norm":
                 value, pair, scale = _best_mean_pair(proj, pairs_l, ends, pairs_c, unit, sim_space(target_norm),
-                                                     position_energy, overlap_penalty_fraction, overlap_cost_prefix=cost)
+                                                     position_energy, overlap_penalty_fraction, overlap_cost_prefix=cost,
+                                                     groups=groups)
             else:
                 value, pair, scale = _best_pooled_pair(proj, pairs_l, ends, pairs_c, unit, sim_space(target_norm),
-                                                       position_energy, overlap_penalty_fraction, pool_p, overlap_cost_prefix=cost)
+                                                       position_energy, overlap_penalty_fraction, pool_p, overlap_cost_prefix=cost,
+                                                       groups=groups)
             if pair is not None:
                 explained[2], best[2] = value, (pair, scale)
     mbf_profile = np.where(np.isfinite(explained), np.sqrt(np.maximum(explained, 0.0)), -np.inf)  # Cosines
 
-    ## Number of matches: The penalized best, then the fewest reaching target_similarity
-    n = _select_match_count(mbf_profile, match_count_penalty, match_count_fraction)
-    if target_similarity is not None:
-        reached = [N for N in range(1, n) if mbf_profile[N] >= target_similarity]
-        n = reached[0] if reached else n
+    ## Number of matches: The penalized best, then the fewest reaching target_similarity (subunit_groups: the pair)
+    if subunit_groups is not None and np.isfinite(explained[2]):
+        n = 2
+    else:
+        n = _select_match_count(mbf_profile, match_count_penalty, match_count_fraction)
+        if target_similarity is not None:
+            reached = [N for N in range(1, n) if mbf_profile[N] >= target_similarity]
+            n = reached[0] if reached else n
     matches, collapsed_scale = best[n]
     mbf_score = float(mbf_profile[n] - match_count_penalty * n)
 
@@ -346,6 +372,41 @@ def _trim_subunits(subunit_motif_stack, subunit_motif_trim):
             raise ValueError(f"Subunit {f} is trimmed away entirely (subunit_motif_trim={subunit_motif_trim!r})")
         subunits.append(subunit)
     return subunits
+
+
+def subunit_trim_spans(subunit_motif_stack, subunit_motif_trim=True, ic_scale=True):
+    '''
+    Where run_modified_bellman_ford_composite() trims each subunit (_trim_subunits()): the subunits
+    IC-scaled as it does (ic_scale), then trimmed by subunit_motif_trim (the same threshold, on the
+    absolute values, as utils_motif.trim_motif()), as positions of each subunit as given (forward).
+
+    Arguments:
+        subunit_motif_stack: Stack of subunit motifs, padded to a common length M - np.array of
+            shape (F, M, D)
+        subunit_motif_trim, ic_scale: As run_modified_bellman_ford_composite()
+    Returns:
+        spans: [start, end) of each trimmed subunit, in its own positions - np.array of shape
+            (F, 2) of int
+    '''
+    F, M, _ = subunit_motif_stack.shape
+    stack = utils_motif.ic_scale(subunit_motif_stack) if ic_scale else subunit_motif_stack
+    if isinstance(subunit_motif_trim, (bool, np.bool_)):
+        threshold = 1 / M if subunit_motif_trim else None
+    elif isinstance(subunit_motif_trim, (int, float, np.integer, np.floating)) and 0 <= subunit_motif_trim <= 1:
+        threshold = float(subunit_motif_trim)
+    else:
+        raise ValueError(f"subunit_motif_trim must be a bool or a number in [0, 1], got {subunit_motif_trim!r}")
+    spans = np.zeros((F, 2), dtype=int)
+    for f in range(F):
+        if threshold is None:
+            spans[f] = (0, M)
+            continue
+        totals = np.abs(stack[f]).sum(axis=1)
+        included = totals > threshold * totals.sum()  # As utils_motif.trim_motif()
+        if not included.any():
+            raise ValueError(f"Subunit {f} is trimmed away entirely (subunit_motif_trim={subunit_motif_trim!r})")
+        spans[f] = (int(np.argmax(included)), M - int(np.argmax(included[::-1])))
+    return spans
 
 
 def _check_match_count_max(match_count_max):
@@ -495,32 +556,49 @@ def _chain_composite(match_scores, matchable, cand_len, overlap_penalty_fraction
     return mbf_profile, trace
 
 
-def _best_disjoint_pair(m, starts, ends):
+def _best_disjoint_pair(m, starts, ends, groups=None):
     '''
     Best pair of placements that do not overlap (the first ends at or before the second starts), by
-    m_i + m_j, exactly: a running maximum of m over ends.
+    m_i + m_j, exactly: a running maximum of m over ends (groups: the first of the other group's).
 
+    Arguments:
+        m: Energy of each placement - np.array (K,)
+        starts, ends: Window [start, end) of each placement - np.array (K,) of int
+        groups: Group (0 or 1) of each placement: pairs of the two groups only (None: any pair)
+            - np.array (K,) of int, or None
     Returns:
         value: m_i + m_j (-inf: no pair) - float
         pair: The two placements, by start (None: no pair) - list of int
     '''
     K = len(m)
     P = int(ends.max()) + 1
-    o = np.lexsort((np.arange(K), -m, ends))  # By end, the best first (ties: the first placement)
-    first = np.ones(K, dtype=bool)
-    first[1:] = ends[o][1:] != ends[o][:-1]
-    by_end, arg_end = np.full(P, -np.inf), np.full(P, -1)
-    by_end[ends[o][first]], arg_end[ends[o][first]] = m[o][first], o[first]
-    run, run_arg = _first_running_max(by_end)  # (P,), (P,): The best ending at or before each position
-    totals = np.where(np.isfinite(run[starts]), run[starts] + m, -np.inf)  # (K,)
+
+    def running_best(m_g):  # The best placement ending at or before each position, by m_g
+        o = np.lexsort((np.arange(K), -m_g, ends))  # By end, the best first (ties: the first placement)
+        first = np.ones(K, dtype=bool)
+        first[1:] = ends[o][1:] != ends[o][:-1]
+        by_end, arg_end = np.full(P, -np.inf), np.full(P, -1)
+        by_end[ends[o][first]], arg_end[ends[o][first]] = m_g[o][first], o[first]
+        run, run_arg = _first_running_max(by_end)  # (P,), (P,)
+        return run, arg_end[run_arg]
+
+    if groups is None:
+        run, arg = running_best(m)
+        before, before_arg = run[starts], arg[starts]  # (K,): The best partner ending before each start
+    else:  # The partner from the other group
+        by_group = [running_best(np.where(groups == g, m, -np.inf)) for g in (0, 1)]
+        other = 1 - groups
+        before = np.where(other == 0, by_group[0][0][starts], by_group[1][0][starts])
+        before_arg = np.where(other == 0, by_group[0][1][starts], by_group[1][1][starts])
+    totals = np.where(np.isfinite(before), before + m, -np.inf)  # (K,)
     j = int(np.argmax(totals))
     if not np.isfinite(totals[j]):
         return -np.inf, None
-    return float(totals[j]), [int(arg_end[run_arg[starts[j]]]), j]
+    return float(totals[j]), [int(before_arg[j]), j]
 
 
 def _best_mean_pair(proj, starts, ends, cands, unit, target, position_energy, overlap_penalty_fraction,
-                    top=3000, row_block=512, overlap_cost_prefix=None):
+                    top=3000, row_block=512, overlap_cost_prefix=None, groups=None):
     '''
     Best pair of placements with strictly increasing starts, by the energy their collapsed
     alignment explains once L2-normalized, with the mean of the two where they overlap:
@@ -536,7 +614,7 @@ def _best_mean_pair(proj, starts, ends, cands, unit, target, position_energy, ov
 
     Arguments:
         proj, starts, ends, cands, unit, position_energy, overlap_penalty_fraction,
-            overlap_cost_prefix: As _best_collapsed_pair()
+            overlap_cost_prefix, groups: As _best_collapsed_pair()
         target: The L2-normalized target, in the similarity space - np.array (S, D')
         top: Placements searched for overlapping pairs - int
         row_block: Block size of the search - int
@@ -546,7 +624,7 @@ def _best_mean_pair(proj, starts, ends, cands, unit, target, position_energy, ov
         scale: Least-squares weight of the pair's collapsed alignment, <t, r> / |r|^2 - float
     '''
     m = proj * proj
-    value, pair = _best_disjoint_pair(m, starts, ends)
+    value, pair = _best_disjoint_pair(m, starts, ends, groups)
     scale = 1.0
     I = np.argsort(-m, kind="stable")[:top]
     T = len(I)
@@ -565,6 +643,7 @@ def _best_mean_pair(proj, starts, ends, cands, unit, target, position_energy, ov
     W = cp.asarray(np.concatenate([[0.0], np.cumsum(position_energy)]))
     bI, mI, lI, eI = (cp.asarray(x[I]) for x in (proj, m, starts, ends))
     CI = None if overlap_cost_prefix is None else cp.asarray(overlap_cost_prefix[I])  # (T, J+1)
+    gI = None if groups is None else cp.asarray(groups[I])  # (T,)
     cols = cp.arange(T)[None, :]
     for s in range(0, T, row_block):
         rows = slice(s, min(T, s + row_block))
@@ -572,6 +651,8 @@ def _best_mean_pair(proj, starts, ends, cands, unit, target, position_energy, ov
         lo = cp.maximum(lI[rows, None], lI[None, :])
         hi = cp.minimum(eI[rows, None], eI[None, :])
         ok = (lo < hi) & (lI[rows, None] < lI[None, :])  # Overlapping, the row first
+        if gI is not None:  # One of each group
+            ok &= gI[rows, None] != gI[None, :]
         lo, hi = cp.where(ok, lo, 0), cp.where(ok, hi, 0)
         Ai = bI[rows, None] * (Ct[ri, hi] - Ct[ri, lo])
         Aj = bI[None, :] * (Ct[cols, hi] - Ct[cols, lo])
@@ -624,7 +705,7 @@ def _pool(x_i, x_j, p, xp):
 
 
 def _best_pooled_pair(proj, starts, ends, cands, unit, target, position_energy, overlap_penalty_fraction, p,
-                      row_block=256, col_block=8192, pair_block=4096, overlap_cost_prefix=None):
+                      row_block=256, col_block=8192, pair_block=4096, overlap_cost_prefix=None, groups=None):
     '''
     Best pair of placements with strictly increasing starts, by the energy their collapsed
     alignment explains once L2-normalized, with the Lp pool of the two where they overlap,
@@ -650,13 +731,14 @@ def _best_pooled_pair(proj, starts, ends, cands, unit, target, position_energy, 
         p: Order of the pool, > 1 (inf: the maximum) - float
         row_block, col_block, pair_block: Block sizes of the search - int
         overlap_cost_prefix: As _best_collapsed_pair() (E(overlap) still bounds <t, r> on the overlap)
+        groups: As _best_collapsed_pair()
     Returns:
         value: Best squared score (-inf: no pair) - float
         pair: The two placements, by start (None: no pair) - list of int
         scale: Least-squares weight of the pair's collapsed alignment, <t, r> / |r|^2 - float
     '''
     m = proj * proj  # (K,): Energy each placement explains alone
-    value, pair = _best_disjoint_pair(m, starts, ends)
+    value, pair = _best_disjoint_pair(m, starts, ends, groups)
     scale = 1.0
     order = np.argsort(-m, kind="stable")
     b_sorted, m_sorted = proj[order], m[order]
@@ -681,6 +763,7 @@ def _best_pooled_pair(proj, starts, ends, cands, unit, target, position_energy, 
     W = cp.asarray(np.concatenate([[0.0], np.cumsum(position_energy)]))  # W[x]: Energy of positions before x
     bI, mI, lI, eI = (cp.asarray(x[I]) for x in (proj, m, starts, ends))
     CI = None if overlap_cost_prefix is None else cp.asarray(overlap_cost_prefix[I])  # (n_cand, J+1)
+    gI = None if groups is None else cp.asarray(groups[I])  # (n_cand,)
     c_p = 4.0 ** (1.0 / p - 1.0)  # |r_O|^2 >= c_p |v_i + v_j|^2 on O
 
     def cos_bound(z, base_t, base_q, A, tau):
@@ -702,6 +785,8 @@ def _best_pooled_pair(proj, starts, ends, cands, unit, target, position_energy, 
             lo = cp.maximum(lI[rows, None], lI[None, cols])
             hi = cp.minimum(eI[rows, None], eI[None, cols])
             ok = row_ok & (ci > ri) & (lo < hi) & (lI[rows, None] != lI[None, cols])  # Overlapping, distinct starts
+            if gI is not None:  # One of each group
+                ok &= gI[rows, None] != gI[None, cols]
             lo, hi = cp.where(ok, lo, 0), cp.where(ok, hi, 0)
             A = bI[rows, None] * (Ct[ri, hi] - Ct[ri, lo]) + bI[None, cols] * (Ct[ci, hi] - Ct[ci, lo])
             Qi = mI[rows, None] * (Cu[ri, hi] - Cu[ri, lo])
@@ -744,7 +829,7 @@ def _best_pooled_pair(proj, starts, ends, cands, unit, target, position_energy, 
 
 
 def _best_collapsed_pair(proj, starts, ends, cands, unit, position_energy, overlap_penalty_fraction,
-                         row_block=512, col_block=16384, score="sum_norm", overlap_cost_prefix=None):
+                         row_block=512, col_block=16384, score="sum_norm", overlap_cost_prefix=None, groups=None):
     '''
     Best pair of placements with strictly increasing starts, by the energy their collapsed
     alignment (the sum of the two) explains once L2-normalized (its squared cosine to the motif),
@@ -774,6 +859,8 @@ def _best_collapsed_pair(proj, starts, ends, cands, unit, position_energy, overl
         overlap_cost_prefix: The masked overlap penalty, in place of p * E(overlap): the cost of an
             overlap of the first j positions of each placement, charged to the later-starting one
             of a pair (None: p * E(overlap)) - np.array (K, J+1)
+        groups: Group (0 or 1) of each placement: pairs of the two groups only (None: any pair)
+            - np.array (K,) of int, or None
     Returns:
         value: Best squared score (-inf: no pair) - float
         pair: The two placements, by start (None: no pair) - list of int
@@ -786,7 +873,7 @@ def _best_collapsed_pair(proj, starts, ends, cands, unit, position_energy, overl
     P = int(ends.max()) + 1
 
     ## Pairs that do not overlap: Exactly
-    value, pair = _best_disjoint_pair(m, starts, ends)
+    value, pair = _best_disjoint_pair(m, starts, ends, groups)
     scale = 1.0
 
     ## Pairs that overlap: Both among the placements with m > value - max(m), by decreasing m
@@ -803,6 +890,7 @@ def _best_collapsed_pair(proj, starts, ends, cands, unit, position_energy, overl
     W = cp.asarray(np.concatenate([[0.0], np.cumsum(position_energy)]))  # W[x]: Energy of positions before x
     mI, bI, lI, eI = (cp.asarray(x[I]) for x in (m, proj, starts, ends))
     CI = None if overlap_cost_prefix is None else cp.asarray(overlap_cost_prefix[I])  # (n_cand, J+1)
+    gI = None if groups is None else cp.asarray(groups[I])  # (n_cand,)
     m_sorted = m[I]  # Decreasing
     for s in range(0, n_cand, row_block):
         if m_sorted[s] + m_max <= value:  # No pair left can beat value
@@ -816,6 +904,8 @@ def _best_collapsed_pair(proj, starts, ends, cands, unit, position_energy, overl
             hi = cp.minimum(eI[rows, None], eI[None, cols])
             B = mI[rows, None] + mI[None, cols]
             ok = (lo < hi) & (lI[rows, None] != lI[None, cols]) & (B > value)  # Overlapping, distinct starts
+            if gI is not None:  # One of each group
+                ok &= gI[rows, None] != gI[None, cols]
             pen = (overlap_penalty_fraction * (W[hi] - W[lo]) if CI is None
                    else _masked_pair_cost(CI[rows], CI[cols], lI[rows, None], lI[None, cols], hi))
             if score == "lsq_norm":  # The refit scales x_i, x_j of the two (non-negative), or the better one alone

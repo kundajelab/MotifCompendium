@@ -1131,7 +1131,7 @@ class Encode_CompositeArgs:
 
     # Subunits: reference matches per composite
     composite_ref_col: str = "composite_reference"
-    max_submotifs_composite: int = 3
+    max_submotifs_composite: int = 3  # Reference submotifs re-matched to the merged composites (C5); identify_composites(): 2 (core, flank)
     composite_error_prefix: str = "_"  # Composites with a core or flank label starting with it are dropped
     families: List[str] = field(default_factory=lambda: [
         'ARID', 'ARNT', 'BCL', 'BHLH', 'CEBP', 'CREB', 'CDX', 'DMRT', 'ESRR', 'ELS',

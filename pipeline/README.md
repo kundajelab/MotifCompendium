@@ -485,7 +485,12 @@ level's as `--composite-dir` (default: `encode/`, next to `--output-dir`):
 10. `encode-combine` (`pipeline_encode.py`): force-clusters the modelclusters
     into crossclusters, annotates and filters them, and decomposes the filtered
     ones into reference monomers (modified Bellman-Ford), before exporting
-    them (and, at `encode-propagate`, to every level below). The composites and their subunits are written to
+    them (and, at `encode-propagate`, to every level below). Each composite's two
+    subunits (the ISM inputs) are placed by Bellman-Ford too: the best pair of one
+    reference motif of its core label and one of its flank label
+    (`subunit_groups`), trimmed and placed as Bellman-Ford trims and places them
+    (`composite_reference_{name,start,end,motif_string,...}{0,1}`: 0 core, 1
+    flank). The composites and their subunits are written to
     `encode/` (`export/motifcompendium_encode_composite_metadata{,_model}.tsv`,
     `mc/motifcompendium_encode_composite.mc`). `--all-paths-tsv` (optional)
     adds each model's model, assay and atlas to the per-model table. Its

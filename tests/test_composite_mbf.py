@@ -1931,6 +1931,76 @@ def test_ic_scale(new):
     return n_fail
 
 
+def test_subunit_groups(new, n_cases=24, seed=53):
+    '''o. subunit_groups: exactly two matches, one subunit of each group, and the best such pair: its score is
+    the best over every pair of a group-0 and a group-1 subunit searched on their own (each collapse with a
+    pair search); subunit_trim_spans() is where the subunits are trimmed (the matched subunits' lengths);
+    bad groups are rejected.'''
+    rng = np.random.default_rng(seed)
+    n_fail = n_runs = 0
+    collapses = [("sum_norm", None), ("lsq_norm", None), ("max_norm", None), ("lp_norm", 2.0), ("mean_norm", None)]
+    for case in range(n_cases):
+        F, M = int(rng.integers(3, 7)), int(rng.integers(5, 9))
+        stack = np.zeros((F, M, 4))
+        for f in range(F):
+            m = int(rng.integers(3, M + 1))
+            stack[f, :m] = rng.random((m, 4)) ** 3 + 0.01
+        L = int(rng.integers(10, 26))
+        target = rng.random((L, 4)) * 0.05
+        for f in rng.choice(F, 2, replace=False):  # Plant two subunits (one maybe reverse complemented)
+            sub = stack[f][np.abs(stack[f]).sum(1) > 0]
+            sub = sub[::-1, ::-1] if rng.random() < 0.5 else sub
+            at = int(rng.integers(0, max(1, L - len(sub))))
+            target[at:at + len(sub)] += sub[:max(0, min(len(sub), L - at))]
+        groups = rng.integers(0, 2, F)
+        groups[:2] = (0, 1)
+        g0, g1 = np.flatnonzero(groups == 0), np.flatnonzero(groups == 1)
+        for collapse, p in collapses:
+            kw = dict(collapse=collapse, collapse_p=p, match_count_penalty=0.05)
+            out = new.run_modified_bellman_ford_composite(target, stack, subunit_groups=groups, **kw)
+            idx = out[3]
+            n_runs += 1
+            if len(idx) != 2 or groups[idx[0]] == groups[idx[1]]:
+                n_fail += 1
+                print(f"  [FAIL] {collapse} case {case}: matches {list(idx)} of groups {list(groups[idx])}")
+                continue
+            best = max(new.run_modified_bellman_ford_composite(target, stack[[i, j]], subunit_groups=[0, 1], **kw)[0]
+                       for i in g0 for j in g1)
+            if not np.isclose(out[0], best, rtol=1e-9, atol=1e-12):
+                n_fail += 1
+                print(f"  [FAIL] {collapse} case {case}: score {out[0]!r}, best pair alone {best!r}")
+            # The matched subunits' lengths: as subunit_trim_spans() (the pinned ic_scale: False)
+            spans = new.subunit_trim_spans(stack, True, ic_scale=False)
+            lengths = [int((np.abs(out[2][k]).sum(1) > 0).sum()) for k in range(2)]
+            if lengths != [int(spans[f][1] - spans[f][0]) for f in idx]:
+                n_fail += 1
+                print(f"  [FAIL] {collapse} case {case}: matched lengths {lengths}, spans {spans[idx].tolist()}")
+    # subunit_trim_spans() against utils_motif.trim_motif() (IC-scaled, as the composite does)
+    for case in range(n_cases):
+        stack = rng.random((4, 9, 4)) ** 4 + 0.001
+        for ic in (True, False):
+            spans = new.subunit_trim_spans(stack, True, ic_scale=ic)
+            scaled = new.utils_motif.ic_scale(stack) if ic else stack
+            for f in range(4):
+                trimmed = new.utils_motif.trim_motif(scaled[f], 1 / 9)
+                if not np.array_equal(trimmed, scaled[f][spans[f][0]:spans[f][1]]):
+                    n_fail += 1
+                    print(f"  [FAIL] subunit_trim_spans case {case} ic {ic} subunit {f}: {spans[f].tolist()}")
+    # Bad groups
+    stack, target = rng.random((3, 5, 4)), rng.random((12, 4))
+    for bad, extra in (([0, 1], {}), ([0, 1, 2], {}), ([0, 0, 0], {}), ([0, 1, 1], dict(collapse="none")),
+                       ([0, 1, 1], dict(match_count_max=1))):
+        try:
+            new.run_modified_bellman_ford_composite(target, stack, subunit_groups=bad, **extra)
+        except ValueError:
+            continue
+        n_fail += 1
+        print(f"  [FAIL] subunit_groups={bad} {extra} accepted")
+    print(f"o. subunit_groups: {n_runs - n_fail if n_fail == 0 else n_runs - n_fail}/{n_runs} pair runs the best "
+          f"cross-group pair{'' if n_fail == 0 else f'; {n_fail} failures'}")
+    return n_fail
+
+
 def pin_ic_scale_off(new):
     '''The tests below check the alignment against composite.py versions without IC-scaling: pin
     the composite wrappers to ic_scale=False (test_ic_scale() checks ic_scale). They were written for
@@ -1971,6 +2041,7 @@ if __name__ == "__main__":
     failures += test_composite_score(new)
     failures += test_pooled_search(new)
     failures += test_masked_overlap(new)
+    failures += test_subunit_groups(new)
     failures += test_storage(new)
     failures += test_l2_norm_removed(new)
     failures += test_padding(new)

@@ -1070,15 +1070,23 @@ def annotate_family(metadata_df, tf_col, family_col):
     metadata_df.loc[metadata_df[tf_col].str.contains("MX"), family_col] = "MAX"
 
 
-def identify_composites(mc_crosscluster, mc_ref_direct_monomer, mc_ref_qc_cluster_name_dict, mc_ref_direct_monomer_all):
+def identify_composites(mc_crosscluster, mc_ref_direct_monomer, mc_ref_qc_cluster_name_dict, mc_ref_direct_monomer_all,
+                        ic_scale=True):
     """
-    The composites of mc_crosscluster (its filtered crossclusters), each with its reference subunits: name, cluster,
-    score, alignment, start, end and motif string per subunit, and the spacing between the first two.
+    The composites of mc_crosscluster (its filtered crossclusters), each with its two reference subunits placed by
+    the modified Bellman-Ford (utils_composite.run_modified_bellman_ford_composite(), with the combine's Bellman
+    settings, CompositeArgs.bellman_*): the best pair of one reference motif of its core label and one of its flank
+    label (subunit_groups; the same motif may be both, e.g. FOX::FOX). Per subunit (0: core, 1: flank): name,
+    cluster, score (cosine to its window), orientation, start, end and motif string, as Bellman trims and places it
+    (subunit_trim_spans(): no other trimming), and its logo; the spacing between the two; the pair's MotifCompendium
+    similarity ({composite_reference}_similarity). Positions are columns of the composite motif (a subunit may
+    overhang either end). The columns of further subunits (CompositeArgs.max_submotifs_composite) are left empty.
 
-    The subunits of a core or flank label are found among its monomers of the composite reference
+    The subunit candidates of a core or flank label are its monomers of the composite reference
     (mc_ref_direct_monomer), else, when it has none there (every motif of the label is longer than
-    CompositeArgs.monomer_max_length, e.g. CBFB, CAMTA, FERD3L, NFKB), among its monomers of mc_ref_direct_monomer_all:
-    the same reference without the length filter.
+    CompositeArgs.monomer_max_length, e.g. CBFB, CAMTA, FERD3L, NFKB), its monomers of mc_ref_direct_monomer_all: the
+    same reference without the length filter. The references are passed as loaded (IC-scaled once) and untrimmed:
+    Bellman IC-scales and trims them itself (ic_scale, CompositeArgs.bellman_subunit_motif_trim).
     """
     # Identify composites
     mc_encode_composite = mc_crosscluster[(mc_crosscluster[MetadataCols.composite_col] == True)]
@@ -1090,144 +1098,121 @@ def identify_composites(mc_crosscluster, mc_ref_direct_monomer, mc_ref_qc_cluste
     annotate_family(mc_encode_composite.metadata, tf_col=LabelCols.label_core_col, family_col=LabelCols.label_core_readable_col)
     annotate_family(mc_encode_composite.metadata, tf_col=LabelCols.label_flank_col, family_col=LabelCols.label_flank_readable_col)
 
-    # Assign references
     composite_ref_col = CompositeArgs.composite_ref_col
-    mc_encode_composite_metadata_updates = []
-    mc_encode_composite_images_updated = pd.DataFrame(index=mc_encode_composite[MetadataCols.unique_id_col])
-    mc_encode_composite_images_existing = set(mc_encode_composite.images())
-    # Motifs and images are positional arrays.  Retain this positional key while
-    # metadata is temporarily indexed by MCID, then restore it before assignment.
-    mc_encode_composite.metadata["_motif_row"] = np.arange(len(mc_encode_composite))
-
-    mc_encode_composite_len = mc_encode_composite.motifs.shape[1]
-
+    ref_names = mc_ref_direct_monomer_all[MetadataCols.name_col].astype(str).to_numpy()
+    ref_row_by_name = {name: row for row, name in enumerate(ref_names)}
+    ref_motifs = mc_ref_direct_monomer_all.motifs  # (R, M, 4): as loaded (IC-scaled once), untrimmed
+    M = ref_motifs.shape[1]
+    trim = CompositeArgs.bellman_subunit_motif_trim
+    idx_to_acgt = np.array(["A", "C", "G", "T"])
+    n_sub = CompositeArgs.max_submotifs_composite
+    fields = ["name", "cluster", "score", "alignment_rc", "alignment_h", "start", "end", VisualizeArgs.motif_string_col]
+    rows, logos = [], [[], []]
     for motif_row, (_, row) in enumerate(mc_encode_composite.metadata.iterrows()):
-        # MotifCompendium: Subset
-        mc_encode_composite_i = mc_encode_composite[np.array([motif_row], dtype=int)]
-        name_i = mc_encode_composite_i[MetadataCols.name_col].values[0]
-        label_core_i = mc_encode_composite_i[LabelCols.label_core_col].values[0]
-        label_core_family_i = mc_encode_composite_i[LabelCols.label_core_readable_col].values[0]
-        label_flank_i = mc_encode_composite_i[LabelCols.label_flank_col].values[0]
-        label_flank_family_i = mc_encode_composite_i[LabelCols.label_flank_readable_col].values[0]
+        name_i = row[MetadataCols.name_col]
+        label_core_i, label_core_family_i = row[LabelCols.label_core_col], row[LabelCols.label_core_readable_col]
+        label_flank_i, label_flank_family_i = row[LabelCols.label_flank_col], row[LabelCols.label_flank_readable_col]
 
         # Reference: Core, flank monomers
-        mc_ref_core_names_i = _subunit_reference_names(mc_ref_direct_monomer, mc_ref_direct_monomer_all, label_core_i, label_core_family_i)
-        if len(mc_ref_core_names_i) == 0:
+        core_names = sorted(_subunit_reference_names(mc_ref_direct_monomer, mc_ref_direct_monomer_all, label_core_i, label_core_family_i))
+        if len(core_names) == 0:
             raise ValueError(f"Core label '{label_core_i}' ({label_core_family_i}) not found in reference motifs.")
-
-        mc_ref_flank_names_i = _subunit_reference_names(mc_ref_direct_monomer, mc_ref_direct_monomer_all, label_flank_i, label_flank_family_i)
-        if len(mc_ref_flank_names_i) == 0:
+        flank_names = sorted(_subunit_reference_names(mc_ref_direct_monomer, mc_ref_direct_monomer_all, label_flank_i, label_flank_family_i))
+        if len(flank_names) == 0:
             raise ValueError(f"Flank label '{label_flank_i}' ({label_flank_family_i}) not found in reference motifs.")
+        names_i = core_names + flank_names
+        groups_i = np.array([0] * len(core_names) + [1] * len(flank_names))
+        stack_i = ref_motifs[[ref_row_by_name[name] for name in names_i]]  # (F, M, 4)
 
-        # Reference: Subset (the composite reference is mc_ref_direct_monomer_all's rows in order: same subsets)
-        mc_ref_direct_monomer_i = mc_ref_direct_monomer_all[mc_ref_direct_monomer_all[MetadataCols.name_col].isin(mc_ref_core_names_i | mc_ref_flank_names_i)]
-        if len(mc_ref_direct_monomer_i) == 0:
-            raise ValueError(f"No reference motifs found for core '{label_core_i}' and flank '{label_flank_i}'.")
+        # Target: the composite motif without its all-zero columns (from column first_col), at least M long
+        motif_i = mc_encode_composite.motifs[motif_row]
+        first_col = int(np.flatnonzero(np.abs(motif_i).sum(axis=1) > 0)[0])
+        target_i = utils_motif.trim_motif(motif_i, 0)
+        if target_i.shape[0] < M:
+            target_i = np.pad(target_i, ((0, M - target_i.shape[0]), (0, 0)))
 
-        # Assign Score, labels, alignments
-        utils_analysis.assign_label_from_other_compendium(
-            assign_to_mc=mc_encode_composite_i,
-            assign_from_mc=mc_ref_direct_monomer_i,
-            from_label_col=MetadataCols.name_col,
-            save_col_prefix=composite_ref_col,
-            min_score=0,
-            max_submotifs=CompositeArgs.max_submotifs_composite,
+        # Bellman: one core and one flank motif
+        (score_i, sim_score_i, aligned_i, idx_i, rc_i, h_i, _) = utils_composite.run_modified_bellman_ford_composite(
+            target_motif=target_i,
+            subunit_motif_stack=stack_i,
+            sim_threshold=CompositeArgs.bellman_sim_min_threshold,
+            overlap_penalty_fraction=CompositeArgs.bellman_overlap_penalty_fraction,
+            match_count_max=2,
+            match_count_penalty=CompositeArgs.bellman_match_count_penalty,
+            match_count_fraction=CompositeArgs.bellman_match_count_fraction,
+            subunit_motif_trim=trim,
             label_unsigned=True,
-            save_images=True,
-            logo_trimming=0,
+            allow_reverse_comp=True,
+            ic_scale=ic_scale,
+            target_similarity=CompositeArgs.bellman_target_similarity,
+            collapse=CompositeArgs.bellman_collapse,
+            subunit_groups=groups_i,
         )
+        if len(idx_i) != 2 or groups_i[idx_i[0]] == groups_i[idx_i[1]]:
+            raise ValueError(f"Composite {name_i}: no pair of a core ('{label_core_i}') and a flank ('{label_flank_i}') "
+                             f"reference motif aligned (matches: {[names_i[k] for k in idx_i]})")
+        spans_i = utils_composite.subunit_trim_spans(stack_i, trim, ic_scale=ic_scale)  # (F, 2): Bellman's trimming
 
-        # Assign: Start, End positions
-        for j in range(CompositeArgs.max_submotifs_composite):
-            # Assign: Reference cluster
-            mc_encode_composite_i[f'{composite_ref_col}_cluster{j}'] = mc_encode_composite_i[f'{composite_ref_col}_name{j}'].map(mc_ref_qc_cluster_name_dict)
+        # The target as Bellman scores it (IC-scaled, unsigned, M-1 columns past either end): each subunit's window
+        target_scored = np.abs(utils_motif.ic_scale(target_i) if ic_scale else target_i)
+        target_scored = np.pad(target_scored, ((M - 1, M - 1), (0, 0)))
 
-            # Reference motif
-            mc_ref_direct_name_j = mc_encode_composite_i[f'{composite_ref_col}_name{j}'].values[0]
-            mc_ref_direct_j = mc_ref_direct_monomer_i[mc_ref_direct_monomer_i[MetadataCols.name_col] == mc_ref_direct_name_j]
-            mc_ref_direct_motif_j = mc_ref_direct_j.motifs[0]
-            mc_ref_direct_string_fwd_j = mc_ref_direct_j[f'{VisualizeArgs.motif_string_col}_fwd'].values[0]
-            mc_ref_direct_string_rev_j = mc_ref_direct_j[f'{VisualizeArgs.motif_string_col}_rev'].values[0]
+        # Per subunit, by role: 0 core, 1 flank
+        out = {MetadataCols.unique_id_col: row[MetadataCols.unique_id_col],
+               f"{composite_ref_col}_similarity": float(sim_score_i)}
+        intervals = []
+        for j in (0, 1):
+            k = int(np.flatnonzero(groups_i[idx_i] == j)[0])  # The match of this role
+            f, rc, h = int(idx_i[k]), bool(rc_i[k]), int(h_i[k])
+            s0, s1 = spans_i[f]
+            segment = stack_i[f][s0:s1]  # The reference motif as Bellman trimmed it, as loaded
+            segment = segment[::-1, ::-1] if rc else segment  # As it matched
+            start = h - (M - 1) + first_col  # In the composite motif's columns
+            end = start + (s1 - s0)
+            window, subunit = target_scored[h:h + (s1 - s0)], aligned_i[k][h:h + (s1 - s0)]
+            norm = np.linalg.norm(window) * np.linalg.norm(subunit)
+            out.update({
+                f"{composite_ref_col}_name{j}": names_i[f],
+                f"{composite_ref_col}_cluster{j}": mc_ref_qc_cluster_name_dict.get(names_i[f]),
+                f"{composite_ref_col}_score{j}": float((window * subunit).sum() / norm) if norm > 0 else 0.0,
+                f"{composite_ref_col}_alignment_rc{j}": rc,
+                f"{composite_ref_col}_alignment_h{j}": start,
+                f"{composite_ref_col}_start{j}": start,
+                f"{composite_ref_col}_end{j}": end,
+                f"{composite_ref_col}_{VisualizeArgs.motif_string_col}{j}": "".join(
+                    idx_to_acgt[segment[np.abs(segment).sum(axis=1) > 0].argmax(axis=1)]),
+            })
+            intervals.append((start, end))
+            logos[j].append(segment)
+        for j in range(2, n_sub):  # Further subunits: none
+            out.update({f"{composite_ref_col}_{field}{j}": None for field in fields})
 
-            # Trim motif: Zero pad
-            mc_ref_direct_motif_unpad_j = utils_motif.trim_motif(
-                motif=mc_ref_direct_motif_j,
-                importance=0,
-            )
-            mc_ref_direct_motif_len_j = mc_ref_direct_motif_unpad_j.shape[0]
+        # Spacing: the gap between the two (negative: they overlap)
+        (start0, end0), (start1, end1) = intervals
+        out[f"{composite_ref_col}_spacing"] = max(start1 - end0, start0 - end1)
+        rows.append(out)
 
-            # Trim motif: Full
-            mc_ref_direct_motif_abs_j = np.abs(mc_ref_direct_motif_j)
-            per_position_totals = np.sum(mc_ref_direct_motif_abs_j, axis=1)
-            included_positions = per_position_totals > (0.5 / mc_ref_direct_motif_len_j) * np.sum(per_position_totals)
-            if np.sum(included_positions) == 0:
-                raise ValueError(f"All positions trimmed for motif '{mc_ref_direct_name_j}' in composite '{name_i}'.")
-            min_index = np.argmax(included_positions)
-            max_index = mc_ref_direct_motif_j.shape[0] - np.argmax(included_positions[::-1])
-            mc_ref_direct_motif_trimmed_j = mc_ref_direct_motif_j[min_index:max_index]
-            mc_ref_direct_motif_trimmed_len_j = mc_ref_direct_motif_trimmed_j.shape[0]
-
-            alignment_rc_j = mc_encode_composite_i[f'{composite_ref_col}_alignment_rc{j}'].values[0]
-            alignment_h_j = mc_encode_composite_i[f'{composite_ref_col}_alignment_h{j}'].values[0]
-
-            # Reverse complement
-            if alignment_rc_j:
-                end_j = mc_encode_composite_len + alignment_h_j - min_index if alignment_h_j is not None else None
-                start_j = end_j - mc_ref_direct_motif_trimmed_len_j if end_j is not None else None
-                mc_ref_direct_string_trimmed_j = mc_ref_direct_string_rev_j[mc_ref_direct_motif_len_j - max_index : mc_ref_direct_motif_len_j - min_index]
-            # Forward
-            else:
-                start_j = alignment_h_j + min_index if alignment_h_j is not None else None
-                end_j = start_j + mc_ref_direct_motif_trimmed_len_j if start_j is not None else None
-                mc_ref_direct_string_trimmed_j = mc_ref_direct_string_fwd_j[min_index:max_index]
-
-            mc_encode_composite_i[f'{composite_ref_col}_start{j}'] = start_j
-            mc_encode_composite_i[f'{composite_ref_col}_end{j}'] = end_j
-            mc_encode_composite_i[f'{composite_ref_col}_{VisualizeArgs.motif_string_col}{j}'] = mc_ref_direct_string_trimmed_j
-
-        # Spacing
-        mc_encode_composite_spacing = np.maximum(
-            mc_encode_composite_i[f'{composite_ref_col}_start1']
-            - mc_encode_composite_i[f'{composite_ref_col}_end0'],
-            mc_encode_composite_i[f'{composite_ref_col}_start0']
-            - mc_encode_composite_i[f'{composite_ref_col}_end1'],
-        )
-        mc_encode_composite_i[f'{composite_ref_col}_spacing'] = mc_encode_composite_spacing
-
-        # Update: Metadata, Images
-        mc_encode_composite_metadata_updates.append(mc_encode_composite_i.metadata.set_index(MetadataCols.unique_id_col))
-        new_image_cols = [image_col for image_col in mc_encode_composite_i.images() if image_col not in mc_encode_composite_images_existing]
-        mc_encode_composite_i_new_images = pd.DataFrame({
-            image_col: pd.Series(
-                mc_encode_composite_i.get_images(image_col),
-                index=mc_encode_composite_i[MetadataCols.unique_id_col],
-            )
-            for image_col in new_image_cols
-        })
-        mc_encode_composite_images_updated = mc_encode_composite_images_updated.combine_first(mc_encode_composite_i_new_images)
-        mc_encode_composite_images_updated.update(mc_encode_composite_i_new_images)
-
-    # Apply updates: Metadata, Images
-    mc_encode_composite_metadata_updates_df = pd.concat(mc_encode_composite_metadata_updates)
-    mc_encode_composite.metadata.set_index(MetadataCols.unique_id_col, inplace=True)
-    mc_encode_composite.metadata = mc_encode_composite.metadata.combine_first(mc_encode_composite_metadata_updates_df)
-    mc_encode_composite.metadata.update(mc_encode_composite_metadata_updates_df)
-    mc_encode_composite.metadata = (
-        mc_encode_composite.metadata.reset_index()
-        .sort_values("_motif_row", kind="stable")
-        .drop(columns="_motif_row")
-        .reset_index(drop=True)
-    )
-    del mc_encode_composite_metadata_updates_df, mc_encode_composite_metadata_updates
-
-    for image_col in mc_encode_composite_images_updated.columns:
-        mc_encode_composite.set_images(
-            image_name=image_col,
-            images=[x if pd.notna(x) else None for x in mc_encode_composite_images_updated
-                    .reindex(mc_encode_composite[MetadataCols.unique_id_col].to_numpy())[image_col]]
-        )
-    del mc_encode_composite_images_updated, mc_encode_composite_images_existing
-
+    # Apply: Metadata (by position), logos
+    if len(rows) == 0:
+        return mc_encode_composite
+    subunit_df = pd.DataFrame(rows)
+    if not (subunit_df[MetadataCols.unique_id_col].to_numpy() == mc_encode_composite[MetadataCols.unique_id_col].to_numpy()).all():
+        raise ValueError("Composite subunits are not in the order of the composites")
+    for col in subunit_df.columns:
+        if col != MetadataCols.unique_id_col:
+            mc_encode_composite.metadata[col] = subunit_df[col].to_numpy()
+    for j in (0, 1):
+        image_name = f"{composite_ref_col}_logo{j}"
+        if image_name in mc_encode_composite.images():
+            mc_encode_composite.delete_images(image_name)
+        width = max(len(segment) for segment in logos[j])
+        stack = np.stack([np.pad(segment, ((0, width - len(segment)), (0, 0))) for segment in logos[j]])
+        mc_encode_composite.add_logos(stack, image_name, trim=0)
+    for j in range(2, n_sub):  # Further subunits: no logo (the composite HTML tables list them)
+        image_name = f"{composite_ref_col}_logo{j}"
+        if image_name in mc_encode_composite.images():
+            mc_encode_composite.delete_images(image_name)
+        mc_encode_composite.set_images(image_name=image_name, images=[None] * len(mc_encode_composite))
     return mc_encode_composite
 
 
@@ -1317,10 +1302,10 @@ def export_composites(mc_crosscluster, mc_encode_composite, composite_paths_ns, 
     os.makedirs(os.path.dirname(composite_paths_ns.metadata_composite_model_path), exist_ok=True)
     mc_encode_composite_metadata_model.to_csv(composite_paths_ns.metadata_composite_model_path, sep="\t", index=False)
 
-    # Save summary table HTML
-    html_columns_crosscluster = [
+    # Save summary table HTML: the two subunits (identify_composites(): Bellman's core and flank)
+    html_columns_crosscluster = [f"{composite_ref_col}_similarity", f"{composite_ref_col}_spacing"] + [
             col
-            for i in range(CompositeArgs.max_submotifs_composite)
+            for i in range(2)
             for col in [
                 f"{composite_ref_col}_name{i}",
                 f'{composite_ref_col}_cluster{i}',
@@ -3870,7 +3855,8 @@ def run_encode_combine(args):
     logging.info("Composites: identifying the composite crossclusters and their reference subunits...")
     composite_paths_ns = composite_paths(getattr(args, "composite_dir", None) or default_composite_dir(args.output_dir))
     mc_ref_composite_all, _, _ = prepare_composite_reference(mc_ref_direct, args.ref_clustered_hr_metadata, length_filter=False)
-    mc_encode_composite = identify_composites(mc_crosscluster_filtered, mc_ref_composite, mc_ref_qc_cluster_name_dict, mc_ref_composite_all)
+    mc_encode_composite = identify_composites(mc_crosscluster_filtered, mc_ref_composite, mc_ref_qc_cluster_name_dict, mc_ref_composite_all,
+                                              ic_scale=args.ic)
     del mc_ref_composite_all
     export_composites(mc_crosscluster_filtered, mc_encode_composite, composite_paths_ns, getattr(args, "all_paths_tsv", None), html_column_desc_dict)
     del mc_encode_composite
