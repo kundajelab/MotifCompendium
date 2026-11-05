@@ -385,8 +385,10 @@ Each level saves only `mc/motifcompendium_{level}_{all,filtered}.mc`
 (`motifcompendium_{level}_removed`: `.mc`, HTML, MEME, metadata TSV, MoDISco H5)
 are saved only with `--save-all` (every script of the ENCODE pipeline has it; the
 encode/src launchers pass it); the later stages read the `_all` and `_filtered`
-ones. The encodecluster level (C5) is one compendium,
-`encode/mc/motifcompendium_encode.mc`: nothing is removed there.
+ones. The encodecluster level (C5) is `encode/mc/motifcompendium_encode.mc`
+(no `_all`/`_filtered`); its removed compendium,
+`encode/mc/motifcompendium_encode_removed.mc` (+ HTML, MEME, metadata TSV;
+`--save-all`), holds the combine's filtered crossclusters it leaves out.
 
 Each stage writes some combination of `mc/`, `html/`, `export/`, `metadata/`,
 and `logs/`. Every stage records arguments/configuration in
@@ -503,9 +505,14 @@ level's as `--composite-dir` (default: `encode/`, next to `--output-dir`):
     removes the no-synergy ones, and combines the rest with the singles: the
     encodecluster level (C5), written like a crosscluster level to
     `encode/` (`motifcompendium_encode`: `.mc`, HTML, metadata
-    TSV, MEME; nothing is removed at this level: the crossclusters in no
-    encodecluster are the combine's removed ones and the composites left
-    out). As a clustering, each encodecluster has a number
+    TSV, MEME; the crossclusters in no encodecluster are the combine's
+    removed ones and the composites left out). The composites left out (no
+    synergy; no subunits) are its removed compendium,
+    `motifcompendium_encode_removed` (the same files, `--save-all`): the
+    merged no-synergy composites with their ISM evidence, numbered and with
+    C5 MCIDs after the encodeclusters, named by flag type as `encode-combine`
+    names its removed crossclusters (`no-synergy_0`, ...); the membership
+    does not name them. As a clustering, each encodecluster has a number
     (`source_cluster`) and a C5 MCID, and each crosscluster of
     `encode-combine` its encodecluster, or why it has none
     (`encode/metadata/motifcompendium_encode_membership.tsv`:

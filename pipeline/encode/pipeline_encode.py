@@ -761,14 +761,19 @@ def composite_paths(composite_dir):
         metadata_composite_ism_motifs_agg_path=os.path.join(composite_dir, "export", "motifcompendium_encode_composite_ism_motifs_metadata_agg.tsv"),
         html_composite_ism_path=os.path.join(composite_dir, "html", "motifcompendium_encode_composite_ism.html"),
         html_composite_ism_dedup_path=os.path.join(composite_dir, "html", "motifcompendium_encode_composite_ism_deduplicated.html"),
-        # The encodecluster level (C5; pipeline_encode_composite.py): one compendium (nothing is removed at this
-        # level), the membership of the crossclusters (C4), the motif index, the hits annotation (pipeline_encode_hits.py)
+        # The encodecluster level (C5; pipeline_encode_composite.py): the encodeclusters, the removed ones (the
+        # crossclusters (C4) it leaves out: --save-all), the membership of the crossclusters, the motif index, the hits
+        # annotation (pipeline_encode_hits.py)
         metadata_dir=os.path.join(composite_dir, "metadata"),
         export_dir=os.path.join(composite_dir, "export"),
         mc_encodecluster_path=os.path.join(composite_dir, "mc", "motifcompendium_encode.mc"),
         html_encodecluster_path=os.path.join(composite_dir, "html", "motifcompendium_encode.html"),
         metadata_encodecluster_path=os.path.join(composite_dir, "metadata", "motifcompendium_encode_metadata.tsv"),
         meme_encodecluster_path=os.path.join(composite_dir, "export", "motifcompendium_encode.meme.txt"),
+        mc_encodecluster_removed_path=os.path.join(composite_dir, "mc", "motifcompendium_encode_removed.mc"),
+        html_encodecluster_removed_path=os.path.join(composite_dir, "html", "motifcompendium_encode_removed.html"),
+        metadata_encodecluster_removed_path=os.path.join(composite_dir, "metadata", "motifcompendium_encode_removed_metadata.tsv"),
+        meme_encodecluster_removed_path=os.path.join(composite_dir, "export", "motifcompendium_encode_removed.meme.txt"),
         metadata_encodecluster_membership_path=os.path.join(composite_dir, "metadata", "motifcompendium_encode_membership.tsv"),
         metadata_encodecluster_motif_index_path=os.path.join(composite_dir, "metadata", "motifcompendium_encode_motif_index.tsv"),
         metadata_hits_path=os.path.join(composite_dir, "metadata", "motifcompendium_encode_metadata_hits.tsv"),
@@ -780,7 +785,8 @@ def hits_level_paths(args, cpaths, level):
     """crosscluster_paths(args), with {mc,html,metadata,meme}_level{,_filtered,_removed}_path those of the level the hits
     are indexed and summarized by (pipeline_encode_hits.py --level): the crossclusters' (C4) or, level "encodecluster",
     the encodecluster level's (C5; cpaths: composite_paths()), whose motif index, name column and hits outputs then also
-    replace the crossclusters'. The encodecluster level is one compendium (its "filtered" one): no removed one (None)."""
+    replace the crossclusters'. The encodecluster level's hits are its encodeclusters' (its "filtered" compendium): its
+    removed compendium (the crossclusters it leaves out) has no encodecluster names in the motif index, so no hits (None)."""
     paths = crosscluster_paths(args)
     for kind in ("mc", "html", "metadata", "meme"):
         if level == "encodecluster":
@@ -2105,33 +2111,38 @@ def export_crosscluster_constituents(args, mc_crosscluster, mc_modelcluster_comb
                     )
 
 
-def export_encodecluster_level(args, cpaths, mc_encodecluster, membership, html_column_desc_dict):
-    """
-    The encodecluster level (C5: pipeline_encode_composite.py's singles and merged composites) as an crosscluster level, in
-    <composite-dir> (cpaths): motifcompendium_encode (.mc, HTML, metadata TSV, MEME; nothing is removed at
-    this level: the crossclusters not in it are the combine's, C4), and the membership of the crossclusters (one row
-    per C4 crosscluster: its encodecluster, or why it has none). The levels below:
-    export_encodecluster_constituents().
-    """
-    name_col, flag_col = MetadataCols.name_col, FilterArgs.filter_flag_col
-    mc_encodecluster[flag_col] = mc_encodecluster[flag_col].astype(bool)
-
-    # Logos of the rows without one (singles and composites combined with and without them): summary_table_html() draws
-    # them only for a compendium without the image column
+def _draw_missing_logos(mc, what):
+    """Logos of the rows without one (singles and composites combined with and without them): summary_table_html()
+    draws them only for a compendium without the image column."""
     for image_name, reverse in (("logo (fwd)", False), ("logo (rev)", True)):
-        if image_name not in mc_encodecluster.images():
+        if image_name not in mc.images():
             continue
-        images = list(mc_encodecluster.get_images(image_name))
+        images = list(mc.get_images(image_name))
         missing = [i for i, image in enumerate(images) if image is None]
         if missing:
-            mc_missing = mc_encodecluster[missing]
+            mc_missing = mc[missing]
             mc_missing.delete_images(image_name)
             motifs = mc_missing.get_standard_motif_stack()
             mc_missing.add_logos(utils_motif.reverse_complement(motifs) if reverse else motifs, image_name, VisualizeArgs.html_logo_trim)
             for i, image in zip(missing, mc_missing.get_images(image_name)):
                 images[i] = image
-            mc_encodecluster.set_images(image_name, images)
-            logging.info(f"{image_name}: drawn for the {len(missing)} encodeclusters without one")
+            mc.set_images(image_name, images)
+            logging.info(f"{image_name}: drawn for the {len(missing)} {what} without one")
+
+
+def export_encodecluster_level(args, cpaths, mc_encodecluster, membership, html_column_desc_dict,
+                               mc_encodecluster_removed=None):
+    """
+    The encodecluster level (C5: pipeline_encode_composite.py's singles and merged composites) as an crosscluster level, in
+    <composite-dir> (cpaths): motifcompendium_encode (.mc, HTML, metadata TSV, MEME), with --save-all its removed
+    compendium, motifcompendium_encode_removed (mc_encodecluster_removed: the combine's filtered crossclusters, C4, it
+    leaves out; the same files; HTML with their flag type and ISM evidence; None: none left out, an earlier run's
+    removed files are deleted), and the membership of the crossclusters (one row per C4 crosscluster: its
+    encodecluster, or why it has none). The levels below: export_encodecluster_constituents().
+    """
+    name_col, flag_col = MetadataCols.name_col, FilterArgs.filter_flag_col
+    mc_encodecluster[flag_col] = mc_encodecluster[flag_col].astype(bool)
+    _draw_missing_logos(mc_encodecluster, "encodeclusters")
 
     #### The encodecluster level --------------------------------------------------------------------
     logging.info(f"Encodecluster level: {len(mc_encodecluster)} encodeclusters -> {cpaths.composite_dir}")
@@ -2156,6 +2167,41 @@ def export_encodecluster_level(args, cpaths, mc_encodecluster, membership, html_
     mc_encodecluster.metadata.drop(columns=EncodeCombineArgs.remove_cols, errors='ignore').to_csv(
         cpaths.metadata_encodecluster_path, sep="\t", index=False)
     save_replace(mc_encodecluster, cpaths.mc_encodecluster_path)
+
+    #### The removed encodeclusters (--save-all): the crossclusters the level leaves out ---------------------------
+    removed_paths = (cpaths.mc_encodecluster_removed_path, cpaths.html_encodecluster_removed_path,
+                     cpaths.metadata_encodecluster_removed_path, cpaths.meme_encodecluster_removed_path)
+    if getattr(args, "save_all", False) and mc_encodecluster_removed is not None:
+        mc_encodecluster_removed[flag_col] = mc_encodecluster_removed[flag_col].astype(bool)
+        _draw_missing_logos(mc_encodecluster_removed, "removed encodeclusters")
+        logging.info(f"Encodecluster level: {len(mc_encodecluster_removed)} removed -> {cpaths.mc_encodecluster_removed_path}")
+        removed_columns = mc_encodecluster_removed.columns() + mc_encodecluster_removed.images()
+        html_columns_removed = list(dict.fromkeys(
+            [col for col in VisualizeArgs.html_columns if col in removed_columns]
+            + [col for col in [FilterArgs.filter_flag_type_col] + CompositeArgs.html_columns_composite if col in removed_columns]))
+        for path in removed_paths:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+        mc_encodecluster_removed.summary_table_html(
+            html_out=cpaths.html_encodecluster_removed_path,
+            columns=html_columns_removed,
+            logo_trimming=VisualizeArgs.html_logo_trim,
+            editable=True,
+            column_desc_dict={col: html_column_desc_dict.get(col, col) for col in html_columns_removed},
+        )
+        utils_analysis.export_compendium_meme(
+            mc=mc_encodecluster_removed,
+            name_col=name_col,
+            save_loc=cpaths.meme_encodecluster_removed_path,
+            trim_importance=(1/(2*mc_encodecluster_removed.motifs.shape[1])),
+        )
+        mc_encodecluster_removed.metadata.drop(columns=EncodeCombineArgs.remove_cols, errors='ignore').to_csv(
+            cpaths.metadata_encodecluster_removed_path, sep="\t", index=False)
+        save_replace(mc_encodecluster_removed, cpaths.mc_encodecluster_removed_path)
+    elif getattr(args, "save_all", False):
+        for path in removed_paths:  # none left out: an earlier run's
+            if os.path.exists(path):
+                os.remove(path)
+        logging.info("Encodecluster level: no crosscluster left out (no removed compendium)")
 
     # Membership: each crosscluster (C4), with its encodecluster (or why it has none)
     os.makedirs(os.path.dirname(cpaths.metadata_encodecluster_membership_path), exist_ok=True)

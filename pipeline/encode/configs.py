@@ -1190,7 +1190,8 @@ class Encode_CompositeArgs:
     soft_nosynergy_num_members_col: str = 'num_soft_nosynergy_members'
 
     # Final ENCODE MotifCompendium (C5): the singles and the merged composites. Crossclusters left out of it
-    # are removed, with these flag types: the no-synergy composites, and the composites without subunits.
+    # are removed, with these flag types: the no-synergy composites, and the composites without subunits (the
+    # level's removed compendium, motifcompendium_encode_removed: --save-all).
     mcid_level: str = "C5.encode.TF_Chrom_ProCap.counts_profile"
     # The encodecluster level (C5), in <run>/<composite_dir_name>: as a clustering, each encodecluster has a
     # number (its source_cluster: 0, 1, ...), each crosscluster (C4) the number of its encodecluster; every level

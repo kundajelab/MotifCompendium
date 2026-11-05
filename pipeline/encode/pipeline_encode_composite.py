@@ -14,14 +14,16 @@ composite/validate_composite_motifs.ipynb (after the ISM runs):
      export/) and the classified composites (mc/motifcompendium_encode_composite_ism.mc)
   2. Merge: duplicate composites (centroids, until no pair is similar enough), then the soft and no-synergy composites
      of the same reference clusters; the merged ones reannotated; the no-synergy composites removed.
-  3. The encodecluster level (C5): the singles and the merged composites. Nothing is removed at this level: the
-     crossclusters of pipeline_encode.py (C4) in no encodecluster are its removed ones and the composites left
-     out (no synergy; no subunits). As a clustering, each encodecluster has a number (source_cluster) and a C5
-     MCID, and each C4 crosscluster its encodecluster's number, or why it has none
-     (<composite-dir>/metadata/motifcompendium_encode_membership.tsv); the encodeclusters are named as
-     pipeline_encode.py names its crossclusters ({prename}_{counter}).
+  3. The encodecluster level (C5): the singles and the merged composites. The crossclusters of pipeline_encode.py
+     (C4) in no encodecluster are its removed ones and the composites left out (no synergy; no subunits). As a
+     clustering, each encodecluster has a number (source_cluster) and a C5 MCID, and each C4 crosscluster its
+     encodecluster's number, or why it has none (<composite-dir>/metadata/motifcompendium_encode_membership.tsv);
+     the encodeclusters are named as pipeline_encode.py names its crossclusters ({prename}_{counter}). The
+     composites left out are the level's removed compendium (--save-all; numbered and with C5 MCIDs after the
+     encodeclusters, named by flag type as the combine names its removed crossclusters: no-synergy_0, ...).
   4. Exported as a crosscluster level, in <composite-dir> (motifcompendium_encode: .mc, HTML, metadata TSV, MEME;
-     the membership), and (--update-constituents now; defer: later, --update-constituents only) added to the levels
+     with --save-all motifcompendium_encode_removed, the same files; the membership), and (--update-constituents
+     now; defer: later, --update-constituents only) added to the levels
      below, which keep their own names and flags: the crossclusters (C4) get their encodecluster's number, name
      and filter flag; every atlas level and the motif indexes its name and filter flag; then the motif index of the
      level. Then pipeline_encode_hits.py --level encodecluster.
@@ -161,9 +163,10 @@ def final_encode_compendium(mc_encode, mc_crosscluster_filtered, mc_crosscluster
     """
     The encodecluster level (C5): the C5 clusters of mc_encode (the singles and the merged composites), numbered as
     a clustering (source_cluster 0..N-1, in mc_encode's order), with C5 MCIDs (mcid_prefix + number), named as the
-    combine names its crossclusters ({prename}_{counter}; simple name: prename). Nothing is removed at this level: the
-    crossclusters of the combine (C4) in no encodecluster are its removed ones (mc_crosscluster_removed) and its
-    filtered ones left out of C5 (the no-synergy composites, else the composites without subunits). A C5 composite
+    combine names its crossclusters ({prename}_{counter}; simple name: prename). The crossclusters of the combine (C4)
+    in no encodecluster are its removed ones (mc_crosscluster_removed) and its filtered ones left out of C5 (the
+    no-synergy composites, else the composites without subunits: the level's removed compendium,
+    removed_encode_compendium()). A C5 composite
     holds the C4 composites merged into it (their MCIDs: CompositeArgs.duplicate_members_col); a C5 single is its own
     C4 one. The encodecluster columns of an earlier run on the C4 compendia are dropped first.
 
@@ -265,6 +268,90 @@ def final_encode_compendium(mc_encode, mc_crosscluster_filtered, mc_crosscluster
             for in_level, crosscluster_id, flag_type in zip(in_encodecluster, crosscluster_ids, crosscluster_all[flag_type_col])],
     })
     return mc_encode, membership, num_left_out
+
+
+def removed_encode_compendium(mc_encodecluster, membership, mc_crosscluster_filtered, mc_encode_composite_nosynergy,
+                              mcid_prefix, safe):
+    """
+    The removed compendium of the encodecluster level (C5): the filtered crossclusters of the combine (C4) that
+    final_encode_compendium() leaves out (its membership: flag types no-synergy and composite-unannotated), as the
+    level's removed clusters: the no-synergy composites as they were merged (the rows of mc_encode_composite_nosynergy
+    holding them, with their ISM evidence; their C4 MCIDs in CompositeArgs.duplicate_members_col), then the
+    composites without subunits (their C4 rows). As a combine names its removed crossclusters: flag_remove True, flag
+    type and prename (and simple name) the flag type, name {flag type}_{counter}, confidence flagged; numbered
+    (source_cluster) and with C5 MCIDs after the encodeclusters (mc_encodecluster). The membership is not changed
+    (the left-out crossclusters keep no encodecluster); the label columns stay the composites'.
+
+    Returns:
+        mc_encodecluster_removed, or None when no crosscluster is left out
+    """
+    id_col, name_col = MetadataCols.unique_id_col, MetadataCols.name_col
+    flag_col, flag_type_col = FilterArgs.filter_flag_col, FilterArgs.filter_flag_type_col
+    members_col = CompositeArgs.duplicate_members_col
+    no_synergy, unannotated = CompositeArgs.flag_type_no_synergy, CompositeArgs.flag_type_unannotated
+    membership_type = membership[VisualizeArgs.encodecluster_flag_type_col]
+    left_out = {flag_type: set(membership.loc[(membership_type == flag_type).to_numpy(), id_col].astype(str))
+                for flag_type in (no_synergy, unannotated)}
+
+    # The no-synergy composites: the rows holding the left-out no-synergy crossclusters
+    nosynergy_members = [
+        {crosscluster_id.strip() for crosscluster_id in str(members).split(",") if crosscluster_id.strip()}
+        if pd.notna(members) else set()
+        for members in (mc_encode_composite_nosynergy[members_col] if members_col in mc_encode_composite_nosynergy.columns()
+                        else [None] * len(mc_encode_composite_nosynergy))
+    ]
+    nosynergy_rows = [row for row, members in enumerate(nosynergy_members) if members & left_out[no_synergy]]
+    in_level = [(row, sorted(nosynergy_members[row] - left_out[no_synergy])[:3]) for row in nosynergy_rows
+                if nosynergy_members[row] - left_out[no_synergy]]
+    if in_level:
+        raise ValueError(f"{len(in_level)} no-synergy composites hold crossclusters that are in an encodecluster, e.g. "
+                         f"row {in_level[0][0]}: {in_level[0][1]}")
+    held = [crosscluster_id for row in nosynergy_rows for crosscluster_id in nosynergy_members[row]]
+    if len(held) != len(set(held)) or set(held) != left_out[no_synergy]:
+        logging.warning(f"Removed encodeclusters: {len(left_out[no_synergy])} left-out no-synergy crossclusters, "
+                        f"{len(set(held))} in the no-synergy composites ({len(held) - len(set(held))} in two)")
+
+    # The composites without subunits: their C4 rows
+    unannotated_mask = mc_crosscluster_filtered[id_col].astype(str).isin(left_out[unannotated]).to_numpy()
+    parts = []
+    if nosynergy_rows:
+        parts.append((no_synergy, mc_encode_composite_nosynergy[nosynergy_rows]))
+    if unannotated_mask.any():
+        mc_unannotated = mc_crosscluster_filtered[unannotated_mask]
+        mc_unannotated[members_col] = mc_unannotated[id_col].astype(str)
+        parts.append((unannotated, mc_unannotated))
+    if not parts:
+        return None
+
+    # One compendium (the columns and images of both)
+    columns = list(dict.fromkeys(col for _, mc_i in parts for col in mc_i.columns()))
+    images = list(dict.fromkeys(image for _, mc_i in parts for image in mc_i.images()))
+    for _, mc_i in parts:
+        for col in columns:
+            if col not in mc_i.columns():
+                mc_i.metadata[col] = [None] * len(mc_i)
+        for image_col in images:
+            if image_col not in mc_i.images():
+                mc_i.set_images(image_name=image_col, images=[None] * len(mc_i))
+    flag_types = [flag_type for flag_type, mc_i in parts for _ in range(len(mc_i))]
+    mc_removed = MotifCompendium.combine([mc_i for _, mc_i in parts], safe=safe) if len(parts) > 1 else parts[0][1]
+    mc_removed.metadata.drop(columns=[VisualizeArgs.encodecluster_cluster_col, VisualizeArgs.encodecluster_name_col,
+                                      VisualizeArgs.encodecluster_flag_col], errors="ignore", inplace=True)
+
+    # As the level's removed clusters: flagged, numbered after the encodeclusters, named by their flag type
+    mc_removed[flag_col] = True
+    mc_removed[flag_type_col] = flag_types
+    mc_removed[LabelCols.label_conf_col] = LabelCols.label_confs[-1]
+    numbers = np.arange(len(mc_encodecluster), len(mc_encodecluster) + len(mc_removed))
+    mc_removed[ClusterArgs.source_cluster_col] = numbers
+    mc_removed[id_col] = [f"{mcid_prefix}{number:08d}" for number in numbers]
+    mc_removed[MetadataCols.prename_col] = flag_types
+    counters = pd.Series(flag_types).groupby(flag_types).cumcount().to_numpy()
+    mc_removed[name_col] = [f"{flag_type}_{counter}" for flag_type, counter in zip(flag_types, counters)]
+    mc_removed[MetadataCols.simple_name_col] = flag_types
+    logging.info(f"Removed encodeclusters: {len(mc_removed)} "
+                 f"({dict(pd.Series(flag_types).value_counts())}; {len(set(held))} no-synergy crossclusters)")
+    return mc_removed
 
 
 def run_encode_composite(args):
@@ -1675,10 +1762,16 @@ def run_encode_composite(args):
         mc_encode, mc_crosscluster_filtered, mc_crosscluster_removed, mc_encode_composite_nosynergy,
         f"{unique_id_initial}.{CompositeArgs.mcid_level}.", safe=args.safe,
     )
+    # Its removed compendium (--save-all): the crossclusters left out
+    mc_encodecluster_removed = removed_encode_compendium(
+        mc_encodecluster, encodecluster_membership_df, mc_crosscluster_filtered, mc_encode_composite_nosynergy,
+        f"{unique_id_initial}.{CompositeArgs.mcid_level}.", safe=args.safe,
+    ) if args.save_all else None
 
     # #### Export: the encodecluster level (<composite-dir>); added to the crossclusters and every level below
     # (--update-constituents now)
-    pipeline_encode.export_encodecluster_level(args, cpaths, mc_encodecluster, encodecluster_membership_df, html_column_desc_dict)
+    pipeline_encode.export_encodecluster_level(args, cpaths, mc_encodecluster, encodecluster_membership_df, html_column_desc_dict,
+                                               mc_encodecluster_removed=mc_encodecluster_removed)
     if args.update_constituents == "now":
         pipeline_encode.export_encodecluster_constituents(args, cpaths, mc_encodecluster, encodecluster_membership_df)
     else:
@@ -1691,6 +1784,7 @@ def run_encode_composite(args):
         "composite_dir": cpaths.composite_dir,
         "num_encodecluster": len(mc_encodecluster),
         "num_left_out_of_encodecluster": num_left_out,
+        "num_encodecluster_removed": None if mc_encodecluster_removed is None else len(mc_encodecluster_removed),
         "log_path": log_path,
     }
     args_json_path = os.path.join(cpaths.metadata_dir, "args_encodecluster.json")
