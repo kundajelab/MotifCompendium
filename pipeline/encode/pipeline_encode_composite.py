@@ -900,8 +900,8 @@ def run_encode_composite(args):
         best = ranked.drop_duplicates(cluster_col).set_index(cluster_col, drop=False)
         groups = metadata.groupby(cluster_col, sort=True)
         keep = {cluster_col, CompositeArgs.soft_nosynergy_membership_col, MetadataCols.composite_col}
-        sums = {CompositeArgs.num_ids_col, MetadataCols.num_seqlet_col, MetadataCols.total_contrib_score_col,
-                MetadataCols.group_total_contrib_score_col, MetadataCols.num_constituents_col}
+        sums = {CompositeArgs.num_ids_col, MetadataCols.num_seqlet_col, MetadataCols.num_hits_col,
+                MetadataCols.total_contrib_score_col, MetadataCols.group_total_contrib_score_col, MetadataCols.num_constituents_col}
         for col in metadata:
             if col in keep or col.startswith("ism_") or col.startswith("composite_"):
                 continue
