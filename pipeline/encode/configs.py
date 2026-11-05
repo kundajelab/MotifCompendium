@@ -1051,13 +1051,13 @@ class EncodeCombineArgs:
     ])
 
 ## COMPOSITE MOTIFS ------------------------------------------------------------------------------------------
-# Composite motifs of the crossclusters (composite/identify_composite_motifs.ipynb): the modified Smith-Waterman
+# Composite motifs of the crossclusters (composite/identify_composite_motifs.ipynb): the modified Bellman-Ford
 # decomposition into reference monomers (pipeline_encode.py), ISM cooperativity (pipeline_encode_composite_ism.py),
 # and the merge of duplicate and soft / no-synergy composites into the final ENCODE MotifCompendium
 # (pipeline_encode_composite.py).
 @dataclass
 class Encode_CompositeArgs:
-    # Modified Smith-Waterman (Bellman DP): decomposition into direct reference monomers
+    # Modified Bellman-Ford: decomposition into direct reference monomers
     bellman_score_col: str = "bellman_composite_score"
     bellman_name_col: str = "bellman_composite_name"
     bellman_label_col: str = "bellman_composite_label"
@@ -1066,7 +1066,7 @@ class Encode_CompositeArgs:
     bellman_align_col: str = "bellman_composite_alignment"
     bellman_logo_col: str = "bellman_composite_logo"
 
-    # utils_composite.run_modified_smith_waterman_composite() at its defaults since 3acaa1f (v27; v26 and before:
+    # utils_composite.run_modified_bellman_ford_composite() at its defaults since 3acaa1f (v27; v26 and before:
     # sim threshold 0.5, overlap penalty 1.0, match count penalty 0.1, the old score)
     bellman_sim_min_threshold: float = 0.0
     bellman_subunit_motif_trim: bool = True  # Trim each reference subunit (as logo_trimming: True = 1/M)

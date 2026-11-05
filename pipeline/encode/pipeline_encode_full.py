@@ -231,7 +231,7 @@ def setup_parser():
     parser.add_argument("--mc-ref-clustered-hr-metadata", type=str, required=True,
                         help="Metadata TSV for --mc-ref-clustered-hr.")
     parser.add_argument("--mc-b1h", type=str, required=True,
-                        help="B1H zinc-finger reference MotifCompendium object (.mc), for the TF Smith-Waterman ZNF step.")
+                        help="B1H zinc-finger reference MotifCompendium object (.mc), for the TF Bellman-Ford ZNF step.")
     # Reference databases required by the confirmed per-atlas pipelines
     parser.add_argument("--ref-invitro", type=str, required=True,
                         help="Reference in-vitro PFM/MotifCompendium (used by the TF and ENCODE stages).")

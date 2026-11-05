@@ -749,7 +749,7 @@ def composite_paths(composite_dir):
         mc_composite_path=os.path.join(composite_dir, "mc", "motifcompendium_encode_composite.mc"),
         metadata_composite_path=os.path.join(composite_dir, "export", "motifcompendium_encode_composite_metadata.tsv"),
         metadata_composite_model_path=os.path.join(composite_dir, "export", "motifcompendium_encode_composite_metadata_model.tsv"),
-        html_msw_path=os.path.join(composite_dir, "html", "motifcompendium_crosscluster_msw.html"),
+        html_mbf_path=os.path.join(composite_dir, "html", "motifcompendium_crosscluster_mbf.html"),
         html_composite_path=os.path.join(composite_dir, "html", "motifcompendium_encode_composite.html"),
         # ISM cooperativity (the ISM evidence and the classified composites: --save-all) and the merged composites
         # (pipeline_encode_composite.py)
@@ -926,9 +926,9 @@ def prepare_composite_reference(mc_ref_direct, ref_clustered_hr_metadata_path, l
     return mc_ref_direct_monomer, mc_ref_qc_cluster_name_dict, mc_ref_qc_cluster_label_dict
 
 
-def assign_msw_composites(mc_crosscluster, mc_ref_composite, ic_scale, verbose=False):
+def assign_mbf_composites(mc_crosscluster, mc_ref_composite, ic_scale, verbose=False):
     """
-    Modified Smith-Waterman (Bellman DP): decompose each motif into reference monomers (bellman_* columns and the
+    Modified Bellman-Ford: decompose each motif into reference monomers (bellman_* columns and the
     aligned-reference logo). A motif that is not high or medium confidence becomes a composite (with its core and
     flank labels from the matched reference clusters) when the decomposition finds more than one subunit at a
     similarity of at least min_single_score, and stops being one otherwise.
@@ -966,7 +966,7 @@ def assign_msw_composites(mc_crosscluster, mc_ref_composite, ic_scale, verbose=F
         if verbose:
             logging.info(f"Processing: {name_i}")
 
-        (bellman_score, bellman_sim_score, bellman_aligned_ref_stack, bellman_aligned_ref_idx, bellman_aligned_ref_rc, bellman_aligned_ref_h, bellman_aligned_ref_scale) = utils_composite.run_modified_smith_waterman_composite(
+        (bellman_score, bellman_sim_score, bellman_aligned_ref_stack, bellman_aligned_ref_idx, bellman_aligned_ref_rc, bellman_aligned_ref_h, bellman_aligned_ref_scale) = utils_composite.run_modified_bellman_ford_composite(
             target_motif=motif_i_trimmed,
             subunit_motif_stack=mc_ref_composite_motifs,
             sim_threshold=CompositeArgs.bellman_sim_min_threshold,
@@ -1272,13 +1272,13 @@ def export_composites(mc_crosscluster, mc_encode_composite, composite_paths_ns, 
     """
     composite_ref_col = CompositeArgs.composite_ref_col
 
-    # HTML: Modified Smith-Waterman
+    # HTML: Modified Bellman-Ford
     html_columns_crosscluster = [html_col for html_col in VisualizeArgs.html_columns if html_col in (mc_crosscluster.columns() + mc_crosscluster.images())]
     html_column_desc_dict_crosscluster = {col: html_column_desc_dict.get(col, col) for col in html_columns_crosscluster}
 
-    os.makedirs(os.path.dirname(composite_paths_ns.html_msw_path), exist_ok=True)
+    os.makedirs(os.path.dirname(composite_paths_ns.html_mbf_path), exist_ok=True)
     mc_crosscluster.summary_table_html(
-        html_out=composite_paths_ns.html_msw_path,
+        html_out=composite_paths_ns.html_mbf_path,
         columns=[
             MetadataCols.name_col, MetadataCols.composite_col, MetadataCols.num_subunit_col,
             CompositeArgs.bellman_score_col, CompositeArgs.bellman_sim_col, CompositeArgs.bellman_align_col,
@@ -3843,15 +3843,15 @@ def run_encode_combine(args):
     mc_modelcluster_combined[MetadataCols.simple_name_col] = mc_modelcluster_combined[crosscluster_cluster_col].map(modelcluster2crosscluster_simple_map).fillna(mc_modelcluster_combined[MetadataCols.simple_name_col]).fillna(MetadataCols.name_unknown)
 
 
-    # #### Composites: Modified Smith-Waterman
+    # #### Composites: Modified Bellman-Ford
     # The last step of the filtered crossclusters, before they are exported to every level below: decompose each into
     # direct reference monomers. Below medium confidence, the decomposition decides whether it is a composite, with
     # its core and flank labels (composite/identify_composite_motifs.ipynb). Written back into mc_crosscluster as is.
-    logging.info("Composites: decomposing the filtered crossclusters into reference monomers (modified Smith-Waterman)...")
+    logging.info("Composites: decomposing the filtered crossclusters into reference monomers (modified Bellman-Ford)...")
     mc_ref_composite, mc_ref_qc_cluster_name_dict, _ = prepare_composite_reference(mc_ref_direct, args.ref_clustered_hr_metadata)
     filtered_rows = np.flatnonzero(~mc_crosscluster[FilterArgs.filter_flag_col].to_numpy(dtype=bool))
     mc_crosscluster_filtered = mc_crosscluster[filtered_rows.tolist()]
-    assign_msw_composites(mc_crosscluster_filtered, mc_ref_composite, ic_scale=args.ic, verbose=args.verbose)
+    assign_mbf_composites(mc_crosscluster_filtered, mc_ref_composite, ic_scale=args.ic, verbose=args.verbose)
     write_back_rows(
         mc_crosscluster, mc_crosscluster_filtered, filtered_rows,
         columns=[

@@ -165,18 +165,18 @@ class DirectTypeArgs:
     direct_gamma_key: str = 'direct_gamma'
 
 
-## SMITH-WATERMAN (Direct Beta ZNF, Gamma) -----------------------------------------------------------------------
+## BELLMAN-FORD (Direct Beta ZNF, Gamma) -----------------------------------------------------------------------
 @dataclass
-class SmithWatermanArgs:
-    msw_score_col: str = "smith-waterman_score"
-    msw_name_col: str = "smith-waterman_name"
-    msw_sim_col: str = "smith-waterman_similarity"
-    msw_orient_col: str = "smith-waterman_orientation"
-    msw_align_col: str = "smith-waterman_alignment"
-    msw_action_col: str = "smith-waterman_action"
-    msw_logo_col: str = "smith-waterman_logo"
+class BellmanFordArgs:
+    mbf_score_col: str = "bellman-ford_score"
+    mbf_name_col: str = "bellman-ford_name"
+    mbf_sim_col: str = "bellman-ford_similarity"
+    mbf_orient_col: str = "bellman-ford_orientation"
+    mbf_align_col: str = "bellman-ford_alignment"
+    mbf_action_col: str = "bellman-ford_action"
+    mbf_logo_col: str = "bellman-ford_logo"
 
-    msw_sim_threshold: float = 0
+    mbf_sim_threshold: float = 0
     overlap_penalty_f1: float = 0.02
     overlap_penalty_f2: float = 0.1
     skip_penalty_f1: float = 0.1
@@ -185,8 +185,8 @@ class SmithWatermanArgs:
     skip_penalty_l2: float = 0.1
     finger_length: int = 3
 
-    min_msw_score: float = 0.6  # F1-optimized: 0.68
-    min_topk_msw_score: float = 0.5  # Select top k
+    min_mbf_score: float = 0.6  # F1-optimized: 0.68
+    min_topk_mbf_score: float = 0.5  # Select top k
     topk: int = 1
 
     # Direct: Gamma
@@ -1031,7 +1031,7 @@ class VisualizeArgs:
     ] + [
         f'{LabelCols.best_label_ref_col}_logo0', f'{LabelCols.best_label_ref_col}_name0', f'{LabelCols.best_label_ref_col}_score0',
         LabelCols.label_core_col, LabelCols.direct_label_core_col, LabelCols.label_flank_col,
-        SmithWatermanArgs.msw_logo_col, SmithWatermanArgs.msw_name_col, SmithWatermanArgs.msw_score_col,
+        BellmanFordArgs.mbf_logo_col, BellmanFordArgs.mbf_name_col, BellmanFordArgs.mbf_score_col,
         VisualizeArgs.motif_string_col,
         MetadataCols.avgdist_summit_col, MetadataCols.avgcontrib_score_col,
         DirectTypeArgs.tf_direct_col, DirectTypeArgs.family_direct_col,

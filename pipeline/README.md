@@ -484,7 +484,7 @@ level's as `--composite-dir` (default: `encode/`, next to `--output-dir`):
 
 10. `encode-combine` (`pipeline_encode.py`): force-clusters the modelclusters
     into crossclusters, annotates and filters them, and decomposes the filtered
-    ones into reference monomers (modified Smith-Waterman), before exporting
+    ones into reference monomers (modified Bellman-Ford), before exporting
     them (and, at `encode-propagate`, to every level below). The composites and their subunits are written to
     `encode/` (`export/motifcompendium_encode_composite_metadata{,_model}.tsv`,
     `mc/motifcompendium_encode_composite.mc`). `--all-paths-tsv` (optional)

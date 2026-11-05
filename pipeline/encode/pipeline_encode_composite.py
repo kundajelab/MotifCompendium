@@ -1723,7 +1723,7 @@ def run_encode_composite(args):
 
     # ENCODE: Single: the filtered crossclusters outside the composites of the ISM analysis (cpaths.mc_composite_path, as
     # loaded under "ISM Cooperativity"), whatever mc_crosscluster's composite flags say: resumed after the ISM runs, mc_crosscluster may
-    # hold other flags than the MSW that selected the composites (e.g. an earlier ENCODE combine's, without the MSW). The
+    # hold other flags than the MBF that selected the composites (e.g. an earlier ENCODE combine's, without the MBF). The
     # composites dropped as errors ("Drop: Errors": core or flank label "_...") stay out of C5.
     mc_encode_composite_ids = set(MotifCompendium.load(cpaths.mc_composite_path, safe=args.safe)[MetadataCols.unique_id_col].astype(str))
     mc_crosscluster_error = (mc_crosscluster[MetadataCols.composite_col] == True) & (

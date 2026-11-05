@@ -139,7 +139,7 @@ def setup_parser():
     parser.add_argument("--mc-ref-clustered-hr-metadata", type=str, required=True,
                         help="Metadata TSV for --mc-ref-clustered-hr.")
     parser.add_argument("--mc-b1h", type=str, required=True,
-                        help="B1H zinc-finger reference MotifCompendium object (.mc), for the TF Smith-Waterman ZNF step.")
+                        help="B1H zinc-finger reference MotifCompendium object (.mc), for the TF Bellman-Ford ZNF step.")
     # Reference databases required by the confirmed per-atlas pipelines
     parser.add_argument("--ref-invitro", type=str, required=True,
                         help="Reference in-vitro PFM/MotifCompendium (used by the TF and ENCODE stages).")
@@ -193,7 +193,7 @@ def setup_parser():
 def set_default_configs(atlas):
     """Bind the config classes for `atlas` ('TF' | 'Chrom' | 'ENCODE') to module globals."""
     global MetadataCols, TFAnnotationCols, CellTypeCols, ReferenceMatchCols, LabelCols
-    global MotifMatchArgs, DirectTypeArgs, SmithWatermanArgs, FilterArgs, MotifFilterArgs
+    global MotifMatchArgs, DirectTypeArgs, BellmanFordArgs, FilterArgs, MotifFilterArgs
     global ClusterArgs, VisualizeArgs, HitsCols, EncodeCombineArgs, MotifCompendiumArgs
     global AtlasFilterArgs, TFMoDIScoCols
 
@@ -1345,7 +1345,7 @@ def run_tf_sequential(args):
     # - (2) **Direct BETA**: TF Paralog, ZNF B1H
     #     - (For TFs without/no match with Direct ALPHA)
     #     - Non-ZNFs: Matched with annotated paralog's *in vivo* or *in vitro* PFM (non-ZNFs)
-    #     - ZNFs: Matched with ZNF B1H via Modified Smith-Waterman
+    #     - ZNFs: Matched with ZNF B1H via Modified Bellman-Ford
     # - (3) **Direct GAMMA**: Top total contrib score
     #     - (For TFs without/no match with Direct ALPHA, BETA)
     #     - Top k=1 total contrib score (= num_seqlets x avg_contrib)
@@ -1463,7 +1463,7 @@ def run_tf_sequential(args):
     #     - Reference: TF family's Reference QC (human-readable) + All Reference QC (human-readable) [direct hetero-multimer]
     # - (ZNFs) Per TF:
     #     - From NOT annotated (in (4)): min single, min composite
-    #     - Rank by Modified Smith-Waterman
+    #     - Rank by Modified Bellman-Ford
     #     - Threshold: 0.7
     #     - If none, top 1 between 0.5 - 0.6
     # 
@@ -1593,14 +1593,14 @@ def run_tf_sequential(args):
         mc_qc[f'{ReferenceMatchCols.nonznf_ref_readable_col}_name{submotif_i}'] = mc_qc[f'{ReferenceMatchCols.nonznf_ref_col}_name{submotif_i}'].map(mc_ref_qc_hr_dict)
 
     # #### (2) Direct motifs: BETA (ZNF) - B1H alignment
-    ## Run Modified Smith-Waterman
+    ## Run Modified Bellman-Ford
     # Record: Score, alignment
-    mc_qc.metadata[SmithWatermanArgs.msw_score_col] = 0.0
-    mc_qc.metadata[SmithWatermanArgs.msw_sim_col] = 0.0
-    mc_qc.metadata[SmithWatermanArgs.msw_orient_col] = None
-    mc_qc.metadata[SmithWatermanArgs.msw_align_col] = None
-    mc_qc.metadata[SmithWatermanArgs.msw_action_col] = None
-    aligned_motifs = np.zeros((mc_qc.motifs.shape[0], mc_qc.motifs.shape[1] + 2 * (SmithWatermanArgs.finger_length - 1), mc_qc.motifs.shape[2]))
+    mc_qc.metadata[BellmanFordArgs.mbf_score_col] = 0.0
+    mc_qc.metadata[BellmanFordArgs.mbf_sim_col] = 0.0
+    mc_qc.metadata[BellmanFordArgs.mbf_orient_col] = None
+    mc_qc.metadata[BellmanFordArgs.mbf_align_col] = None
+    mc_qc.metadata[BellmanFordArgs.mbf_action_col] = None
+    aligned_motifs = np.zeros((mc_qc.motifs.shape[0], mc_qc.motifs.shape[1] + 2 * (BellmanFordArgs.finger_length - 1), mc_qc.motifs.shape[2]))
 
     # Per TF
     for i, row_b1h in mc_b1h.metadata.iterrows():
@@ -1625,39 +1625,39 @@ def run_tf_sequential(args):
                 cwm_ij = utils_motif.trim_motif(cwm_i[j] , 0) # (L, 4), trim zeros
                 # logging.info(f"  CWM: {name_cwm}")
 
-                (msw_score, sim_score, msw_aligned_b1h, msw_orient, msw_align_b1h, msw_align_cwm, msw_scale_f, msw_action, _, _,) = utils_composite.run_modified_smith_waterman_alignment(
+                (mbf_score, sim_score, mbf_aligned_b1h, mbf_orient, mbf_align_b1h, mbf_align_cwm, mbf_scale_f, mbf_action, _, _,) = utils_composite.run_modified_bellman_ford_alignment(
                     target_motif=cwm_ij,
                     reference_motif=b1h_ppm_ic_i,
-                    sim_threshold=SmithWatermanArgs.msw_sim_threshold,
-                    overlap_penalty_f1=SmithWatermanArgs.overlap_penalty_f1,
-                    overlap_penalty_f2=SmithWatermanArgs.overlap_penalty_f2,
-                    skip_penalty_f1=SmithWatermanArgs.skip_penalty_f1, 
-                    skip_penalty_f2=SmithWatermanArgs.skip_penalty_f2,
-                    skip_penalty_l1=SmithWatermanArgs.skip_penalty_l1, 
-                    skip_penalty_l2=SmithWatermanArgs.skip_penalty_l2,
-                    finger_length=SmithWatermanArgs.finger_length,
+                    sim_threshold=BellmanFordArgs.mbf_sim_threshold,
+                    overlap_penalty_f1=BellmanFordArgs.overlap_penalty_f1,
+                    overlap_penalty_f2=BellmanFordArgs.overlap_penalty_f2,
+                    skip_penalty_f1=BellmanFordArgs.skip_penalty_f1, 
+                    skip_penalty_f2=BellmanFordArgs.skip_penalty_f2,
+                    skip_penalty_l1=BellmanFordArgs.skip_penalty_l1, 
+                    skip_penalty_l2=BellmanFordArgs.skip_penalty_l2,
+                    finger_length=BellmanFordArgs.finger_length,
                 )
                 
                 # Aligned B1H motif (collapsed)
-                msw_aligned_b1h_collapse = msw_aligned_b1h.sum(axis=0)
-                msw_aligned_b1h_collapse = utils_motif.pad_motif(
-                    msw_aligned_b1h_collapse[np.newaxis, :, :], aligned_motifs.shape[1])
+                mbf_aligned_b1h_collapse = mbf_aligned_b1h.sum(axis=0)
+                mbf_aligned_b1h_collapse = utils_motif.pad_motif(
+                    mbf_aligned_b1h_collapse[np.newaxis, :, :], aligned_motifs.shape[1])
 
                 # Record, in original MotifCompendium
                 org_idx = (mc_qc.metadata[MetadataCols.name_col] == name_cwm).idxmax()
-                if msw_score > row_cwm[SmithWatermanArgs.msw_score_col]:
-                    mc_qc.metadata.loc[org_idx, SmithWatermanArgs.msw_score_col] = msw_score
-                    mc_qc.metadata.loc[org_idx, SmithWatermanArgs.msw_sim_col] = sim_score
-                    mc_qc.metadata.loc[org_idx, SmithWatermanArgs.msw_orient_col] = msw_orient
-                    mc_qc.metadata.loc[org_idx, SmithWatermanArgs.msw_align_col] = "\n".join("".join(str(msw_align_pos)) for msw_align_pos in [msw_align_b1h, msw_align_cwm])
-                    mc_qc.metadata.loc[org_idx, SmithWatermanArgs.msw_action_col] = ";".join(msw_action)
-                    mc_qc.metadata.loc[org_idx, SmithWatermanArgs.msw_name_col] = name_b1h
-                    aligned_motifs[org_idx] = msw_aligned_b1h_collapse # Save aligned motif
+                if mbf_score > row_cwm[BellmanFordArgs.mbf_score_col]:
+                    mc_qc.metadata.loc[org_idx, BellmanFordArgs.mbf_score_col] = mbf_score
+                    mc_qc.metadata.loc[org_idx, BellmanFordArgs.mbf_sim_col] = sim_score
+                    mc_qc.metadata.loc[org_idx, BellmanFordArgs.mbf_orient_col] = mbf_orient
+                    mc_qc.metadata.loc[org_idx, BellmanFordArgs.mbf_align_col] = "\n".join("".join(str(mbf_align_pos)) for mbf_align_pos in [mbf_align_b1h, mbf_align_cwm])
+                    mc_qc.metadata.loc[org_idx, BellmanFordArgs.mbf_action_col] = ";".join(mbf_action)
+                    mc_qc.metadata.loc[org_idx, BellmanFordArgs.mbf_name_col] = name_b1h
+                    aligned_motifs[org_idx] = mbf_aligned_b1h_collapse # Save aligned motif
 
     # Visualize aligned motifs, in original MotifCompendium
     mc_qc.add_logos(
         motifs=aligned_motifs,
-        image_name=SmithWatermanArgs.msw_logo_col,
+        image_name=BellmanFordArgs.mbf_logo_col,
         trim=0,
     )
 
@@ -1965,8 +1965,8 @@ def run_tf_sequential(args):
             # Continue with unannotated motifs
             mc_i = mc_i[mc_i[DirectTypeArgs.direct_type_col] != DirectTypeArgs.direct_types[1]]
         
-        ## [Direct BETA: ZNF] Select by Modified Smith-Waterman
-        elif (len(mc_direct_alpha_i) == 0) and (mc_i[MetadataCols.znf_col] == 'znf').all() and (mc_i[SmithWatermanArgs.msw_score_col].notna()).any() and len(mc_i) > 0:
+        ## [Direct BETA: ZNF] Select by Modified Bellman-Ford
+        elif (len(mc_direct_alpha_i) == 0) and (mc_i[MetadataCols.znf_col] == 'znf').all() and (mc_i[BellmanFordArgs.mbf_score_col].notna()).any() and len(mc_i) > 0:
             ## Check BETA: ZNF
             logging.info(f"  Direct Beta ref (ZNF)")
             check_beta_zf = True
@@ -2000,21 +2000,21 @@ def run_tf_sequential(args):
             #     (mc_i[f'{ref_oofamily_col}_score2'] > MotifMatchArgs.min_composite_score)
             # )]
             
-            # Sort by Modified Smith-Waterman score
+            # Sort by Modified Bellman-Ford score
             mc_znf_i.sort(
-                by=SmithWatermanArgs.msw_score_col,
+                by=BellmanFordArgs.mbf_score_col,
                 ascending=False,
                 inplace=True,
             )
             
             ## Identify direct motif
             # (1) Above threshold
-            mask_match = mc_znf_i[SmithWatermanArgs.msw_score_col] > SmithWatermanArgs.min_msw_score
+            mask_match = mc_znf_i[BellmanFordArgs.mbf_score_col] > BellmanFordArgs.min_mbf_score
 
             # (2) Top k = 1, above threshold
             if not mask_match.any():
-                idx_2 = mc_znf_i.metadata[mc_znf_i[SmithWatermanArgs.msw_score_col] > SmithWatermanArgs.min_topk_msw_score].index
-                for k in range(SmithWatermanArgs.topk, 0, -1):
+                idx_2 = mc_znf_i.metadata[mc_znf_i[BellmanFordArgs.mbf_score_col] > BellmanFordArgs.min_topk_mbf_score].index
+                for k in range(BellmanFordArgs.topk, 0, -1):
                     if len(idx_2) >= k:
                         mask_match = mc_znf_i.metadata.index.isin(idx_2[:k])
                         break
@@ -2031,7 +2031,7 @@ def run_tf_sequential(args):
             mc_znf_i.metadata.loc[mask_match, LabelCols.label_core_readable_col]        = tf_family
             mc_znf_i.metadata.loc[mask_match, LabelCols.direct_label_core_readable_col] = tf_family
             mc_znf_i.metadata.loc[mask_match, LabelCols.label_flank_col]                = None
-            mc_znf_i.metadata.loc[mask_match, ReferenceMatchCols.znf_ref_name_col]               = mc_znf_i.metadata.loc[mask_match, SmithWatermanArgs.msw_name_col].values
+            mc_znf_i.metadata.loc[mask_match, ReferenceMatchCols.znf_ref_name_col]               = mc_znf_i.metadata.loc[mask_match, BellmanFordArgs.mbf_name_col].values
             
             # Select direct: Beta ZNF
             mc_direct_beta_zf_i = mc_znf_i[mc_znf_i[DirectTypeArgs.direct_type_col] == DirectTypeArgs.direct_types[2]]
@@ -2059,13 +2059,13 @@ def run_tf_sequential(args):
             if len(mc_gamma_i) > 0:
                 # Sort by total contrib
                 mc_gamma_i.sort(
-                    by=SmithWatermanArgs.gamma_col,
+                    by=BellmanFordArgs.gamma_col,
                     ascending=False,
                     inplace=True,
                 )
         
                 # Select top k
-                for k in range(SmithWatermanArgs.topk, 0, -1):
+                for k in range(BellmanFordArgs.topk, 0, -1):
                     if len(mc_gamma_i) >= k:
                         # Final direct type, name, readable name
                         mask_match = mc_gamma_i.metadata.iloc[:k].index
@@ -3304,13 +3304,13 @@ def run_tf_sequential(args):
         LabelCols.label_flank_col:        None,
     }).copy()
 
-    ### MODIFIED SMITH-WATERMAN ALIGNMENT
+    ### MODIFIED BELLMAN-FORD ALIGNMENT
     mc_b1h_select = mc_b1h[mc_b1h[TFAnnotationCols.ref_tf_col].isin(mc_cluster_direct_beta_zf[MetadataCols.tf_col].unique())]
 
-    ## Run Modified Smith-Waterman
+    ## Run Modified Bellman-Ford
     aligned_motifs = np.zeros((
         mc_cluster_direct_beta_zf.motifs.shape[0], 
-        mc_cluster_direct_beta_zf.motifs.shape[1] + 2 * (SmithWatermanArgs.finger_length - 1), 
+        mc_cluster_direct_beta_zf.motifs.shape[1] + 2 * (BellmanFordArgs.finger_length - 1), 
         mc_cluster_direct_beta_zf.motifs.shape[2]
     ))
 
@@ -3334,23 +3334,23 @@ def run_tf_sequential(args):
                 cwm_ij = utils_motif.trim_motif(cwm_i[j] , 0) # (L, 4), trim zeros
                 logging.info(f"  CWM: {name_cwm}")
                 
-                (msw_score, sim_score, msw_aligned_b1h, msw_orient, msw_align_b1h, msw_align_cwm, msw_scale_f, msw_action, _, _) = utils_composite.run_modified_smith_waterman_alignment(
+                (mbf_score, sim_score, mbf_aligned_b1h, mbf_orient, mbf_align_b1h, mbf_align_cwm, mbf_scale_f, mbf_action, _, _) = utils_composite.run_modified_bellman_ford_alignment(
                     target_motif=cwm_ij,
                     reference_motif=b1h_ppm_ic_i,
-                    sim_threshold=SmithWatermanArgs.msw_sim_threshold,
-                    overlap_penalty_f1=SmithWatermanArgs.overlap_penalty_f1,
-                    overlap_penalty_f2=SmithWatermanArgs.overlap_penalty_f2,
-                    skip_penalty_f1=SmithWatermanArgs.skip_penalty_f1, 
-                    skip_penalty_f2=SmithWatermanArgs.skip_penalty_f2,
-                    skip_penalty_l1=SmithWatermanArgs.skip_penalty_l1, 
-                    skip_penalty_l2=SmithWatermanArgs.skip_penalty_l2,
-                    finger_length=SmithWatermanArgs.finger_length,
+                    sim_threshold=BellmanFordArgs.mbf_sim_threshold,
+                    overlap_penalty_f1=BellmanFordArgs.overlap_penalty_f1,
+                    overlap_penalty_f2=BellmanFordArgs.overlap_penalty_f2,
+                    skip_penalty_f1=BellmanFordArgs.skip_penalty_f1, 
+                    skip_penalty_f2=BellmanFordArgs.skip_penalty_f2,
+                    skip_penalty_l1=BellmanFordArgs.skip_penalty_l1, 
+                    skip_penalty_l2=BellmanFordArgs.skip_penalty_l2,
+                    finger_length=BellmanFordArgs.finger_length,
                 )
 
                 # Aligned B1H motif (collapsed)
-                msw_aligned_b1h_collapse = msw_aligned_b1h.sum(axis=0)
-                msw_aligned_b1h_collapse = np.pad(msw_aligned_b1h_collapse,
-                    ((0, aligned_motifs.shape[1] - msw_aligned_b1h_collapse.shape[0]), (0, 0)),
+                mbf_aligned_b1h_collapse = mbf_aligned_b1h.sum(axis=0)
+                mbf_aligned_b1h_collapse = np.pad(mbf_aligned_b1h_collapse,
+                    ((0, aligned_motifs.shape[1] - mbf_aligned_b1h_collapse.shape[0]), (0, 0)),
                     mode='constant')
                 cwm_ij = np.pad(cwm_ij,
                     ((0, aligned_motifs.shape[1] - cwm_ij.shape[0]), (0, 0)),
@@ -3358,20 +3358,20 @@ def run_tf_sequential(args):
 
                 # Record, in original MotifCompendium
                 org_idx = (mc_cluster_direct_beta_zf.metadata[MetadataCols.name_col] == name_cwm).idxmax()
-                mc_cluster_direct_beta_zf.metadata.loc[org_idx, SmithWatermanArgs.msw_score_col] = msw_score
-                mc_cluster_direct_beta_zf.metadata.loc[org_idx, SmithWatermanArgs.msw_sim_col] = sim_score
-                mc_cluster_direct_beta_zf.metadata.loc[org_idx, SmithWatermanArgs.msw_align_col] = "\n".join("".join(str(msw_align_pos)) for msw_align_pos in [msw_align_b1h, msw_align_cwm])
-                mc_cluster_direct_beta_zf.metadata.loc[org_idx, SmithWatermanArgs.msw_action_col] = ";".join(msw_action)
-                mc_cluster_direct_beta_zf.metadata.loc[org_idx, SmithWatermanArgs.msw_name_col] = name_b1h
+                mc_cluster_direct_beta_zf.metadata.loc[org_idx, BellmanFordArgs.mbf_score_col] = mbf_score
+                mc_cluster_direct_beta_zf.metadata.loc[org_idx, BellmanFordArgs.mbf_sim_col] = sim_score
+                mc_cluster_direct_beta_zf.metadata.loc[org_idx, BellmanFordArgs.mbf_align_col] = "\n".join("".join(str(mbf_align_pos)) for mbf_align_pos in [mbf_align_b1h, mbf_align_cwm])
+                mc_cluster_direct_beta_zf.metadata.loc[org_idx, BellmanFordArgs.mbf_action_col] = ";".join(mbf_action)
+                mc_cluster_direct_beta_zf.metadata.loc[org_idx, BellmanFordArgs.mbf_name_col] = name_b1h
                 mc_cluster_direct_beta_zf.metadata.loc[org_idx, ReferenceMatchCols.znf_ref_name_col] = name_b1h
 
                 # Save aligned motif
-                aligned_motifs[org_idx] = msw_aligned_b1h_collapse
+                aligned_motifs[org_idx] = mbf_aligned_b1h_collapse
 
     # Visualize aligned motifs
     mc_cluster_direct_beta_zf.add_logos(
         motifs=aligned_motifs,
-        image_name=SmithWatermanArgs.msw_logo_col,
+        image_name=BellmanFordArgs.mbf_logo_col,
         trim=0,
     )
 
@@ -3454,9 +3454,9 @@ def run_tf_sequential(args):
         if direct_type_key in [DirectTypeArgs.direct_alpha_key, DirectTypeArgs.direct_beta_nzf_key]:  # Alpha, Beta non-ZNF:
             score_col = (mc_cluster_direct_i[ref_score_cols].fillna(0).max(axis=1) * 100).astype(int).astype(str)
         elif direct_type_key == DirectTypeArgs.direct_beta_zf_key:  # Beta ZNF:
-            score_col = mc_cluster_direct_i[SmithWatermanArgs.msw_sim_col].fillna(0).apply(lambda x: int(x * 100)).astype(str)
+            score_col = mc_cluster_direct_i[BellmanFordArgs.mbf_sim_col].fillna(0).apply(lambda x: int(x * 100)).astype(str)
         elif direct_type_key == DirectTypeArgs.direct_gamma_key:  # Gamma:
-            score_col = mc_cluster_direct_i[SmithWatermanArgs.gamma_col].fillna(0).apply(lambda x: int(x * 100)).astype(str)
+            score_col = mc_cluster_direct_i[BellmanFordArgs.gamma_col].fillna(0).apply(lambda x: int(x * 100)).astype(str)
         
         # Assign readable label:
         mc_cluster_direct_i[LabelCols.direct_label_col] = (
@@ -5269,28 +5269,28 @@ def run_tf_sequential(args):
         "direct_beta_zf_key": DirectTypeArgs.direct_beta_zf_key,
         "direct_gamma_key": DirectTypeArgs.direct_gamma_key,
 
-        # Parameters: Smith-Waterman (ZNF)
-        "msw_score_col": SmithWatermanArgs.msw_score_col,
-        "msw_name_col": SmithWatermanArgs.msw_name_col,
-        "msw_sim_col": SmithWatermanArgs.msw_sim_col,
-        "msw_orient_col": SmithWatermanArgs.msw_orient_col,
-        "msw_align_col": SmithWatermanArgs.msw_align_col,
-        "msw_action_col": SmithWatermanArgs.msw_action_col,
-        "msw_logo_col": SmithWatermanArgs.msw_logo_col,
-        "msw_sim_threshold": SmithWatermanArgs.msw_sim_threshold,
-        "overlap_penalty_f1": SmithWatermanArgs.overlap_penalty_f1,
-        "overlap_penalty_f2": SmithWatermanArgs.overlap_penalty_f2,
-        "skip_penalty_f1": SmithWatermanArgs.skip_penalty_f1,
-        "skip_penalty_f2": SmithWatermanArgs.skip_penalty_f2,
-        "skip_penalty_l1": SmithWatermanArgs.skip_penalty_l1,
-        "skip_penalty_l2": SmithWatermanArgs.skip_penalty_l2,
-        "finger_length": SmithWatermanArgs.finger_length,
-        "min_msw_score": SmithWatermanArgs.min_msw_score,
-        "min_topk_msw_score": SmithWatermanArgs.min_topk_msw_score,
-        "topk": SmithWatermanArgs.topk,
+        # Parameters: Bellman-Ford (ZNF)
+        "mbf_score_col": BellmanFordArgs.mbf_score_col,
+        "mbf_name_col": BellmanFordArgs.mbf_name_col,
+        "mbf_sim_col": BellmanFordArgs.mbf_sim_col,
+        "mbf_orient_col": BellmanFordArgs.mbf_orient_col,
+        "mbf_align_col": BellmanFordArgs.mbf_align_col,
+        "mbf_action_col": BellmanFordArgs.mbf_action_col,
+        "mbf_logo_col": BellmanFordArgs.mbf_logo_col,
+        "mbf_sim_threshold": BellmanFordArgs.mbf_sim_threshold,
+        "overlap_penalty_f1": BellmanFordArgs.overlap_penalty_f1,
+        "overlap_penalty_f2": BellmanFordArgs.overlap_penalty_f2,
+        "skip_penalty_f1": BellmanFordArgs.skip_penalty_f1,
+        "skip_penalty_f2": BellmanFordArgs.skip_penalty_f2,
+        "skip_penalty_l1": BellmanFordArgs.skip_penalty_l1,
+        "skip_penalty_l2": BellmanFordArgs.skip_penalty_l2,
+        "finger_length": BellmanFordArgs.finger_length,
+        "min_mbf_score": BellmanFordArgs.min_mbf_score,
+        "min_topk_mbf_score": BellmanFordArgs.min_topk_mbf_score,
+        "topk": BellmanFordArgs.topk,
 
         # Parameters: Gamma
-        "gamma_col": SmithWatermanArgs.gamma_col,
+        "gamma_col": BellmanFordArgs.gamma_col,
 
         # Parameters: Clustering
         "cluster_algorithm_main": ClusterArgs.cluster_algorithm_main,

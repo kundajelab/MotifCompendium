@@ -2,7 +2,7 @@
 Regression + feature checks for MotifCompendium.utils.composite.
 
 Run:
-    python tests/test_composite_msw.py ORIGINAL_COMPOSITE [SNAPSHOT_COMPOSITE [PREVIOUS_COMPOSITE [BASE_COMPOSITE]]]
+    python tests/test_composite_mbf.py ORIGINAL_COMPOSITE [SNAPSHOT_COMPOSITE [PREVIOUS_COMPOSITE [BASE_COMPOSITE]]]
 
 ORIGINAL_COMPOSITE is the pre-generalization composite.py (old API; 4886214). It gates that the
 frozen 3 bp core is still the original algorithm, fed the penalties negated.
@@ -41,6 +41,13 @@ def load_module(path, name):
     sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def api(mod, name):
+    """The function name (Bellman-Ford) of mod, or its Smith-Waterman name in the snapshots (old API)."""
+    if hasattr(mod, name):
+        return getattr(mod, name)
+    return getattr(mod, name.replace("bellman_ford", "smith_waterman"))
 
 
 def make_case(rng, F, M, L, noise=0.05):
@@ -89,8 +96,8 @@ PENALTY_NAMES = ("overlap_penalty_f1", "overlap_penalty_f2", "skip_penalty_f1", 
 ZERO = dict(NEUTRAL, overlap_penalty_f1=0.0, overlap_penalty_f2=0.0, skip_penalty_f1=0.0,
             skip_penalty_f2=0.0, skip_penalty_l1=0.0, skip_penalty_l2=0.0)
 
-OUTPUTS = ["msw_score", "sim_score", "aligned_motif_fs", "msw_orient",
-           "msw_align_f", "msw_align_l", "msw_scale_f", "msw_actions"]
+OUTPUTS = ["mbf_score", "sim_score", "aligned_motif_fs", "mbf_orient",
+           "mbf_align_f", "mbf_align_l", "mbf_scale_f", "mbf_actions"]
 
 
 def differing(out_a, out_b, fields=OUTPUTS):
@@ -138,7 +145,7 @@ def call_general(mod, motif, fingers, M, **kwargs):
     # Exercise the unexpanded generalized core; public stack expansion has its own tests.
     params.setdefault("return_matrices", False)
     params.setdefault("label_unsigned", True)
-    return mod._run_modified_smith_waterman(
+    return api(mod, "_run_modified_bellman_ford")(
         target_motif=motif, subunit_motif_stack=unroll(fingers, M), **params)
 
 
@@ -147,7 +154,7 @@ def call_core(mod, sim, scale, M, **kwargs):
     F, N = sim.shape
     params = dict(NEUTRAL, orientations=("for",))
     params.update(kwargs)
-    return mod.calculate_modified_smith_waterman(
+    return api(mod, "calculate_modified_bellman_ford")(
         matrix_l=np.zeros((N + M - 1, 4)), matrix_f=np.zeros((F, M, 4)),
         sim_for=sim, sim_rev=sim, scale_factor=scale, **params)
 
@@ -209,7 +216,7 @@ def test_core_identical(new, orig, n_cases=300, seed=0):
                       scale_factor=importance, sim_threshold=0.0,
                       alignment_type="local", initial_score=0.0)
         old = negated(NEUTRAL)  # The original adds its penalties (numbers <= 0)
-        out_orig = orig.calculate_modified_smith_waterman(
+        out_orig = api(orig, "calculate_modified_bellman_ford")(
             overlap_penalty_f1=old["overlap_penalty_f1"], overlap_penalty_f2=old["overlap_penalty_f2"],
             skip_penalty_l1=old["skip_penalty_l1"], skip_penalty_l2=old["skip_penalty_l2"],
             skip_penalty_f=old["skip_penalty_f1"], **shared)
@@ -238,7 +245,7 @@ def test_matches_previous(new, prev, n_cases=40, seed=17):
         motif, fingers = make_case(rng, F, M, int(rng.integers(max(M + 1, 12), 40)))
         for cfg, exact in itertools.product(configs, (True, False)):
             flags = dict(global_exact=exact)
-            runs = [("alignment", lambda mod, p: mod.run_modified_smith_waterman_alignment(
+            runs = [("alignment", lambda mod, p: api(mod, "run_modified_bellman_ford_alignment")(
                         target_motif=motif, reference_motif=fingers, finger_length=M, **flags, **p))]
             for label, run in runs:
                 a, b = run(new, cfg), run(prev, negated(cfg))
@@ -303,9 +310,9 @@ def test_matches_base(new, base, n_cases=20, seed=22):
                 (dict(), dict(match_count_penalty=0.05), dict(match_count_max=2)), (True, False)):
             kw = dict(target_motif=motif, reference_motif=fingers, finger_length=M, global_exact=exact,
                       label_unsigned=unsigned, return_matrices=True, **{k: v for k, v in p.items()}, **mc)
-            for fn in ("run_modified_smith_waterman_alignment", "run_modified_smith_waterman_znf"):
+            for fn in ("run_modified_bellman_ford_alignment", "run_modified_smith_waterman_znf"):
                 n_runs += 1
-                if not same_outputs(getattr(new, fn)(**kw), getattr(base, fn)(general_penalty_root=0, **kw)):
+                if not same_outputs(api(new, fn)(**kw), api(base, fn)(general_penalty_root=0, **kw)):
                     n_diff += 1
                     if n_diff <= 3:
                         print(f"  [diff] {fn} M={M} {p} global_exact={exact} {mc} unsigned={unsigned}")
@@ -331,7 +338,7 @@ def test_penalty_signs(new):
     runs = [(name, label, run) for name in PENALTY_NAMES + ("match_count_penalty",) for label, run in (
                 ("core", lambda name: call_core(new, np.ones((2, 4)), np.ones(4), 2, **{name: -0.1})),
                 ("alignment", lambda name: call_znf(new, motif, fingers, **{name: -0.1})))]
-    runs += [(name, "composite", lambda name: new.run_modified_smith_waterman_composite(
+    runs += [(name, "composite", lambda name: new.run_modified_bellman_ford_composite(
                 motif, unroll(fingers, 3), **{name: -0.1}))
              for name in ("overlap_penalty_fraction", "match_count_penalty")]
     for name, label, run in runs:
@@ -346,7 +353,7 @@ def test_penalty_signs(new):
         print(f"  [FAIL] {label} accepted {name}=-0.1")
     for removed in ("match_penalty_f", "general_penalty_root", "overlap_penalty"):
         for label, run in (("alignment", lambda: call_znf(new, motif, fingers, **{removed: 0.1})),
-                           ("composite", lambda: new.run_modified_smith_waterman_composite(
+                           ("composite", lambda: new.run_modified_bellman_ford_composite(
                                motif, unroll(fingers, 3), **{removed: 0.1}))):
             if label == "alignment" and removed == "overlap_penalty":
                 continue
@@ -356,9 +363,9 @@ def test_penalty_signs(new):
                 continue
             n_bad += 1
             print(f"  [FAIL] {label} accepted {removed}")
-    if hasattr(new, "run_modified_smith_waterman_composite_fixlen") or hasattr(new, "_match_rescale"):
+    if (hasattr(new, "run_modified_bellman_ford_composite_fixlen") or hasattr(new, "run_modified_smith_waterman_composite_fixlen")) or hasattr(new, "_match_rescale"):
         n_bad += 1
-        print("  [FAIL] run_modified_smith_waterman_composite_fixlen or _match_rescale still defined")
+        print("  [FAIL] run_modified_bellman_ford_composite_fixlen or _match_rescale still defined")
     print(f"0b. penalty signs: negative penalties rejected; match_penalty_f, general_penalty_root, "
           f"overlap_penalty and the fixed-length composite removed: "
           f"{'ok' if n_bad == 0 else f'{n_bad} failures'}")
@@ -390,7 +397,7 @@ def test_degenerate(new):
                 print(f"  [FAIL] {name} global_exact={exact}: {type(exc).__name__}: {exc}")
                 n_fail += 1
         try:
-            new.run_modified_smith_waterman_composite(motif, unroll(fingers, 3), subunit_motif_trim=False)
+            new.run_modified_bellman_ford_composite(motif, unroll(fingers, 3), subunit_motif_trim=False)
         except Exception as exc:
             print(f"  [FAIL] {name} composite: {type(exc).__name__}: {exc}")
             n_fail += 1
@@ -460,14 +467,14 @@ def brute_force_cases(n_cases, seed):
 
 
 def core_problems(new, out, sim, scale, M, p):
-    """Ways a core's output is inconsistent: its matches must re-score to msw_score, and its
+    """Ways a core's output is inconsistent: its matches must re-score to mbf_score, and its
     state at the optimum must decompose it."""
     F, N = sim.shape
     chain = match_chain(out[2])
     state = out[3]
     problems = []
     if chain and abs(chain_score(chain, sim, scale, M, p) - out[0]) > 1e-12:
-        problems.append("matches do not re-score to msw_score")
+        problems.append("matches do not re-score to mbf_score")
     if state["F_total"] != len(chain):
         problems.append(f"F_total {state['F_total']} for {len(chain)} matches")
     if out[0] != (state["H_match"] - state["H_penalty_overlap_f"]
@@ -589,7 +596,7 @@ def test_match_count(new, n_cases=60, seed=14):
                     problems.append(f"penalty {penalty} fraction {fraction}: {len(chain)} matches, chose {chosen}")
                 elif chain and abs(chain_score(chain, sim, scale, M, p) - penalty * len(chain)
                                    - out[0]) > 1e-12:
-                    problems.append("chosen alignment does not re-score to msw_score")
+                    problems.append("chosen alignment does not re-score to mbf_score")
                 if fraction == 1:
                     counts.append(chosen)
             if counts != sorted(counts, reverse=True):
@@ -629,17 +636,17 @@ def test_match_count(new, n_cases=60, seed=14):
         print(f"  [FAIL] accepted match_count_fraction {fraction!r}")
 
     # Wrappers: One more output, only when asked; the composite keeps fewer subunits as the penalty
-    # grows (without a match count penalty, msw_score is the profile's best: the default is 0.05)
+    # grows (without a match count penalty, mbf_score is the profile's best: the default is 0.05)
     for j in range(8):
         motif, stack = make_mixed_case(rng, 2, (3, 4)[j % 2], int(rng.integers(15, 30)))
-        base = new.run_modified_smith_waterman_composite(motif, stack, match_count_penalty=0.0, target_similarity=None)
-        out = new.run_modified_smith_waterman_composite(motif, stack, match_count_penalty=0.0, target_similarity=None,
+        base = new.run_modified_bellman_ford_composite(motif, stack, match_count_penalty=0.0, target_similarity=None)
+        out = new.run_modified_bellman_ford_composite(motif, stack, match_count_penalty=0.0, target_similarity=None,
                                                         return_match_profile=True)
         if (len(base) != 7 or len(out) != 8 or abs(out[7][len(out[3])] - out[0]) > 1e-12
                 or abs(out[0] - out[7].max()) > 1e-12 or out[0] != base[0]):
             n_bad += 1
             print(f"  [FAIL] composite outputs {len(base)}, {len(out)}: {out[0]!r} {base[0]!r}")
-        sizes = [len(new.run_modified_smith_waterman_composite(
+        sizes = [len(new.run_modified_bellman_ford_composite(
             motif, stack, match_count_penalty=penalty, return_match_profile=True)[3]) for penalty in penalties]
         if sizes != sorted(sizes, reverse=True):
             n_bad += 1
@@ -663,7 +670,7 @@ def test_match_count(new, n_cases=60, seed=14):
 
 
 def test_match_cost(new, n_cases=60, seed=15):
-    """f. match_count_penalty as a per-match cost: with global_exact, msw_score is the best over
+    """f. match_count_penalty as a per-match cost: with global_exact, mbf_score is the best over
     every chain of matches (brute force, the empty one included) of its score minus the cost per
     match; fewer matches as the cost grows; and hand cases."""
     rng = np.random.default_rng(seed)
@@ -685,7 +692,7 @@ def test_match_cost(new, n_cases=60, seed=15):
                 if abs(out[0] - best) > 1e-12:
                     problems.append(f"cost {cost}: score {out[0]!r}, best chain {best!r}")
                 elif chain and abs(chain_score(chain, sim, scale, M, config) - cost * len(chain) - out[0]) > 1e-12:
-                    problems.append(f"cost {cost}: matches do not re-score to msw_score")
+                    problems.append(f"cost {cost}: matches do not re-score to mbf_score")
             if counts != sorted(counts, reverse=True):
                 problems.append(f"more matches with a larger cost: {counts}")
             n_runs += 1
@@ -706,7 +713,7 @@ def test_match_cost(new, n_cases=60, seed=15):
     # Wrappers: The composite keeps fewer subunits as the cost grows
     for j in range(4):
         motif, stack = make_mixed_case(rng, 2, 3, int(rng.integers(15, 25)))
-        sizes = [len(new.run_modified_smith_waterman_composite(motif, stack, match_count_penalty=cost)[3])
+        sizes = [len(new.run_modified_bellman_ford_composite(motif, stack, match_count_penalty=cost)[3])
                  for cost in (0.0, 0.02, 0.1)]
         if sizes != sorted(sizes, reverse=True):
             n_bad += 1
@@ -718,7 +725,7 @@ def test_match_cost(new, n_cases=60, seed=15):
 
 def test_match_count_max(new, n_cases=60, seed=19):
     """h. match_count_max limits the number of matches whatever the penalty and fraction: with
-    global_exact, msw_score is the best over every chain of at most that many matches (brute
+    global_exact, mbf_score is the best over every chain of at most that many matches (brute
     force), minus the penalty; the profile stops at it; a limit of min(F, N) or more is no limit;
     and the composite wrapper limits to 2 by default, and to at most 2."""
     rng = np.random.default_rng(seed)
@@ -781,19 +788,19 @@ def test_match_count_max(new, n_cases=60, seed=19):
     for j in range(6):
         subunits, target, planted = plant_subunits(rng, 2, (3, 4, 5)[j % 3], 5)
         kw = dict(sim_threshold=0.99, subunit_motif_trim=0)
-        sizes = [len(new.run_modified_smith_waterman_composite(target, subunits, **kw, **extra)[3])
+        sizes = [len(new.run_modified_bellman_ford_composite(target, subunits, **kw, **extra)[3])
                  for extra in ({}, dict(match_count_max=1), dict(match_count_max=2))]
         if sizes != [2, 1, 2]:
             n_bad += 1
             print(f"  [FAIL] composite: matches by limit (default, 1, 2) {sizes}")
         for bad in (None, 3, 5):
             try:
-                new.run_modified_smith_waterman_composite(target, subunits, match_count_max=bad, **kw)
+                new.run_modified_bellman_ford_composite(target, subunits, match_count_max=bad, **kw)
             except ValueError:
                 continue
             n_bad += 1
             print(f"  [FAIL] composite: accepted match_count_max={bad!r}")
-        none = len(new.run_modified_smith_waterman_composite(target, subunits, collapse="none", match_count_max=None,
+        none = len(new.run_modified_bellman_ford_composite(target, subunits, collapse="none", match_count_max=None,
                                                              **kw)[3])
         if none != 5:
             n_bad += 1
@@ -830,7 +837,7 @@ def test_signed(new, seed=20):
             seen.append((x.shape[-1], y.shape[-1]))
             return core(x, y)
         with patch.object(new, "compute_aligned_similarity", side_effect=record):
-            new.run_modified_smith_waterman_composite(motif, stack, label_unsigned=unsigned)
+            new.run_modified_bellman_ford_composite(motif, stack, label_unsigned=unsigned)
         if not seen or any(c != (channels, channels) for c in seen):
             n_bad += 1
             print(f"  [FAIL] label_unsigned={unsigned}: similarity on channels {seen}")
@@ -840,8 +847,8 @@ def test_signed(new, seed=20):
         target = np.concatenate([a, np.full((3, 4), 0.01), -b])
         stack = np.stack([a, b, -b])
         kw = dict(sim_threshold=0.9, allow_reverse_comp=False, match_count_max=2, subunit_motif_trim=0)
-        signed = new.run_modified_smith_waterman_composite(target, stack, label_unsigned=False, **kw)
-        unsigned = new.run_modified_smith_waterman_composite(target, stack, label_unsigned=True, **kw)
+        signed = new.run_modified_bellman_ford_composite(target, stack, label_unsigned=False, **kw)
+        unsigned = new.run_modified_bellman_ford_composite(target, stack, label_unsigned=True, **kw)
         starts = list(signed[5] - (M - 1))
         if list(signed[3]) != [0, 2] or starts != [0, M + 3]:
             n_bad += 1
@@ -946,7 +953,7 @@ COLLAPSES = [("sum_norm", None), ("mean_norm", None), ("none", None), ("max_norm
 
 
 def test_composite_score(new, n_cases=24 * len(COLLAPSES), seed=23):
-    """l. run_modified_smith_waterman_composite()'s score is the cosine similarity of the motif with
+    """l. run_modified_bellman_ford_composite()'s score is the cosine similarity of the motif with
     its collapsed alignment, L2-normalized: each subunit, placed at its start (zero elsewhere), is
     scaled by its cosine to the whole padded, L2-normalized motif (its least-squares weight), and the
     scaled subunits are summed (sum_norm), pooled by their maximum (max_norm) or Lp norm (lp_norm)
@@ -972,7 +979,7 @@ def test_composite_score(new, n_cases=24 * len(COLLAPSES), seed=23):
         penalty = (0.0, 0.5)[(i // (2 * n_modes)) % 2]
         sim_threshold = (0.0, 0.4)[(i // (4 * n_modes)) % 2]
         max_count = ((1, 2, 2) if collapse != "none" else (1, 2, 3))[(i // (8 * n_modes)) % 3]
-        out = new.run_modified_smith_waterman_composite(
+        out = new.run_modified_bellman_ford_composite(
             target, stack, sim_threshold=sim_threshold, overlap_penalty_fraction=penalty, match_count_max=max_count,
             match_count_penalty=0.0, target_similarity=None, subunit_motif_trim=trim, return_match_profile=True,
             collapse=collapse, collapse_p=collapse_p)
@@ -1018,7 +1025,7 @@ def test_composite_score(new, n_cases=24 * len(COLLAPSES), seed=23):
         if profile.shape != expected.shape or not np.allclose(profile, expected, rtol=0, atol=1e-9):
             problems.append(f"profile {np.round(profile, 4)} vs from scratch {np.round(expected, 4)}")
         else:
-            # The reported matches re-score to msw_score; their scales
+            # The reported matches re-score to mbf_score; their scales
             matches = [placements.index((2 * int(f) + int(rc), int(h))) for f, rc, h in zip(out[3], out[4], out[5])]
             if not matches:
                 rescored, scales = 0.0, []
@@ -1037,7 +1044,7 @@ def test_composite_score(new, n_cases=24 * len(COLLAPSES), seed=23):
                 pen = penalty * float(weight[lo:hi].sum()) if hi > lo else 0.0
                 rescored, scales = np.sqrt(max(e - pen, 0.0)), [proj[k_i] * f[0], proj[k_j] * f[1]]
             if abs(rescored - out[0]) > 1e-9 or abs(out[0] - profile.max()) > 1e-9:
-                problems.append(f"matches {matches} re-score to {rescored!r}, msw_score {out[0]!r}")
+                problems.append(f"matches {matches} re-score to {rescored!r}, mbf_score {out[0]!r}")
             if not np.allclose(out[6], scales, rtol=0, atol=1e-9):
                 problems.append(f"scales {out[6]} vs {scales}")
         if problems:
@@ -1049,7 +1056,7 @@ def test_composite_score(new, n_cases=24 * len(COLLAPSES), seed=23):
     # An imperfect match scores its cosine to the motif
     target = np.eye(4)[[0, 0, 1, 1]] + 0.3
     sub = np.eye(4)[[0, 0, 1, 1]]
-    out = new.run_modified_smith_waterman_composite(target, sub[None], subunit_motif_trim=0, return_match_profile=True,
+    out = new.run_modified_bellman_ford_composite(target, sub[None], subunit_motif_trim=0, return_match_profile=True,
                                                     allow_reverse_comp=False)
     cos = float((target / np.linalg.norm(target) * sub / np.linalg.norm(sub)).sum())
     if abs(out[7][1] - cos) > 1e-12:
@@ -1057,13 +1064,13 @@ def test_composite_score(new, n_cases=24 * len(COLLAPSES), seed=23):
         print(f"  [FAIL] one imperfect match: {out[7][1]!r}, cosine {cos!r}")
 
     # Defaults: no overlap penalty, 0.05 per subunit, target similarity 0.9, at most 2 subunits
-    parameters = inspect.signature(new.run_modified_smith_waterman_composite).parameters
+    parameters = inspect.signature(new.run_modified_bellman_ford_composite).parameters
     defaults = tuple(parameters[k].default for k in ("overlap_penalty_fraction", "match_count_penalty",
                                                      "target_similarity", "match_count_max"))
     target = np.concatenate([np.eye(4)[[0, 1, 2]], np.eye(4)[[2, 3, 0]]]) + 0.05
     stack = np.stack([np.eye(4)[[0, 1, 2, 2]], np.eye(4)[[2, 2, 3, 0]]])
-    same = same_outputs(new.run_modified_smith_waterman_composite(target, stack, subunit_motif_trim=0),
-                        new.run_modified_smith_waterman_composite(
+    same = same_outputs(new.run_modified_bellman_ford_composite(target, stack, subunit_motif_trim=0),
+                        new.run_modified_bellman_ford_composite(
                             target, stack, subunit_motif_trim=0, overlap_penalty_fraction=0.0, match_count_penalty=0.05,
                             target_similarity=0.9, match_count_max=2))
     if defaults != (0.0, 0.05, 0.9, 2) or not same:
@@ -1074,8 +1081,8 @@ def test_composite_score(new, n_cases=24 * len(COLLAPSES), seed=23):
     target = np.concatenate([np.eye(4)[[0, 1, 2, 3, 0, 1]], np.eye(4)[[3]] * 0.4])
     stack = np.stack([np.eye(4)[[0, 1, 2, 3, 0, 1]], np.eye(4)[[3, 3, 3, 3, 3, 3]]])
     kw = dict(subunit_motif_trim=0, allow_reverse_comp=False, match_count_penalty=0.0, return_match_profile=True)
-    stop = new.run_modified_smith_waterman_composite(target, stack, target_similarity=0.9, **kw)
-    free = new.run_modified_smith_waterman_composite(target, stack, target_similarity=None, **kw)
+    stop = new.run_modified_bellman_ford_composite(target, stack, target_similarity=0.9, **kw)
+    free = new.run_modified_bellman_ford_composite(target, stack, target_similarity=None, **kw)
     if not (stop[7][1] >= 0.9 and stop[7][2] > stop[7][1] and len(stop[3]) == 1 and len(free[3]) == 2):
         n_bad += 1
         print(f"  [FAIL] target similarity: profile {stop[7]}, subunits {len(stop[3])} (0.9) and {len(free[3])} (None)")
@@ -1083,20 +1090,20 @@ def test_composite_score(new, n_cases=24 * len(COLLAPSES), seed=23):
     # Validation
     for bad in (None, 0, 3, 5, True):
         try:
-            new.run_modified_smith_waterman_composite(target, stack, match_count_max=bad)
+            new.run_modified_bellman_ford_composite(target, stack, match_count_max=bad)
         except ValueError:
             continue
         n_bad += 1
         print(f"  [FAIL] accepted match_count_max={bad!r}")
     try:
-        new.run_modified_smith_waterman_composite(target, stack, target_similarity="0.9")
+        new.run_modified_bellman_ford_composite(target, stack, target_similarity="0.9")
     except ValueError:
         pass
     else:
         n_bad += 1
         print("  [FAIL] accepted target_similarity='0.9'")
     try:
-        new.run_modified_smith_waterman_composite(target, stack, collapse="max")
+        new.run_modified_bellman_ford_composite(target, stack, collapse="max")
     except ValueError:
         pass
     else:
@@ -1106,7 +1113,7 @@ def test_composite_score(new, n_cases=24 * len(COLLAPSES), seed=23):
                    dict(collapse="lp_norm", collapse_p="2"), dict(collapse="sum_norm", collapse_p=2.0),
                    dict(collapse="max_norm", collapse_p=np.inf)):
         try:
-            new.run_modified_smith_waterman_composite(target, stack, **kw_bad)
+            new.run_modified_bellman_ford_composite(target, stack, **kw_bad)
         except ValueError:
             continue
         n_bad += 1
@@ -1119,20 +1126,20 @@ def test_composite_score(new, n_cases=24 * len(COLLAPSES), seed=23):
         stack = np.abs(rng.normal(size=(3, 5, 4)))
         kw = dict(match_count_penalty=0.0, target_similarity=None, return_match_profile=True)
         for (c_a, p_a), (c_b, p_b) in ((("lp_norm", 1), ("sum_norm", None)), (("lp_norm", np.inf), ("max_norm", None))):
-            out_a = new.run_modified_smith_waterman_composite(target, stack, collapse=c_a, collapse_p=p_a, **kw)
-            out_b = new.run_modified_smith_waterman_composite(target, stack, collapse=c_b, collapse_p=p_b, **kw)
+            out_a = new.run_modified_bellman_ford_composite(target, stack, collapse=c_a, collapse_p=p_a, **kw)
+            out_b = new.run_modified_bellman_ford_composite(target, stack, collapse=c_b, collapse_p=p_b, **kw)
             if not same_outputs(out_a, out_b):
                 n_bad += 1
                 print(f"  [FAIL] lp_norm p={p_a} differs from {c_b}")
         # Signed (8 channels): The pooled collapse is scored, finite
         for c_s, p_s in (("max_norm", None), ("lp_norm", 2.0)):
-            out_s = new.run_modified_smith_waterman_composite(rng.normal(size=(10, 4)), rng.normal(size=(3, 5, 4)),
+            out_s = new.run_modified_bellman_ford_composite(rng.normal(size=(10, 4)), rng.normal(size=(3, 5, 4)),
                                                               label_unsigned=False, collapse=c_s, collapse_p=p_s, **kw)
             if not (np.isfinite(out_s[0]) and np.isfinite(out_s[1])):
                 n_bad += 1
-                print(f"  [FAIL] signed {c_s}: msw_score {out_s[0]!r}, sim_score {out_s[1]!r}")
+                print(f"  [FAIL] signed {c_s}: mbf_score {out_s[0]!r}, sim_score {out_s[1]!r}")
     for limit in (3, None):
-        new.run_modified_smith_waterman_composite(target, stack, collapse="none", match_count_max=limit,
+        new.run_modified_bellman_ford_composite(target, stack, collapse="none", match_count_max=limit,
                                                   subunit_motif_trim=0)
     print(f"l. composite score (cosine of the collapsed alignment): {n_runs - n_bad}/{n_runs} profiles from scratch "
           f"(brute force), matches re-scored, scales; imperfect match, defaults, target similarity and validation "
@@ -1295,7 +1302,7 @@ def test_masked_overlap(new, n_cases=96, n_pair_cases=24 * 5, seed=37):
         else:
             collapse, collapse_p = pair_collapses[i % len(pair_collapses)]
             max_count = (2, 1)[(i // 64) % 2]
-        out = new.run_modified_smith_waterman_composite(
+        out = new.run_modified_bellman_ford_composite(
             target, stack, sim_threshold=sim_threshold, overlap_penalty_fraction=penalty, overlap_penalty_mode="masked",
             collapse=collapse, collapse_p=collapse_p, match_count_max=max_count, match_count_penalty=0.0,
             target_similarity=None, subunit_motif_trim=trim, return_match_profile=True, label_unsigned=not signed)
@@ -1358,7 +1365,7 @@ def test_masked_overlap(new, n_cases=96, n_pair_cases=24 * 5, seed=37):
                 scales = [proj[k_i] * f[0], proj[k_j] * f[1]]
             rescored = np.sqrt(max(energy, 0.0)) if matches else 0.0
             if abs(rescored - out[0]) > 1e-9 or abs(out[0] - profile.max()) > 1e-9:
-                problems.append(f"matches {matches} re-score to {rescored!r}, msw_score {out[0]!r}")
+                problems.append(f"matches {matches} re-score to {rescored!r}, mbf_score {out[0]!r}")
             if not np.allclose(out[6], scales, rtol=0, atol=1e-9):
                 problems.append(f"scales {out[6]} vs {scales}")
             if chain_case and matches:  # sim_score: The reconstruction, each incoming subunit masked where it covers the previous one
@@ -1390,13 +1397,13 @@ def test_masked_overlap(new, n_cases=96, n_pair_cases=24 * 5, seed=37):
         collapse, collapse_p = ([("none", None)] + pair_collapses)[n_i % 6]
         kw = dict(collapse=collapse, collapse_p=collapse_p, overlap_penalty_fraction=0.0, match_count_penalty=0.0,
                   target_similarity=None, return_match_profile=True)
-        if not same_outputs(new.run_modified_smith_waterman_composite(target, stack, overlap_penalty_mode="masked", **kw),
-                            new.run_modified_smith_waterman_composite(target, stack, overlap_penalty_mode="energy", **kw)):
+        if not same_outputs(new.run_modified_bellman_ford_composite(target, stack, overlap_penalty_mode="masked", **kw),
+                            new.run_modified_bellman_ford_composite(target, stack, overlap_penalty_mode="energy", **kw)):
             n_bad += 1
             print(f"  [FAIL] masked with penalty 0 differs from energy ({collapse})")
 
     # Defaults (unpinned): the masked mode, no penalty, sum_norm
-    unpinned = getattr(new.run_modified_smith_waterman_composite, "func", new.run_modified_smith_waterman_composite)
+    unpinned = getattr(new.run_modified_bellman_ford_composite, "func", new.run_modified_bellman_ford_composite)
     parameters = inspect.signature(unpinned).parameters
     defaults = tuple(parameters[k].default for k in ("overlap_penalty_mode", "overlap_penalty_fraction", "collapse"))
     if defaults != ("masked", 0.0, "sum_norm"):
@@ -1406,7 +1413,7 @@ def test_masked_overlap(new, n_cases=96, n_pair_cases=24 * 5, seed=37):
     # Validation: known modes only
     target, stack = rng.normal(size=(8, 4)), np.abs(rng.normal(size=(2, 4, 4)))
     try:
-        new.run_modified_smith_waterman_composite(target, stack, overlap_penalty_mode="mask")
+        new.run_modified_bellman_ford_composite(target, stack, overlap_penalty_mode="mask")
     except ValueError:
         pass
     else:
@@ -1419,7 +1426,7 @@ def test_masked_overlap(new, n_cases=96, n_pair_cases=24 * 5, seed=37):
 
 
 def test_composite_varlen(new, seed=21):
-    """j. run_modified_smith_waterman_composite(): subunits of any lengths (subunit_motif_trim), ordered by
+    """j. run_modified_bellman_ford_composite(): subunits of any lengths (subunit_motif_trim), ordered by
     position. The chain DP (collapse="none") is the best over every chain (brute force), by number
     of matches, with an overlap penalty (per bp or energy-weighted) and a limit; the pair searches
     (sum_norm, mean_norm) are the best over every pair of placements, with or without an overlap
@@ -1558,7 +1565,7 @@ def test_composite_varlen(new, seed=21):
         offsets = [int(rng.integers(0, M - len(x) + 1)) for x in subunits]
         for f, (x, o) in enumerate(zip(subunits, offsets)):
             stack[f, o:o + len(x)] = x
-        out = new.run_modified_smith_waterman_composite(target, stack, subunit_motif_trim=0, sim_threshold=0.99,
+        out = new.run_modified_bellman_ford_composite(target, stack, subunit_motif_trim=0, sim_threshold=0.99,
                                                         target_similarity=None)
         starts, pos = [], 0
         for g, x in zip(gaps, pieces):
@@ -1583,7 +1590,7 @@ def test_composite_varlen(new, seed=21):
         a, b = np.eye(4)[[0] * (M - 1) + [1]], np.eye(4)[[2] + [3] * (M - 1)]
         target = np.concatenate([a, np.full((3, 4), 0.01), -b])
         stack = np.stack([a, b, -b])
-        out = new.run_modified_smith_waterman_composite(target, stack, subunit_motif_trim=0, sim_threshold=0.9,
+        out = new.run_modified_bellman_ford_composite(target, stack, subunit_motif_trim=0, sim_threshold=0.9,
                                                         allow_reverse_comp=False, label_unsigned=False)
         if list(out[3]) != [0, 2] or list(out[5] - (M - 1)) != [0, M + 3]:
             n_bad += 1
@@ -1591,7 +1598,7 @@ def test_composite_varlen(new, seed=21):
     # (f) At most 2 matches by default
     x = np.eye(4)[[0, 1, 2, 3]]
     target = np.concatenate([x] * 5)
-    out = new.run_modified_smith_waterman_composite(target, x[None], subunit_motif_trim=0, sim_threshold=0.99)
+    out = new.run_modified_bellman_ford_composite(target, x[None], subunit_motif_trim=0, sim_threshold=0.99)
     if len(out[3]) != 2:
         n_bad += 1
         print(f"  [FAIL] default limit: {len(out[3])} matches")
@@ -1635,7 +1642,7 @@ def test_storage(new, seed=16):
                                   or final[names[0]].shape != (F + 1, N + 2 * M - 1)):
                     problems.append(f"fields {fields}")
                 if set(out[3]) != set(_EMPTY) or out[3]["F_total"] != len(match_chain(out[2])):
-                    problems.append("msw_state")
+                    problems.append("mbf_state")
                 outs[exact] = out
                 if problems:
                     n_bad += 1
@@ -1660,7 +1667,7 @@ def test_l2_norm_removed(new, seed=12):
         for label, run in (
                 ("core", lambda: call_core(new, np.ones((2, 4)), np.ones(4), 2, overlap_penalty_f1=spelling)),
                 ("alignment", lambda: call_znf(new, motif, fingers, overlap_penalty_f2=spelling)),
-                ("composite", lambda: new.run_modified_smith_waterman_composite(
+                ("composite", lambda: new.run_modified_bellman_ford_composite(
                     motif, unroll(fingers, 3), overlap_penalty_fraction=spelling))):
             try:
                 run()
@@ -1685,7 +1692,7 @@ def test_padding(new):
             # explains too little of the target to pass the default (0.05)
             target = np.concatenate([s[M - 1:], np.eye(4)[[3] * middle], s[:1]])
             L = len(target)
-            out = new.run_modified_smith_waterman_composite(
+            out = new.run_modified_bellman_ford_composite(
                 target, s[None], sim_threshold=0.5 / math.sqrt(M), allow_reverse_comp=False,
                 subunit_motif_trim=0, match_count_max=2, match_count_penalty=0.0)
             (_, _, stack, idx, rc, h, _) = out
@@ -1699,7 +1706,7 @@ def test_padding(new):
                 print(f"  [FAIL] M={M} L={L}: overhanging bp misplaced")
     for M, L in ((3, 1), (3, 2), (5, 3)):
         rng = np.random.default_rng(M * 10 + L)
-        out = new.run_modified_smith_waterman_composite(rng.random((L, 4)), rng.random((2, M, 4)))
+        out = new.run_modified_bellman_ford_composite(rng.random((L, 4)), rng.random((2, M, 4)))
         aligned = call_znf(new, rng.random((L, 4)), rng.random((2 * M, 4)), finger_length=M)
         if out[2].shape[1:] != (L + 2 * M - 2, 4) or aligned[2].shape != (2, L + 2 * M - 2, 4):
             n_bad += 1
@@ -1862,7 +1869,7 @@ def test_general_m(new, seed=2):
         motif, fingers = make_case(rng, 4, M, int(rng.integers(4 * M, 8 * M)))
         for exact in (True, False):
             flags = dict(global_exact=exact)
-            aligned = new.run_modified_smith_waterman_alignment(target_motif=motif, reference_motif=fingers,
+            aligned = new.run_modified_bellman_ford_alignment(target_motif=motif, reference_motif=fingers,
                                                                 finger_length=M, **flags, **NEUTRAL)
             for label, other in (("generalized path", call_general(new, motif, fingers, M, **flags)),
                                  ("ZNF wrapper", call_znf(new, motif, fingers, finger_length=M, **flags))):
@@ -1887,8 +1894,8 @@ def test_ic_scale(new):
                 * rng.uniform(0.2, 1, size=(L, 1)))
 
     wrappers = {
-        "composite": (new.run_modified_smith_waterman_composite, True, 3),
-        "alignment": (lambda t, f, **k: new.run_modified_smith_waterman_alignment(
+        "composite": (new.run_modified_bellman_ford_composite, True, 3),
+        "alignment": (lambda t, f, **k: new.run_modified_bellman_ford_alignment(
             t, f.reshape(-1, 4), finger_length=f.shape[1], **k), False, 3),
         "znf": (lambda t, f, **k: new.run_modified_smith_waterman_znf(
             t, f.reshape(-1, 4), finger_length=f.shape[1], **k), False, 3),
@@ -1929,7 +1936,7 @@ def pin_ic_scale_off(new):
     the composite wrappers to ic_scale=False (test_ic_scale() checks ic_scale). They were written for
     the overlap penalty on the motif energy: pin overlap_penalty_mode="energy" too (the masked penalty,
     the default, is checked in test_masked_overlap()); a test passing it explicitly overrides the pin.'''
-    for name in ("run_modified_smith_waterman_composite",):
+    for name in ("run_modified_bellman_ford_composite",):
         setattr(new, name, functools.partial(getattr(new, name), ic_scale=False, overlap_penalty_mode="energy"))
 
 

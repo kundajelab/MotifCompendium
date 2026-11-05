@@ -1,4 +1,5 @@
 import math
+import warnings
 from types import SimpleNamespace
 
 import numpy as np
@@ -12,10 +13,16 @@ import MotifCompendium.utils.motif as utils_motif
 import MotifCompendium.utils.similarity as utils_similarity
 import MotifCompendium.utils.config as utils_config
 
-###########################
-# MODIFIED SMITH-WATERMAN #
-###########################
-def run_modified_smith_waterman_composite(
+
+def _warn_deprecated(old, new):
+    """The deprecation warning of an old (Smith-Waterman) name: shown by default (FutureWarning), at the caller."""
+    warnings.warn(f"{old}() is deprecated. Deprecated: Use {new}()", FutureWarning, stacklevel=3)
+
+
+#########################
+# MODIFIED BELLMAN-FORD #
+#########################
+def run_modified_bellman_ford_composite(
     target_motif, subunit_motif_stack,
     sim_threshold=0.0,
     overlap_penalty_fraction=0.0,
@@ -90,14 +97,14 @@ def run_modified_smith_waterman_composite(
             positive int, or None for no limit
         match_count_penalty: Penalty per subunit matched, in cosine units: keeps the alignment with
             the N that maximizes its best score with N matches - match_count_penalty * N, and
-            subtracts match_count_penalty * N from msw_score; a second subunit is kept only if it
+            subtracts match_count_penalty * N from mbf_score; a second subunit is kept only if it
             raises the cosine by more than this (default: 0.05) - float >= 0
         match_count_fraction: Keep the fewest matches whose penalized best score reaches this
             fraction of the maximum; 1 keeps the maximum (default: 1) - float in (0, 1]
         target_similarity: Stop adding subunits once the best alignment reaches this cosine: the
             number of matches is the fewer of the penalized choice and the fewest whose best
             score reaches it (None: no stop) (default: 0.9) - float or None
-        return_match_profile: Also return msw_profile - bool
+        return_match_profile: Also return mbf_profile - bool
         subunit_motif_trim: How to trim each subunit, as logo_trimming in
             assign_label_from_other_compendium(): False keeps all M positions; True trims the
             flanks at the standard threshold of 1/M; a number in [0, 1] is the threshold of
@@ -120,7 +127,7 @@ def run_modified_smith_waterman_composite(
             energy of the overlapping positions (default: "masked") - str
 
     Returns:
-        msw_score: Score of the optimal alignment (cosine), minus match_count_penalty * N - float
+        mbf_score: Score of the optimal alignment (cosine), minus match_count_penalty * N - float
         sim_score: MotifCompendium similarity score of the optimal alignment (collapse "none" with
             the masked overlap penalty: with each incoming subunit, times overlap_penalty_fraction,
             taken out where it covers the previous one, as scored) - float
@@ -137,7 +144,7 @@ def run_modified_smith_waterman_composite(
             least-squares weight of the collapsed alignment, <motif, r> / |r|^2 (1 without overlaps),
             so that the summed aligned subunits are the best fit of the collapsed alignment to the
             target - np.array of shape (N,)
-        msw_profile: Best score (cosine) of an alignment with exactly N matches, by N (0: empty;
+        mbf_profile: Best score (cosine) of an alignment with exactly N matches, by N (0: empty;
             -inf: impossible), before match_count_penalty - np.array, only if return_match_profile
     '''
     ## Check arguments
@@ -260,15 +267,15 @@ def run_modified_smith_waterman_composite(
                                                        position_energy, overlap_penalty_fraction, pool_p, overlap_cost_prefix=cost)
             if pair is not None:
                 explained[2], best[2] = value, (pair, scale)
-    msw_profile = np.where(np.isfinite(explained), np.sqrt(np.maximum(explained, 0.0)), -np.inf)  # Cosines
+    mbf_profile = np.where(np.isfinite(explained), np.sqrt(np.maximum(explained, 0.0)), -np.inf)  # Cosines
 
     ## Number of matches: The penalized best, then the fewest reaching target_similarity
-    n = _select_match_count(msw_profile, match_count_penalty, match_count_fraction)
+    n = _select_match_count(mbf_profile, match_count_penalty, match_count_fraction)
     if target_similarity is not None:
-        reached = [N for N in range(1, n) if msw_profile[N] >= target_similarity]
+        reached = [N for N in range(1, n) if mbf_profile[N] >= target_similarity]
         n = reached[0] if reached else n
     matches, collapsed_scale = best[n]
-    msw_score = float(msw_profile[n] - match_count_penalty * n)
+    mbf_score = float(mbf_profile[n] - match_count_penalty * n)
 
     ## Aligned subunits: One per match, scaled by its projection and the collapsed alignment's weight
     aligned_subunit_stack = np.zeros((n, num_starts, D))
@@ -310,14 +317,14 @@ def run_modified_smith_waterman_composite(
     if ic_scale_config:
         utils_config.set_ic_scale(True)
 
-    outputs = (msw_score, sim_score, aligned_subunit_stack, aligned_subunit_idx,
+    outputs = (mbf_score, sim_score, aligned_subunit_stack, aligned_subunit_idx,
                aligned_subunit_alignment_rc, aligned_subunit_alignment_h, aligned_subunit_scale)
-    return outputs + (msw_profile,) if return_match_profile else outputs
+    return outputs + (mbf_profile,) if return_match_profile else outputs
 
 
 def _trim_subunits(subunit_motif_stack, subunit_motif_trim):
     '''
-    Each subunit, trimmed as logo_trimming (see run_modified_smith_waterman_composite()): False
+    Each subunit, trimmed as logo_trimming (see run_modified_bellman_ford_composite()): False
     keeps it whole, True trims at 1/M, and a number in [0, 1] is the threshold of trim_motif().
 
     Returns:
@@ -366,7 +373,7 @@ def _chain_composite(match_scores, matchable, cand_len, overlap_penalty_fraction
     Best chain of candidates (variable-length subunits at starts) with exactly N matches, for
     every N, exactly: starts strictly increase, and an overlap with the previous candidate costs
     overlap_penalty_fraction times the summed overlap_weight of the overlapping positions (the
-    motif energy, for run_modified_smith_waterman_composite(); 1 per position counts the bp). The
+    motif energy, for run_modified_bellman_ford_composite(); 1 per position counts the bp). The
     score of a chain is the sum of its match scores, minus its overlap costs.
 
     With W[x] the summed weight of positions before x, an overlap of a candidate at [l, t) with
@@ -396,7 +403,7 @@ def _chain_composite(match_scores, matchable, cand_len, overlap_penalty_fraction
         overlap_costs: Cost of an overlap of the first j positions of each candidate at each
             start, in place of the weight's (None: the weight's) - np.array (C, S, >= max(cand_len)+1)
     Returns:
-        msw_profile: Best score with exactly N matches, by N (0: the empty alignment; -inf:
+        mbf_profile: Best score with exactly N matches, by N (0: the empty alignment; -inf:
             impossible) - np.array
         trace: The (candidate, start) of the best alignment with N matches, left to right, for
             N - function
@@ -467,14 +474,14 @@ def _chain_composite(match_scores, matchable, cand_len, overlap_penalty_fraction
                     best[e, n], best_pair[e, n] = vk, k
 
     ## The best chain with n matches, for every n
-    msw_profile = np.full(num_n + 1, -np.inf)  # (num_n+1,)
-    msw_profile[0] = 0.0
+    mbf_profile = np.full(num_n + 1, -np.inf)  # (num_n+1,)
+    mbf_profile[0] = 0.0
     found = [None] * (num_n + 1)  # [num_n+1]
     for n in range(1, num_n + 1):
         if K == 0 or not np.isfinite(value[:, n]).any():
             continue
         found[n] = int(value[:, n].argmax())
-        msw_profile[n] = value[found[n], n]
+        mbf_profile[n] = value[found[n], n]
 
     def trace(n):
         if n == 0:
@@ -485,7 +492,7 @@ def _chain_composite(match_scores, matchable, cand_len, overlap_penalty_fraction
             chain.append((int(pairs_c[k]), int(pairs_l[k])))
             k, n = previous[k, n], n - 1
         return chain[::-1]
-    return msw_profile, trace
+    return mbf_profile, trace
 
 
 def _best_disjoint_pair(m, starts, ends):
@@ -841,7 +848,7 @@ def _best_collapsed_pair(proj, starts, ends, cands, unit, position_energy, overl
     return value, pair, scale
 
 
-def run_modified_smith_waterman_alignment(
+def run_modified_bellman_ford_alignment(
     target_motif, reference_motif,
     sim_threshold=0.0,
     overlap_penalty_f1=0.02, overlap_penalty_f2=0.1,
@@ -859,12 +866,12 @@ def run_modified_smith_waterman_alignment(
 ):
     '''
     Aligns a chain of fixed-length finger motifs against a CWM, in the order and orientation
-    given: unlike run_modified_smith_waterman_composite(), fingers keep their length and are not
+    given: unlike run_modified_bellman_ford_composite(), fingers keep their length and are not
     reordered, reverse complemented individually, or repeated. Each alignment pass matches every
-    finger in one orientation (msw_orient).
+    finger in one orientation (mbf_orient).
 
     Every finger length, including 3 bp B1H zinc fingers, uses the generalized recurrence
-    (calculate_modified_smith_waterman).
+    (calculate_modified_bellman_ford).
 
     A finger may overhang either end of the CWM, overlapping it by as little as 1 bp. Every CWM
     position in the results (actions, alignment tracks, columns of aligned_motif_fs) is padded
@@ -888,20 +895,20 @@ def run_modified_smith_waterman_alignment(
             best alignment (default: True) - bool
         match_count_penalty: Penalty per finger matched: keeps the alignment with the N that
             maximizes its best score with N matches - match_count_penalty * N, and subtracts
-            match_count_penalty * N from msw_score (see calculate_modified_smith_waterman())
+            match_count_penalty * N from mbf_score (see calculate_modified_bellman_ford())
             - float >= 0
         match_count_fraction: Keep the fewest matches whose penalized best score reaches this
             fraction of the maximum; 1 keeps the maximum (default: 1) - float in (0, 1]
         match_count_max: Most fingers matched, whatever the penalty and fraction (None: no
             limit) (default: None) - int >= 1, or None
-        return_match_profile: Also return msw_profile - bool
+        return_match_profile: Also return mbf_profile - bool
             Only the local alignment is chosen (and limited): the remaining alignment still adds the fingers
-            left after it (see _run_modified_smith_waterman()).
+            left after it (see _run_modified_bellman_ford()).
         return_matrices: Also return the full DP matrices. They are large and no known caller
             reads them, so they default to None - bool
         label_unsigned: Compare the absolute values of the motifs (unsigned); if False, compare the
             signed motifs on 8 channels, so that a negative region only matches a negative finger
-            (see run_modified_smith_waterman_composite()) (default: True) - bool
+            (see run_modified_bellman_ford_composite()) (default: True) - bool
         finger_length: Length of each finger motif - int (M)
         ic_scale: IC-scale the CWM and the fingers (once, before any calculation), so that
             every similarity, match score and scaling uses the IC-scaled motifs; pass motifs
@@ -909,26 +916,26 @@ def run_modified_smith_waterman_alignment(
             IC-scale setting is ignored (default: False) - bool
 
     Returns:
-        msw_score: Modified Smith Waterman score of optimal alignment - float
+        mbf_score: Modified Bellman-Ford score of optimal alignment - float
         sim_score: MotifCompendium similarity score of optimal alignment - float
         aligned_motif_fs: Aligned finger motifs (IC-scaled, if ic_scale) - np.array of shape
             (F, L+2M-2, D)
-        msw_orient: Optimal orientation ("for" or "rev") - str
-        msw_align_f: Finger alignment indices - list of int
-        msw_align_l: CWM alignment indices (padded) - list of int
-        msw_scale_f: Finger scaling projection - np.array of shape (F,)
-        msw_actions: Optimal alignment arrangement - list of str
+        mbf_orient: Optimal orientation ("for" or "rev") - str
+        mbf_align_f: Finger alignment indices - list of int
+        mbf_align_l: CWM alignment indices (padded) - list of int
+        mbf_scale_f: Finger scaling projection - np.array of shape (F,)
+        mbf_actions: Optimal alignment arrangement - list of str
         H_final: Best score of an alignment ending at each DP cell - np.array of shape
             (F+1, L+3M-2), None unless requested
         state_final: H_match and the penalty matrices by DP cell and state - dict, None unless
             requested
-        msw_profile: Best score of an alignment with exactly N matches, by N (0: empty; -inf:
+        mbf_profile: Best score of an alignment with exactly N matches, by N (0: empty; -inf:
             impossible) - np.array, only if return_match_profile
     '''
     subunit_motif_stack = reference_motif.reshape(
         -1, finger_length, reference_motif.shape[-1]
     )  # (F, M, D)
-    return _run_modified_smith_waterman(
+    return _run_modified_bellman_ford(
         target_motif=target_motif,
         subunit_motif_stack=subunit_motif_stack,
         sim_threshold=sim_threshold,
@@ -966,14 +973,15 @@ def run_modified_smith_waterman_znf(
     ic_scale=False,
 ):
     '''
-    Exactly run_modified_smith_waterman_alignment(), kept for backward compatibility.
+    Exactly run_modified_bellman_ford_alignment(), kept for backward compatibility (legacy).
 
-    Deprecated: this will be removed in the future; use run_modified_smith_waterman_alignment().
+    Deprecated: Use run_modified_bellman_ford_alignment(). This will be removed in the future.
     It no longer uses the frozen 3 bp recurrence (calculate_modified_smith_waterman_znf).
 
-    Arguments and returns: see run_modified_smith_waterman_alignment().
+    Arguments and returns: see run_modified_bellman_ford_alignment().
     '''
-    return run_modified_smith_waterman_alignment(
+    _warn_deprecated("run_modified_smith_waterman_znf", "run_modified_bellman_ford_alignment")
+    return run_modified_bellman_ford_alignment(
         target_motif=target_motif,
         reference_motif=reference_motif,
         sim_threshold=sim_threshold,
@@ -995,7 +1003,7 @@ def run_modified_smith_waterman_znf(
     )
 
 
-def _run_modified_smith_waterman(
+def _run_modified_bellman_ford(
     target_motif, subunit_motif_stack,
     sim_threshold,
     overlap_penalty_f1, overlap_penalty_f2,
@@ -1012,10 +1020,10 @@ def _run_modified_smith_waterman(
 ):
     '''
     Aligns a chain of fixed-length finger motifs against a motif, for any finger length M > 1.
-    The fingers are matched in both orientations (msw_orient), placed as given, and, after the
+    The fingers are matched in both orientations (mbf_orient), placed as given, and, after the
     local alignment, the fingers left after it are aligned to the rest of the motif (globally),
     so that every finger is accounted for: their matches are added to the alignment, but not to
-    msw_score.
+    mbf_score.
 
     The target is padded with M-1 zeros on either side, so that a finger may overhang either
     end, overlapping the target by as little as 1 bp. Every motif position in the results is in
@@ -1038,26 +1046,26 @@ def _run_modified_smith_waterman(
         global_exact: Keep the best alignment of every state in each DP cell (exact), rather
             than one alignment per cell - bool
         match_count_penalty, match_count_fraction, match_count_max: Choose (and limit) the number
-            of matches of the local alignment (see calculate_modified_smith_waterman()) - float
+            of matches of the local alignment (see calculate_modified_bellman_ford()) - float
             >= 0, float in (0, 1], int >= 1 or None
-        return_match_profile: Also return msw_profile - bool
+        return_match_profile: Also return mbf_profile - bool
         ic_scale: IC-scale the target and the fingers, once, before any calculation (the
             global IC-scale setting is ignored) - bool
 
     Returns:
-        msw_score: Modified Smith Waterman score of optimal alignment - float
+        mbf_score: Modified Bellman-Ford score of optimal alignment - float
         sim_score: MotifCompendium similarity score of optimal alignment - float
         aligned_motif_fs: Aligned finger motifs - np.array of shape (F, L+2M-2, D)
-        msw_orient: Optimal orientation ("for" or "rev") - str
-        msw_align_f: Finger alignment indices - list of int (F*M + L+2M-2 - C)
-        msw_align_l: Motif alignment indices - list of int (F*M + L+2M-2 - C)
-        msw_scale_f: Finger scaling projection - np.array of shape (F,)
-        msw_actions: Optimal alignment arrangement - list of str
+        mbf_orient: Optimal orientation ("for" or "rev") - str
+        mbf_align_f: Finger alignment indices - list of int (F*M + L+2M-2 - C)
+        mbf_align_l: Motif alignment indices - list of int (F*M + L+2M-2 - C)
+        mbf_scale_f: Finger scaling projection - np.array of shape (F,)
+        mbf_actions: Optimal alignment arrangement - list of str
         H_final: Best score of an alignment ending at each DP cell - np.array of shape
             (F+1, L+3M-2), None unless requested
         state_final: H_match and the penalty matrices by DP cell and state (see
-            calculate_modified_smith_waterman()) - dict, None unless requested
-        msw_profile: Best score of a local alignment with exactly N matches, by N - np.array,
+            calculate_modified_bellman_ford()) - dict, None unless requested
+        mbf_profile: Best score of a local alignment with exactly N matches, by N - np.array,
             only if return_match_profile
     '''
     # Setting: IC-scale off (store), so that compute_similarities() does not IC-scale again
@@ -1110,8 +1118,8 @@ def _run_modified_smith_waterman(
     sims_ff = compute_aligned_similarity(sim_stack_cp, sim_windows_cp) # (F, L-M+1)
     sims_fr = compute_aligned_similarity(sim_stack_cp, sim_windows_cp[:, ::-1, ::-1]) # (F, L-M+1)
 
-    ## Run Modified Smith-Waterman: Local
-    (msw_score, msw_orient, msw_actions, msw_state, H_final, state_final, msw_profile) = calculate_modified_smith_waterman(
+    ## Run Modified Bellman-Ford: Local
+    (mbf_score, mbf_orient, mbf_actions, mbf_state, H_final, state_final, mbf_profile) = calculate_modified_bellman_ford(
         matrix_l=target_motif_norm,
         matrix_f=subunit_motif_stack_norm,
         sim_for=sims_ff,
@@ -1134,14 +1142,14 @@ def _run_modified_smith_waterman(
     )
 
     ## Add remaining global alignment
-    remain_f, remain_l = _next_unused_indices(msw_actions, M)  # First unused finger / motif index
-    if msw_orient == "rev":
+    remain_f, remain_l = _next_unused_indices(mbf_actions, M)  # First unused finger / motif index
+    if mbf_orient == "rev":
         remain_sim = sims_fr
     else:
         remain_sim = sims_ff
 
-    if len(msw_actions) > 0 and remain_f < F and remain_l < L_M_1:
-        (_, _, remain_actions, msw_state, H_remain, state_remain, _) = calculate_modified_smith_waterman(
+    if len(mbf_actions) > 0 and remain_f < F and remain_l < L_M_1:
+        (_, _, remain_actions, mbf_state, H_remain, state_remain, _) = calculate_modified_bellman_ford(
             matrix_l=target_motif_norm[remain_l:],
             matrix_f=subunit_motif_stack_norm[remain_f:],
             sim_for=remain_sim[remain_f:, remain_l:],
@@ -1156,31 +1164,31 @@ def _run_modified_smith_waterman(
             skip_penalty_l2=skip_penalty_l2,
             global_exact=global_exact,
             alignment_type="global",
-            initial_state=msw_state,  # Continues the local alignment
+            initial_state=mbf_state,  # Continues the local alignment
             initial_f_idx=remain_f,
             initial_l_idx=remain_l,
-            orientations=(msw_orient,),
+            orientations=(mbf_orient,),
             return_matrices=return_matrices,
         )
 
         # Update final alignments
-        msw_actions = msw_actions + remain_actions
+        mbf_actions = mbf_actions + remain_actions
         if return_matrices:
             H_final[remain_f + 1:, remain_l + M:] = H_remain[1:, M:]  # With local shifts
             state_final["remain"] = state_remain
 
     ## Retrieve alignments
-    if len(msw_actions) == 0:  # No alignment found: Return empty alignment
+    if len(mbf_actions) == 0:  # No alignment found: Return empty alignment
         aligned_motif_fs = np.zeros((F, L, D))
-        msw_scale_f = np.zeros(F)
-        msw_align_f, msw_align_l = _alignment_tracks([], F, M, L)
+        mbf_scale_f = np.zeros(F)
+        mbf_align_f, mbf_align_l = _alignment_tracks([], F, M, L)
         sim_score = 0.0
     else:
-        (aligned_motif_fs, msw_scale_f, msw_align_f, msw_align_l) = get_alignment_modified_smith_waterman(
+        (aligned_motif_fs, mbf_scale_f, mbf_align_f, mbf_align_l) = get_alignment_modified_bellman_ford(
             matrix_l=target_motif_norm,
             matrix_f=subunit_motif_stack_norm,
             scale_factor=target_motif_norm_unroll_importance,
-            msw_actions=msw_actions,
+            mbf_actions=mbf_actions,
         )
 
         ## Calculate similarity score
@@ -1195,11 +1203,11 @@ def _run_modified_smith_waterman(
     if ic_scale_config:
         utils_config.set_ic_scale(True)
 
-    outputs = (msw_score, sim_score, aligned_motif_fs, msw_orient, msw_align_f, msw_align_l, msw_scale_f, msw_actions, H_final, state_final)
-    return outputs + (msw_profile,) if return_match_profile else outputs
+    outputs = (mbf_score, sim_score, aligned_motif_fs, mbf_orient, mbf_align_f, mbf_align_l, mbf_scale_f, mbf_actions, H_final, state_final)
+    return outputs + (mbf_profile,) if return_match_profile else outputs
 
 
-def _next_unused_indices(msw_actions, finger_length):
+def _next_unused_indices(mbf_actions, finger_length):
     '''
     First unused finger index and first unused motif position, after an alignment.
 
@@ -1207,21 +1215,21 @@ def _next_unused_indices(msw_actions, finger_length):
     whole footprint of the last match (the final action itself may be an F-overlap or a skip).
 
     Arguments:
-        msw_actions: Alignment arrangement - list of str
+        mbf_actions: Alignment arrangement - list of str
         finger_length: Length of each finger motif - int (M)
     Returns:
         remain_f: First unused finger index - int
         remain_l: First unused motif position - int
     '''
-    if len(msw_actions) == 0:
+    if len(mbf_actions) == 0:
         return 0, 0
 
-    last_action = msw_actions[-1]
+    last_action = mbf_actions[-1]
     remain_f = int(last_action.split("@")[0][1:]) + 1  # Last used finger index
     remain_l = int(last_action.split("@")[-1][1:]) + 1  # Last used motif index
 
     # Match: The finger occupies finger_length positions
-    for action in reversed(msw_actions):
+    for action in reversed(mbf_actions):
         if action.split("@")[1] == "match":
             remain_l = max(remain_l, int(action.split("@")[-1][1:]) + finger_length)
             break
@@ -1286,7 +1294,7 @@ def shuffle_motif_position(motif):
 
 
 ###################
-# SMITH-WATERMAN  #
+# BELLMAN-FORD  #
 ###################
 def _previous_state(H, A, idx_f, idx_l, initial_score):
     '''
@@ -1653,7 +1661,7 @@ def _cell_candidates(space, parts, i, j, match_score, matchable, allow_start, be
     return best
 
 
-def _fill_modified_smith_waterman(space, match_scores, matchable, initial_state, allow_start, num_cols):
+def _fill_modified_bellman_ford(space, match_scores, matchable, initial_state, allow_start, num_cols):
     '''
     Fills the DP matrices of one orientation.
 
@@ -1881,14 +1889,14 @@ def _best_by_count(score):
     return best, best_cell
 
 
-def _select_match_count(msw_profile, match_count_penalty, match_count_fraction):
+def _select_match_count(mbf_profile, match_count_penalty, match_count_fraction):
     '''
-    Number of matches N to align with, from the best score with exactly N matches (msw_profile):
-    the smallest N whose penalized score, msw_profile[N] - match_count_penalty * N, reaches
+    Number of matches N to align with, from the best score with exactly N matches (mbf_profile):
+    the smallest N whose penalized score, mbf_profile[N] - match_count_penalty * N, reaches
     match_count_fraction of its maximum. With a fraction of 1, that is the N that maximizes it
     (the fewest matches, on ties). N = 0 (the empty alignment, score 0) is always a candidate.
     '''
-    penalized = msw_profile - match_count_penalty * np.arange(len(msw_profile))
+    penalized = mbf_profile - match_count_penalty * np.arange(len(mbf_profile))
     return int(np.flatnonzero(penalized >= match_count_fraction * penalized.max())[0])
 
 
@@ -1916,14 +1924,14 @@ def _align_all_states(finger_length, penalties, match_scores, matchable, initial
             best_matrices: H_final and state_final (see _state_matrices()), None unless
                 return_matrices - tuple
         With profile:
-            msw_profile: Best score with exactly N matches, by N (-inf: impossible) - np.array
+            mbf_profile: Best score with exactly N matches, by N (-inf: impossible) - np.array
             trace: The steps and matrices of the best alignment with N matches, for N - function
     '''
     M = finger_length
     F, L_M_1 = match_scores.shape
     num_f_total = initial_state["F_total"] + _max_matches(F, L_M_1, max_count) + 1
     space = _state_space(M, *penalties, num_f_total if profile else 1)
-    parts = _fill_modified_smith_waterman(space, match_scores, matchable, initial_state, allow_start, num_cols)
+    parts = _fill_modified_bellman_ford(space, match_scores, matchable, initial_state, allow_start, num_cols)
     score = _state_value(parts)  # Score of the alignment ending at each cell and state
 
     if not profile:
@@ -1932,12 +1940,12 @@ def _align_all_states(finger_length, penalties, match_scores, matchable, initial
             space, parts, score, match_scores, matchable, allow_start, cell, return_matrices)
         return best_score, best_steps, best_matrices
 
-    msw_profile, best_cells = _best_by_count(score)
+    mbf_profile, best_cells = _best_by_count(score)
 
     def trace(n):
         return _trace_all_states(space, parts, score, match_scores, matchable, allow_start, best_cells[n],
                                  return_matrices)
-    return msw_profile, trace
+    return mbf_profile, trace
 
 
 ##########################
@@ -2044,7 +2052,7 @@ def _one_state_cell_candidates(space, parts, states, i, j, match_score, matchabl
 def _fill_one_state(space, match_scores, matchable, initial_state, allow_start, num_cols, by_count):
     '''
     Fills the DP matrices of one orientation, keeping one alignment per cell or, by_count, per
-    cell and F_total (see _one_state_row_candidates()), as _fill_modified_smith_waterman().
+    cell and F_total (see _one_state_row_candidates()), as _fill_modified_bellman_ford().
 
     Returns:
         parts, states: Rows of each DP cell (see _one_state_row_candidates()) - list of list of
@@ -2143,15 +2151,15 @@ def _align_one_state(finger_length, penalties, match_scores, matchable, initial_
         return steps, _one_state_matrices(space, parts, states, score) if return_matrices else None
 
     if profile:
-        msw_profile, best_cells = _best_by_count(score)
-        return msw_profile, lambda n: trace(*best_cells[n])
+        mbf_profile, best_cells = _best_by_count(score)
+        return mbf_profile, lambda n: trace(*best_cells[n])
 
     best_score, cell = _best_cell(score[:, :, None, None, :], allow_start, M, F, L_M_1)
     best_steps, best_matrices = trace(cell[0], cell[1], 0)
     return best_score, best_steps, best_matrices
 
 
-def calculate_modified_smith_waterman(
+def calculate_modified_bellman_ford(
     matrix_l, matrix_f,
     sim_for, sim_rev,
     scale_factor, sim_threshold,
@@ -2171,7 +2179,7 @@ def calculate_modified_smith_waterman(
     return_matrices=False,
 ):
     '''
-    Modified Smith-Waterman, for any finger length M > 1.
+    Modified Bellman-Ford, for any finger length M > 1.
 
     Each finger covers M motif positions, so a finger placed at motif position l can be
     reached from M diagonals: diagonal k comes from the cell k positions earlier. Given the
@@ -2198,18 +2206,18 @@ def calculate_modified_smith_waterman(
     so no matrix of moves is kept.
 
     The number of matches can be chosen, rather than left to the best score (local alignment
-    only). msw_profile[N] is the best score of an alignment with exactly N matches (0 for the
+    only). mbf_profile[N] is the best score of an alignment with exactly N matches (0 for the
     empty alignment, -inf where impossible); it is exact with global_exact, and without it, by
     keeping one alignment per cell and F_total. The alignment kept has the smallest N whose
-    penalized score, msw_profile[N] - match_count_penalty * N, reaches match_count_fraction of
+    penalized score, mbf_profile[N] - match_count_penalty * N, reaches match_count_fraction of
     its maximum: with the default fraction, 1, the N that maximizes it (the fewest matches, on
-    ties). msw_score is that penalized score (msw_profile itself is not). Without global_exact, keeping one alignment
+    ties). mbf_score is that penalized score (mbf_profile itself is not). Without global_exact, keeping one alignment
     per cell and F_total can find a better alignment than one per cell, so for a sweep of
     match_count_penalty, set return_match_profile at 0 too. Match scores are normalized (the matches
     of a tiling of the motif sum to about 1), so match_count_penalty = 0.02 keeps a match only if
     it raises the score by more than 0.02. With global_exact, this is a per-match penalty in the
     score. match_count_max limits N whatever the penalty and fraction: the DP keeps
-    no alignment with more matches, so msw_profile stops at it, and the alignment found is the
+    no alignment with more matches, so mbf_profile stops at it, and the alignment found is the
     best (exactly, with global_exact) of at most match_count_max matches.
 
     Arguments:
@@ -2228,26 +2236,26 @@ def calculate_modified_smith_waterman(
         global_exact: Keep the best alignment of every state in each cell (exact), rather than
             one alignment per cell - bool
         match_count_penalty: Penalty per match, for choosing the number of matches, subtracted
-            from msw_score - float >= 0
+            from mbf_score - float >= 0
         match_count_fraction: Choose the fewest matches whose penalized score reaches this
             fraction of the best (1: the best) - float in (0, 1]
         match_count_max: Most matches, whatever the penalty and fraction (None: no limit)
             - int >= 1, or None
-        return_match_profile: Compute msw_profile even without a match count penalty, a
+        return_match_profile: Compute mbf_profile even without a match count penalty, a
             fraction below 1 or a match_count_max - bool
         alignment_type: Type of alignment ("local" or "global") - str
         initial_state: State of the alignment that a global alignment continues: H_match, the
-            three penalty sums and F_total (as msw_state); None for an empty alignment - dict
+            three penalty sums and F_total (as mbf_state); None for an empty alignment - dict
         initial_f_idx: Initial finger index - int
         initial_l_idx: Initial motif position index - int
         orientations: Which orientation(s) to evaluate - tuple of "for"/"rev"
         return_matrices: Also return H_final/state_final; None unless requested - bool
     Returns:
-        msw_score: Optimal alignment score, minus match_count_penalty * N when the number of
+        mbf_score: Optimal alignment score, minus match_count_penalty * N when the number of
             matches N is chosen - float
-        msw_orient: Optimal orientation ("for" or "rev") - str
-        msw_actions: Optimal alignment arrangement - list of str
-        msw_state: H_match, the three penalty sums (each >= 0) and F_total of the optimal
+        mbf_orient: Optimal orientation ("for" or "rev") - str
+        mbf_actions: Optimal alignment arrangement - list of str
+        mbf_state: H_match, the three penalty sums (each >= 0) and F_total of the optimal
             alignment, before match_count_penalty - dict
         H_final: Best score of an alignment ending at each DP cell - np.array (F+1, L+M), None
             unless requested
@@ -2255,7 +2263,7 @@ def calculate_modified_smith_waterman(
             _state_space()) by DP cell and state (see _state_matrices()), or without
             global_exact, by DP cell with the state fields a penalty depends on (see
             _one_state_matrices()), None unless requested - dict
-        msw_profile: Best score with exactly N matches, by N - np.array (min(F, L-M+1,
+        mbf_profile: Best score with exactly N matches, by N - np.array (min(F, L-M+1,
             match_count_max) + 1,), None unless a match count penalty, fraction, maximum or
             return_match_profile
     '''
@@ -2297,35 +2305,35 @@ def calculate_modified_smith_waterman(
             return_matrices, profile=profile, max_count=match_count_max)))
 
     ## Record final optimal
-    msw_profile = None
+    mbf_profile = None
     if profile:
         # The best alignment with N matches, for every N (ties: the later orientation); then N
-        msw_profile = np.full(len(results[0][2][0]), -np.inf)
-        owners = [None] * len(msw_profile)
+        mbf_profile = np.full(len(results[0][2][0]), -np.inf)
+        owners = [None] * len(mbf_profile)
         for orient, orient_scores, (orient_profile, trace) in results:
             for n, score_n in enumerate(orient_profile):
-                if score_n > -np.inf and score_n >= msw_profile[n]:
-                    msw_profile[n], owners[n] = score_n, (orient, orient_scores, trace)
-        n = _select_match_count(msw_profile, match_count_penalty, match_count_fraction)
-        msw_orient, best_scores, trace = owners[n]
+                if score_n > -np.inf and score_n >= mbf_profile[n]:
+                    mbf_profile[n], owners[n] = score_n, (orient, orient_scores, trace)
+        n = _select_match_count(mbf_profile, match_count_penalty, match_count_fraction)
+        mbf_orient, best_scores, trace = owners[n]
         best_steps, best_matrices = trace(n)
     else:
         best_score = -np.inf
         for orient, orient_scores, (orient_score, steps, matrices) in results:
             if orient_score >= best_score:
-                best_score, msw_orient, best_scores = orient_score, orient, orient_scores # Orientation
+                best_score, mbf_orient, best_scores = orient_score, orient, orient_scores # Orientation
                 best_steps, best_matrices = steps, matrices
 
     # The alignment's parts and score, from its moves (the DP keeps only what its choices need)
     rules = _state_space(M, *penalties, 1)
-    msw_state, msw_score = _path_state(best_steps, rules, best_scores, initial_state)
+    mbf_state, mbf_score = _path_state(best_steps, rules, best_scores, initial_state)
     if profile:  # The number of matches was chosen: Its penalty is part of the score
-        msw_score -= match_count_penalty * n
-    msw_score = float(msw_score) # Final score
-    msw_actions = _path_actions(best_steps, M, initial_f_idx, initial_l_idx) # Start to end
+        mbf_score -= match_count_penalty * n
+    mbf_score = float(mbf_score) # Final score
+    mbf_actions = _path_actions(best_steps, M, initial_f_idx, initial_l_idx) # Start to end
     H_final, state_final = best_matrices if return_matrices else (None, None)
 
-    return (msw_score, msw_orient, msw_actions, msw_state, H_final, state_final, msw_profile)
+    return (mbf_score, mbf_orient, mbf_actions, mbf_state, H_final, state_final, mbf_profile)
 
 
 def calculate_modified_smith_waterman_znf(
@@ -2343,21 +2351,21 @@ def calculate_modified_smith_waterman_znf(
     return_matrices=False,
 ):
     '''
-    Modified Smith-Waterman, for the 3 bp zinc-finger case only: the original three-diagonal
-    recurrence, kept frozen only to reproduce old results. Nothing calls it; use
-    calculate_modified_smith_waterman(), which is correct for any finger length (3 bp included).
+    Legacy (the modified Smith-Waterman, now Bellman-Ford, core), for the 3 bp zinc-finger case only: the
+    original three-diagonal recurrence, kept frozen only to reproduce old results. Nothing calls it; use
+    calculate_modified_bellman_ford(), which is correct for any finger length (3 bp included).
 
     Bug 1: On diagonals 2 and 3, a finger adjacent to the previous one (no gap) is charged
     skip_penalty_l1 / skip_penalty_l2 for its distance to the finger before that.
     Bug 2: Diagonal 1 also never charges a gap penalty, but has not been seen to
     change a result.
-    It keeps one arrangement per cell (A), which calculate_modified_smith_waterman() replaced by
+    It keeps one arrangement per cell (A), which calculate_modified_bellman_ford() replaced by
     exact states and a recomputed traceback.
 
-    Penalties are numbers >= 0, subtracted, as in calculate_modified_smith_waterman(), but the
+    Penalties are numbers >= 0, subtracted, as in calculate_modified_bellman_ford(), but the
     gap rule is the old one: skip_penalty_l1 for a 1 bp gap, else (G - 1) * skip_penalty_l2.
 
-    Arguments and returns: see calculate_modified_smith_waterman().
+    Arguments and returns: see calculate_modified_bellman_ford().
     '''
     assert matrix_f.shape[-1] == matrix_l.shape[-1]
     assert sim_for.shape == sim_rev.shape
@@ -2585,49 +2593,49 @@ def calculate_modified_smith_waterman_znf(
     return (msw_score, msw_orient, msw_actions, H_final, A_final)
 
 
-def get_alignment_modified_smith_waterman(
+def get_alignment_modified_bellman_ford(
     matrix_l, matrix_f,
     scale_factor,
-    msw_actions,
+    mbf_actions,
 ):
     '''
     Arguments:
         matrix_l: Motif matrix - np.array of shape (L, D)
         matrix_f: Finger motif matrices - np.array of shape (F, M, D)
         scale_factor: Scaling factors for each motif position - np.array of shape (L-M+1,)
-        msw_actions: Optimal alignment arrangement - list of str
+        mbf_actions: Optimal alignment arrangement - list of str
 
     Returns:
         aligned_motif_fs: Aligned finger motifs - np.array of shape (F, L, D)
-        msw_scale_f: Scaling of finger motifs - np.array of shape (F)
-        msw_align_f: Finger alignment track - list of int and '-'
-        msw_align_l: Motif alignment track - list of int and '-'
+        mbf_scale_f: Scaling of finger motifs - np.array of shape (F)
+        mbf_align_f: Finger alignment track - list of int and '-'
+        mbf_align_l: Motif alignment track - list of int and '-'
     '''
     F, M, _ = matrix_f.shape
     L, D = matrix_l.shape
 
     ## Place scaled fingers
     aligned_motif_fs = np.zeros((F, L, D)) # (F, L, D)
-    msw_scale_f = np.zeros(F)
-    for action in msw_actions:
+    mbf_scale_f = np.zeros(F)
+    for action in mbf_actions:
         parts = action.split("@")
         if parts[1] == "match":
             f_i = int(parts[0][1:])
             l_j = int(parts[-1][1:])
             scale_ij = scale_factor[l_j]
             aligned_motif_fs[f_i, l_j:l_j+M, :] = matrix_f[f_i] * scale_ij
-            msw_scale_f[f_i] = scale_ij
+            mbf_scale_f[f_i] = scale_ij
 
     ## Alignment tracks
-    msw_align_f, msw_align_l = _alignment_tracks(msw_actions, F, M, L)
+    mbf_align_f, mbf_align_l = _alignment_tracks(mbf_actions, F, M, L)
 
-    return aligned_motif_fs, msw_scale_f, msw_align_f, msw_align_l
+    return aligned_motif_fs, mbf_scale_f, mbf_align_f, mbf_align_l
 
 
-def _alignment_tracks(msw_actions, F, M, L):
+def _alignment_tracks(mbf_actions, F, M, L):
     '''
-    The alignment as two equal-length tracks, one entry per column: msw_align_f holds
-    finger columns (column k of finger f is f*M + k) and msw_align_l motif positions,
+    The alignment as two equal-length tracks, one entry per column: mbf_align_f holds
+    finger columns (column k of finger f is f*M + k) and mbf_align_l motif positions,
     with '-' where a track has nothing in that column.
 
     Built from where each finger was placed, so a matched finger's columns sit over exactly
@@ -2638,31 +2646,31 @@ def _alignment_tracks(msw_actions, F, M, L):
     never reached it. Motif positions under no finger face '-'.
 
     Arguments:
-        msw_actions: Optimal alignment arrangement - list of str
+        mbf_actions: Optimal alignment arrangement - list of str
         F: Number of fingers - int
         M: Finger length - int
         L: Motif length - int
     Returns:
-        msw_align_f: Finger alignment track - list of int and '-'
-        msw_align_l: Motif alignment track - list of int and '-'
+        mbf_align_f: Finger alignment track - list of int and '-'
+        mbf_align_l: Motif alignment track - list of int and '-'
     '''
     placed = {}   # Finger -> motif position of its match
     skipped = {}  # Finger -> motif position where it was skipped
-    for action in msw_actions:
+    for action in mbf_actions:
         parts = action.split("@")
         if parts[1] == "match":
             placed[int(parts[0][1:])] = int(parts[-1][1:])
         elif parts[1] == "F-skip":
             skipped.setdefault(int(parts[0][1:]), int(parts[-1][1:]))
 
-    msw_align_f, msw_align_l = [], []
+    mbf_align_f, mbf_align_l = [], []
     next_l = 0  # Next motif position to show
 
     def show_motif_until(l):
         nonlocal next_l
         while next_l < l:  # Motif positions under no finger
-            msw_align_f.append('-')
-            msw_align_l.append(next_l)
+            mbf_align_f.append('-')
+            mbf_align_l.append(next_l)
             next_l += 1
 
     for f in range(F):
@@ -2671,11 +2679,11 @@ def _alignment_tracks(msw_actions, F, M, L):
             show_motif_until(l)
             num_overlap = min(next_l - l, M)  # Already shown under earlier fingers
             for k in range(M):
-                msw_align_f.append(f*M + k)
+                mbf_align_f.append(f*M + k)
                 if k < num_overlap:
-                    msw_align_l.append('-')
+                    mbf_align_l.append('-')
                 else:
-                    msw_align_l.append(next_l)  # == l + k
+                    mbf_align_l.append(next_l)  # == l + k
                     next_l += 1
         else:
             if f in skipped:
@@ -2683,11 +2691,11 @@ def _alignment_tracks(msw_actions, F, M, L):
             elif placed and f < min(placed):  # Before the alignment: Beside the first match
                 show_motif_until(placed[min(placed)])
             for k in range(M):
-                msw_align_f.append(f*M + k)
-                msw_align_l.append('-')
+                mbf_align_f.append(f*M + k)
+                mbf_align_l.append('-')
     show_motif_until(L)
 
-    return msw_align_f, msw_align_l
+    return mbf_align_f, mbf_align_l
 
 ##############
 # VISUALIZE  #
@@ -2799,3 +2807,30 @@ def visualize_motifs_n(motifs, save_path):
     plt.tight_layout()
     plt.savefig(save_path, bbox_inches="tight", dpi=100)
     plt.close(fig)
+
+
+###################################################
+# DEPRECATED NAMES (modified Smith-Waterman, old) #
+###################################################
+def run_modified_smith_waterman_composite(*args, **kwargs):
+    '''Deprecated: Use run_modified_bellman_ford_composite() (the same arguments and returns).'''
+    _warn_deprecated("run_modified_smith_waterman_composite", "run_modified_bellman_ford_composite")
+    return run_modified_bellman_ford_composite(*args, **kwargs)
+
+
+def run_modified_smith_waterman_alignment(*args, **kwargs):
+    '''Deprecated: Use run_modified_bellman_ford_alignment() (the same arguments and returns).'''
+    _warn_deprecated("run_modified_smith_waterman_alignment", "run_modified_bellman_ford_alignment")
+    return run_modified_bellman_ford_alignment(*args, **kwargs)
+
+
+def calculate_modified_smith_waterman(*args, **kwargs):
+    '''Deprecated: Use calculate_modified_bellman_ford() (the same arguments and returns).'''
+    _warn_deprecated("calculate_modified_smith_waterman", "calculate_modified_bellman_ford")
+    return calculate_modified_bellman_ford(*args, **kwargs)
+
+
+def get_alignment_modified_smith_waterman(*args, **kwargs):
+    '''Deprecated: Use get_alignment_modified_bellman_ford() (the same arguments and returns).'''
+    _warn_deprecated("get_alignment_modified_smith_waterman", "get_alignment_modified_bellman_ford")
+    return get_alignment_modified_bellman_ford(*args, **kwargs)
