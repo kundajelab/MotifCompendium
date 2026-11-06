@@ -2,14 +2,13 @@
 *.html
 *.mc
 *.npy
-*.png
 *.pyc
 *.sh
 *.tsv
-*.txt
-*.meme
 */.ipynb_checkpoints
 */__pycache__/*
+*.md
 MotifCompendium.egg-info/*
+!README.md
 !tutorials/tutorial_outputs/*.html
 !tutorials/tutorial_outputs/*.png

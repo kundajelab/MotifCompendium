@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections import defaultdict
 import os
 import warnings
+from itertools import combinations
 
 from bs4 import BeautifulSoup
 import h5py
@@ -17,6 +18,12 @@ import MotifCompendium.utils.motif as utils_motif
 import MotifCompendium.utils.plotting as utils_plotting
 import MotifCompendium.utils.similarity as utils_similarity
 import MotifCompendium.utils.visualization as utils_visualization
+
+
+#: safety cap on the rounds of greedy composite matching (max_submotifs=-1):
+#: every round subtracts a matched component, but the round-i score is scaled by
+#: sqrt(i + 1), so a shrinking residual alone does not guarantee termination
+GREEDY_MAX_SUBMOTIFS = 50
 
 
 ############
@@ -909,7 +916,7 @@ class MotifCompendium:
                 raise KeyError(f"Labels not found in index: {missing}")
         elif isinstance(key, pd.Series) and pd.api.types.is_bool_dtype(key):
             keep_idxs = list(self.metadata[key].index)
-        elif isinstance(key, np.ndarray) and key.dtype == bool:
+        elif isinstance(key, np.ndarray) and np.issubdtype(key.dtype, np.bool_):
             if len(key) != len(self.metadata):
                 raise ValueError("Boolean mask must be same length as metadata.")
             keep_idxs = list(np.where(key)[0])
@@ -919,10 +926,13 @@ class MotifCompendium:
             keep_idxs = [i for i, x in enumerate(key) if x]
         elif isinstance(key, slice):
             keep_idxs = list(range(*key.indices(len(self.metadata))))
-        elif isinstance(key, int):
-            keep_idxs = [key]
-        elif isinstance(key, list) and all(isinstance(i, int) for i in key):
-            keep_idxs = key
+        elif isinstance(key, (int, np.integer)):
+            keep_idxs = [int(key)]
+        elif isinstance(key, (list, np.ndarray)) and all(
+            isinstance(i, (int, np.integer)) and not isinstance(i, (bool, np.bool_))
+            for i in key
+        ):
+            keep_idxs = [int(i) for i in key]
         elif len(key) == 0:
             keep_idxs = []
         else:
@@ -1555,8 +1565,11 @@ class MotifCompendium:
             self.metadata[save_name] = self.metadata[save_name].map(cluster_map)
 
     def clustering_quality(
-        self, clustering: str, with_stats: bool = False
-    ) -> pd.DataFrame:
+        self,
+        clustering: str,
+        mc_avg: MotifCompendium | None = None,
+        with_stats: bool = False,
+    ) -> pd.DataFrame | tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         """Produces a pd.DataFrame that summarizes the quality of particular clustering.
 
         Produces a matrix where diagonal entries represent lowest intra-cluster
@@ -1574,22 +1587,48 @@ class MotifCompendium:
             with_stats: Whether or not to compute and store extra quality statistics
               columns. If True, it adds the following columns, which have per-cluster
               information to the returned pd.DataFrame:
-                - "lowest_internal_similarity": The lowest internal similarity.
-                - "lowest_internal_similarity_motif1_name": The name of the first motif
-                  contributing to the lowest internal similarity.
-                - "lowest_internal_similarity_motif1_logo": The motif of the first
-                  motif contributing to the lowest internal similarity.
-                - "lowest_internal_similarity_motif2_name": The name of the second motif
-                  contributing to the lowest internal similarity.
-                - "lowest_internal_similarity_motif2_logo": The logo of the second
-                  motif contributing to the lowest internal similarity.
-                - "highest_external_similarity": The highest external similarity.
-                - "highest_external_similarity_cluster": The cluster within which the
-                  highest external similarity motif is found in.
-                - "highest_external_similarity_motif_name": The name of the motif in the
-                  external cluster that is driving high external similarity.
-                - "highest_external_similarity_motif_logo": The logo of the motif in
-                  the external cluster that is driving high external similarity.
+                - "min_internal_motif-motif_similarity_score": The lowest internal motif-motif 
+                  similarity score between motifs within the cluster.
+                - "min_internal_motif-motif_similarity_motif1_name": The name of the first motif
+                  contributing to the lowest internal motif-motif similarity.
+                - "min_internal_motif-motif_similarity_motif1": The motif of the first
+                  motif contributing to the lowest internal motif-motif similarity.
+                - "min_internal_motif-motif_similarity_motif2_name": The name of the second motif
+                  contributing to the lowest internal motif-motif similarity.
+                - "min_internal_motif-motif_similarity_motif2": The logo of the second
+                  motif contributing to the lowest internal motif-motif similarity.
+                - "min_internal_centroid-motif_similarity_score": The lowest internal centroid-motif 
+                  similarity score between the cluster's centroid and motifs within the cluster.
+                - "min_internal_centroid-motif_similarity_motif_name": The name of the motif
+                  contributing to the lowest internal centroid-motif similarity.
+                - "min_internal_centroid-motif_similarity_motif": The logo of the motif
+                  contributing to the lowest internal centroid-motif similarity.
+                - "max_external_motif-motif_similarity_score": The highest external motif-motif similarity 
+                  score between motifs in the cluster and motifs outside the cluster.
+                - "max_external_motif-motif_similarity_motif1_cluster": The external cluster within which
+                   the motif of the highest external motif-motif similarity motif is found in.
+                - "max_external_motif-motif_similarity_motif1_name": The name of the motif in the external
+                  cluster contributing to the highest external motif-motif similarity.
+                - "max_external_motif-motif_similarity_motif1": The logo of the motif in the external
+                  cluster contributing to the highest external motif-motif similarity.
+                - "max_external_motif-motif_similarity_motif1_cluster": The internal cluster within which
+                    the motif of the highest external motif-motif similarity motif is found in.
+                - "max_external_motif-motif_similarity_motif1_name": The name of the motif in the internal
+                    cluster contributing to the highest external motif-motif similarity.
+                - "max_external_motif-motif_similarity_motif1": The logo of the motif in the internal
+                    cluster contributing to the highest external motif-motif similarity.
+                - "max_external_centroid-motif_similarity_score": The highest external centroid-motif similarity
+                  score between the cluster's centroid and motifs outside the cluster.
+                - "max_external_centroid-motif_similarity_motif_cluster": The external cluster within which
+                  the motif of the highest external centroid-motif similarity motif is found in.
+                - "max_external_centroid-motif_similarity_motif_name": The name of the motif in the external 
+                  cluster contributing to the highest external centroid-motif similarity.
+                - "max_external_centroid-motif_similarity_motif": The logo of the motif in the external
+                  cluster contributing to the highest external centroid-motif similarity.
+                - "max_external_centroid-centroid_similarity_score": The highest external centroid-centroid similarity
+                  score between the cluster's centroid and centroids of other clusters.
+                - "max_external_centroid-centroid_similarity_cluster": The name of the external cluster contributing to 
+                   the highest centroid-centroid similarity.
 
         Returns:
             A pd.DataFrame containing information about the lowest intra-cluster
@@ -1604,131 +1643,234 @@ class MotifCompendium:
         """
         # Cache cluster --> idxs dictionary
         ci_idxs = defaultdict(list)
-        for i, c in enumerate(self.metadata[clustering]):
-            ci_idxs[c].append(i)
-        # Iterate through pairs of clusters
-        clusters = sorted(ci_idxs.keys())
-        quality = np.zeros((len(clusters), len(clusters)))
+        for motif_idx, cluster in enumerate(self.metadata[clustering]):
+            ci_idxs[cluster].append(motif_idx)
+
+        clusters = sorted(ci_idxs)
+        clusters_arr = np.array(clusters)
+        n_clusters = len(clusters)
+        source_idx = np.arange(n_clusters)
+        cluster_member_idxs = [
+            np.asarray(ci_idxs[cluster], dtype=np.intp)
+            for cluster in clusters
+        ]
+        cluster_ref_idxs = np.array(
+            [member_idxs[0] for member_idxs in cluster_member_idxs],
+            dtype=np.intp,
+        )
+
+        # Initialize quality, stats (metadata, images)
+        quality = np.zeros((n_clusters, n_clusters))
         if with_stats:
-            stats = pd.DataFrame(
+            stats_metadata = pd.DataFrame(
                 index=clusters,
                 columns=[
-                    "lowest_internal_similarity",
-                    "lowest_internal_similarity_motif1_name",
-                    "lowest_internal_similarity_motif1_logo",
-                    "lowest_internal_similarity_motif2_name",
-                    "lowest_internal_similarity_motif2_logo",
-                    "lowest_constituent_cluster_similarity",
-                    "lowest_constituent_cluster_similarity_motif_name",
-                    "lowest_constituent_cluster_similarity_logo",
-                    "highest_external_similarity",
-                    "highest_external_similarity_cluster",
-                    "highest_external_similarity_motif_name",
-                    "highest_external_similarity_motif_logo",
+                    "min_internal_motif-motif_similarity_score",
+                    "min_internal_motif-motif_similarity_motif1_name",
+                    "min_internal_motif-motif_similarity_motif2_name",
+                    "min_internal_centroid-motif_similarity_score",
+                    "min_internal_centroid-motif_similarity_motif_name",
+                    "max_external_motif-motif_similarity_score",
+                    "max_external_motif-motif_similarity_motif1_cluster",
+                    "max_external_motif-motif_similarity_motif1_name",
+                    "max_external_motif-motif_similarity_motif2_cluster",
+                    "max_external_motif-motif_similarity_motif2_name",
+                    "max_external_centroid-motif_similarity_score",
+                    "max_external_centroid-motif_similarity_motif_cluster",
+                    "max_external_centroid-motif_similarity_motif_name",
+                    "max_external_centroid-centroid_similarity_score",
+                    "max_external_centroid-centroid_similarity_cluster",
                 ],
             )
-            motif_names = list(self.metadata["name"])
-            motifs_standard = self.get_standard_motif_stack()
-            external_similarity_culprit_idxs = np.zeros(
-                (len(clusters), len(clusters)), dtype=np.int32
-            )  # [i, j] --> in cluster i, which motif (in j) drove similarity
-        for i, c1 in enumerate(clusters):
-            c1_idxs = ci_idxs[c1]
-            c1_similarity_slice = self.similarity[c1_idxs, :]
-            for j, c2 in enumerate(clusters):
-                # Lower triangle --> fill in during upper triangle calculation
-                if j < i:
-                    continue
-                # Upper triangle + main diagonal
-                c2_idxs = ci_idxs[c2]
-                similarity_slice_ij = c1_similarity_slice[:, c2_idxs]
-                # Main diagonal
-                if i == j:
-                    # Lowest internal similarity
-                    min_idxs = np.unravel_index(
-                        np.argmin(similarity_slice_ij), similarity_slice_ij.shape
-                    )  # culprits of lowest internal similarity
-                    quality[i, i] = similarity_slice_ij[min_idxs]
-                    if with_stats:
-                        culprit_1_idx = c1_idxs[min_idxs[0]]
-                        culprit_1_rc = self.alignment_rc[
-                            c1_idxs[0], culprit_1_idx
-                        ]  # 0 b/c cluster aligned to first motif in cluster
-                        culprit_2_idx = c1_idxs[min_idxs[1]]
-                        culprit_2_rc = self.alignment_rc[
-                            c1_idxs[0], culprit_2_idx
-                        ]  # 0 b/c cluster aligned to first motif in cluster
-                        stats.loc[c1, "lowest_internal_similarity"] = quality[i, i]
-                        stats.loc[c1, "lowest_internal_similarity_motif1_name"] = (
-                            motif_names[culprit_1_idx]
-                        )
-                        stats.loc[c1, "lowest_internal_similarity_motif1_logo"] = (
-                            motifs_standard[culprit_1_idx]
-                            if not culprit_1_rc
-                            else utils_motif.reverse_complement(
-                                motifs_standard[culprit_1_idx]
-                            )
-                        )
-                        stats.loc[c1, "lowest_internal_similarity_motif2_name"] = (
-                            motif_names[culprit_2_idx]
-                        )
-                        stats.loc[c1, "lowest_internal_similarity_motif2_logo"] = (
-                            motifs_standard[culprit_2_idx]
-                            if not culprit_2_rc
-                            else utils_motif.reverse_complement(
-                                motifs_standard[culprit_2_idx]
-                            )
-                        )
-                # Upper triangle
-                else:
-                    # Highest external similarity
-                    max_idxs = np.unravel_index(
-                        np.argmax(similarity_slice_ij), similarity_slice_ij.shape
-                    )
-                    quality[i, j] = similarity_slice_ij[max_idxs]
-                    quality[j, i] = quality[i, j]
-                    if with_stats:
-                        culprit_c1_idx = c1_idxs[
-                            max_idxs[0]
-                        ]  # culprit in c1 that is causing highest external similarity
-                        external_similarity_culprit_idxs[j, i] = culprit_c1_idx
-                        culprit_c2_idx = c2_idxs[
-                            max_idxs[1]
-                        ]  # culprit in c2 that is causing highest external similarity
-                        external_similarity_culprit_idxs[i, j] = culprit_c2_idx
+            stats_motifs = pd.DataFrame(
+                index=clusters,
+                columns=[
+                    "min_internal_motif-motif_similarity_motif1",
+                    "min_internal_motif-motif_similarity_motif2",
+                    "min_internal_centroid-motif_similarity_motif",
+                    "max_external_motif-motif_similarity_motif1",
+                    "max_external_motif-motif_similarity_motif2",
+                    "max_external_centroid-motif_similarity_motif",
+                    "max_external_centroid-centroid_similarity_motif",
+                ],
+            )
+
+            # [i, j] is the motif index in cluster j that drove quality[i, j].
+            external_similarity_culprit_idxs = np.empty(
+                (n_clusters, n_clusters),
+                dtype=np.intp,
+            )
+            internal_culprit_idxs = np.empty(
+                (n_clusters, 2),
+                dtype=np.intp,
+            )
+            motif_names = self.metadata["name"]
+            motif_names_arr = np.array(motif_names)
+            motif_motifs = self.motifs
+
+            # Cache cluster averages
+            if mc_avg is None:
+                mc_avg = self.cluster_averages(clustering=clustering)
+
+        # Quality: Diagonal = min similarity within each cluster.
+        for i, member_idxs in enumerate(cluster_member_idxs):
+            similarity_block = self.similarity[np.ix_(member_idxs, member_idxs)]
+            row_idx, col_idx = np.unravel_index(
+                similarity_block.argmin(),
+                similarity_block.shape,
+            )
+
+            quality[i, i] = similarity_block[row_idx, col_idx]
+
+            if with_stats:
+                internal_culprit_idxs[i] = (
+                    member_idxs[row_idx],
+                    member_idxs[col_idx],
+                )
+
+        # Quality: Upper triangle = max similarity between each pair of clusters.
+        for i, j in combinations(range(n_clusters), 2):
+            member_idxs_i = cluster_member_idxs[i]
+            member_idxs_j = cluster_member_idxs[j]
+
+            similarity_block = self.similarity[
+                np.ix_(member_idxs_i, member_idxs_j)
+            ]
+            row_idx, col_idx = np.unravel_index(
+                similarity_block.argmax(),
+                similarity_block.shape,
+            )
+            score = similarity_block[row_idx, col_idx]
+
+            quality[i, j] = score
+            quality[j, i] = score
+
+            if with_stats:
+                external_similarity_culprit_idxs[i, j] = member_idxs_j[col_idx]
+                external_similarity_culprit_idxs[j, i] = member_idxs_i[row_idx]
+
+        # Populate quality
         quality_df = pd.DataFrame(quality, index=clusters, columns=clusters)
-        # Add stats if needed
-        if with_stats:
-            # Look at highest external similarities
-            external_sim = quality * (1 - np.eye(quality.shape[0]))
-            highest_external_sim_idx = external_sim.argmax(axis=0)
-            stats["highest_external_similarity"] = [
-                quality[i, highest_external_sim_idx[i]] for i in range(len(clusters))
+
+        # Return: Quality only
+        if not with_stats:
+            return quality_df
+
+        # Add stats_metadata, stats_motifs
+        def aligned_logos(
+            alignment_rc: np.ndarray,
+            ref_idxs: np.ndarray,
+            motif_idxs: np.ndarray,
+            motifs: np.ndarray | None = None,
+        ) -> list[np.ndarray]:
+            """Orient motifs relative to their cluster's reference motif.
+
+            motif_idxs index into motifs, which defaults to this MotifCompendium's motifs.
+            """
+            motifs = motif_motifs if motifs is None else motifs
+            is_rc = alignment_rc[ref_idxs, motif_idxs]
+            return [
+                utils_motif.reverse_complement(motifs[motif_idx])
+                if rc
+                else motifs[motif_idx]
+                for motif_idx, rc in zip(motif_idxs, is_rc)
             ]
-            stats["highest_external_similarity_cluster"] = [
-                clusters[x] for x in highest_external_sim_idx
-            ]
-            highest_external_similarity_motif_idxs = [
-                external_similarity_culprit_idxs[i, highest_external_sim_idx[i]]
-                for i in range(len(clusters))
-            ]
-            stats["highest_external_similarity_motif_name"] = [
-                motif_names[x] for x in highest_external_similarity_motif_idxs
-            ]
-            stats["highest_external_similarity_motif_logo"] = [
-                (
-                    motifs_standard[y]
-                    if ci_idxs[x] and not self.alignment_rc[ci_idxs[x][0], y]
-                    else utils_motif.reverse_complement(motifs_standard[y])
-                )
-                for x, y in zip(
-                    highest_external_sim_idx, highest_external_similarity_motif_idxs
-                )
-            ]  # align with respect to source cluster
-            # Concatenate columns
-            quality_df = pd.concat([quality_df, stats], axis=1)
-        # Return
-        return quality_df
+
+        ## Min internal motif-motif similarity
+        internal_motif1_idxs = internal_culprit_idxs[:, 0]
+        internal_motif2_idxs = internal_culprit_idxs[:, 1]
+
+        # Populate: Metadata, Images
+        stats_metadata["min_internal_motif-motif_similarity_score"] = quality.diagonal()
+        stats_metadata["min_internal_motif-motif_similarity_motif1_name"] = motif_names_arr[internal_motif1_idxs]
+        stats_metadata["min_internal_motif-motif_similarity_motif2_name"] = motif_names_arr[internal_motif2_idxs]
+        stats_motifs["min_internal_motif-motif_similarity_motif1"] = aligned_logos(
+            self.alignment_rc, cluster_ref_idxs[source_idx], internal_motif1_idxs
+        )
+        stats_motifs["min_internal_motif-motif_similarity_motif2"] = aligned_logos(
+            self.alignment_rc, cluster_ref_idxs[source_idx], internal_motif2_idxs
+        )
+
+        ## Cluster averages
+        mc_avg_idx = pd.Index(mc_avg.metadata["source_cluster"]).get_indexer(clusters)
+        if np.any(mc_avg_idx < 0):
+            raise ValueError("`mc_avg` does not contain an average motif for every cluster.")
+        mc_avg_motifs = mc_avg.motifs[mc_avg_idx]  # Reorder rows
+        mc_avg_names = mc_avg.metadata["name"].to_numpy()[mc_avg_idx]  # Reorder rows
+
+        cluster_labels = self.metadata[clustering].to_numpy()
+        membership = cluster_labels[None, :] == clusters_arr[:, None]
+
+        # Calculate similarity
+        cluster_motif_similarity, cluster_motif_rc, _ = utils_similarity.compute_similarities(
+            [mc_avg_motifs, self.motifs],
+            [(0, 1)],
+        )[0]
+
+        ## Min internal cluster-motif similarity
+        internal_average_similarity = np.where(membership, cluster_motif_similarity, np.inf)
+        min_centroid_scores = internal_average_similarity.min(axis=1)
+        min_centroid_motif_idxs = internal_average_similarity.argmin(axis=1)
+
+        stats_metadata["min_internal_centroid-motif_similarity_score"] = min_centroid_scores
+        stats_metadata["min_internal_centroid-motif_similarity_motif_name"] = motif_names_arr[min_centroid_motif_idxs]
+        stats_motifs["min_internal_centroid-motif_similarity_motif"] = aligned_logos(
+            cluster_motif_rc, source_idx, min_centroid_motif_idxs
+        )
+
+        # No external comparison: Return None
+        if n_clusters < 2:
+            return quality_df, stats_metadata, stats_motifs
+
+        ## Max external motif-motif similarity
+        external_sim = quality.copy()
+        np.fill_diagonal(external_sim, -np.inf)
+
+        max_external_idx = external_sim.argmax(axis=0)
+        max_external_sim_score = quality[max_external_idx, source_idx]
+        motif1_idx = external_similarity_culprit_idxs[max_external_idx, source_idx]
+        motif2_idx = external_similarity_culprit_idxs[source_idx, max_external_idx]
+
+        # Populate: Metadata, Images
+        stats_metadata["max_external_motif-motif_similarity_score"] = max_external_sim_score
+        stats_metadata["max_external_motif-motif_similarity_motif1_cluster"] = clusters_arr[source_idx]
+        stats_metadata["max_external_motif-motif_similarity_motif2_cluster"] = clusters_arr[max_external_idx]
+        stats_metadata["max_external_motif-motif_similarity_motif1_name"] = motif_names_arr[motif1_idx]
+        stats_metadata["max_external_motif-motif_similarity_motif2_name"] = motif_names_arr[motif2_idx]
+        stats_motifs["max_external_motif-motif_similarity_motif1"] = aligned_logos(
+            self.alignment_rc, cluster_ref_idxs[source_idx], motif1_idx,
+        )
+        stats_motifs["max_external_motif-motif_similarity_motif2"] = aligned_logos(
+            self.alignment_rc, cluster_ref_idxs[max_external_idx], motif2_idx,
+        )
+
+        ## Max external cluster-motif similarity
+        external_average_similarity = np.where(membership, -np.inf, cluster_motif_similarity)
+        max_external_centroid_scores = external_average_similarity.max(axis=1)
+        max_external_centroid_motif_idxs = external_average_similarity.argmax(axis=1)
+
+        stats_metadata["max_external_centroid-motif_similarity_score"] = max_external_centroid_scores
+        stats_metadata["max_external_centroid-motif_similarity_motif_cluster"] = cluster_labels[max_external_centroid_motif_idxs]
+        stats_metadata["max_external_centroid-motif_similarity_motif_name"] = motif_names_arr[max_external_centroid_motif_idxs]
+        stats_motifs["max_external_centroid-motif_similarity_motif"] = aligned_logos(
+            cluster_motif_rc, source_idx, max_external_centroid_motif_idxs
+        )
+
+        ## Max external cluster-cluster similarity
+        cluster_cluster_similarity = mc_avg.similarity[mc_avg_idx, :][:, mc_avg_idx]
+        cluster_cluster_rc = mc_avg.alignment_rc[mc_avg_idx, :][:, mc_avg_idx]
+        np.fill_diagonal(cluster_cluster_similarity, -np.inf)
+
+        max_external_centroid_scores = cluster_cluster_similarity.max(axis=1)
+        max_external_centroid_cluster_idxs = cluster_cluster_similarity.argmax(axis=1)
+        stats_metadata["max_external_centroid-centroid_similarity_score"] = max_external_centroid_scores
+        stats_metadata["max_external_centroid-centroid_similarity_cluster"] = mc_avg_names[max_external_centroid_cluster_idxs]
+        stats_motifs["max_external_centroid-centroid_similarity_motif"] = aligned_logos(
+            cluster_cluster_rc, source_idx, max_external_centroid_cluster_idxs, mc_avg_motifs
+        )
+
+        return quality_df, stats_metadata, stats_motifs
+
 
     def cluster_averages(
         self,
@@ -1736,6 +1878,7 @@ class MotifCompendium:
         aggregations: list[tuple[str]] = [("name", "count", "num_constituents")],
         weight_col: str | None = None,
         compute_quality_stats: bool = False,
+        reference: str = "medoid",
     ) -> MotifCompendium:
         """Creates a MotifCompendium where each motif represents a cluster of motifs.
 
@@ -1772,24 +1915,53 @@ class MotifCompendium:
             compute_quality_stats: Whether or not to compute quality statistics for the
               clustering. If True, the quality statistics will be saved in the metadata
               of the returned MotifCompendium.
-                - "best_match_similarity": The similarity of the cluster average motif to
-                  its most similar cluster average motif (excluding itself). 
-                - "best_match_cluster": The cluster of the most similar cluster average motif.
-                - "best_match_cluster_logo": The logo of the most similar cluster average motif.
-                - "lowest_constituent_cluster_similarity": The similarity of the cluster to 
-                  its least similar constituent motif. ("radius")
-                - "lowest_constituent_cluster_similarity_logo": The logo of the least similar
-                  constituent motif.
-                - "lowest_internal_similarity": The lowest similarity between all consituents
-                  in the cluster. ("diameter")
-                - "lowest_internal_similarity_motif1": Logo of one of the motif pair contributing 
-                  to the lowest internal similarity.
-                - "lowest_internal_similarity_motif2": Logo of the other motif pair contributing
-                  to the lowest internal similarity.
-                - "highest_external_similarity": The highest similarity between motifs in the 
-                  cluster and motifs outside of the cluster.
-                - "highest_external_similarity_logo": The logo of the motif outside of the cluster 
-                  that has the highest external similarity.
+            reference: Which member of each cluster provides the alignment frame that the
+              cluster average is built in. "medoid" uses the member with the highest
+              weighted similarity to the rest of its cluster, and so depends only on
+              cluster membership. "first" uses the lowest-indexed member, reproducing
+              historical behaviour at the cost of depending on motif ordering.
+                - "min_internal_motif-motif_similarity_score": The lowest internal motif-motif 
+                    similarity score between motifs within the cluster.
+                - "min_internal_motif-motif_similarity_motif1_name": The name of the first motif
+                    contributing to the lowest internal motif-motif similarity.
+                - "min_internal_motif-motif_similarity_motif1": The motif of the first
+                    motif contributing to the lowest internal motif-motif similarity.
+                - "min_internal_motif-motif_similarity_motif2_name": The name of the second motif
+                    contributing to the lowest internal motif-motif similarity.
+                - "min_internal_motif-motif_similarity_motif2": The logo of the second
+                    motif contributing to the lowest internal motif-motif similarity.
+                - "min_internal_centroid-motif_similarity_score": The lowest internal centroid-motif 
+                    similarity score between the cluster's centroid and motifs within the cluster.
+                - "min_internal_centroid-motif_similarity_motif_name": The name of the motif
+                    contributing to the lowest internal centroid-motif similarity.
+                - "min_internal_centroid-motif_similarity_motif": The logo of the motif
+                    contributing to the lowest internal centroid-motif similarity.
+                - "max_external_motif-motif_similarity_score": The highest external motif-motif similarity 
+                    score between motifs in the cluster and motifs outside the cluster.
+                - "max_external_motif-motif_similarity_motif1_cluster": The external cluster within which
+                    the motif of the highest external motif-motif similarity motif is found in.
+                - "max_external_motif-motif_similarity_motif1_name": The name of the motif in the external
+                    cluster contributing to the highest external motif-motif similarity.
+                - "max_external_motif-motif_similarity_motif1": The logo of the motif in the external
+                    cluster contributing to the highest external motif-motif similarity.
+                - "max_external_motif-motif_similarity_motif1_cluster": The internal cluster within which
+                    the motif of the highest external motif-motif similarity motif is found in.
+                - "max_external_motif-motif_similarity_motif1_name": The name of the motif in the internal
+                    cluster contributing to the highest external motif-motif similarity.
+                - "max_external_motif-motif_similarity_motif1": The logo of the motif in the internal
+                    cluster contributing to the highest external motif-motif similarity.
+                - "max_external_centroid-motif_similarity_score": The highest external centroid-motif similarity
+                    score between the cluster's centroid and motifs outside the cluster.
+                - "max_external_centroid-motif_similarity_motif_cluster": The external cluster within which
+                    the motif of the highest external centroid-motif similarity motif is found in.
+                - "max_external_centroid-motif_similarity_motif_name": The name of the motif in the external 
+                    cluster contributing to the highest external centroid-motif similarity.
+                - "max_external_centroid-motif_similarity_motif": The logo of the motif in the external
+                    cluster contributing to the highest external centroid-motif similarity.
+                - "max_external_centroid-centroid_similarity_score": The highest external centroid-centroid similarity
+                    score between the cluster's centroid and centroids of other clusters.
+                - "max_external_centroid-centroid_similarity_cluster": The name of the external cluster contributing to 
+                    the highest centroid-centroid similarity.
 
         Returns:
             A MotifCompendium where each entry represents a motif cluster in the current
@@ -1829,27 +2001,27 @@ class MotifCompendium:
             cluster_idxs[c].append(i)
         # Perform averaging per cluster
         clusters = sorted(cluster_idxs.keys())
-        cluster_motif_avgs, cluster_names = [], []
-        for c in clusters:
-            # Cluster name
-            cluster_names.append(f"{clustering}#{c}")
-            # Cluster average motif
-            c_idxs = cluster_idxs[c]
-            motifs_c = self.motifs[c_idxs, :, :]
-            alignment_rc_c = self.alignment_rc[c_idxs, :][:, c_idxs][
-                0, :
-            ]  # vector of alignment
-            alignment_h_c = self.alignment_h[c_idxs, :][:, c_idxs][
-                0, :
-            ]  # vector of alignment
-            weights_c = (
-                None if weights is None else weights[c_idxs]
-            )  # vector of weights (if using weights)
-            # Average motifs
-            motif_avg_c = utils_motif.average_motifs(
-                motifs_c, alignment_rc_c, alignment_h_c, weights=weights_c
-            )
-            cluster_motif_avgs.append(motif_avg_c)
+        cluster_member_idxs = [np.asarray(cluster_idxs[c]) for c in clusters]
+        cluster_names = [f"{clustering}#{c}" for c in clusters]
+        # Select each cluster's alignment reference frame, then average within that frame
+        alignment_rc_ref, alignment_h_ref = utils_motif.select_alignments(
+            self.alignment_rc,
+            self.alignment_h,
+            cluster_member_idxs,
+            similarity_matrix=self.similarity,
+            weights=weights,
+            reference=reference,
+        )
+        cluster_motif_avgs = utils_motif.average_motifs(
+            self.motifs,
+            alignment_rc_ref,
+            alignment_h_ref,
+            weights=weights,
+            cluster_idxs=cluster_member_idxs,
+        )
+        # Aggregate metadata per cluster
+        for c_idxs in cluster_member_idxs:
+            weights_c = None if weights is None else weights[c_idxs]
             # Aggregations
             for agg_dict in aggregations_dicts:
                 agg_c_data = self.metadata.loc[c_idxs, agg_dict["source"]]
@@ -1883,7 +2055,6 @@ class MotifCompendium:
                             f"{agg_dict['method']} is not a supported aggregation method."
                         )
         # Construct cluster average MotifCompendium
-        cluster_motif_avgs = np.stack(cluster_motif_avgs, axis=0)
         metadata = pd.DataFrame()
         metadata["name"] = cluster_names
         metadata["source_cluster"] = clusters
@@ -1892,125 +2063,26 @@ class MotifCompendium:
         mc_avg = build(cluster_motif_avgs, metadata, safe=False)
         # Compute quality statistics
         if compute_quality_stats:
-            # Most similar cluster
-            best_match_idx = np.argmax(
-                mc_avg.similarity - np.diag(np.diag(mc_avg.similarity)), axis=1
+            quality_df, stats_metadata, stats_motifs = self.clustering_quality(
+                clustering=clustering,
+                mc_avg=mc_avg,
+                with_stats=True,
             )
-            mc_avg["best_match_similarity"] = [
-                f"{mc_avg.similarity[i, idx]:.3} ({mc_avg.metadata['name'][idx]})"
-                for i, idx in enumerate(best_match_idx)
-            ]
-            mc_avg_standard_motifs = mc_avg.get_standard_motif_stack()
-            mc_avg.add_logos(
-                np.stack(
-                    [
-                        (
-                            mc_avg_standard_motifs[x]
-                            if not mc_avg.alignment_rc[i, x]
-                            else utils_motif.reverse_complement(
-                                mc_avg_standard_motifs[x]
-                            )
-                        )
-                        for i, x in enumerate(best_match_idx)
-                    ]
-                ),
-                "best_match_cluster",
-                0,
+            # Add stats into metadata: stats are indexed by cluster label, in the same sorted order
+            # as mc_avg, so align by position (an index join adds a row per unmatched label)
+            assert list(stats_metadata.index) == list(mc_avg.metadata["source_cluster"])
+            mc_avg.metadata = pd.concat(
+                [mc_avg.metadata, stats_metadata.set_axis(mc_avg.metadata.index)], axis=1
             )
-            # Best constituent-cluster match
-            cluster_revcomp = {c: i for i, c in enumerate(clusters)}
-            mc_mc_avg_similarity, _, _ = utils_similarity.compute_similarities(
-                [self.motifs, mc_avg.motifs], [(0, 1)])[0]
-            mc_mc_avg_membership = (
-                self.metadata[clustering].to_numpy()[:, None] == mc_avg.metadata["source_cluster"].to_numpy()[None, :]
-            )  # Membership matrix: True if motif i belongs to cluster j
-            mc_mc_avg_similarity_masked = np.where(mc_mc_avg_membership, mc_mc_avg_similarity, np.inf)
-            mc_mc_avg_similarity_min = np.min(mc_mc_avg_similarity_masked, axis=0)
-            mc_mc_avg_similarity_idx = np.argmin(mc_mc_avg_similarity_masked, axis=0)
-            mc_avg["lowest_constituent_cluster_similarity"] = [
-                f"{x:.3} ({y})"
-                for x, y in zip(
-                    mc_mc_avg_similarity_min,
-                    self.metadata["name"][mc_mc_avg_similarity_idx],
+            # Add logos into images (with a single cluster, the external-comparison logos are empty)
+            for stats_logo in stats_motifs.columns:
+                logos = stats_motifs[stats_logo].to_list()
+                if not all(isinstance(logo, np.ndarray) for logo in logos):
+                    continue
+                mc_avg.add_logos(
+                    motifs=np.stack(logos, axis=0),
+                    image_name=stats_logo,
                 )
-            ]
-            mc_avg.add_logos(
-                np.stack([(
-                        self.get_standard_motif_stack()[idx]
-                        if not self.alignment_rc[idx, cluster_revcomp[c]]
-                        else utils_motif.reverse_complement(
-                            self.get_standard_motif_stack()[idx]
-                        )
-                    ) for idx, c in zip(mc_mc_avg_similarity_idx, clusters)
-                ]),
-                "lowest_constituent_cluster_similarity_logo",
-                0,
-            )
-            # Actual quality
-            quality_df = self.clustering_quality(clustering, with_stats=True)
-            mc_avg["lowest_internal_similarity"] = [
-                f"{x:.3} ({y} vs {z})"
-                for x, y, z in zip(
-                    quality_df["lowest_internal_similarity"],
-                    quality_df["lowest_internal_similarity_motif1_name"],
-                    quality_df["lowest_internal_similarity_motif2_name"],
-                )
-            ]
-            mc_avg.add_logos(
-                np.stack(quality_df["lowest_internal_similarity_motif1_logo"]),
-                "lowest_internal_similarity_motif1",
-                0,
-            )
-            mc_avg.add_logos(
-                np.stack(quality_df["lowest_internal_similarity_motif2_logo"]),
-                "lowest_internal_similarity_motif2",
-                0,
-            )
-            mc_avg["highest_external_similarity"] = [
-                f"{x:.3} ({y}: {z})"
-                for x, y, z in zip(
-                    quality_df["highest_external_similarity"],
-                    quality_df["highest_external_similarity_cluster"],
-                    quality_df["highest_external_similarity_motif_name"],
-                )
-            ]
-            mc_avg_standard_motifs = mc_avg.get_standard_motif_stack()
-            external_cluster_rc = [
-                mc_avg.alignment_rc[i, cluster_revcomp[c]]
-                for i, c in enumerate(quality_df["highest_external_similarity_cluster"])
-            ]
-            mc_avg.add_logos(
-                np.stack(
-                    [
-                        (
-                            mc_avg_standard_motifs[cluster_revcomp[x]]
-                            if not y
-                            else utils_motif.reverse_complement(
-                                mc_avg_standard_motifs[cluster_revcomp[x]]
-                            )
-                        )
-                        for x, y in zip(
-                            quality_df["highest_external_similarity_cluster"],
-                            external_cluster_rc,
-                        )
-                    ]
-                ),
-                "highest_external_similarity_cluster",
-                0,
-            )
-            mc_avg.add_logos(
-                np.stack(
-                    [
-                        x if not y else utils_motif.reverse_complement(x)
-                        for x, y in zip(
-                            quality_df["highest_external_similarity_motif_logo"],
-                            external_cluster_rc,
-                        )
-                    ]
-                ),
-                "highest_external_similarity_logo",
-                0,
-            )
         return mc_avg
 
     ###########################
@@ -2388,7 +2460,8 @@ class MotifCompendium:
           match score and the label of the best match are saved in the metadata.
           Optionally, the logos of the matched motifs can be saved as images. These
           logos can be computed on the fly or passed in as utf8 images if they have been
-          precomputed. Composite matching can be enabled by setting max_submotifs > 1.
+          precomputed. Composite matching can be enabled by setting max_submotifs > 1,
+          or max_submotifs = -1 to keep matching until no more matches are found.
 
         Args:
             reference_motifs: A np.ndarray motif stack of shape (M, L, 4) to compare
@@ -2401,7 +2474,12 @@ class MotifCompendium:
             max_submotifs: The maximum number of submotifs to consider in a match. If
               max_submotifs = 1, only a single match is given to each motif. If
               max_submotifs > 1, the best match for each motif can be from a combination
-              of multiple reference motifs.
+              of multiple reference motifs. If max_submotifs = -1, matching is greedy:
+              the best match is subtracted and the residual matched again until a round
+              finds no match for any motif (at most GREEDY_MAX_SUBMOTIFS rounds). The
+              first round is always kept, so the columns are those of max_submotifs = 1
+              when nothing matches; later rounds compare only the motifs still matching.
+              One set of columns is saved per round that found a match.
             label_unsigned: Whether or not to label indifferent of positive and negative
               signs. If True, negative motifs can be labeled by a positive reference motif.
               (i.e., indifferent to sign), by comparing the absolute value of both motifs. 
@@ -2428,10 +2506,23 @@ class MotifCompendium:
               as the logos for the matched motifs.
             save_col_prefix: The prefix to use for the saved columns. All saved columns
               and saved images generated from the labeling process will begin with
-              save_col_prefix. These columns will have the structure
-              f"{save_col_prefix}_{score/name/logo}{i}".
+              save_col_prefix. These columns will have the structure:
+              - f"{save_col_prefix}_score{i}": Similarity score
+              - f"{save_col_prefix}_name{i}": Name of the matched motif
+              - f"{save_col_prefix}_alignment_h{i}": Alignment of the matched motif
+              - f"{save_col_prefix}_alignment_rc{i}": Whether the matched motif is reverse complemented
+              - f"{save_col_prefix}_logo (fwd){i}": Forward logo of the matched motif
         """
         # Check arguments
+        if not (
+            isinstance(max_submotifs, (int, np.integer))
+            and (max_submotifs >= 1 or max_submotifs == -1)
+        ):
+            raise ValueError(
+                f"max_submotifs must be a positive integer or -1 (greedy); got {max_submotifs!r}"
+            )
+        greedy = max_submotifs == -1
+        max_rounds = GREEDY_MAX_SUBMOTIFS if greedy else int(max_submotifs)
         if (utf8_images is not None) and not (
             (isinstance(utf8_images, dict))
             and all(key in utf8_images for key in ["logo (fwd)", "logo (rev)"])
@@ -2482,8 +2573,11 @@ class MotifCompendium:
         match_alignment_hs = []
         match_alignment_rcs = []
         match_mask = np.ones((my_motifs.shape[0],), dtype=bool)  # My motifs remaining for matching (N,)
-        
-        for i in range(max_submotifs):
+
+        for i in range(max_rounds):
+            # Greedy: stop once no motif is left to match
+            if greedy and i > 0 and not match_mask.any():
+                break
             # Initialize:
             if save_all_matches:
                 match_score = [np.array([]) for _ in range(my_motifs.shape[0])]  # list of length (N,) of arrays of shape (K_n,) scores
@@ -2501,9 +2595,21 @@ class MotifCompendium:
                 match_alignment_rc = np.zeros((my_motifs.shape[0],), dtype=bool)  # (N,)
 
             # Compute similarity (L2 norm included during similarity calculation)
-            sim, alignment_rc, alignment_h = utils_similarity.compute_similarities(
-                [my_motifs, reference_motifs], [(0, 1)]
-            )[0]
+            if greedy and i > 0:
+                # Greedy rounds after the first compare only the motifs still
+                # matching; the others keep all-zero similarities
+                active = np.flatnonzero(match_mask)
+                sim_a, rc_a, h_a = utils_similarity.compute_similarities(
+                    [my_motifs[active], reference_motifs], [(0, 1)]
+                )[0]
+                sim = np.zeros((my_motifs.shape[0], sim_a.shape[1]), dtype=sim_a.dtype)
+                alignment_rc = np.zeros(sim.shape, dtype=rc_a.dtype)
+                alignment_h = np.zeros(sim.shape, dtype=h_a.dtype)
+                sim[active], alignment_rc[active], alignment_h[active] = sim_a, rc_a, h_a
+            else:
+                sim, alignment_rc, alignment_h = utils_similarity.compute_similarities(
+                    [my_motifs, reference_motifs], [(0, 1)]
+                )[0]
             # Unscale L2 norm
             my_motifs_norm = np.linalg.norm(my_motifs, axis=(1, 2))[:, np.newaxis]
             reference_motifs_norm = np.linalg.norm(reference_motifs, axis=(1, 2))[np.newaxis, :]
@@ -2514,6 +2620,8 @@ class MotifCompendium:
             sim *= np.sqrt(i + 1)  # (N, M)
             # Remove matches below threshold
             sim_threshold = np.where(sim >= min_score, sim, 0)  # (N, M)
+            if greedy and i > 0 and not (sim_threshold > 0).any():
+                break  # Greedy: this round found nothing; do not keep it
             match_mask = match_mask & (sim_threshold > 0).any(axis=1)  # (N,)
             my_motifs[~match_mask] = 0
             
@@ -2578,15 +2686,24 @@ class MotifCompendium:
             match_labels.append(match_label)
             match_alignment_hs.append(match_alignment_h)
             match_alignment_rcs.append(match_alignment_rc)
+        else:
+            if greedy:
+                warnings.warn(
+                    f"greedy matching stopped after GREEDY_MAX_SUBMOTIFS = "
+                    f"{GREEDY_MAX_SUBMOTIFS} rounds with matches still being found.",
+                    RuntimeWarning,
+                )
 
         # Restore IC-scale setting
         if ic_scale:
             utils_config.set_ic_scale(True)
 
-        # Save match information to metadata and images
-        for i in range(max_submotifs):
+        # Save match information to metadata and images (one set per round kept)
+        for i in range(len(match_scores)):
             self.metadata[f"{save_col_prefix}_score{i}"] = match_scores[i]  # Save score
             self.metadata[f"{save_col_prefix}_name{i}"] = match_labels[i]  # Save label
+            self.metadata[f"{save_col_prefix}_alignment_h{i}"] = match_alignment_hs[i]  # Save alignment
+            self.metadata[f"{save_col_prefix}_alignment_rc{i}"] = match_alignment_rcs[i]  # Save reverse complement status
             # Save logos
             if save_images:
                 self.__images[f"{save_col_prefix}_logo{i}"] = ""  # Initialize images

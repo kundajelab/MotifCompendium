@@ -3,6 +3,7 @@ import sys
 import time
 import argparse
 import logging
+import concurrent.futures
 import json
 import h5py
 
@@ -24,7 +25,7 @@ import configs
 
 
 def setup_parser():
-    parser = argparse.ArgumentParser(description="Run the MotifCompendium pipeline.")
+    parser = argparse.ArgumentParser(description="Run a MotifCompendium pipeline: Basic.")
 
     parser.add_argument("-im", "--input-mc", type=str, default=None, help="Path to the input MotifCompendium object.")
     parser.add_argument("-io", "--input-old-mc", type=str, default=None, help="Path to the input old MotifCompendium object.")
@@ -34,7 +35,10 @@ def setup_parser():
     parser.add_argument("-in", "--input-names", nargs="+", type=str, default=None, help="Nickname(s) of the input file(s): TF-MoDISco (lite) H5, PFMs, MEME.")
 
     parser.add_argument("-o", "--output-dir", type=str, required=True, help="Path to the output directory.")
+    parser.add_argument("--save-clustered", action="store_true", help="Also save the motifs with their cluster assignments: mc/motifcompendium_clustered.mc. (Default: not saved; the assignments are in export/motifcompendium_metadata.tsv)")
+    parser.add_argument("--save-labeled", action="store_true", help="Also save the labeled motifs, clusters, meta-clusters, sub-clusters before filtering: mc/motifcompendium_*labeled.mc. (Default: not saved)")
     parser.add_argument("-m", "--metadata", type=str, default=None, help="Path to the metadata file, per input file or motif: CSV, TSV format.")
+    parser.add_argument("--finemo-paths", type=str, default=None, help="Path to the FiNeMo paths file (TSV, no header: input name, FiNeMo hits file), for the number of hits per motif (counted in the hits file) and its filter (7_minhits). If not provided, the filter is skipped.")
     parser.add_argument("-r", "--reference", type=str, default=None, help="Path to the main reference motif file: MotifCompendium object, or PFM, MEME .txt format.")
     parser.add_argument("--add-reference", nargs="+", type=str, default=None, help="Path(s) to additional reference motif files for final labeling: MotifCompendium object, or PFM, MEME .txt format.")
     parser.add_argument("--modisco-region-width", type=int, default=400, help="Width of region used during TF-Modisco run. (Default: 400 bp)")
@@ -442,6 +446,11 @@ def apply_filter_threshold(
     Returns:
         None
     """
+    # Filters on the number of FiNeMo hits: Skipped if no FiNeMo paths are provided (see add_num_hits)
+    if metric == MetadataCols.num_hits_col and metric not in mc.columns():
+        logging.info(f"Skipping filter on {metric}: no FiNeMo paths provided")
+        return
+
     if override is True:
         if operation == "<":
             mc[flag_col] = mc[flag_col] & (mc[metric] < threshold)
@@ -480,6 +489,102 @@ def apply_filter_threshold(
             mc[flag_col] = mc[flag_col] | (mc[metric].notna())
         else:
             raise ValueError("Invalid operation for filter threshold.")
+
+def add_num_hits(
+    mc: MotifCompendium,
+    finemo_paths: str | None,
+    num_hits_col: str,
+    finemo_path_col: str = "finemo_path",
+    name_col: str = "name",
+    posneg_col: str = "posneg",
+    model_col: str = "model",
+    max_workers: int = 1,
+) -> bool:
+    """
+    Add the number of FiNeMo hits per motif, counted in its model's hits file, if a FiNeMo paths file is provided.
+
+    finemo_paths is a TSV without header: per model (input name), its FiNeMo hits file, as BED (the motif name in
+    the 4th column, e.g. hits.bed.gz) or FiNeMo hits TSV (a motif_name column). Hits are matched to motifs by
+    pos/neg and pattern number, because the TF-MoDISco pattern names can be renamed after FiNeMo ran (e.g.
+    pos_patterns.pattern_0 vs. pos_patterns.ENCSR000AHD_ChIP_CTCF_MCF-7_ENCSR867WPY_counts_pattern_0). A motif
+    without hits has 0.
+
+    Args:
+        mc (MotifCompendium): The MotifCompendium object.
+        finemo_paths (str | None): Path to the FiNeMo paths file (TSV, no header: model, FiNeMo hits file).
+        num_hits_col (str): The column name to save the number of hits to.
+        finemo_path_col (str): The column name to save each motif's FiNeMo hits file to.
+        name_col (str): The column name of the motif names.
+        posneg_col (str): The column name of pos/neg.
+        model_col (str): The column name of the models.
+        max_workers (int): Number of hits files to read at a time.
+
+    Returns:
+        bool: True if num_hits_col was added. False if no FiNeMo paths file is provided, in which
+            case the filters on num_hits_col are skipped (see apply_filter_threshold).
+    """
+    if not finemo_paths:
+        logging.info(f"No FiNeMo paths provided: {num_hits_col} is not calculated, and its filters are skipped.")
+        return False
+
+    # FiNeMo hits file per model
+    finemo_df = pd.read_csv(finemo_paths, sep="\t", header=None, usecols=[0, 1], names=["model", "finemo"], dtype=str)
+    if finemo_df["model"].duplicated().any():
+        raise ValueError(f"Models are listed more than once in the FiNeMo paths file: {finemo_paths}")
+    model_finemo = mc[model_col].astype(str).map(finemo_df.set_index("model")["finemo"])
+    if model_finemo.isna().any():
+        missing_models = mc.metadata.loc[model_finemo.isna().to_numpy(), model_col].unique()
+        raise ValueError(f"No FiNeMo path in {finemo_paths} for {len(missing_models)} model(s): {', '.join(map(str, missing_models[:10]))}")
+
+    def pattern_key(posneg: pd.Series, names: pd.Series) -> pd.Series:
+        # "pos" / "neg" + "." + pattern number (from the trailing "pattern_{#}"; subpatterns do not match)
+        return posneg.str[:3] + "." + names.str.extract(r"(?:^|[^A-Za-z])pattern_(\d+)$", expand=False)
+
+    motif_keys = pattern_key(mc[posneg_col], mc[name_col])
+    if motif_keys.isna().any():
+        unkeyed = mc.metadata.loc[motif_keys.isna().to_numpy(), name_col]
+        raise ValueError(f"{len(unkeyed)} motif name(s) without a pattern number (subpatterns?), e.g.: {', '.join(unkeyed[:5])}")
+
+    def count_hits(hits_path: str) -> pd.Series:
+        # Hits per pos/neg pattern, in one hits file (an empty file: no hits)
+        try:
+            if hits_path.endswith((".bed", ".bed.gz")):
+                motif_names = pd.read_csv(hits_path, sep="\t", header=None, usecols=[3])[3]
+            else:
+                motif_names = pd.read_csv(hits_path, sep="\t", usecols=["motif_name"])["motif_name"]
+        except pd.errors.EmptyDataError:
+            return pd.Series(dtype=int)
+        # Count per motif name, then key the names (far fewer than the hits)
+        name_counts = motif_names.astype(str).value_counts()
+        names = name_counts.index.to_series()
+        keys = pattern_key(names.str.split(".").str[0], names)
+        if keys.isna().any():
+            raise ValueError(f"FiNeMo hits with motif names that are not pos/neg patterns ({', '.join(names[keys.isna()][:5])}): {hits_path}")
+        return name_counts.groupby(keys.to_numpy()).sum()
+
+    # Count: the hits of each model's hits file
+    hits_paths = model_finemo.unique()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, max_workers)) as executor:
+        hits_counts = dict(zip(hits_paths, executor.map(count_hits, hits_paths)))
+
+    # Match: (hits file, pos/neg pattern number); a motif without hits has 0
+    hits_lookup = pd.concat(hits_counts)
+    motif_index = pd.MultiIndex.from_arrays([model_finemo, motif_keys])
+    mc[num_hits_col] = hits_lookup.reindex(motif_index).fillna(0).astype(int).to_numpy()
+    mc[finemo_path_col] = model_finemo.to_numpy()
+
+    # Check: the hits are of their model's motifs (a hits file none of whose hits match is a mismatch)
+    matched = hits_lookup.index.isin(motif_index)
+    if (~matched).any():
+        paths_matched = set(hits_lookup.index[matched].get_level_values(0))
+        paths_unmatched = sorted(set(hits_lookup.index[~matched].get_level_values(0)) - paths_matched)
+        if paths_unmatched:
+            raise ValueError(f"No FiNeMo hit matches a motif of its model in {len(paths_unmatched)} hits file(s), e.g.: {paths_unmatched[0]}")
+        logging.warning(f"{int(hits_lookup[~matched].sum())} FiNeMo hits of {int((~matched).sum())} pattern(s) are not of their model's motifs (ignored).")
+
+    logging.info(f"Added {num_hits_col}, counted in {len(hits_counts)} FiNeMo hits files: {(mc[num_hits_col] == 0).sum()} of {len(mc)} motifs have no hits.")
+    return True
+
 
 def generate_quality_plots(
     mc: MotifCompendium,
@@ -604,6 +709,8 @@ if __name__ == "__main__":
     if not os.path.exists(args.output_dir):
         logging.info(f"Creating output directory: {args.output_dir}...")
         os.makedirs(args.output_dir, exist_ok=True)
+    mc_dir = os.path.join(args.output_dir, "mc")  # MotifCompendium objects
+    os.makedirs(mc_dir, exist_ok=True)
 
 
     ### BUILD --------------------------------------------------------------------
@@ -723,6 +830,9 @@ if __name__ == "__main__":
                     logging.critical("Error building MotifCompendium object. max_chunk has reached 0.")
                     raise ValueError("Error building MotifCompendium object.")
 
+        # Input paths, per model: TF-MoDISco H5
+        mc[MetadataCols.modisco_path_col] = mc["model"].map(modisco_dict)
+
     # Load the input PFM files
     elif args.input_pfms:
         # Check input
@@ -762,6 +872,9 @@ if __name__ == "__main__":
             )
         if args.time:
             logging.info(f"Time taken: {time.time() - start_time:.2f}s")
+
+        # Input paths, per model: PFM file
+        mc[MetadataCols.pfm_path_col] = mc["source"].map(pfm_dict)
 
     else:
         logging.error("Input MotifCompendium object or H5 files must be provided.")
@@ -836,13 +949,22 @@ if __name__ == "__main__":
             if col not in VisualizeArgs.html_table_cols_base:
                 VisualizeArgs.html_table_cols_base.append(col)
 
+    # FiNeMo hits: Number of hits per motif, if a FiNeMo paths file is provided
+    add_num_hits(
+        mc=mc,
+        finemo_paths=args.finemo_paths,
+        num_hits_col=MetadataCols.num_hits_col,
+        finemo_path_col=MetadataCols.finemo_path_col,
+        max_workers=args.max_cpus,
+    )
+
     # Add default columns
     mc.add_motif_strings(
         name=MetadataCols.motif_string_col,
     )
 
     # Save MotifCompendium object
-    mc_path = os.path.join(args.output_dir, OutputPaths.mc_full)
+    mc_path = os.path.join(mc_dir, OutputPaths.mc_full)
     if args.verbose:
         logging.info(f"Saving MotifCompendium object: {mc_path}...")
     if args.time:
@@ -902,15 +1024,16 @@ if __name__ == "__main__":
                     logging.info(f"Adding the following columns to HTML table: {html_addlabel_cols}")
                 VisualizeArgs.html_table_cols_label.extend(html_addlabel_cols)
 
-        ## Save MotifCompendium object
-        mc_path = os.path.join(args.output_dir, OutputPaths.mc_labeled)
-        if args.verbose:
-            logging.info(f"Saving labeled MotifCompendium object: {mc_path}...")
-        if args.time:
-            start_time = time.time()
-        mc.save(mc_path)
-        if args.time:
-            logging.info(f"Time taken: {time.time() - start_time:.2f}s")
+        ## Save MotifCompendium object (--save-labeled)
+        if args.save_labeled:
+            mc_path = os.path.join(mc_dir, OutputPaths.mc_labeled)
+            if args.verbose:
+                logging.info(f"Saving labeled MotifCompendium object: {mc_path}...")
+            if args.time:
+                start_time = time.time()
+            mc.save(mc_path)
+            if args.time:
+                logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
     ### FILTER: MOTIFS ----------------------------------------------------------
     if args.filter:
@@ -935,8 +1058,8 @@ if __name__ == "__main__":
                         f"Number of motifs removed: {len(mc_removed)}")
 
         # Save MotifCompendium objects
-        mc_path = os.path.join(args.output_dir, OutputPaths.mc_filtered)
-        mc_removed_path = os.path.join(args.output_dir, OutputPaths.mc_removed)
+        mc_path = os.path.join(mc_dir, OutputPaths.mc_filtered)
+        mc_removed_path = os.path.join(mc_dir, OutputPaths.mc_removed)
         if args.verbose:
             logging.info(
                 f"Saving filtered MotifCompendium objects:\n"
@@ -1477,15 +1600,16 @@ if __name__ == "__main__":
             **ClusterArgs.algorithm_kwargs[ClusterArgs.algorithm],
         )
 
-    # Save MotifCompendium object
-    mc_path = os.path.join(args.output_dir, OutputPaths.mc_clustered)
-    if args.verbose:
-        logging.info(f"Saving clustered MotifCompendium object: {mc_path}...")
-    if args.time:
-        start_time = time.time()
-    mc.save(mc_path)
-    if args.time:
-        logging.info(f"Time taken: {time.time() - start_time:.2f}s")
+    # Save MotifCompendium object (--save-clustered)
+    if args.save_clustered:
+        mc_path = os.path.join(mc_dir, OutputPaths.mc_clustered)
+        if args.verbose:
+            logging.info(f"Saving clustered MotifCompendium object: {mc_path}...")
+        if args.time:
+            start_time = time.time()
+        mc.save(mc_path)
+        if args.time:
+            logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
 
     ### AVERAGE ------------------------------------------------------------------
@@ -1571,7 +1695,7 @@ if __name__ == "__main__":
     mc_cluster.sort(by=["posneg", "num_motifs"], ascending=False, inplace=True)
 
     # Save Average MotifCompendium object
-    mc_cluster_path = os.path.join(args.output_dir, OutputPaths.mc_cluster)
+    mc_cluster_path = os.path.join(mc_dir, OutputPaths.mc_cluster)
     if args.verbose:
         logging.info(f"Saving average MotifCompendium object: {mc_cluster_path}...")
     if args.time:
@@ -1638,7 +1762,7 @@ if __name__ == "__main__":
         mc_metacluster.sort(by=["posneg", "num_motifs"], ascending=False, inplace=True)
 
         # Save Average MotifCompendium object (meta-cluster)
-        mc_metacluster_path = os.path.join(args.output_dir, OutputPaths.mc_metacluster)
+        mc_metacluster_path = os.path.join(mc_dir, OutputPaths.mc_metacluster)
         if args.verbose:
             logging.info(f"Saving average MotifCompendium object (meta-cluster): {mc_metacluster_path}...")
         if args.time:
@@ -1705,7 +1829,7 @@ if __name__ == "__main__":
             mc_metacluster.sort(by=["posneg", "num_motifs"], ascending=False, inplace=True)
 
         # Save Average MotifCompendium object (sub-cluster)
-        mc_subcluster_path = os.path.join(args.output_dir, OutputPaths.mc_subcluster)
+        mc_subcluster_path = os.path.join(mc_dir, OutputPaths.mc_subcluster)
         if args.verbose:
             logging.info(f"Saving average MotifCompendium object (sub-cluster): {mc_subcluster_path}...")
         if args.time:
@@ -1834,38 +1958,39 @@ if __name__ == "__main__":
                     if args.time:
                         logging.info(f"Time taken: {time.time() - start_time:.2f}s") 
 
-        ## Save MotifCompendium objects
-        # Clusters: Save
-        mc_cluster_path = os.path.join(args.output_dir, OutputPaths.mc_cluster_labeled)
-        if args.verbose:
-            logging.info(f"Saving labeled cluster MotifCompendium object: {mc_cluster_path}...")
-        if args.time:
-            start_time = time.time()
-        mc_cluster.save(mc_cluster_path)
-        if args.time:
-            logging.info(f"Time taken: {time.time() - start_time:.2f}s")
+        ## Save MotifCompendium objects (--save-labeled)
+        if args.save_labeled:
+            # Clusters: Save
+            mc_cluster_path = os.path.join(mc_dir, OutputPaths.mc_cluster_labeled)
+            if args.verbose:
+                logging.info(f"Saving labeled cluster MotifCompendium object: {mc_cluster_path}...")
+            if args.time:
+                start_time = time.time()
+            mc_cluster.save(mc_cluster_path)
+            if args.time:
+                logging.info(f"Time taken: {time.time() - start_time:.2f}s")
         
-        # Meta-clusters: Save
-        if args.sim_threshold_meta:
-            mc_metacluster_path = os.path.join(args.output_dir, OutputPaths.mc_metacluster_labeled)
-            if args.verbose:
-                logging.info(f"Saving labeled meta-cluster MotifCompendium object: {mc_metacluster_path}...")
-            if args.time:
-                start_time = time.time()
-            mc_metacluster.save(mc_metacluster_path)
-            if args.time:
-                logging.info(f"Time taken: {time.time() - start_time:.2f}s")
+            # Meta-clusters: Save
+            if args.sim_threshold_meta:
+                mc_metacluster_path = os.path.join(mc_dir, OutputPaths.mc_metacluster_labeled)
+                if args.verbose:
+                    logging.info(f"Saving labeled meta-cluster MotifCompendium object: {mc_metacluster_path}...")
+                if args.time:
+                    start_time = time.time()
+                mc_metacluster.save(mc_metacluster_path)
+                if args.time:
+                    logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
-        # Sub-clusters: Save
-        if args.sim_threshold_sub:
-            mc_subcluster_path = os.path.join(args.output_dir, OutputPaths.mc_subcluster_labeled)
-            if args.verbose:
-                logging.info(f"Saving labeled sub-cluster MotifCompendium object: {mc_subcluster_path}...")
-            if args.time:
-                start_time = time.time()
-            mc_subcluster.save(mc_subcluster_path)
-            if args.time:
-                logging.info(f"Time taken: {time.time() - start_time:.2f}s")
+            # Sub-clusters: Save
+            if args.sim_threshold_sub:
+                mc_subcluster_path = os.path.join(mc_dir, OutputPaths.mc_subcluster_labeled)
+                if args.verbose:
+                    logging.info(f"Saving labeled sub-cluster MotifCompendium object: {mc_subcluster_path}...")
+                if args.time:
+                    start_time = time.time()
+                mc_subcluster.save(mc_subcluster_path)
+                if args.time:
+                    logging.info(f"Time taken: {time.time() - start_time:.2f}s")
 
 
     ### FILTER: CLUSTERS --------------------------------------------------------------------
@@ -1891,8 +2016,8 @@ if __name__ == "__main__":
                         f"Number of clusters removed: {len(mc_cluster_removed)}")
 
         # Save MotifCompendium objects
-        mc_cluster_path = os.path.join(args.output_dir, OutputPaths.mc_cluster_filtered)
-        mc_cluster_removed_path = os.path.join(args.output_dir, OutputPaths.mc_cluster_removed)
+        mc_cluster_path = os.path.join(mc_dir, OutputPaths.mc_cluster_filtered)
+        mc_cluster_removed_path = os.path.join(mc_dir, OutputPaths.mc_cluster_removed)
         if args.verbose:
             logging.info(
                 f"Saving filtered clusters:\n"
@@ -1926,8 +2051,8 @@ if __name__ == "__main__":
                 logging.info(f"Number of meta-clusters after removing flagged: {len(mc_metacluster)}\n"
                             f"Number of meta-clusters removed: {len(mc_metacluster_removed)}")
             # Save MotifCompendium objects
-            mc_metacluster_path = os.path.join(args.output_dir, OutputPaths.mc_metacluster_filtered)
-            mc_metacluster_removed_path = os.path.join(args.output_dir, OutputPaths.mc_metacluster_removed)
+            mc_metacluster_path = os.path.join(mc_dir, OutputPaths.mc_metacluster_filtered)
+            mc_metacluster_removed_path = os.path.join(mc_dir, OutputPaths.mc_metacluster_removed)
             if args.verbose:
                 logging.info(
                     f"Saving filtered meta-clusters:\n"
@@ -1963,8 +2088,8 @@ if __name__ == "__main__":
                             f"Number of sub-clusters removed: {len(mc_subcluster_removed)}")
                 
             # Save MotifCompendium objects
-            mc_subcluster_path = os.path.join(args.output_dir, OutputPaths.mc_subcluster_filtered)
-            mc_subcluster_removed_path = os.path.join(args.output_dir, OutputPaths.mc_subcluster_removed)
+            mc_subcluster_path = os.path.join(mc_dir, OutputPaths.mc_subcluster_filtered)
+            mc_subcluster_removed_path = os.path.join(mc_dir, OutputPaths.mc_subcluster_removed)
             if args.verbose:
                 logging.info(
                     f"Saving filtered sub-clusters:\n"
